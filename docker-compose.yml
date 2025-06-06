@@ -1,0 +1,22 @@
+services:
+  fastapi:
+    build:
+      context: .
+      no_cache: true
+    container_name: show-build-server
+    ports:
+      - "8888:80"
+    volumes:
+      - ./app:/app
+      - /mnt/sync/disaffected/logs:/home/logs
+      - /mnt/sync/shared_media:/shared_media
+      - /mnt/sync/disaffected/episodes:/home/episodes
+    networks:
+      - video-post
+    environment:
+      MODULE_NAME: main
+      VARIABLE_NAME: app
+      WEB_CONCURRENCY: 1  # Explicitly limit to exactly ONE Gunicorn worker
+networks:
+  video-post:
+    external: true

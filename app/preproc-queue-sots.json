@@ -1,0 +1,58 @@
+[
+    {
+        "job_id": 1,
+        "input_video_path": "/path/to/video1.mp4",
+        "output_video_path": "/path/to/output_trimmed1.mp4",
+        "command": [
+            "-i", "/path/to/video1.mp4",
+            "-ss", "00:01:00",
+            "-to", "00:02:00",
+            "-c", "copy",
+            "/path/to/output_trimmed1.mp4"
+        ],
+        "tool": "ffmpeg",
+        "job_description": "Head & tail trim."
+    },
+    {
+        "job_id": 2,
+        "input_video_path": "/path/to/video2.mp4",
+        "output_video_path": "/path/to/output_resized2.mp4",
+        "command": [
+            "-i", "/path/to/video2.mp4",
+            "-vf", "scale=640:360",
+            "/path/to/output_resized2.mp4"
+        ],
+        "tool": "ffmpeg",
+        "job_description": "Resize video to 640x360 resolution using FFmpeg."
+    },
+    {
+        "job_id": 3,
+        "input_audio_path": "/path/to/audio1.wav",
+        "output_audio_path": "/path/to/output_normalized1.wav",
+        "command": [
+            "/path/to/audio1.wav", "-n", "norm"
+        ],
+        "tool": "sox",
+        "job_description": "Normalize audio using SoX."
+    },
+    {
+        "job_id": 4,
+        "input_image_path": "/path/to/image1.jpg",
+        "output_image_path": "/path/to/output_grayscale1.jpg",
+        "command": [
+            "/path/to/image1.jpg", "-colorspace", "Gray", "/path/to/output_grayscale1.jpg"
+        ],
+        "tool": "convert",
+        "job_description": "Convert image to grayscale using ImageMagick."
+    },
+    {
+        "job_id": 5,
+        "script_path": "/path/to/data_processing_script.py",
+        "output_data_path": "/path/to/processed_data.csv",
+        "command": [
+            "--input", "/path/to/raw_data.csv", "--output", "/path/to/processed_data.csv"
+        ],
+        "tool": "python",
+        "job_description": "Run data processing script to transform raw CSV data."
+    }
+]

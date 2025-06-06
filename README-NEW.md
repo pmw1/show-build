@@ -1,0 +1,253 @@
+# 📦 Disaffected — Show Builder System
+
+This is the core rundown management system used in the *Disaffected* media automation environment. It provides a full-stack interface for organizing, reordering, and saving show segments in coordination with markdown-based editorial workflows (e.g., Obsidian).
+
+---
+
+## 📚 Table of Contents
+
+* [🧠 Overview](#-overview)
+* [🔁 Frontend–Backend Interaction](#-frontend–backend-interaction)
+* [🖥️ How to Launch](#️-how-to-launch)
+* [📂 Obsidian Integration](#-obsidian-integration)
+* [🚀 Recent Update (Changelog)](#-recent-update-changelog--v100)
+* [👉 Still Needed](#-still-needed)
+* [🗯 Git & Commit Workflow](#-git--commit-workflow)
+* [🏁 Summary](#-summary)
+
+---
+
+## 🧠 Overview
+
+The system is composed of two primary components:
+
+### 1. **Frontend — `disaffected-ui`**
+
+* Built with **Vue 3**, **Vuetify 3**, and **vuedraggable**
+* Loads markdown segment metadata from the backend
+* Provides a drag-and-drop UI to reorder segments
+* Sends reordered segment lists to backend for persistent saving
+
+### 2. **Backend — `show-build-server`**
+
+* Built with **FastAPI**
+* Runs in Docker using `tiangolo/uvicorn-gunicorn-fastapi:python3.11`
+* Handles:
+
+  * Serving segment metadata from Obsidian-managed markdown files
+  * Accepting reordered lists and writing `order:` metadata to YAML frontmatter
+  * Generating asset IDs and preprocessing SOT files via MQTT
+
+---
+
+## 🔁 Frontend–Backend Interaction
+
+| Action            | Flow                                                                   |
+| ----------------- | ---------------------------------------------------------------------- |
+| Load Segment List | `GET /rundown/{episode}` — frontend fetches list of `.md` files        |
+| Reorder Segments  | `POST /rundown/{episode}/reorder` — frontend sends reordered filenames |
+| Save to Disk      | Backend parses each file, assigns `order: 10, 20, 30...`, and saves    |
+
+The markdown files are stored in `/mnt/sync/disaffected/episodes/{episode}/rundown`, mounted into the Docker container at `/home/episodes`.
+
+---
+
+## 🖥️ How to Launch
+
+### ✅ Backend (FastAPI)
+
+From `/mnt/process/show-build/`:
+
+```bash
+docker compose up --build
+```
+
+The container is named `show-build-server`. Ports:
+
+* `80` in container
+* Mapped to `8888` on host (`http://192.168.51.210:8888`)
+
+### ✅ Frontend (Vue)
+
+From `/mnt/process/show-build/disaffected-ui`:
+
+```bash
+npm install
+npm run serve
+```
+
+This runs on default port `8080` unless overridden.
+
+---
+
+## 📂 Obsidian Integration
+
+* All segment `.md` files are authored and managed in Obsidian.
+* Reordering in the UI modifies the `order:` field in frontmatter.
+* Filenames are not renamed, preserving link stability.
+* Segment sorting is done based on the `order:` field (not filename prefix).
+
+---
+
+## 🚀 Recent Update (Changelog — v1.0.0)
+
+**🟢 New:**
+
+* Drag-and-drop ordering of segment cards
+* Save Order button commits changes to backend
+* FastAPI route `/rundown/{episode}/reorder` implemented
+* Writes `order:` field in YAML frontmatter in steps of 10
+* Group permission fix: Docker user `insider` can write to `/home/episodes`
+
+**🔧 Infra:**
+
+* Fixed Docker `USER` and `groupadd` conflicts
+* `frontmatter` added to `requirements.txt`
+* Axios POST debugged and corrected for CORS + port 8888
+
+**✅ Verified:**
+
+* End-to-end working from UI to filesystem
+
+---
+
+## 👉 Still Needed
+
+### 📦 Frontend Dockerization
+
+* Currently launched manually via `npm run serve`
+* Needs a production-ready build (`npm run build`) and Docker container
+* Add NGINX or serve static files via FastAPI if needed
+
+### 🪙 UI Enhancements
+
+* Show `asset_id` in each segment card
+* Add inline editing of metadata (`title`, `slug`, etc.)
+* Confirmation toasts/snackbar for success/failure
+* Episode selector component to load different folders
+
+### 🛠 Backend Enhancements
+
+* Add endpoint to edit metadata fields (`PUT /rundown/{episode}/{filename}`)
+* Validate frontmatter schema
+* Add logging to file for traceability
+
+### 🔍 QA Tasks
+
+* Test with segments across multiple blocks (100s, 200s, 300s)
+* Confirm Obsidian plugin compatibility with `order:` sorting
+* Write tests for empty or malformed `.md` files
+
+---
+
+## 🗯 Git & Commit Workflow
+
+### 🧩 Repository Structure Note
+
+As of the latest iteration, the `disaffected-ui` frontend no longer has its own Git repository. The `.git` and `.gitignore` from that subfolder were removed to unify the full stack under a single top-level Git repository rooted at `show-build/`. This simplifies version control and deployment.
+
+### ✅ Basic Usage
+
+```bash
+git init
+git add .
+git commit -m "Initial working version of Show Builder"
+git branch -M main
+git remote add origin git@github.com:youruser/show-build.git
+git push -u origin main
+```
+
+### ✅ Exclude Unnecessary Files
+
+Your unified `.gitignore` at the root of the project should now include:
+
+```gitignore
+# Backend
+__pycache__/
+*.py[cod]
+*.log
+*.bak
+*.swp
+*.swo
+*~
+
+# Frontend
+/disaffected-ui/node_modules/
+/disaffected-ui/dist/
+/disaffected-ui/.vite/
+/disaffected-ui/.cache/
+/disaffected-ui/.output/
+
+# Editor/IDE/System noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Docker overrides
+/home/logs/
+docker-compose.override.yml
+
+# Secrets or personal data
+.env
+.env.*
+```
+
+gitignore
+
+# Backend
+
+**pycache**/
+\*.pyc
+\*.pyo
+\*.log
+\*.bak
+
+# Frontend
+
+/disaffected-ui/node\_modules/
+/disaffected-ui/dist/
+/disaffected-ui/.vite/
+/disaffected-ui/.output/
+
+# Editor/IDE/System noise
+
+\*.swp
+\*.swo
+\*\~
+.DS\_Store
+.vscode/
+.idea/
+.env
+gitignore
+disaffected-ui/node\_modules/
+disaffected-ui/dist/
+\*.log
+\*.bak
+**pycache**/
+\*.pyc
+
+````
+
+### ⚠️ Note on `node_modules`
+The `disaffected-ui/node_modules/` directory contains all frontend dependencies.
+- It is generated by running `npm install`
+- It can be **hundreds of MBs in size**
+- It **should not be committed** to Git
+- It **should not be Syncthing’d or backed up**
+- If deleted, it can be safely rebuilt with:
+  ```bash
+  cd disaffected-ui
+  npm install
+````
+
+---
+
+## 🏁 Summary
+
+This system is now capable of managing full rundown reordering logic in an editorial-friendly, web-accessible way. Markdown files remain compatible with Obsidian, and changes are non-destructive to filenames or asset links.
+
+Next: Dockerize the frontend and implement metadata editing + display.
+

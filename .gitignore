@@ -1,0 +1,50 @@
+disaffected-ui/node_modules/
+
+
+# Python / FastAPI backend
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.bak
+*.swp
+*.swo
+*.tmp
+*.DS_Store
+
+# Virtualenv (if ever used)
+env/
+venv/
+ENV/
+
+# Compiled scripts
+*.html
+
+# Vue frontend
+disaffected-ui/node_modules/
+disaffected-ui/dist/
+disaffected-ui/.vite/
+disaffected-ui/.cache/
+disaffected-ui/.output/
+
+# Optional Vue CLI/IDE junk
+disaffected-ui/.idea/
+disaffected-ui/.vscode/
+
+# Local Docker logs
+/home/logs/
+docker-compose.override.yml
+
+# OS or editor-specific
+*.~undo
+*.bak
+*~
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Secrets or personal data (optional)
+.env
+.env.*
+
