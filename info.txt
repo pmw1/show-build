@@ -1,3 +1,1321 @@
+
+
+
+Document generated on: 2025-06-12 18:31:00
+
+
+
+# PROJECT INFO FOR SHOW BUILD
+This document is compiled on-the-fly using a python script executed in the root of the project.
+The script is designed to be run in the root directory of the project.
+
+TABLE OF CONTENTS
+----------------------------------------
+Contents of:     This file (info.txt)
+Contents of:     .gather (the main project documentation file)
+Contents of:     README.md (if present)
+Contents of:     Directory tree of the project (excluding files and directories ignored by .gatherignore)
+Contents of:     All included files' contents (excluding ignored)
+----------------------------------------
+System info:     System information including docker info
+----------------------------------------
+
+------------------------------------------------------------------------------------------------
+relative to project root: README.md
+absolute: /mnt/process/show-build/README.md
+
+```
+# 📦 Disaffected — Show Builder System
+
+This is the core rundown management system used in the *Disaffected* media automation environment. It provides a full-stack interface for organizing, reordering, and saving show segments in coordination with markdown-based editorial workflows (e.g., Obsidian).
+
+---
+
+## 📚 Table of Contents
+
+* [🧠 Overview](#-overview)
+* [🔁 Frontend–Backend Interaction](#-frontend–backend-interaction)
+* [🖥️ How to Launch](#️-how-to-launch)
+* [📂 Obsidian Integration](#-obsidian-integration)
+* [🚀 Recent Update (Changelog)](#-recent-update-changelog--v100)
+* [👉 Still Needed](#-still-needed)
+* [🗯 Git & Commit Workflow](#-git--commit-workflow)
+* [🏁 Summary](#-summary)
+
+---
+
+## 🧠 Overview
+
+The system is composed of two primary components:
+
+### 1. **Frontend — `disaffected-ui`**
+
+* Built with **Vue 3**, **Vuetify 3**, and **vuedraggable**
+* Loads markdown segment metadata from the backend
+* Provides a drag-and-drop UI to reorder segments
+* Sends reordered segment lists to backend for persistent saving
+
+### 2. **Backend — `show-build-server`**
+
+* Built with **FastAPI**
+* Runs in Docker using `tiangolo/uvicorn-gunicorn-fastapi:python3.11`
+* Handles:
+
+  * Serving segment metadata from Obsidian-managed markdown files
+  * Accepting reordered lists and writing `order:` metadata to YAML frontmatter
+  * Generating asset IDs and preprocessing SOT files via MQTT
+
+---
+
+## 🔁 Frontend–Backend Interaction
+
+| Action            | Flow                                                                   |
+| ----------------- | ---------------------------------------------------------------------- |
+| Load Segment List | `GET /rundown/{episode}` — frontend fetches list of `.md` files        |
+| Reorder Segments  | `POST /rundown/{episode}/reorder` — frontend sends reordered filenames |
+| Save to Disk      | Backend parses each file, assigns `order: 10, 20, 30...`, and saves    |
+
+The markdown files are stored in `/mnt/sync/disaffected/episodes/{episode}/rundown`, mounted into the Docker container at `/home/episodes`.
+
+---
+
+## 🖥️ How to Launch
+
+### ✅ Backend (FastAPI)
+
+From `/mnt/process/show-build/`:
+
+```bash
+docker compose up --build
+```
+
+The container is named `show-build-server`. Ports:
+
+* `80` in container
+* Mapped to `8888` on host (`http://192.168.51.210:8888`)
+
+### ✅ Frontend (Vue)
+
+From `/mnt/process/show-build/disaffected-ui`:
+
+```bash
+npm install
+npm run serve
+```
+
+This runs on default port `8080` unless overridden.
+
+---
+
+## 📂 Obsidian Integration
+
+* All segment `.md` files are authored and managed in Obsidian.
+* Reordering in the UI modifies the `order:` field in frontmatter.
+* Filenames are not renamed, preserving link stability.
+* Segment sorting is done based on the `order:` field (not filename prefix).
+
+---
+
+## 🚀 Recent Update (Changelog — v1.0.0)
+
+**🟢 New:**
+
+* Drag-and-drop ordering of segment cards
+* Save Order button commits changes to backend
+* FastAPI route `/rundown/{episode}/reorder` implemented
+* Writes `order:` field in YAML frontmatter in steps of 10
+* Group permission fix: Docker user `insider` can write to `/home/episodes`
+
+**🔧 Infra:**
+
+* Fixed Docker `USER` and `groupadd` conflicts
+* `frontmatter` added to `requirements.txt`
+* Axios POST debugged and corrected for CORS + port 8888
+
+**✅ Verified:**
+
+* End-to-end working from UI to filesystem
+
+---
+
+## 👉 Still Needed
+
+### 📦 Frontend Dockerization
+
+* Currently launched manually via `npm run serve`
+* Needs a production-ready build (`npm run build`) and Docker container
+* Add NGINX or serve static files via FastAPI if needed
+
+### 🪙 UI Enhancements
+
+* Show `asset_id` in each segment card
+* Add inline editing of metadata (`title`, `slug`, etc.)
+* Confirmation toasts/snackbar for success/failure
+* Episode selector component to load different folders
+
+### 🛠 Backend Enhancements
+
+* Add endpoint to edit metadata fields (`PUT /rundown/{episode}/{filename}`)
+* Validate frontmatter schema
+* Add logging to file for traceability
+
+### 🔍 QA Tasks
+
+* Test with segments across multiple blocks (100s, 200s, 300s)
+* Confirm Obsidian plugin compatibility with `order:` sorting
+* Write tests for empty or malformed `.md` files
+
+---
+
+## 🗯 Git & Commit Workflow
+
+### 🧩 Repository Structure Note
+
+As of the latest iteration, the `disaffected-ui` frontend no longer has its own Git repository. The `.git` and `.gitignore` from that subfolder were removed to unify the full stack under a single top-level Git repository rooted at `show-build/`. This simplifies version control and deployment.
+
+### ✅ Basic Usage
+
+```bash
+git init
+git add .
+git commit -m "Initial working version of Show Builder"
+git branch -M main
+git remote add origin git@github.com:youruser/show-build.git
+git push -u origin main
+```
+
+### ✅ Exclude Unnecessary Files
+
+Your unified `.gitignore` at the root of the project should now include:
+
+```gitignore
+# Backend
+__pycache__/
+*.py[cod]
+*.log
+*.bak
+*.swp
+*.swo
+*~
+
+# Frontend
+/disaffected-ui/node_modules/
+/disaffected-ui/dist/
+/disaffected-ui/.vite/
+/disaffected-ui/.cache/
+/disaffected-ui/.output/
+
+# Editor/IDE/System noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Docker overrides
+/home/logs/
+docker-compose.override.yml
+
+# Secrets or personal data
+.env
+.env.*
+```
+
+gitignore
+
+# Backend
+
+**pycache**/
+\*.pyc
+\*.pyo
+\*.log
+\*.bak
+
+# Frontend
+
+/disaffected-ui/node\_modules/
+/disaffected-ui/dist/
+/disaffected-ui/.vite/
+/disaffected-ui/.output/
+
+# Editor/IDE/System noise
+
+\*.swp
+\*.swo
+\*\~
+.DS\_Store
+.vscode/
+.idea/
+.env
+gitignore
+disaffected-ui/node\_modules/
+disaffected-ui/dist/
+\*.log
+\*.bak
+**pycache**/
+\*.pyc
+
+````
+
+### ⚠️ Note on `node_modules`
+The `disaffected-ui/node_modules/` directory contains all frontend dependencies.
+- It is generated by running `npm install`
+- It can be **hundreds of MBs in size**
+- It **should not be committed** to Git
+- It **should not be Syncthing’d or backed up**
+- If deleted, it can be safely rebuilt with:
+  ```bash
+  cd disaffected-ui
+  npm install
+````
+
+---
+
+## 🏁 Summary
+
+This system is now capable of managing full rundown reordering logic in an editorial-friendly, web-accessible way. Markdown files remain compatible with Obsidian, and changes are non-destructive to filenames or asset links.
+
+Next: Dockerize the frontend and implement metadata editing + display.
+
+```
+
+
+
+
+
+Included files and directories (tree):
+├── app
+│   ├── services
+│   │   ├── sot_processor.py
+│   │   └── testboot.mqtt.py
+│   ├── utils
+│   │   ├── id.py
+│   │   └── validator.py
+│   ├── main.py
+│   ├── mqttcurl.sh
+│   ├── preproc-queue-sots.json
+│   ├── preproc_delegate.py
+│   ├── preproc_mqtt_listen.py
+│   ├── preproc_mqtt_pub.py
+│   └── testup.sh
+├── disaffected-ui
+│   ├── src
+│   │   ├── assets
+│   │   │   ├── config
+│   │   │   │   └── colorMap.js
+│   │   │   ├── logo.png
+│   │   │   └── logo.svg
+│   │   ├── components
+│   │   │   ├── ColorSelector.vue
+│   │   │   ├── HelloWorld.vue
+│   │   │   ├── RundownManager.vue
+│   │   │   └── RundownManagerBACKUP.vue
+│   │   ├── router
+│   │   │   └── index.js
+│   │   ├── views
+│   │   ├── App.vue
+│   │   └── main.js
+│   ├── babel.config.js
+│   ├── jsconfig.json
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── README.md
+│   ├── rundown-order-flow.md
+│   └── vue.config.js
+├── tools
+├── .gatherignore
+├── .gitignore
+├── docker-compose.yml
+├── Dockerfile
+├── find-asset-id-refs.sh
+├── gather.sh
+├── info.txt
+├── README.md
+└── requirements.txt
+
+
+BEGIN SCRIPT OUTPUT
+
+------------------------------------------------------------------------------------------------
+relative to project root: docker-compose.yml
+absolute: /mnt/process/show-build/docker-compose.yml
+
+```
+services:
+  fastapi:
+    build:
+      context: .
+      no_cache: true
+    container_name: show-build-server
+    ports:
+      - "8888:80"
+    volumes:
+      - ./app:/app
+      - /mnt/sync/disaffected/logs:/home/logs
+      - /mnt/sync/shared_media:/shared_media
+      - /mnt/sync/disaffected/episodes:/home/episodes
+    networks:
+      - video-post
+    environment:
+      MODULE_NAME: main
+      VARIABLE_NAME: app
+      WEB_CONCURRENCY: 1  # Explicitly limit to exactly ONE Gunicorn worker
+networks:
+  video-post:
+    external: true
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: .gitignore
+absolute: /mnt/process/show-build/.gitignore
+
+```
+disaffected-ui/node_modules/
+
+
+# Python / FastAPI backend
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.bak
+*.swp
+*.swo
+*.tmp
+*.DS_Store
+
+# Virtualenv (if ever used)
+env/
+venv/
+ENV/
+
+# Compiled scripts
+*.html
+
+# Vue frontend
+disaffected-ui/node_modules/
+disaffected-ui/dist/
+disaffected-ui/.vite/
+disaffected-ui/.cache/
+disaffected-ui/.output/
+
+# Optional Vue CLI/IDE junk
+disaffected-ui/.idea/
+disaffected-ui/.vscode/
+
+# Local Docker logs
+/home/logs/
+docker-compose.override.yml
+
+# OS or editor-specific
+*.~undo
+*.bak
+*~
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Secrets or personal data (optional)
+.env
+.env.*
+
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: .gatherignore
+absolute: /mnt/process/show-build/.gatherignore
+
+```
+# Generated by gather.py --setup
+.git/
+/disaffected-ui/babel.config.js
+/disaffected-ui/find-asset-id-refs.sh
+/disaffected-ui/package-lock.json
+backups/
+disaffected-ui/node_modules/
+disaffected-ui/public/
+disaffected-ui/src/plugins/
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/babel.config.js
+absolute: /mnt/process/show-build/disaffected-ui/babel.config.js
+
+```
+module.exports = {
+  presets: [
+    '@vue/cli-plugin-babel/preset'
+  ]
+}
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/vue.config.js
+absolute: /mnt/process/show-build/disaffected-ui/vue.config.js
+
+```
+const { defineConfig } = require('@vue/cli-service')
+module.exports = defineConfig({
+  transpileDependencies: true,
+
+  pluginOptions: {
+    vuetify: {
+			// https://github.com/vuetifyjs/vuetify-loader/tree/next/packages/vuetify-loader
+		}
+  }
+})
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/package.json
+absolute: /mnt/process/show-build/disaffected-ui/package.json
+
+```
+{
+  "name": "disaffected-ui",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "serve": "vue-cli-service serve",
+    "build": "vue-cli-service build",
+    "lint": "vue-cli-service lint"
+  },
+  "dependencies": {
+    "@mdi/font": "5.9.55",
+    "axios": "^1.9.0",
+    "core-js": "^3.8.3",
+    "roboto-fontface": "*",
+    "vue": "^3.2.13",
+    "vue-router": "^4.5.1",
+    "vuedraggable": "^4.1.0",
+    "vuetify": "^3.8.8",
+    "webfontloader": "^1.0.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.12.16",
+    "@babel/eslint-parser": "^7.12.16",
+    "@vue/cli-plugin-babel": "~5.0.0",
+    "@vue/cli-plugin-eslint": "~5.0.0",
+    "@vue/cli-service": "~5.0.0",
+    "eslint": "^7.32.0",
+    "eslint-plugin-vue": "^8.0.3",
+    "vue-cli-plugin-vuetify": "~2.5.8",
+    "webpack-plugin-vuetify": "^2.0.0-alpha.0"
+  },
+  "eslintConfig": {
+    "root": true,
+    "env": {
+      "node": true
+    },
+    "extends": [
+      "plugin:vue/vue3-essential",
+      "eslint:recommended"
+    ],
+    "parserOptions": {
+      "parser": "@babel/eslint-parser"
+    },
+    "rules": {}
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions",
+    "not dead",
+    "not ie 11"
+  ]
+}
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/jsconfig.json
+absolute: /mnt/process/show-build/disaffected-ui/jsconfig.json
+
+```
+{
+  "compilerOptions": {
+    "target": "es5",
+    "module": "esnext",
+    "baseUrl": "./",
+    "moduleResolution": "node",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ]
+    },
+    "lib": [
+      "esnext",
+      "dom",
+      "dom.iterable",
+      "scripthost"
+    ]
+  }
+}
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/rundown-order-flow.md
+absolute: /mnt/process/show-build/disaffected-ui/rundown-order-flow.md
+
+```
+
+- The request payload is a JSON array of segment objects, typically including:
+- `filename` (e.g. `1A.md`)
+- optionally other metadata (e.g. `title`, `slug`, `asset_id`)
+
+---
+
+## 🧠 What Happens in the Backend
+
+1. The backend receives the new list.
+2. It loops through the list and assigns new `order:` values:
+ - `10`, `20`, `30`, etc.
+3. For each segment:
+ - The backend opens the corresponding `.md` file from:
+   ```
+   /home/episodes/{episode}/rundown/{filename}
+   ```
+ - It updates the YAML frontmatter to set the new `order:` value.
+ - It preserves all other metadata (like `title`, `slug`, `asset_id`).
+ - It writes the file back to disk.
+
+---
+
+## ✅ Result
+
+- Files stay the same (no renaming).
+- Asset IDs remain untouched.
+- YAML `order:` values reflect the new UI sequence.
+- Obsidian or any plugin that reads frontmatter can now sort segments properly.
+
+---
+
+This process maintains a stable structure, avoids filename churn, and allows consistent ordering across UI, backend, and local markdown tools.
+
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/main.js
+absolute: /mnt/process/show-build/disaffected-ui/src/main.js
+
+```
+import { createApp } from 'vue';
+import App from './App.vue';
+import router from './router'; // <--- This line is critical
+import vuetify from './plugins/vuetify';
+import { loadFonts } from './plugins/webfontloader';
+
+loadFonts();
+
+createApp(App)
+  .use(router) // <--- Also critical
+  .use(vuetify)
+  .mount('#app');
+
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/App.vue
+absolute: /mnt/process/show-build/disaffected-ui/src/App.vue
+
+```
+<template>
+  <v-app>
+    <v-main>
+      <router-view />
+    </v-main>
+  </v-app>
+</template>
+
+<script>
+export default {
+  name: 'App',
+};
+</script>
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/components/RundownManagerBACKUP.vue
+absolute: /mnt/process/show-build/disaffected-ui/src/components/RundownManagerBACKUP.vue
+
+```
+<!-- RundownManager.vue -->
+<template>
+  <div>
+    <h2>Episode Rundown</h2>
+
+    <draggable :list="segments" item-key="getItemKey">
+      <template #item="{ element, index }">
+        <div
+          :key="getItemKey(element)"
+          style="border: 1px solid black; padding: 8px; margin: 4px; background-color: #f9f9f9;"
+        >
+          <strong>{{ index + 1 }}. {{ element.title || 'Untitled' }}</strong><br />
+          Slug: {{ element.slug || element.filename }}<br />
+          Duration: {{ element.duration || '—' }}<br />
+          Type: {{ element.item_type || '—' }}<br />
+          Asset ID: {{ element.asset_id || '—' }}<br />
+        </div>
+      </template>
+    </draggable>
+
+    <button @click="saveOrder" style="margin-top: 16px;">Save Order</button>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import draggable from 'vuedraggable'
+import axios from 'axios'
+
+const segments = ref([])
+
+const getItemKey = (item) => item.slug || item.filename || item.title || Math.random().toString(36)
+
+onMounted(async () => {
+  try {
+    const response = await axios.get('http://192.168.51.210:8888/rundown/0225')
+    segments.value = response.data
+    console.log("Fetched segments:", segments.value)
+  } catch (error) {
+    console.error("Failed to fetch rundown:", error)
+  }
+})
+
+const saveOrder = async () => {
+  try {
+    const payload = segments.value.map(segment => ({ filename: segment.filename }))
+    const response = await axios.post('http://192.168.51.210:8888/rundown/0225/reorder', payload)
+    console.log("Save response:", response.data)
+    alert("Order saved successfully!")
+  } catch (error) {
+    console.error("Failed to save order:", error)
+    alert("Failed to save order.")
+  }
+}
+</script>
+
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/components/ColorSelector.vue
+absolute: /mnt/process/show-build/disaffected-ui/src/components/ColorSelector.vue
+
+```
+<template>
+  <div class="color-selector">
+    <h2>Color Selector</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Color</th>
+          <th>Select Color</th>
+          <th>Preview</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="(type, index) in types" :key="index">
+          <td>{{ type }}</td>
+          <td>
+            <input
+              type="text"
+              v-model="typeColors[type]"
+              placeholder="Enter color hex code or name"
+            />
+          </td>
+          <td>
+            <button @click="openColorPicker(type)">Select Color</button>
+          </td>
+          <td>
+            <div :style="{ backgroundColor: typeColors[type], width: '100px', height: '20px' }"></div>
+          </td>
+        </tr>
+        <tr>
+          <td>Highlight</td>
+          <td>
+            <input
+              type="text"
+              id="row-highlight"
+              v-model="typeColors['Highlight']"
+              placeholder="Enter color hex code or name"
+            />
+          </td>
+          <td>
+            <button @click="openColorPicker('Highlight')">Select Color</button>
+          </td>
+          <td>
+            <div :style="{ backgroundColor: typeColors['Highlight'], width: '100px', height: '20px' }"></div>
+          </td>
+        </tr>
+        <tr>
+          <td>DropLine</td>
+          <td>
+            <input
+              type="text"
+              id="drop-line"
+              v-model="typeColors['DropLine']"
+              placeholder="Enter color hex code or name"
+            />
+          </td>
+          <td>
+            <button @click="openColorPicker('DropLine')">Select Color</button>
+          </td>
+          <td>
+            <div :style="{ backgroundColor: typeColors['DropLine'], width: '100px', height: '20px' }"></div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      types: ['Advert', 'CTA', 'Promo', 'Segment', 'Trans'],
+      typeColors: {},
+    };
+  },
+  methods: {
+    saveColor(type) {
+      localStorage.setItem(`color_${type}`, this.typeColors[type]);
+      alert(`${type} color saved as ${this.typeColors[type]}`);
+    },
+    openColorPicker(type) {
+      const picker = document.createElement('input');
+      picker.type = 'color';
+      picker.value = this.typeColors[type];
+      picker.onchange = () => {
+        this.typeColors[type] = picker.value;
+        this.saveColor(type);
+      };
+      picker.click();
+    },
+  },
+  created() {
+    this.types.forEach(type => {
+      const storedColor = localStorage.getItem(`color_${type}`);
+      if (storedColor) {
+        this.typeColors[type] = storedColor;
+      }
+    });
+    ['Highlight', 'DropLine'].forEach(effect => {
+      const storedEffectColor = localStorage.getItem(`color_${effect}`);
+      if (storedEffectColor) {
+        this.typeColors[effect] = storedEffectColor;
+      }
+    });
+  },
+};
+</script>
+
+<style scoped>
+.color-selector {
+  margin-top: 20px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 8px;
+}
+
+th {
+  background-color: #f2f2f2;
+}
+
+input[type="text"], button {
+  margin-left: 5px;
+}
+
+div {
+  display: inline-block;
+}
+</style>
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/components/HelloWorld.vue
+absolute: /mnt/process/show-build/disaffected-ui/src/components/HelloWorld.vue
+
+```
+<template>
+  <v-container>
+    <v-row class="text-center">
+      <v-col cols="12">
+        <v-img
+          :src="require('../assets/logo.svg')"
+          class="my-3"
+          contain
+          height="200"
+        />
+      </v-col>
+
+      <v-col class="mb-4">
+        <h1 class="display-2 font-weight-bold mb-3">
+          Welcome to the Vuetify 3 Beta
+        </h1>
+
+
+        <p class="subheading font-weight-regular">
+          For help and collaboration with other Vuetify developers,
+          <br>please join our online
+          <a
+            href="https://community.vuetifyjs.com"
+            target="_blank"
+          >Discord Community</a>
+        </p>
+      </v-col>
+
+      <v-col
+        class="mb-5"
+        cols="12"
+      >
+        <h2 class="headline font-weight-bold mb-5">
+          What's next?
+        </h2>
+
+        <v-row justify="center">
+          <a
+            v-for="(next, i) in whatsNext"
+            :key="i"
+            :href="next.href"
+            class="subheading mx-3"
+            target="_blank"
+          >
+            {{ next.text }}
+          </a>
+        </v-row>
+      </v-col>
+
+      <v-col
+        class="mb-5"
+        cols="12"
+      >
+        <h2 class="headline font-weight-bold mb-5">
+          Important Links
+        </h2>
+
+        <v-row justify="center">
+          <a
+            v-for="(link, i) in importantLinks"
+            :key="i"
+            :href="link.href"
+            class="subheading mx-3"
+            target="_blank"
+          >
+            {{ link.text }}
+          </a>
+        </v-row>
+      </v-col>
+
+      <v-col
+        class="mb-5"
+        cols="12"
+      >
+        <h2 class="headline font-weight-bold mb-5">
+          Ecosystem
+        </h2>
+
+        <v-row justify="center">
+          <a
+            v-for="(eco, i) in ecosystem"
+            :key="i"
+            :href="eco.href"
+            class="subheading mx-3"
+            target="_blank"
+          >
+            {{ eco.text }}
+          </a>
+        </v-row>
+      </v-col>
+    </v-row>
+  </v-container>
+</template>
+
+<script>
+
+export default {
+  name: 'HelloWorld',
+
+  data: () => ({
+    ecosystem: [
+      {
+        text: 'vuetify-loader',
+        href: 'https://github.com/vuetifyjs/vuetify-loader/tree/next',
+      },
+      {
+        text: 'github',
+        href: 'https://github.com/vuetifyjs/vuetify/tree/next',
+      },
+      {
+        text: 'awesome-vuetify',
+        href: 'https://github.com/vuetifyjs/awesome-vuetify',
+      },
+    ],
+    importantLinks: [
+      {
+        text: 'Chat',
+        href: 'https://community.vuetifyjs.com',
+      },
+      {
+        text: 'Made with Vuetify',
+        href: 'https://madewithvuejs.com/vuetify',
+      },
+      {
+        text: 'Twitter',
+        href: 'https://twitter.com/vuetifyjs',
+      },
+      {
+        text: 'Articles',
+        href: 'https://medium.com/vuetify',
+      },
+    ],
+    whatsNext: [
+      {
+        text: 'Explore components',
+        href: 'https://vuetifyjs.com',
+      },
+      {
+        text: 'Roadmap',
+        href: 'https://vuetifyjs.com/introduction/roadmap/',
+      },
+      {
+        text: 'Frequently Asked Questions',
+        href: 'https://vuetifyjs.com/getting-started/frequently-asked-questions',
+      },
+    ],
+  }),
+}
+</script>
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/components/RundownManager.vue
+absolute: /mnt/process/show-build/disaffected-ui/src/components/RundownManager.vue
+
+```
+<template>
+  <v-container>
+    <!-- Header row with episode selector and save button -->
+    <v-row class="align-center justify-space-between mb-4">
+      <v-col cols="6">
+        <h2>Rundown Editor</h2>
+      </v-col>
+      <v-col cols="6" class="text-right">
+        <v-select
+          v-model="selectedEpisode"
+          :items="episodes"
+          label="Select Episode"
+          @change="loadEpisode"
+          :disabled="loading"
+        />
+        <v-btn color="primary" class="ml-2" @click="saveChanges" :disabled="loading || segments.length === 0">
+          Save & Commit
+        </v-btn>
+      </v-col>
+    </v-row>
+    <!-- Rundown list -->
+    <v-card-text>
+      <div v-if="loading" class="text-center">
+        <v-progress-circular indeterminate color="primary" />
+        <p>Loading rundown for episode {{ selectedEpisode }}...</p>
+      </div>
+      <div v-else-if="segments.length === 0" class="text-center">
+        <v-alert type="warning" outlined>
+          No segments found for episode {{ selectedEpisode }}. Check /mnt/sync/disaffected/episodes/{{ selectedEpisode }}/rundown/ for .md files.
+        </v-alert>
+      </div>
+      <draggable v-else v-model="segments" :item-key="getItemKey">
+        <template #item="{ element, index }">
+          <v-card
+            class="mb-2"
+            outlined
+            :class="resolveTypeClass(element.type)"
+          >
+            <v-row no-gutters>
+              <!-- Type + Index column (uniform width) -->
+              <v-col
+                :style="{ width: '80px', minWidth: '80px', maxWidth: '80px' }"
+                class="d-flex flex-column"
+              >
+                <!-- Type cell -->
+                <div
+                  class="d-flex align-center justify-center"
+                  style="
+                    background: rgba(0, 0, 0, 0.05);
+                    height: 25%;
+                    text-align: center;
+                    border-right: 1px solid rgba(0, 0, 0, 0.1);
+                  "
+                >
+                  <div class="text-caption font-weight-bold" style="font-size: 0.6rem;">
+                    {{ (element.type || 'UNKNOWN').toUpperCase() }}
+                  </div>
+                </div>
+                <!-- Index cell -->
+                <div
+                  class="d-flex align-center justify-center"
+                  style="
+                    background: rgba(0, 0, 0, 0.02);
+                    height: 75%;
+                    border-right: 1px solid rgba(0, 0, 0, 0.1);
+                  "
+                >
+                  <div style="font-size: 1.5em;">
+                    {{ (index + 1) * 10 }}
+                  </div>
+                </div>
+              </v-col>
+              <!-- Slug content -->
+              <v-col>
+                <v-card-text>
+                  <div>
+                    <strong style="font-size: 1.8em;">{{ element.title || 'No title' }}</strong>
+                    <div class="text-caption grey--text mt-1">
+                      {{ element.asset_id || 'No ID' }}
+                    </div>
+                    <div class="text-caption grey--text">
+                      {{ element.description || 'No description' }}
+                    </div>
+                    <div class="text-caption grey--text">
+                      File: {{ element.filename || 'Unknown' }}
+                    </div>
+                  </div>
+                </v-card-text>
+              </v-col>
+              <!-- Duration column -->
+              <v-col
+                cols="auto"
+                class="d-flex align-center justify-end"
+                :style="{
+                  background: 'rgba(0, 0, 0, 0.05)',
+                  padding: '0 16px',
+                  minWidth: '100px',
+                }"
+              >
+                <div
+                  class="text-center"
+                  style="width: 100%; font-size: 1.3em; font-weight: bold;"
+                >
+                  {{ element.length || 'N/A' }}
+                </div>
+              </v-col>
+            </v-row>
+          </v-card>
+        </template>
+      </draggable>
+    </v-card-text>
+  </v-container>
+</template>
+
+<script>
+import draggable from "vuedraggable";
+import axios from "axios";
+import colorMap from '@/assets/config/colorMap.js';
+
+export default {
+  name: "RundownManager",
+  components: { draggable },
+  data() {
+    return {
+      segments: [],
+      selectedEpisode: "0225",
+      episodes: ["0225", "0226", "0227"], // Can be made dynamic
+      loading: false,
+    };
+  },
+  methods: {
+    getItemKey(item) {
+      return item.asset_id || item.filename || item.order || Math.random().toString();
+    },
+    async loadEpisode() {
+      this.loading = true;
+      try {
+        const response = await axios.get(`http://192.168.51.210:8888/rundown/${this.selectedEpisode}`);
+        console.log("[DEBUG] API Response:", response.data);
+        this.segments = response.data.map(entry => ({
+          ...entry.metadata,
+          filename: entry.filename // Ensure filename is included
+        }));
+        console.log("[DEBUG] Processed Segments:", this.segments);
+      } catch (err) {
+        console.error("[ERROR] Failed to load rundown:", err);
+        this.segments = [];
+        alert(`Failed to load rundown for episode ${this.selectedEpisode}: ${err.message}`);
+      } finally {
+        this.loading = false;
+      }
+    },
+    async saveChanges() {
+      try {
+        const payload = { segments: this.segments.map(segment => ({ filename: segment.filename })) };
+        const response = await axios.post(
+          `http://192.168.51.210:8888/rundown/${this.selectedEpisode}/reorder`,
+          payload
+        );
+        console.log("[DEBUG] Rundown saved:", response.data);
+        alert("Rundown reordered successfully!");
+      } catch (err) {
+        console.error("[ERROR] Failed to save rundown:", err);
+        alert("Failed to save rundown: " + err.message);
+      }
+    },
+    resolveTypeClass(type) {
+      const typeKey = (type || '').toLowerCase();
+      const color = colorMap[typeKey] || 'white';
+      console.log("[DEBUG] Type:", typeKey, "Class:", color);
+      return color; // Returns class like 'blue lighten-4'
+    },
+  },
+  mounted() {
+    this.loadEpisode();
+  },
+};
+</script>
+
+<style scoped>
+.v-card {
+  cursor: grab;
+}
+</style>
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/router/index.js
+absolute: /mnt/process/show-build/disaffected-ui/src/router/index.js
+
+```
+import { createRouter, createWebHistory } from 'vue-router';
+import RundownManager from '@/components/RundownManager.vue';
+import ColorSelector from '@/components/ColorSelector.vue';
+
+const routes = [
+  {
+    path: '/',
+    redirect: '/rundown-manager/:episodeID'
+  },
+  {
+    path: '/rundown-manager/:episodeID',
+    name: 'RundownManager',
+    component: RundownManager,
+  },
+  {
+    path: '/color-selector',
+    name: 'ColorSelector',
+    component: ColorSelector,
+  }
+];
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes
+});
+
+export default router;
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/assets/logo.svg
+absolute: /mnt/process/show-build/disaffected-ui/src/assets/logo.svg
+
+```
+<svg width="488" height="424" viewBox="0 0 488 424" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M249.126 95.017L151.843 263.694L243.959 423.473L365.966 211.973L487.918 0.473206H303.629L249.126 95.017Z" fill="#1697F6"/>
+<path d="M122.007 211.973L128.396 223.096L219.402 65.2635L256.793 0.473206H243.959H0L122.007 211.973Z" fill="#AEDDFF"/>
+<path d="M303.629 0.473206C349.743 152.355 243.959 423.473 243.959 423.473L151.843 263.694L303.629 0.473206Z" fill="#1867C0"/>
+<path d="M256.793 0.473206C62.5042 0.473206 128.397 223.096 128.397 223.096L256.793 0.473206Z" fill="#7BC6FF"/>
+</svg>
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/assets/logo.png
+absolute: /mnt/process/show-build/disaffected-ui/src/assets/logo.png
+
+```
+[Error reading /mnt/process/show-build/disaffected-ui/src/assets/logo.png: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte]
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/assets/config/colorMap.js
+absolute: /mnt/process/show-build/disaffected-ui/src/assets/config/colorMap.js
+
+```
+export default {
+  advert: 'amber lighten-4',
+  cta: 'green lighten-4',
+  promo: 'indigo lighten-4',
+  segment: 'blue lighten-4',
+  transition: 'grey lighten-4',
+  draghighlight: 'orange-lighten-2',
+};
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/package-lock.json
+absolute: /mnt/process/show-build/disaffected-ui/package-lock.json
+
+```
 {
   "name": "disaffected-ui",
   "version": "0.1.0",
@@ -12628,3 +13946,1796 @@
     }
   }
 }
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/README.md
+absolute: /mnt/process/show-build/disaffected-ui/README.md
+
+```
+# disaffected-ui
+
+## Project setup
+```
+npm install
+```
+
+### Compiles and hot-reloads for development
+```
+npm run serve
+```
+
+### Compiles and minifies for production
+```
+npm run build
+```
+
+### Lints and fixes files
+```
+npm run lint
+```
+
+### Customize configuration
+See [Configuration Reference](https://cli.vuejs.org/config/).
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: find-asset-id-refs.sh
+absolute: /mnt/process/show-build/find-asset-id-refs.sh
+
+```
+#!/bin/bash
+
+# Navigate to the project root
+cd /mnt/process/show-build || exit 1
+
+# Search for common assetID variations
+echo "Searching for assetID references..."
+grep -rIn --color=always \
+  -e 'assetID' \
+  -e 'asset_id' \
+  -e '"asset_id"' \
+  --exclude-dir=node_modules \
+  --exclude-dir=__pycache__ \
+  --exclude=\*.log \
+  .
+
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: gather.sh
+absolute: /mnt/process/show-build/gather.sh
+
+```
+#!/usr/bin/env bash
+# This script generates a text file with project information
+
+# Check for minimum Bash version 4
+if ((BASH_VERSINFO[0] < 4)); then
+    echo "This script requires Bash version 4 or higher." >&2
+    exit 1
+fi
+
+
+# Check for required commands
+if ! command -v tree &>/dev/null; then
+    echo "The 'tree' command is required but not installed."
+    echo "To install on Ubuntu/Debian: sudo apt-get install tree"
+    echo "To install on MacOS (Homebrew): brew install tree"
+    exit 1
+fi
+
+if ! command -v realpath &>/dev/null; then
+    echo "The 'realpath' command is required but not installed."
+    echo "To install on Ubuntu/Debian: sudo apt-get install realpath"
+    echo "To install on MacOS (Homebrew): brew install coreutils"
+    exit 1
+fi
+
+print_file_info() {
+    local filepath="$1"
+    local abs_path
+    abs_path="$(realpath "$filepath")"
+    local rel_path
+    rel_path="$(realpath --relative-to="$(pwd)" "$filepath")"
+
+    echo "------------------------------------------------------------------------------------------------"
+    echo "relative to project root: $rel_path"
+    echo "absolute: $abs_path"
+    echo
+    echo '```'
+    while IFS= read -r line; do
+        echo "$line"
+    done < "$filepath"
+    echo '```'
+    echo
+    echo
+}
+
+scan_and_print_files() {
+    local base_path="$1"
+    local project_root
+    project_root="$(pwd)"
+    local include_dirs=()
+    local subdirs=()
+
+    # Gather subdirectories
+    while IFS= read -r -d '' dir; do
+        subdirs+=("$dir")
+    done < <(find "$base_path" -mindepth 1 -maxdepth 1 -type d -print0)
+
+    # Prompt user for each subdirectory
+    for dir in "${subdirs[@]}"; do
+        dir_name="$(basename "$dir")"
+        echo "Directory: $dir_name"
+        echo -n "Include this directory in scan? (i=include, o=omit): "
+        read -n 1 choice
+        echo
+        if [[ "$choice" == "i" ]]; then
+            include_dirs+=("$dir")
+        fi
+    done
+
+    # Build find arguments for included directories
+    find_args=()
+    if [ "${#include_dirs[@]}" -eq 0 ]; then
+        find_args=("$base_path")
+    else
+        for inc in "${include_dirs[@]}"; do
+            find_args+=("$inc")
+        done
+    fi
+
+    # Find all files in included directories (or base if none included)
+    while IFS= read -r -d '' file; do
+        local abs_path
+        abs_path="$(realpath "$file")"
+        local rel_path
+        rel_path="$(realpath --relative-to="$project_root" "$file")"
+
+        echo "------------------------------------------------------------------------------------------------"
+        echo "relative to project root: $rel_path"
+        echo "absolute: $abs_path"
+        echo
+        echo "Tree to file from project root:"
+        tree -L 100 -f --noreport "$project_root" | grep --color=never "$rel_path"
+        echo
+        echo '```'
+        cat "$file"
+        echo '```'
+        echo
+        echo
+    done < <(find "${find_args[@]}" -type f -print0)
+}
+
+list_and_exclude_directories() {
+    local base_path="$1"
+    local -a dir_list
+    local -A dir_map
+    local idx=1
+
+    # Gather all directories recursively
+    while IFS= read -r -d '' dir; do
+        dir_list+=("$dir")
+        dir_map["$idx"]="$dir"
+        ((idx++))
+    done < <(find "$base_path" -type d -print0)
+
+    # Print enumerated directory list
+    echo "Enumerated directory list:"
+    for i in "${!dir_list[@]}"; do
+        num=$((i+1))
+        rel_dir="$(realpath --relative-to="$base_path" "${dir_list[$i]}")"
+        echo "$num) $rel_dir"
+    done
+
+    echo
+    echo "Enter comma-separated numbers of directories to EXCLUDE (e.g. 2,5,7), or leave blank for none:"
+    read -r exclude_input
+
+    # Parse exclusions
+    IFS=',' read -ra exclude_nums <<< "$exclude_input"
+    declare -A exclude_dirs
+    for num in "${exclude_nums[@]}"; do
+        num="$(echo "$num" | xargs)" # trim
+        if [[ -n "${dir_map[$num]}" ]]; then
+            exclude_dirs["${dir_map[$num]}"]=1
+        fi
+    done
+
+    # Print tree, showing excluded dirs as "..."
+    print_tree_with_exclusions() {
+        local path="$1"
+        local prefix="$2"
+        local rel_path
+        rel_path="$(realpath --relative-to="$base_path" "$path")"
+        if [[ "${exclude_dirs[$path]}" == "1" ]]; then
+            echo "${prefix}${rel_path}/ ..."
+            return
+        fi
+        echo "${prefix}${rel_path}/"
+        local child
+        while IFS= read -r -d '' child; do
+            print_tree_with_exclusions "$child" "    $prefix"
+        done < <(find "$path" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+        # List files in this directory
+        while IFS= read -r -d '' file; do
+            file_rel="$(realpath --relative-to="$base_path" "$file")"
+            echo "${prefix}    $file_rel"
+        done < <(find "$path" -mindepth 1 -maxdepth 1 -type f -print0 | sort -z)
+    }
+
+    echo
+    echo "Project directory tree (excluded directories shown as ...):"
+    print_tree_with_exclusions "$base_path" ""
+    echo
+}
+
+
+
+print_system_info() {
+    echo "System Information:"
+    echo "-------------------"
+    echo "Hostname: $(hostname)"
+    echo "Date: $(date)"
+    echo "Uptime: $(uptime -p)"
+    echo "User: $(whoami)"
+    echo "OS: $(uname -a)"
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        echo "Distribution: $PRETTY_NAME"
+    fi
+    echo
+
+    echo "CPU Info:"
+    if command -v lscpu &>/dev/null; then
+        lscpu | grep -E 'Model name|Socket|Thread|Core|CPU\(s\):'
+    else
+        grep -E 'model name|cpu cores|siblings' /proc/cpuinfo | sort | uniq
+    fi
+    echo
+
+    echo "Memory Info:"
+    free -h
+    echo
+
+    echo "Disk Usage:"
+    df -h /
+    echo
+
+    if command -v nvidia-smi &>/dev/null; then
+        echo "NVIDIA GPU Info:"
+        nvidia-smi
+        echo
+    else
+        echo "NVIDIA GPU Info: nvidia-smi not found."
+        echo
+    fi
+
+    echo "Docker Info:"
+    if command -v docker &>/dev/null; then
+        docker info 2>/dev/null | head -n 20
+        echo
+        echo "Docker Containers:"
+        docker ps -a
+        echo
+        echo "Docker Images:"
+        docker images
+        echo
+    else
+        echo "Docker not installed."
+        echo
+    fi
+
+        # Print running Docker containers and their networks
+        if command -v docker &>/dev/null; then
+            echo
+            echo "Running Docker Containers and Networks:"
+            docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}"
+            echo
+
+            echo "Docker Networks and Connected Containers:"
+            docker network ls --format "table {{.Name}}\t{{.Driver}}\t{{.Scope}}"
+            echo
+
+            for net in $(docker network ls --format "{{.Name}}"); do
+                echo "Network: $net"
+                docker network inspect "$net" --format '{{range .Containers}}{{.Name}}{{"\t"}}{{end}}'
+                echo
+            done
+            echo
+        fi
+        echo
+}
+
+
+echo "#PROJECT INFO FOR SHOW BUILD" > info.txt
+echo "This document is compiled on-the-fly using a bash script executed in the root of the project." >> info.txt
+echo "The contents of the bash script generating this file will be included in this text file." >> info.txt
+echo "The script is designed to be run in the root directory of the project." >> info.txt
+echo "" >> info.txt
+echo "TABLE OF CONTENTS" >> info.txt
+echo "----------------------------------------" >> info.txt
+echo "Contents of:     This file (info.txt):" >> info.txt
+echo "Contents of:     README.md (the main project documentation file)" >> info.txt
+echo "Contents of:     The project file system structure" >> info.txt
+echo "Contents of:     gather.sh (the bash script generating this file)" >> info.txt
+echo "Contents of:     backend of the system (multiple file) e.g. the app folder and FastAPI/python/routes etc" >> info.txt
+echo "Contents of:     frontend of the system e.g. the app folder and ReactJS/NextJS/components etc" >> info.txt
+echo "----------------------------------------" >> info.txt
+echo "System info:     System information including docker info" >> info.txt
+echo "----------------------------------------" >> info.txt
+echo "" >> info.txt
+echo "BEGIN SCRIPT OUTPUT" >> info.txt
+echo ""
+
+print_file_info "gather.sh" >> info.txt
+print_file_info "README.md" >> info.txt
+
+# Interactive functions: capture output to temp files, then append
+tmpdir=$(mktemp -d)
+list_and_exclude_directories "." > "$tmpdir/tree.txt"
+scan_and_print_files "app" > "$tmpdir/app.txt"
+scan_and_print_files "disaffected-ui" > "$tmpdir/ui.txt"
+
+cat "$tmpdir/tree.txt" >> info.txt
+cat "$tmpdir/app.txt" >> info.txt
+cat "$tmpdir/ui.txt" >> info.txt
+rm -rf "$tmpdir"
+
+##system info
+print_system_info >> info.txt
+
+echo "Script completed successfully. Project information has been saved to info.txt."
+echo "You can view the file using any text editor."
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: requirements.txt
+absolute: /mnt/process/show-build/requirements.txt
+
+```
+fastapi==0.115.0
+uvicorn==0.30.6
+requests==2.32.3
+paho-mqtt==1.6.1
+markdown==3.7
+pydantic==2.9.2
+ffmpeg-python==0.2.0
+python-frontmatter==1.0.0
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/preproc_delegate.py
+absolute: /mnt/process/show-build/app/preproc_delegate.py
+
+```
+import os
+import subprocess
+import json
+
+def process_file(filepath: str, config_path: str):
+    with open(config_path, 'r') as f:
+        tasks = json.load(f)
+
+    for task in tasks:
+        if task['type'] == 'trim':
+            trim_video(filepath, task)
+        elif task['type'] == 'convert_to_mp3':
+            convert_to_mp3(filepath, task)
+        elif task['type'] == 'create_preview':
+            create_low_res_preview(filepath, task)
+
+def trim_video(video_path: str, config):
+    output_file = os.path.join(
+        os.path.dirname(video_path),
+        f"{os.path.splitext(os.path.basename(video_path))[0]}_trimmed.mp4"
+    )
+    subprocess.run([
+        "ffmpeg", "-i", video_path,
+        "-ss", str(config['start_time']),
+        "-to", str(config['end_time']),
+        "-c", "copy",
+        output_file
+    ])
+    return output_file
+
+def convert_to_mp3(video_path: str, config):
+    output_file = os.path.join(
+        os.path.dirname(video_path),
+        f"{os.path.splitext(os.path.basename(video_path))[0]}.mp3"
+    )
+    subprocess.run([
+        "ffmpeg", "-i", video_path,
+        output_file
+    ])
+    return output_file
+
+def create_low_res_preview(video_path: str, config):
+    output_file = os.path.join(
+        os.path.dirname(video_path),
+        f"{os.path.splitext(os.path.basename(video_path))[0]}_preview.mp4"
+    )
+    subprocess.run([
+        "ffmpeg", "-i", video_path,
+        "-vf", f"scale={config['width']}:{config['height']}, drawtext=fontsize=24:text='%{{pts\\:hms}}':x=10:y=H-th-10",
+        output_file
+    ])
+    return output_file
+
+# Example usage:
+if __name__ == "__main__":
+    file_path = "/path/to/video.mp4"
+    config_path = "tasks.json"  # Path to the JSON configuration file
+    process_file(file_path, config_path)
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/utils/validator.py
+absolute: /mnt/process/show-build/app/utils/validator.py
+
+```
+# validator.py
+import logging
+from utils.id import get_next_id
+
+
+
+# Define which front matter fields we care about
+KNOWN_FIELDS = [
+    "slug",
+    "id",
+    "type",
+    "duration",
+    "title",
+    "order"
+]
+
+def validate_front_matter(front_matter: dict, filename: str = None) -> dict:
+    metadata = {}
+    system_messages = []
+
+    print(f"[DEBUG FRONT MATTER] {front_matter}")
+
+    # Normalize keys (case-insensitive)
+    normalized = {k.strip().lower(): v for k, v in front_matter.items()}
+
+    for field in KNOWN_FIELDS:
+        key = field.lower()
+        if key in normalized:
+            metadata[field] = normalized[key]
+
+    # Validate required fields
+    if "slug" not in metadata or not metadata["slug"]:
+        raise ValueError(f"Missing or invalid 'slug' in {filename or 'front matter'}")
+
+    if "id" not in metadata or not str(metadata["id"]).isdigit():
+        try:
+            metadata["id"] = get_next_id(metadata["slug"], metadata.get("type", "unknown"))
+            system_messages.append("ID was missing or invalid and has been automatically generated.")
+        except Exception as e:
+            raise ValueError(f"Could not generate ID: {e}")
+
+    # Validate optional integer field for 'order'
+    if "order" in metadata:
+        try:
+            if metadata["order"] is not None:
+                metadata["order"] = int(metadata["order"])
+        except (ValueError, TypeError):
+            system_messages.append("'order' must be an integer or null.")
+
+    # Catch unexpected fields
+    for field in normalized:
+        if field not in KNOWN_FIELDS:
+            msg = f"Unexpected front matter field: {field}. This field is not currently handled by the validator."
+            logging.warning(f"{filename or 'unknown file'} — system warnings: {msg}")
+            ##system_messages.append(msg)
+
+    if system_messages:
+        metadata["system_messages"] = system_messages
+
+    return metadata
+
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/utils/id.py
+absolute: /mnt/process/show-build/app/utils/id.py
+
+```
+import os
+import logging
+
+# File path for tracking last issued ID
+LAST_ID_FILE = "/home/logs/last.id"
+MAX_ID_LENGTH = 5
+
+# Ensure the logs directory exists
+os.makedirs("/home/logs", exist_ok=True)
+
+# Initialize the file if it doesn't exist
+if not os.path.exists(LAST_ID_FILE):
+    with open(LAST_ID_FILE, "w") as f:
+        f.write("0")
+
+def read_last_id() -> int:
+    with open(LAST_ID_FILE, "r") as f:
+        return int(f.read().strip())
+
+def write_last_id(new_id: int):
+    with open(LAST_ID_FILE, "w") as f:
+        f.write(str(new_id))
+
+def get_next_id(slug: str, type_: str) -> str:
+    logging.info(f"Generating ID for type={type_}, slug={slug}")
+    if not slug.strip():
+        raise ValueError("Slug cannot be empty")
+    last_id = read_last_id()
+    new_id = last_id + 1
+    write_last_id(new_id)
+    return f"{new_id:0{MAX_ID_LENGTH}d}"
+
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/testup.sh
+absolute: /mnt/process/show-build/app/testup.sh
+
+```
+curl -X POST "http://localhost:8000/preproc_sot" \
+     -F "file=@/home/user/videos/sample.mp4" \
+     -F "type=sampleType" \
+     -F "assetID=123456" \
+     -F "episode=01" \
+     -F "slug=example-slug"
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/main.py
+absolute: /mnt/process/show-build/app/main.py
+
+```
+# main.py
+
+from fastapi import FastAPI, Form, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.encoders import jsonable_encoder
+from preproc_mqtt_pub import publish_message
+from preproc_mqtt_listen import MQTTListener
+from pydantic import BaseModel
+from utils.id import get_next_id
+from utils.validator import validate_front_matter
+import logging
+import hashlib
+import os
+import threading
+import re
+import yaml
+
+app = FastAPI()
+
+listener = MQTTListener()
+
+@app.on_event("startup")
+def startup_event():
+    threading.Thread(target=listener.start, daemon=True).start()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+MAX_FILE_SIZE_MB = 50
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
+class PublishRequest(BaseModel):
+    topic: str
+    message: str
+
+class ReorderRequest(BaseModel):
+    segments: list[dict]
+
+@app.get("/", response_class=HTMLResponse)
+def read_root():
+    return """
+    <html>
+      <head>
+        <title>Show Builder API</title>
+        <style>
+          body { font-family: sans-serif; margin: 2em; }
+          code { background: #f0f0f0; padding: 2px 4px; border-radius: 4px; }
+          h2 { margin-top: 1.5em; }
+        </style>
+      </head>
+      <body>
+        <h1>🎬 Show Builder API</h1>
+        <p>This server powers the Disaffected Rundown Builder. Here are the available endpoints:</p>
+
+        <h2>GET <code>/health</code></h2>
+        <p>Returns basic server status.</p>
+
+        <h2>GET <code>/rundown/{episode_number}</code></h2>
+        <p>Fetch rundown items with validated front matter metadata.</p>
+
+        <h2>POST <code>/rundown/{episode_number}/reorder</code></h2>
+        <p>Reorder segments by updating <code>order:</code> in YAML frontmatter.</p>
+
+        <h2>POST <code>/publish/</code></h2>
+        <p>Send a raw MQTT message.</p>
+
+        <h2>GET <code>/listen/?topic=xyz</code></h2>
+        <p>Subscribe to an MQTT topic and stream responses.</p>
+
+        <h2>POST <code>/next-id</code></h2>
+        <p>Generates the next unique ID. Requires form fields <code>slug</code> and <code>type</code>.</p>
+
+        <h2>POST <code>/proc_vid</code></h2>
+        <p>Upload a video file for processing. Accepts multipart form fields: <code>file</code>, <code>type</code>, <code>id</code>, <code>episode</code>, <code>slug</code>, and optional <code>trim_start</code>/<code>trim_end</code>.</p>
+      </body>
+    </html>
+    """
+
+@app.post("/publish/")
+async def publish_endpoint(payload: PublishRequest):
+    try:
+        result = publish_message(payload.topic, payload.message)
+        if not result:
+            raise HTTPException(status_code=500, detail="Failed to publish message")
+        return {
+            "topic": payload.topic,
+            "message": payload.message,
+            "status": "published",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/listen/")
+async def listen_endpoint(topic: str):
+    try:
+        listener.subscribe_to_topic(topic)
+        return {"topic": topic, "status": "listening"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+@app.post("/next-id")
+async def next_id(slug: str = Form(...), type: str = Form(...)):
+    try:
+        next_id_value = get_next_id(slug, type)
+        return {"id": next_id_value}
+    except ValueError as ve:
+        raise HTTPException(status_code=422, detail=str(ve))
+    except Exception as e:
+        logging.error(f"Failed to generate ID: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/proc_vid")
+async def upload(
+    file: UploadFile = File(..., alias="file"),
+    type: str = Form(..., alias="type"),
+    id: str = Form(..., alias="id"),
+    episode: str = Form(..., alias="episode"),
+    slug: str = Form(..., alias="slug"),
+    trim_start: str = Form(default=None),
+    trim_end: str = Form(default=None),
+):
+    if not file:
+        raise HTTPException(status_code=400, detail="File is required")
+
+    file_content = await file.read()
+
+    if not file_content:
+        raise HTTPException(status_code=422, detail="File content is empty")
+
+    if not file.filename.lower().endswith((".mp4", ".mov", ".mkv")):
+        raise HTTPException(status_code=422, detail="File must be mp4, mov, or mkv")
+
+    md5_hash = hashlib.md5(file_content).hexdigest()
+    work_dir = f"/shared_media/preproc/working/{id}"
+    os.makedirs(work_dir, exist_ok=True)
+    filepath = os.path.join(work_dir, file.filename)
+
+    try:
+        with open(filepath, "wb") as f:
+            f.write(file_content)
+
+        file_size = os.path.getsize(filepath)
+        if file_size > MAX_FILE_SIZE_BYTES:
+            raise HTTPException(
+                status_code=413, detail=f"File size exceeds {MAX_FILE_SIZE_MB} MB."
+            )
+
+        logging.info(f"File successfully saved: {filepath}, MD5: {md5_hash}")
+        return {"status": "file uploaded", "filepath": filepath, "md5": md5_hash}
+
+    except Exception as e:
+        logging.error(f"Failed to save file: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+
+@app.get("/rundown/{episode_number}")
+async def get_rundown(episode_number: str):
+    base_path = "/home/episodes"
+    episode_path = os.path.join(base_path, episode_number, "rundown")
+
+    if not os.path.isdir(episode_path):
+        raise HTTPException(
+            status_code=404, detail=f"Episode {episode_number} not found."
+        )
+
+    rundown_items = []
+
+    for file_name in sorted(os.listdir(episode_path)):
+        if file_name.endswith(".md"):
+            file_path = os.path.join(episode_path, file_name)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+
+                if content.startswith("---"):
+                    fm_end = content.find("\n---", 4)
+                    if fm_end == -1:
+                        raise ValueError("Front matter block not properly closed")
+                    yaml_block = content[4:fm_end]
+                    front_matter = yaml.safe_load(yaml_block)
+                else:
+                    raise ValueError("No YAML front matter found")
+
+                validated_metadata = validate_front_matter(front_matter, filename=file_name)
+                rundown_items.append({"filename": file_name, "metadata": validated_metadata})
+
+            except Exception as e:
+                #logging.warning(f"Invalid metadata in {file_name}: {e}")
+                pass  ##skipping the warning messages about unvalidated fields for now  uncomment above to re-enable
+    return JSONResponse(content=jsonable_encoder(rundown_items))
+
+@app.post("/rundown/{episode_number}/reorder")
+async def reorder_rundown(episode_number: str, payload: ReorderRequest):
+    base_path = "/home/episodes"
+    episode_path = os.path.join(base_path, episode_number, "rundown")
+
+    if not os.path.isdir(episode_path):
+        raise HTTPException(
+            status_code=404, detail=f"Episode {episode_number} not found."
+        )
+
+    try:
+        for index, segment in enumerate(payload.segments):
+            filename = segment.get("filename")
+            if not filename or not filename.endswith(".md"):
+                raise HTTPException(
+                    status_code=422, detail=f"Invalid or missing filename in segment {index}"
+                )
+
+            file_path = os.path.join(episode_path, filename)
+            if not os.path.isfile(file_path):
+                raise HTTPException(
+                    status_code=404, detail=f"File {filename} not found."
+                )
+
+            # Read existing file
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            if not content.startswith("---"):
+                raise HTTPException(
+                    status_code=422, detail=f"No YAML frontmatter in {filename}"
+                )
+
+            fm_end = content.find("\n---", 4)
+            if fm_end == -1:
+                raise HTTPException(
+                    status_code=422, detail=f"Invalid YAML frontmatter in {filename}"
+                )
+
+            yaml_block = content[4:fm_end]
+            body = content[fm_end + 4:]
+            front_matter = yaml.safe_load(yaml_block) or {}
+
+            # Update order
+            front_matter["order"] = (index + 1) * 10
+
+            # Write back to file
+            new_yaml = yaml.safe_dump(front_matter, sort_keys=False)
+            new_content = f"---\n{new_yaml}---\n{body}"
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+
+        return {"status": "success", "message": f"Rundown for episode {episode_number} reordered"}
+
+    except Exception as e:
+        logging.error(f"Failed to reorder rundown: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to reorder rundown: {str(e)}")
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/preproc_mqtt_listen.py
+absolute: /mnt/process/show-build/app/preproc_mqtt_listen.py
+
+```
+import json
+import subprocess
+from paho.mqtt import client as mqtt_client
+import paho.mqtt.client as mqtt
+import threading
+
+# Constants for Mosquitto running in Docker
+MQTT_BROKER = 'MQTT Broker'  # Use your broker hostname
+MQTT_PORT = 1883
+MQTT_TOPIC = 'preprocessing/command'
+CLIENT_ID = 'Preprocessor_Listener'
+
+
+class MQTTListener:
+    def __init__(self):
+        self.client = mqtt.Client()
+
+    def on_connect(self, client, userdata, flags, rc):
+        print("Connected with result code:", rc)
+        self.client.subscribe("#")  # subscribe to all topics, or specific ones
+
+    def on_message(self, client, userdata, msg):
+        print(f"Received message on topic {msg.topic}: {msg.payload.decode()}")
+
+    def start(self):
+        self.client.on_connect = self.on_connect
+        self.client.on_message = self.on_message
+
+        self.client.connect("mqtt-broker", 1883, 60)
+        self.client.loop_forever()
+
+    def subscribe_to_topic(self, topic):
+        self.client.subscribe(topic)
+
+
+
+
+
+
+
+def connect_mqtt():
+    """Connect to the MQTT broker."""
+    def on_connect(client, userdata, flags, rc):
+        if rc == 0:
+            print("Connected to MQTT Broker!")
+            client.subscribe(MQTT_TOPIC)
+        else:
+            print(f"Failed to connect, return code {rc}\n")
+
+    client = mqtt_client.Client(CLIENT_ID)
+    client.on_connect = on_connect
+    client.connect(MQTT_BROKER, MQTT_PORT)
+
+    return client
+
+def execute_command(command, tool):
+    """Execute the command using the specified tool."""
+    try:
+        if tool == "ffmpeg":
+            subprocess.run(["ffmpeg"] + command)
+        elif tool == "sox":
+            subprocess.run(["sox"] + command)
+        elif tool == "convert":
+            subprocess.run(["convert"] + command)
+        elif tool == "python":
+            subprocess.run(["python3"] + command)  # Assuming Python3 is the default Python interpreter
+        else:
+            print(f"Unknown tool: {tool}")
+    except Exception as e:
+        print(f"Failed to execute command with error: {e}")
+
+def main():
+    client = connect_mqtt()
+
+    def on_message(client, userdata, msg):
+        message = json.loads(msg.payload.decode())
+        job_id = message["job_id"]
+        command = message["command"]
+        tool = message["tool"]
+
+        print(f"Received job {job_id} for tool '{tool}' with command: {command}")
+        execute_command(command, tool)
+
+    client.on_message = on_message
+
+    # Blocking loop to keep the listener running
+    client.loop_forever()
+
+
+
+if __name__ == '__main__':
+    main()
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/mqttcurl.sh
+absolute: /mnt/process/show-build/app/mqttcurl.sh
+
+```
+curl -X POST "http://localhost:8888/publish/" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "topic": "ffmpeg/command",
+           "message": "ffmpeg -version"
+         }'
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/preproc_mqtt_pub.py
+absolute: /mnt/process/show-build/app/preproc_mqtt_pub.py
+
+```
+import json
+from paho.mqtt import client as mqtt_client
+import paho.mqtt.client as mqtt
+
+# Constants for Mosquitto running in Docker
+MQTT_BROKER = "mqtt-broker"  # Updated to match the Docker container name
+MQTT_PORT = 1883
+MQTT_TOPIC = 'preprocessing/command'
+CLIENT_ID = 'Preprocessor_Publisher'
+
+def connect_mqtt():
+    """Connect to the MQTT broker."""
+    def on_connect(client, userdata, flags, rc):
+        if rc == 0:
+            print("Connected to MQTT Broker!")
+        else:
+            print(f"Failed to connect, return code {rc}\n")
+
+    client = mqtt_client.Client(CLIENT_ID)
+    client.on_connect = on_connect
+    client.connect(MQTT_BROKER, MQTT_PORT)
+
+    return client
+
+def publish_message(client, topic, message):
+    """Publish a message to the specified MQTT topic."""
+    result = client.publish(topic, json.dumps(message))
+    status = result[0]
+    if status == 0:
+        print(f"Message `{message}` sent to topic `{topic}`")
+    else:
+        print(f"Failed to send message to topic {topic}")
+
+
+def publish_message(topic, message):
+    client = mqtt.Client(client_id="fastapi_server", clean_session=True)
+
+    def on_connect(client, userdata, flags, rc):
+        if rc == 0:
+            print("Connected to MQTT Broker")
+            result = client.publish(topic, payload=message)
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                raise Exception(f"Failed to publish message: {result.rc}")
+            return "Message published successfully"
+        else:
+            print(f"Failed to connect, return code {rc}")
+
+    client.on_connect = on_connect
+    client.connect("mqtt-broker", 1883, 60)
+    return client.publish(topic, payload=message).rc == mqtt.MQTT_ERR_SUCCESS
+
+
+
+
+
+
+
+def main():
+    # Step 1: Connect to MQTT Broker
+    client = connect_mqtt()
+
+    # Read preprocessing jobs from JSON file
+    with open('preprocessing_jobs.json', 'r') as file:
+        jobs = json.load(file)
+
+    for job in jobs:
+        publish_message(client, MQTT_TOPIC, {
+            "job_id": job["job_id"],
+            "command": job["command"],
+            "tool": job["tool"]
+        })
+
+if __name__ == '__main__':
+    main()
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/preproc-queue-sots.json
+absolute: /mnt/process/show-build/app/preproc-queue-sots.json
+
+```
+[
+    {
+        "job_id": 1,
+        "input_video_path": "/path/to/video1.mp4",
+        "output_video_path": "/path/to/output_trimmed1.mp4",
+        "command": [
+            "-i", "/path/to/video1.mp4",
+            "-ss", "00:01:00",
+            "-to", "00:02:00",
+            "-c", "copy",
+            "/path/to/output_trimmed1.mp4"
+        ],
+        "tool": "ffmpeg",
+        "job_description": "Head & tail trim."
+    },
+    {
+        "job_id": 2,
+        "input_video_path": "/path/to/video2.mp4",
+        "output_video_path": "/path/to/output_resized2.mp4",
+        "command": [
+            "-i", "/path/to/video2.mp4",
+            "-vf", "scale=640:360",
+            "/path/to/output_resized2.mp4"
+        ],
+        "tool": "ffmpeg",
+        "job_description": "Resize video to 640x360 resolution using FFmpeg."
+    },
+    {
+        "job_id": 3,
+        "input_audio_path": "/path/to/audio1.wav",
+        "output_audio_path": "/path/to/output_normalized1.wav",
+        "command": [
+            "/path/to/audio1.wav", "-n", "norm"
+        ],
+        "tool": "sox",
+        "job_description": "Normalize audio using SoX."
+    },
+    {
+        "job_id": 4,
+        "input_image_path": "/path/to/image1.jpg",
+        "output_image_path": "/path/to/output_grayscale1.jpg",
+        "command": [
+            "/path/to/image1.jpg", "-colorspace", "Gray", "/path/to/output_grayscale1.jpg"
+        ],
+        "tool": "convert",
+        "job_description": "Convert image to grayscale using ImageMagick."
+    },
+    {
+        "job_id": 5,
+        "script_path": "/path/to/data_processing_script.py",
+        "output_data_path": "/path/to/processed_data.csv",
+        "command": [
+            "--input", "/path/to/raw_data.csv", "--output", "/path/to/processed_data.csv"
+        ],
+        "tool": "python",
+        "job_description": "Run data processing script to transform raw CSV data."
+    }
+]
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/services/sot_processor.py
+absolute: /mnt/process/show-build/app/services/sot_processor.py
+
+```
+import paho.mqtt.client as mqtt
+import json
+from pathlib import Path
+import logging
+import time
+
+# Version: 1.0.1
+# Date: May 21, 2025
+
+logging.basicConfig(
+    filename='/home/logs/sot_processor.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+# MQTT configuration
+MQTT_BROKER = "192.168.51.210"
+MQTT_PORT = 1883
+MQTT_TASK_TOPIC = "ffmpeg/tasks"
+MQTT_RESULT_TOPIC = "ffmpeg/results"
+MQTT_CLIENT_ID = "sot_processor"
+
+mqtt_results = {}
+
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        logging.info("Connected to MQTT broker")
+        client.subscribe(MQTT_RESULT_TOPIC)
+    else:
+        logging.error(f"Failed to connect to MQTT broker with code {rc}")
+
+def on_message(client, userdata, msg):
+    try:
+        result = json.loads(msg.payload.decode())
+        task_id = result.get("task_id")
+        mqtt_results[task_id] = result
+        logging.info(f"Received MQTT result for task {task_id}: {result}")
+    except Exception as e:
+        logging.error(f"Error processing MQTT message: {e}")
+
+mqtt_client = mqtt.Client(MQTT_CLIENT_ID)
+mqtt_client.on_connect = on_connect
+mqtt_client.on_message = on_message
+mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+mqtt_client.loop_start()
+
+def process_sot(video_path, markdown_file, asset_id, slug, description, trim_start, trim_end):
+    try:
+        video_path = Path(f"/mnt/sync/disaffected/{video_path}")
+        markdown_path = Path(markdown_file)
+        episode = video_path.parts[3]  # /mnt/sync/disaffected/episodes/EPISODE/...
+        output_dir = Path(f"/shared_media/{episode}/assets")
+
+        # Ensure output directories
+        (output_dir / "audio/sots").mkdir(parents=True, exist_ok=True)
+        (output_dir / "videos/previews").mkdir(parents=True, exist_ok=True)
+        (output_dir / "images/sots/thumbnails").mkdir(parents=True, exist_ok=True)
+
+        task_id = f"{asset_id}_{int(time.time())}"
+
+        # MP3 conversion
+        mp3_path = output_dir / "audio/sots" / f"{slug}.mp3"
+        mqtt_client.publish(MQTT_TASK_TOPIC, json.dumps({
+            "task_id": task_id,
+            "type": "convert_to_mp3",
+            "input": str(video_path),
+            "output": str(mp3_path),
+            "params": ["-vn", "-acodec", "mp3", "-ar", "16000"]
+        }))
+        logging.info(f"Published MP3 task {task_id}")
+
+        # Preview video
+        preview_path = output_dir / "videos/previews" / f"{slug}-preview.mp4"
+        mqtt_client.publish(MQTT_TASK_TOPIC, json.dumps({
+            "task_id": task_id,
+            "type": "generate_preview",
+            "input": str(video_path),
+            "output": str(preview_path),
+            "params": [
+                "-vf", "drawtext=text='%{pts\\:hms}':fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5:x=10:y=10",
+                "-c:v", "libx264", "-c:a", "copy"
+            ]
+        }))
+        logging.info(f"Published preview task {task_id}")
+
+        # Duration extraction
+        mqtt_client.publish(MQTT_TASK_TOPIC, json.dumps({
+            "task_id": task_id,
+            "type": "extract_duration",
+            "input": str(video_path),
+            "params": [
+                "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1"
+            ]
+        }))
+        logging.info(f"Published duration task {task_id}")
+
+        # Thumbnail
+        thumb_path = output_dir / "images/sots/thumbnails" / f"thumb-{slug}.png"
+        mqtt_client.publish(MQTT_TASK_TOPIC, json.dumps({
+            "task_id": task_id,
+            "type": "generate_thumbnail",
+            "input": str(video_path),
+            "output": str(thumb_path),
+            "params": ["-ss", "1", "-vframes", "1"]
+        }))
+        logging.info(f"Published thumbnail task {task_id}")
+
+        # Trim video
+        trimmed_path = video_path
+        if trim_start and trim_end:
+            trimmed_path = output_dir / "videos" / f"{slug}-trimmed.{video_path.suffix}"
+            mqtt_client.publish(MQTT_TASK_TOPIC, json.dumps({
+                "task_id": task_id,
+                "type": "trim_video",
+                "input": str(video_path),
+                "output": str(trimmed_path),
+                "params": ["-ss", trim_start, "-to", trim_end, "-c", "copy"]
+            }))
+            logging.info(f"Published trim task {task_id}")
+
+        # Wait for results
+        timeout = 60
+        start_time = time.time()
+        duration_str = "00:00:00"
+        while time.time() - start_time < timeout:
+            if task_id in mqtt_results and mqtt_results[task_id].get("status") == "success":
+                if "duration" in mqtt_results[task_id]:
+                    duration = float(mqtt_results[task_id]["duration"])
+                    duration_str = f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}"
+                break
+            time.sleep(1)
+        else:
+            logging.error(f"Timeout waiting for MQTT results for task {task_id}")
+            raise TimeoutError(f"FFmpeg processing timed out for task {task_id}")
+
+        # Stub transcription
+        transcription = "Transcription pending"
+
+        # Update markdown
+        with open(markdown_path, 'r') as f:
+            content = f.read()
+        cue_block = f"""<<!-- Begin Cue -->>
+[Type:SOT]
+[AssetID:{asset_id}]
+[Slug:{slug}]
+[Description:{description}]
+[MediaURL:../assets/videos/{trimmed_path.name}]
+[Duration:{duration_str}]
+[TrimStart:{trim_start}]
+[TrimEnd:{trim_end}]
+[Transcription:{transcription}]
+[Status:Processed]
+<img src="../assets/images/sots/thumbnails/thumb-{slug}.png"/>
+<<!-- End Cue -->>
+"""
+        new_content = content.replace(f"[AssetID:{asset_id}]", cue_block, 1)
+        with open(markdown_path, 'w') as f:
+            f.write(new_content)
+
+        logging.info(f"Processed SOT for {video_path}")
+        return {
+            "duration": duration_str,
+            "transcription": transcription,
+            "thumbnail": str(thumb_path),
+            "preview": str(preview_path),
+            "mp3": str(mp3_path)
+        }
+    except Exception as e:
+        logging.error(f"Error processing SOT {video_path}: {e}")
+        raise
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: app/services/testboot.mqtt.py
+absolute: /mnt/process/show-build/app/services/testboot.mqtt.py
+
+```
+import paho.mqtt.client as mqtt
+import json
+from pathlib import Path
+
+# Configuration
+VIDEO_PATH = "/mnt/sync/disaffected/episodes/S01E02/video.mp4"
+THUMBNAIL_DIR = "path/to/assets/images/sots/thumbnails"
+THUMBNAIL_FILE = f"{Path(VIDEO_PATH).stem}.png"
+ASSET_ID = "asset_123"
+
+# MQTT Configuration
+MQTT_BROKER = "your_mqtt_broker"
+MQTT_PORT = 1883
+MQTT_TASK_TOPIC = "mqtt_task_topic"
+
+def publish_thumbnail_task(video_path, thumbnail_dir, asset_id):
+    task_id = f"{asset_id}-thumbnail"
+    payload = {
+        "task_id": task_id,
+        "type": "generate_thumbnail",
+        "input": video_path,
+        "output": str(Path(thumbnail_dir) / THUMBNAIL_FILE)
+    }
+
+    mqtt_client = mqtt.Client()
+    mqtt_client.connect(MQTT_BROKER, MQTT_PORT)
+
+    # Publish the task
+    mqtt_client.publish(MQTT_TASK_TOPIC, json.dumps(payload))
+    print(f"Published generate_thumbnail task for {video_path} to {THUMBNAIL_FILE}")
+
+if __name__ == "__main__":
+    publish_thumbnail_task(VIDEO_PATH, THUMBNAIL_DIR, ASSET_ID)
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: Dockerfile
+absolute: /mnt/process/show-build/Dockerfile
+
+```
+FROM tiangolo/uvicorn-gunicorn-fastapi:python3.11
+WORKDIR /app
+COPY ./requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install -r /app/requirements.txt
+COPY ./app /app
+RUN groupadd -g 1001 disaffected || true && \
+    useradd -m -u 1001 -g disaffected -G disaffected insider
+USER insider
+HEALTHCHECK --interval=30s --timeout=3s \
+    CMD curl -f http://localhost:80/health || exit 1
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: README.md
+absolute: /mnt/process/show-build/README.md
+
+```
+# 📦 Disaffected — Show Builder System
+
+This is the core rundown management system used in the *Disaffected* media automation environment. It provides a full-stack interface for organizing, reordering, and saving show segments in coordination with markdown-based editorial workflows (e.g., Obsidian).
+
+---
+
+## 📚 Table of Contents
+
+* [🧠 Overview](#-overview)
+* [🔁 Frontend–Backend Interaction](#-frontend–backend-interaction)
+* [🖥️ How to Launch](#️-how-to-launch)
+* [📂 Obsidian Integration](#-obsidian-integration)
+* [🚀 Recent Update (Changelog)](#-recent-update-changelog--v100)
+* [👉 Still Needed](#-still-needed)
+* [🗯 Git & Commit Workflow](#-git--commit-workflow)
+* [🏁 Summary](#-summary)
+
+---
+
+## 🧠 Overview
+
+The system is composed of two primary components:
+
+### 1. **Frontend — `disaffected-ui`**
+
+* Built with **Vue 3**, **Vuetify 3**, and **vuedraggable**
+* Loads markdown segment metadata from the backend
+* Provides a drag-and-drop UI to reorder segments
+* Sends reordered segment lists to backend for persistent saving
+
+### 2. **Backend — `show-build-server`**
+
+* Built with **FastAPI**
+* Runs in Docker using `tiangolo/uvicorn-gunicorn-fastapi:python3.11`
+* Handles:
+
+  * Serving segment metadata from Obsidian-managed markdown files
+  * Accepting reordered lists and writing `order:` metadata to YAML frontmatter
+  * Generating asset IDs and preprocessing SOT files via MQTT
+
+---
+
+## 🔁 Frontend–Backend Interaction
+
+| Action            | Flow                                                                   |
+| ----------------- | ---------------------------------------------------------------------- |
+| Load Segment List | `GET /rundown/{episode}` — frontend fetches list of `.md` files        |
+| Reorder Segments  | `POST /rundown/{episode}/reorder` — frontend sends reordered filenames |
+| Save to Disk      | Backend parses each file, assigns `order: 10, 20, 30...`, and saves    |
+
+The markdown files are stored in `/mnt/sync/disaffected/episodes/{episode}/rundown`, mounted into the Docker container at `/home/episodes`.
+
+---
+
+## 🖥️ How to Launch
+
+### ✅ Backend (FastAPI)
+
+From `/mnt/process/show-build/`:
+
+```bash
+docker compose up --build
+```
+
+The container is named `show-build-server`. Ports:
+
+* `80` in container
+* Mapped to `8888` on host (`http://192.168.51.210:8888`)
+
+### ✅ Frontend (Vue)
+
+From `/mnt/process/show-build/disaffected-ui`:
+
+```bash
+npm install
+npm run serve
+```
+
+This runs on default port `8080` unless overridden.
+
+---
+
+## 📂 Obsidian Integration
+
+* All segment `.md` files are authored and managed in Obsidian.
+* Reordering in the UI modifies the `order:` field in frontmatter.
+* Filenames are not renamed, preserving link stability.
+* Segment sorting is done based on the `order:` field (not filename prefix).
+
+---
+
+## 🚀 Recent Update (Changelog — v1.0.0)
+
+**🟢 New:**
+
+* Drag-and-drop ordering of segment cards
+* Save Order button commits changes to backend
+* FastAPI route `/rundown/{episode}/reorder` implemented
+* Writes `order:` field in YAML frontmatter in steps of 10
+* Group permission fix: Docker user `insider` can write to `/home/episodes`
+
+**🔧 Infra:**
+
+* Fixed Docker `USER` and `groupadd` conflicts
+* `frontmatter` added to `requirements.txt`
+* Axios POST debugged and corrected for CORS + port 8888
+
+**✅ Verified:**
+
+* End-to-end working from UI to filesystem
+
+---
+
+## 👉 Still Needed
+
+### 📦 Frontend Dockerization
+
+* Currently launched manually via `npm run serve`
+* Needs a production-ready build (`npm run build`) and Docker container
+* Add NGINX or serve static files via FastAPI if needed
+
+### 🪙 UI Enhancements
+
+* Show `asset_id` in each segment card
+* Add inline editing of metadata (`title`, `slug`, etc.)
+* Confirmation toasts/snackbar for success/failure
+* Episode selector component to load different folders
+
+### 🛠 Backend Enhancements
+
+* Add endpoint to edit metadata fields (`PUT /rundown/{episode}/{filename}`)
+* Validate frontmatter schema
+* Add logging to file for traceability
+
+### 🔍 QA Tasks
+
+* Test with segments across multiple blocks (100s, 200s, 300s)
+* Confirm Obsidian plugin compatibility with `order:` sorting
+* Write tests for empty or malformed `.md` files
+
+---
+
+## 🗯 Git & Commit Workflow
+
+### 🧩 Repository Structure Note
+
+As of the latest iteration, the `disaffected-ui` frontend no longer has its own Git repository. The `.git` and `.gitignore` from that subfolder were removed to unify the full stack under a single top-level Git repository rooted at `show-build/`. This simplifies version control and deployment.
+
+### ✅ Basic Usage
+
+```bash
+git init
+git add .
+git commit -m "Initial working version of Show Builder"
+git branch -M main
+git remote add origin git@github.com:youruser/show-build.git
+git push -u origin main
+```
+
+### ✅ Exclude Unnecessary Files
+
+Your unified `.gitignore` at the root of the project should now include:
+
+```gitignore
+# Backend
+__pycache__/
+*.py[cod]
+*.log
+*.bak
+*.swp
+*.swo
+*~
+
+# Frontend
+/disaffected-ui/node_modules/
+/disaffected-ui/dist/
+/disaffected-ui/.vite/
+/disaffected-ui/.cache/
+/disaffected-ui/.output/
+
+# Editor/IDE/System noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Docker overrides
+/home/logs/
+docker-compose.override.yml
+
+# Secrets or personal data
+.env
+.env.*
+```
+
+gitignore
+
+# Backend
+
+**pycache**/
+\*.pyc
+\*.pyo
+\*.log
+\*.bak
+
+# Frontend
+
+/disaffected-ui/node\_modules/
+/disaffected-ui/dist/
+/disaffected-ui/.vite/
+/disaffected-ui/.output/
+
+# Editor/IDE/System noise
+
+\*.swp
+\*.swo
+\*\~
+.DS\_Store
+.vscode/
+.idea/
+.env
+gitignore
+disaffected-ui/node\_modules/
+disaffected-ui/dist/
+\*.log
+\*.bak
+**pycache**/
+\*.pyc
+
+````
+
+### ⚠️ Note on `node_modules`
+The `disaffected-ui/node_modules/` directory contains all frontend dependencies.
+- It is generated by running `npm install`
+- It can be **hundreds of MBs in size**
+- It **should not be committed** to Git
+- It **should not be Syncthing’d or backed up**
+- If deleted, it can be safely rebuilt with:
+  ```bash
+  cd disaffected-ui
+  npm install
+````
+
+---
+
+## 🏁 Summary
+
+This system is now capable of managing full rundown reordering logic in an editorial-friendly, web-accessible way. Markdown files remain compatible with Obsidian, and changes are non-destructive to filenames or asset links.
+
+Next: Dockerize the frontend and implement metadata editing + display.
+
+```
+
+
+
+
+
+--- Files and directories ignored by .gatherignore ---
+  .git
+  backups
+System Information:
+-------------------
+Hostname: whisperbox
+Date: 2025-06-12 18:31:00.870176
+User: root
+OS: Linux-5.15.0-141-generic-x86_64-with-glibc2.35
+Distribution: Ubuntu 22.04.5 LTS
+
+CPU Info:
+CPU(s):                               16
+Model name:                           Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz
+Thread(s) per core:                   2
+Core(s) per socket:                   8
+Socket(s):                            1
+NUMA node0 CPU(s):                    0-15
+
+Memory Info:
+               total        used        free      shared  buff/cache   available
+Mem:            23Gi       1.6Gi        14Gi       9.0Mi       7.2Gi        21Gi
+Swap:          8.0Gi       3.0Mi       8.0Gi
+
+
+Disk Usage:
+Filesystem                         Size  Used Avail Use% Mounted on
+/dev/mapper/ubuntu--vg-ubuntu--lv   54G   42G  9.5G  82% /
+
+
+NVIDIA GPU Info:
+Thu Jun 12 18:31:00 2025       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 550.144.03             Driver Version: 550.144.03     CUDA Version: 12.4     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  Quadro P4000                   Off |   00000000:01:00.0 Off |                  N/A |
+| 46%   38C    P8              9W /  105W |    1171MiB /   8192MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI        PID   Type   Process name                              GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|    0   N/A  N/A      1778      C   python3                                      1166MiB |
++-----------------------------------------------------------------------------------------+
+
+
+Docker Info:
+Client: Docker Engine - Community
+ Version:    28.1.1
+ Context:    default
+ Debug Mode: false
+ Plugins:
+  buildx: Docker Buildx (Docker Inc.)
+    Version:  v0.23.0
+    Path:     /usr/libexec/docker/cli-plugins/docker-buildx
+  compose: Docker Compose (Docker Inc.)
+    Version:  v2.35.1
+    Path:     /usr/libexec/docker/cli-plugins/docker-compose
+
+Server:
+ Containers: 10
+  Running: 7
+  Paused: 0
+  Stopped: 3
+ Images: 68
+ Server Version: 28.1.1
+ Storage Driver: overlay2
+  Backing Filesystem: extfs
+  Supports d_type: true
+  Using metacopy: false
+  Native Overlay Diff: true
+  userxattr: false
+ Logging Driver: json-file
+ Cgroup Driver: systemd
+ Cgroup Version: 2
+ Plugins:
+  Volume: local
+  Network: bridge host ipvlan macvlan null overlay
+  Log: awslogs fluentd gcplogs gelf journald json-file local splunk syslog
+ Swarm: inactive
+ Runtimes: nvidia runc io.containerd.runc.v2
+ Default Runtime: runc
+ Init Binary: docker-init
+ containerd version: 05044ec0a9a75232cad458027ca83437aae3f4da
+ runc vers
+Docker Containers:
+CONTAINER ID   IMAGE                                COMMAND                  CREATED       STATUS                     PORTS                                                                                                                                                                                            NAMES
+980afe8f328d   show-build-fastapi                   "/start.sh"              3 hours ago   Up 3 hours (healthy)       0.0.0.0:8888->80/tcp, [::]:8888->80/tcp                                                                                                                                                          show-build-server
+86162373b8f3   id-server-api-fastapi                "/start.sh"              12 days ago   Exited (0) 6 days ago                                                                                                                                                                                                       id-server-api
+c6842dfa5b33   ffmpeg-worker:latest                 "python3 mqtt_client…"   2 weeks ago   Up 6 days                                                                                                                                                                                                                   ffmpeg-worker
+30c6bf4f2f3d   ffmpeg-worker:latest                 "python3 mqtt_client…"   2 weeks ago   Exited (130) 2 weeks ago                                                                                                                                                                                                    quirky_bell
+1293e7c120e2   syncthing-syncthing                  "/bin/entrypoint.sh …"   3 weeks ago   Up 6 days (healthy)        0.0.0.0:8384->8384/tcp, 0.0.0.0:21027->21027/udp, [::]:8384->8384/tcp, [::]:21027->21027/udp, 0.0.0.0:22000->22000/tcp, [::]:22000->22000/tcp, 0.0.0.0:22000->22000/udp, [::]:22000->22000/udp   syncthing
+24417c958da5   heimoshuiyu/whisper-fastapi:latest   "python3 whisper_fas…"   3 weeks ago   Up 6 days                  0.0.0.0:8885->5000/tcp, [::]:8885->5000/tcp                                                                                                                                                      whisper-api
+be24c5109ae8   node-red                             "./entrypoint.sh"        4 weeks ago   Up 6 days (healthy)        0.0.0.0:1880->1880/tcp, [::]:1880->1880/tcp                                                                                                                                                      node-red
+42cab699aeef   filebrowser/filebrowser:s6           "/init"                  4 weeks ago   Exited (0) 3 weeks ago                                                                                                                                                                                                      filebrowser
+b1070251da92   eclipse-mosquitto:latest             "/docker-entrypoint.…"   4 weeks ago   Up 6 days                  0.0.0.0:1883->1883/tcp, [::]:1883->1883/tcp                                                                                                                                                      mqtt-broker
+b935c737a704   portainer/portainer-ce               "/portainer"             5 weeks ago   Up 6 days                  8000/tcp, 9443/tcp, 0.0.0.0:9000->9000/tcp, [::]:9000->9000/tcp                                                                                                                                  portainer
+
+Docker Images:
+REPOSITORY                    TAG       IMAGE ID       CREATED        SIZE
+show-build-fastapi            latest    b53411f05bc9   4 days ago     1.1GB
+<none>                        <none>    ecd98675f2d0   4 days ago     1.1GB
+<none>                        <none>    b3234fcfb384   4 days ago     1.1GB
+<none>                        <none>    0c7a3b7fe011   4 days ago     1.1GB
+<none>                        <none>    b6a9f297b770   5 days ago     1.1GB
+<none>                        <none>    683c65ea894d   5 days ago     1.1GB
+<none>                        <none>    0dfacdd0b74e   5 days ago     1.1GB
+<none>                        <none>    16e5be412f46   5 days ago     1.1GB
+<none>                        <none>    7b3fa25d9332   5 days ago     1.1GB
+<none>                        <none>    8dc3e5b08bc5   5 days ago     1.1GB
+<none>                        <none>    60593fd5e5f6   5 days ago     1.1GB
+<none>                        <none>    d2a609adadad   5 days ago     1.1GB
+<none>                        <none>    07e1ac7e9dcc   5 days ago     1.1GB
+<none>                        <none>    4ec39ec2aea1   5 days ago     1.1GB
+<none>                        <none>    60671e7e4ed1   5 days ago     1.1GB
+<none>                        <none>    6060d69b57df   5 days ago     1.1GB
+<none>                        <none>    b2d79437358f   5 days ago     1.1GB
+<none>                        <none>    ef7459fa2fa7   6 days ago     1.1GB
+<none>                        <none>    12cdfdc7a922   6 days ago     1.1GB
+<none>                        <none>    a287193b82b6   6 days ago     1.1GB
+<none>                        <none>    35c0585c1efa   6 days ago     1.1GB
+<none>                        <none>    fd3bfc759a09   6 days ago     1.1GB
+<none>                        <none>    e21cd331dc29   6 days ago     1.1GB
+<none>                        <none>    27b61bbf2865   6 days ago     1.1GB
+<none>                        <none>    95930a3535dc   6 days ago     1.1GB
+idserver-fastapi              latest    2f9d0cb1391e   2 weeks ago    1.1GB
+<none>                        <none>    43c3e97a0a48   2 weeks ago    1.1GB
+id-server-api-fastapi         latest    30b5096b1ca9   2 weeks ago    1.1GB
+<none>                        <none>    f61a380d4e0e   2 weeks ago    1.1GB
+<none>                        <none>    b34ae36bd66b   3 weeks ago    1.1GB
+<none>                        <none>    a10610fbf3f7   3 weeks ago    1.1GB
+<none>                        <none>    dbcfe0de4a9a   3 weeks ago    1.1GB
+<none>                        <none>    4f0ccb29e574   3 weeks ago    1.1GB
+<none>                        <none>    83c773d5a99c   3 weeks ago    1.1GB
+<none>                        <none>    3caaa33983dd   3 weeks ago    1.1GB
+<none>                        <none>    bf43d2c833ad   3 weeks ago    1.1GB
+<none>                        <none>    931383e42b62   3 weeks ago    1.1GB
+<none>                        <none>    ddba97dda467   3 weeks ago    1.1GB
+<none>                        <none>    7ae5dacd65c1   3 weeks ago    1.1GB
+<none>                        <none>    0fdea7169099   3 weeks ago    1.1GB
+<none>                        <none>    c123f4dace32   3 weeks ago    1.1GB
+<none>                        <none>    8cb4dbdeded3   3 weeks ago    1.1GB
+<none>                        <none>    19a1fada33c6   3 weeks ago    1.1GB
+<none>                        <none>    688d86f4b754   3 weeks ago    1.1GB
+<none>                        <none>    a19f76396493   3 weeks ago    1.1GB
+<none>                        <none>    8c6ad436444b   3 weeks ago    1.1GB
+<none>                        <none>    537513e0c296   3 weeks ago    1.1GB
+<none>                        <none>    817e67237ddf   3 weeks ago    1.1GB
+<none>                        <none>    69eff581182e   3 weeks ago    1.1GB
+<none>                        <none>    9dc469c2bedb   3 weeks ago    1.1GB
+<none>                        <none>    75ca70c2a939   3 weeks ago    1.1GB
+<none>                        <none>    eeed69638d95   3 weeks ago    1.1GB
+<none>                        <none>    0480db915ce2   3 weeks ago    1.1GB
+<none>                        <none>    d35849b4e0ec   3 weeks ago    1.1GB
+<none>                        <none>    23e6b8d95f97   3 weeks ago    1.1GB
+<none>                        <none>    95128b949fc8   3 weeks ago    1.1GB
+<none>                        <none>    20f78e7bf66b   3 weeks ago    1.1GB
+<none>                        <none>    c6bda93c40e1   3 weeks ago    1.1GB
+<none>                        <none>    13ae009298ce   3 weeks ago    1.1GB
+<none>                        <none>    670387c355ee   3 weeks ago    1.1GB
+syncthing-syncthing           latest    c9f16132b156   3 weeks ago    135MB
+fastapi-fastapi               latest    5af078f7d247   3 weeks ago    1.08GB
+node-red                      latest    da6c59578889   4 weeks ago    1.19GB
+ffmpeg-worker                 latest    3f8c953f9f0a   4 weeks ago    865MB
+portainer/portainer-ce        latest    d3e9f39af9c5   6 weeks ago    268MB
+eclipse-mosquitto             latest    35f50ba5c110   3 months ago   9.89MB
+heimoshuiyu/whisper-fastapi   latest    f8329e77469f   4 months ago   4.57GB
+filebrowser/filebrowser       s6        4567130c34df   4 months ago   46.8MB
+

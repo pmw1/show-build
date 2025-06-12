@@ -1,23 +1,13 @@
 <template>
   <v-app>
     <v-main>
-      <RundownManager/>
+      <router-view />
     </v-main>
   </v-app>
 </template>
 
 <script>
-import RundownManager	 from './components/RundownManager.vue'
-
 export default {
   name: 'App',
-
-  components: {
-    RundownManager
-  },
-
-  data: () => ({
-    //
-  }),
-}
+};
 </script>

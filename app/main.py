@@ -39,6 +39,9 @@ class PublishRequest(BaseModel):
     topic: str
     message: str
 
+class ReorderRequest(BaseModel):
+    segments: list[dict]
+
 @app.get("/", response_class=HTMLResponse)
 def read_root():
     return """
@@ -60,6 +63,9 @@ def read_root():
 
         <h2>GET <code>/rundown/{episode_number}</code></h2>
         <p>Fetch rundown items with validated front matter metadata.</p>
+
+        <h2>POST <code>/rundown/{episode_number}/reorder</code></h2>
+        <p>Reorder segments by updating <code>order:</code> in YAML frontmatter.</p>
 
         <h2>POST <code>/publish/</code></h2>
         <p>Send a raw MQTT message.</p>
@@ -192,3 +198,60 @@ async def get_rundown(episode_number: str):
                 pass  ##skipping the warning messages about unvalidated fields for now  uncomment above to re-enable
     return JSONResponse(content=jsonable_encoder(rundown_items))
 
+@app.post("/rundown/{episode_number}/reorder")
+async def reorder_rundown(episode_number: str, payload: ReorderRequest):
+    base_path = "/home/episodes"
+    episode_path = os.path.join(base_path, episode_number, "rundown")
+
+    if not os.path.isdir(episode_path):
+        raise HTTPException(
+            status_code=404, detail=f"Episode {episode_number} not found."
+        )
+
+    try:
+        for index, segment in enumerate(payload.segments):
+            filename = segment.get("filename")
+            if not filename or not filename.endswith(".md"):
+                raise HTTPException(
+                    status_code=422, detail=f"Invalid or missing filename in segment {index}"
+                )
+
+            file_path = os.path.join(episode_path, filename)
+            if not os.path.isfile(file_path):
+                raise HTTPException(
+                    status_code=404, detail=f"File {filename} not found."
+                )
+
+            # Read existing file
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            if not content.startswith("---"):
+                raise HTTPException(
+                    status_code=422, detail=f"No YAML frontmatter in {filename}"
+                )
+
+            fm_end = content.find("\n---", 4)
+            if fm_end == -1:
+                raise HTTPException(
+                    status_code=422, detail=f"Invalid YAML frontmatter in {filename}"
+                )
+
+            yaml_block = content[4:fm_end]
+            body = content[fm_end + 4:]
+            front_matter = yaml.safe_load(yaml_block) or {}
+
+            # Update order
+            front_matter["order"] = (index + 1) * 10
+
+            # Write back to file
+            new_yaml = yaml.safe_dump(front_matter, sort_keys=False)
+            new_content = f"---\n{new_yaml}---\n{body}"
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+
+        return {"status": "success", "message": f"Rundown for episode {episode_number} reordered"}
+
+    except Exception as e:
+        logging.error(f"Failed to reorder rundown: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to reorder rundown: {str(e)}")
