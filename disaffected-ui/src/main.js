@@ -1,13 +1,15 @@
-import { createApp } from 'vue';
-import App from './App.vue';
-import router from './router'; // <--- This line is critical
-import vuetify from './plugins/vuetify';
-import { loadFonts } from './plugins/webfontloader';
+import { createApp } from 'vue'
+import App from './App.vue'
+import { vuetify } from './plugins/vuetify'
+import router from './router'
+import 'vuetify/styles'
+import '@mdi/font/css/materialdesignicons.css'
+import { loadFonts } from './plugins/webfontloader'
 
-loadFonts();
+loadFonts()
 
-createApp(App)
-  .use(router) // <--- Also critical
-  .use(vuetify)
-  .mount('#app');
+const app = createApp(App)
+app.use(router)
+app.use(vuetify)
+app.mount('#app')
 

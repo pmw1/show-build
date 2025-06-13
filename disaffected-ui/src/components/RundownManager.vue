@@ -20,102 +20,76 @@
     </v-row>
     <!-- Rundown list -->
     <v-card-text>
-      <div v-if="loading" class="text-center">
-        <v-progress-circular indeterminate color="primary" />
-        <p>Loading rundown for episode {{ selectedEpisode }}...</p>
-      </div>
-      <div v-else-if="segments.length === 0" class="text-center">
-        <v-alert type="warning" outlined>
-          No segments found for episode {{ selectedEpisode }}. Check /mnt/sync/disaffected/episodes/{{ selectedEpisode }}/rundown/ for .md files.
+      <div>
+        <v-fade-transition>
+          <div v-if="loading" class="text-center">
+            <v-progress-circular 
+              indeterminate 
+              color="primary"
+              size="64"
+            />
+            <p class="mt-2">Loading rundown...</p>
+          </div>
+        </v-fade-transition>
+
+        <v-alert
+          v-if="!loading && segments.length === 0"
+          type="warning"
+          outlined
+          class="text-center"
+        >
+          No segments found for episode {{ selectedEpisode }}. 
+          Check /mnt/sync/disaffected/episodes/{{ selectedEpisode }}/rundown/ for .md files.
         </v-alert>
+
+        <draggable 
+          v-if="!loading && segments.length > 0"
+          v-model="segments" 
+          :item-key="getItemKey"
+          @start="dragStart"
+          @end="dragEnd"
+          @change="handleDragChange"
+          :class="{ dragging: isDragging }"
+        >
+          <template #item="{ element, index }">
+            <v-expand-transition>
+              <v-card
+                outlined
+                :class="[
+                  resolveTypeClass(element.type),
+                  'elevation-1'
+                ]"
+              >
+                <v-row no-gutters class="rundown-row">
+                  <!-- Index + Type column -->
+                  <v-col class="type-col">
+                    <div class="type-cell">
+                      <div class="type-label">{{ (element.type || 'UNKNOWN').toUpperCase() }}</div>
+                      <div class="index-number">{{ (index + 1) * 10 }}</div>
+                    </div>
+                  </v-col>
+
+                  <!-- Content column -->
+                  <v-col>
+                    <div class="content-cell">
+                      <div class="slug-text">{{ element.slug }}</div>
+                      <div class="duration-box">{{ element.duration }}</div>
+                    </div>
+                  </v-col>
+                </v-row>
+              </v-card>
+            </v-expand-transition>
+          </template>
+        </draggable>
       </div>
-      <draggable v-else v-model="segments" :item-key="getItemKey">
-        <template #item="{ element, index }">
-          <v-card
-            class="mb-2"
-            outlined
-            :class="resolveTypeClass(element.type)"
-          >
-            <v-row no-gutters>
-              <!-- Type + Index column (uniform width) -->
-              <v-col
-                :style="{ width: '80px', minWidth: '80px', maxWidth: '80px' }"
-                class="d-flex flex-column"
-              >
-                <!-- Type cell -->
-                <div
-                  class="d-flex align-center justify-center"
-                  style="
-                    background: rgba(0, 0, 0, 0.05);
-                    height: 25%;
-                    text-align: center;
-                    border-right: 1px solid rgba(0, 0, 0, 0.1);
-                  "
-                >
-                  <div class="text-caption font-weight-bold" style="font-size: 0.6rem;">
-                    {{ (element.type || 'UNKNOWN').toUpperCase() }}
-                  </div>
-                </div>
-                <!-- Index cell -->
-                <div
-                  class="d-flex align-center justify-center"
-                  style="
-                    background: rgba(0, 0, 0, 0.02);
-                    height: 75%;
-                    border-right: 1px solid rgba(0, 0, 0, 0.1);
-                  "
-                >
-                  <div style="font-size: 1.5em;">
-                    {{ (index + 1) * 10 }}
-                  </div>
-                </div>
-              </v-col>
-              <!-- Slug content -->
-              <v-col>
-                <v-card-text>
-                  <div>
-                    <strong style="font-size: 1.8em;">{{ element.title || 'No title' }}</strong>
-                    <div class="text-caption grey--text mt-1">
-                      {{ element.asset_id || 'No ID' }}
-                    </div>
-                    <div class="text-caption grey--text">
-                      {{ element.description || 'No description' }}
-                    </div>
-                    <div class="text-caption grey--text">
-                      File: {{ element.filename || 'Unknown' }}
-                    </div>
-                  </div>
-                </v-card-text>
-              </v-col>
-              <!-- Duration column -->
-              <v-col
-                cols="auto"
-                class="d-flex align-center justify-end"
-                :style="{
-                  background: 'rgba(0, 0, 0, 0.05)',
-                  padding: '0 16px',
-                  minWidth: '100px',
-                }"
-              >
-                <div
-                  class="text-center"
-                  style="width: 100%; font-size: 1.3em; font-weight: bold;"
-                >
-                  {{ element.length || 'N/A' }}
-                </div>
-              </v-col>
-            </v-row>
-          </v-card>
-        </template>
-      </draggable>
     </v-card-text>
   </v-container>
 </template>
 
 <script>
-import draggable from "vuedraggable";
-import axios from "axios";
-import colorMap from '@/assets/config/colorMap.js';
+import draggable from "vuedraggable"
+import axios from "axios"
+import { getColorValue, defaultColors } from '../utils/themeColorMap'
 
 export default {
   name: "RundownManager",
@@ -126,6 +100,8 @@ export default {
       selectedEpisode: "0225",
       episodes: ["0225", "0226", "0227"], // Can be made dynamic
       loading: false,
+      isDragging: false,
+      dragError: null
     };
   },
   methods: {
@@ -136,12 +112,45 @@ export default {
       this.loading = true;
       try {
         const response = await axios.get(`http://192.168.51.210:8888/rundown/${this.selectedEpisode}`);
-        console.log("[DEBUG] API Response:", response.data);
-        this.segments = response.data.map(entry => ({
-          ...entry.metadata,
-          filename: entry.filename // Ensure filename is included
-        }));
-        console.log("[DEBUG] Processed Segments:", this.segments);
+        
+        // Log full entry for item #20 (index 1)
+        console.log("[DEBUG] Full Entry #20:", {
+          raw: response.data[1],
+          metadata: response.data[1].metadata,
+          filename: response.data[1].filename
+        });
+
+        // Log advertisement entries
+        const adverts = response.data.filter(entry => entry.metadata.type === 'advert');
+        console.log("[DEBUG] Advertisement Entries:", adverts);
+
+        this.segments = response.data.map(entry => {
+          const processed = {
+            ...entry.metadata,      // Spread metadata first
+            filename: entry.filename,
+            type: entry.metadata.type || 'unknown',
+            slug: entry.metadata.slug || '',
+            id: entry.metadata.id || 'No ID',
+            duration: entry.metadata.duration || 'N/A',
+            title: entry.metadata.title || '',
+            description: entry.metadata.description || ''
+          };
+          
+          // Debug each processed entry
+          console.log("[DEBUG] Processed Entry:", {
+            original: entry,
+            processed: processed,
+            fields: {
+              slug: processed.slug,
+              id: processed.id,
+              duration: processed.duration,
+              type: processed.type
+            }
+          });
+          
+          return processed;
+        });
+
       } catch (err) {
         console.error("[ERROR] Failed to load rundown:", err);
         this.segments = [];
@@ -165,11 +174,59 @@ export default {
       }
     },
     resolveTypeClass(type) {
-      const typeKey = (type || '').toLowerCase();
-      const color = colorMap[typeKey] || 'white';
-      console.log("[DEBUG] Type:", typeKey, "Class:", color);
-      return color; // Returns class like 'blue lighten-4'
+      if (!type || type === 'unknown') {
+        console.log("[DEBUG] Resolving unknown type:", type);
+        return 'bg-grey-light';
+      }
+      
+      const normalizedType = type.toLowerCase();
+      console.log("[DEBUG] Type before color lookup:", {
+        original: type,
+        normalized: normalizedType
+      });
+      
+      const color = getColorValue(normalizedType);
+      const cssClass = `bg-${color}`;
+      
+      console.log("[DEBUG] Final color resolution:", {
+        type: normalizedType,
+        color: color,
+        cssClass: cssClass,
+        availableColors: defaultColors
+      });
+      
+      return cssClass;
     },
+    dragStart() {
+      this.isDragging = true;
+      const dragLightColor = getColorValue('draglight');
+      const highlightColor = getColorValue('highlight');
+      const droplineColor = getColorValue('dropline');  // Add dropline color
+    
+      // DEBUG: Log all color values
+      console.log("[DEBUG] Raw color values:", {
+        dragLight: dragLightColor,
+        highlight: highlightColor,
+        dropline: droplineColor
+      });
+    
+      // Set all CSS custom properties
+      document.documentElement.style.setProperty('--highlight-color', `rgb(var(--v-theme-${highlightColor}))`);
+      document.documentElement.style.setProperty('--draglight-color', `rgb(var(--v-theme-${dragLightColor}))`);
+      document.documentElement.style.setProperty('--dropline-color', `rgb(var(--v-theme-${droplineColor}))`);
+    },
+    dragEnd() {
+      this.isDragging = false;
+    },
+    handleDragChange(evt) {
+      console.log("[DEBUG] Drag operation:", evt)
+      // Validate new order if needed
+    }
+  },
+  created() {
+    const highlightColor = getColorValue('highlight');
+    // Set initial highlight color with RGB values
+    document.documentElement.style.setProperty('--highlight-color', `rgb(var(--v-theme-${highlightColor}))`);
   },
   mounted() {
     this.loadEpisode();
@@ -178,7 +235,138 @@ export default {
 </script>
 
 <style scoped>
-.v-card {
+/* Force square corners everywhere */
+.v-card,
+.v-card.elevation-1,
+:deep(.v-card),
+:deep(.v-card__text) {
+  border-radius: 0 !important;
+}
+
+/* Adjust layout sizes */
+.rundown-row {
+  min-height: 52px !important;  /* Increased for more content */
+  max-height: 52px !important;
+}
+
+.type-col {
+  width: 90px !important;     /* Widened for index number */
+  min-width: 90px !important;
+  max-width: 90px !important;
+}
+
+.type-cell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.05);
+  border-right: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 4px;
+}
+
+.index-number {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-top: 2px;
+  font-family: monospace;  /* For better number alignment */
+}
+
+.type-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.content-cell {
+  padding: 0;  /* Remove padding from content cell */
+  height: 100%;
+  display: flex;
+  align-items: stretch;  /* Changed to stretch for full height */
+  justify-content: space-between;
+}
+
+.slug-text {
+  font-size: 0.95rem;
+  font-weight: 400;
+  flex-grow: 1;
+  padding: 0 12px;  /* Move padding to slug-text */
+  display: flex;
+  align-items: center;
+}
+
+/* New duration box styling */
+.duration-box {
+  font-size: 0.8rem;
+  font-family: monospace;
+  background: rgba(0, 0, 0, 0.1);
+  padding: 0 12px;
+  white-space: nowrap;
+  width: 100px;  /* Set fixed width instead of min-width */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid rgba(0, 0, 0, 0.05);  /* Optional subtle separator */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Enhanced transition effects */
+.v-scale-transition-enter-active,
+.v-scale-transition-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.v-scale-transition-enter-from,
+.v-scale-transition-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+/* Clean up hover state */
+.v-card.elevation-1:hover:not(.dragging):not(.sortable-chosen) {
+  background: var(--highlight-color) !important;
   cursor: grab;
+  transform: translateZ(0);
+}
+
+/* Dragged item animation - smooth left shift and improved contrast */
+.dragging .v-card.sortable-chosen {
+  background: var(--draglight-color) !important;
+  cursor: grabbing !important;
+  z-index: 100;
+  transform: translateX(-45px) translateZ(20px) !important;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15) !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  color: rgba(0, 0, 0, 0.87) !important;
+  animation: slide-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Replace rotation with subtle spacing animation */
+.dragging .v-card:not(.sortable-chosen):not(.sortable-ghost) {
+  transform: translateY(0);
+  margin-bottom: 5px !important;
+  opacity: 0.95;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Update ghost indicator */
+.sortable-ghost {
+  opacity: 0.7;
+  background: var(--dropline-color) !important;
+  border: 2px solid var(--dropline-color) !important;
+  margin-bottom: 5px !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Add slide-left animation for dragged item */
+@keyframes slide-left {
+  from {
+    transform: translateX(0) translateZ(20px);
+  }
+  to {
+    transform: translateX(-45px) translateZ(20px);
+  }
 }
 </style>
