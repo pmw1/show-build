@@ -1,6 +1,6 @@
 # main.py
 
-from fastapi import FastAPI, Form, File, UploadFile, HTTPException
+from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.encoders import jsonable_encoder
@@ -9,12 +9,32 @@ from preproc_mqtt_listen import MQTTListener
 from pydantic import BaseModel
 from utils.id import get_next_id
 from utils.validator import validate_front_matter
+from auth.utils import get_current_user_or_key, get_current_user  # Add get_current_user
 import logging
 import hashlib
 import os
-import threading
+import sys
+import threading  # Add this import
 import re
-import yaml
+from pathlib import Path
+
+# Absolute path to the app directory
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
+print(f"Python path: {sys.path}")
+print(f"App directory: {APP_DIR}")
+print(f"Directory contents: {os.listdir(APP_DIR)}")
+print(f"Auth directory contents: {os.listdir(APP_DIR / 'auth')}")
+
+# Now try importing the auth module
+try:
+    from auth.router import router as auth_router
+except ImportError as e:
+    print(f"Import Error: {e}")
+    print(f"Current directory: {os.getcwd()}")
+    raise
 
 app = FastAPI()
 
@@ -28,9 +48,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include the auth router
+app.include_router(auth_router)
 
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
@@ -255,3 +278,41 @@ async def reorder_rundown(episode_number: str, payload: ReorderRequest):
     except Exception as e:
         logging.error(f"Failed to reorder rundown: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to reorder rundown: {str(e)}")
+
+@app.get("/episodes")
+async def list_episodes():
+    """List all available episode numbers by scanning /home/episodes directory"""
+    base_path = "/home/episodes"
+    try:
+        # Get directories that have a rundown subdirectory
+        episodes = [
+            d for d in os.listdir(base_path)
+            if os.path.isdir(os.path.join(base_path, d)) and
+               os.path.isdir(os.path.join(base_path, d, "rundown")) and
+               re.match(r'^\d{4}$', d)  # Must be 4 digits
+        ]
+        return sorted(episodes)  # Return sorted list of valid episode numbers
+    except Exception as e:
+        logging.error(f"Failed to list episodes: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list episodes: {str(e)}"
+        )
+
+@app.get("/protected-endpoint")
+async def protected_route(current_user: dict = Depends(get_current_user_or_key)):
+    return {
+        "message": "Access granted to protected endpoint",
+        "user": current_user
+    }
+
+@app.post("/secured-route")
+async def secured_route(
+    payload: dict,
+    current_user: dict = Depends(get_current_user_or_key)  # Use the combined auth
+):
+    return {
+        "message": "Secured operation successful",
+        "user": current_user,
+        "data": payload
+    }

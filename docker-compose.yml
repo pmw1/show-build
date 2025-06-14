@@ -1,3 +1,4 @@
+version: '3.8'
 services:
   fastapi:
     build:
@@ -8,15 +9,28 @@ services:
       - "8888:80"
     volumes:
       - ./app:/app
+      - ./app/storage:/app/storage
       - /mnt/sync/disaffected/logs:/home/logs
       - /mnt/sync/shared_media:/shared_media
       - /mnt/sync/disaffected/episodes:/home/episodes
     networks:
       - video-post
     environment:
-      MODULE_NAME: main
-      VARIABLE_NAME: app
-      WEB_CONCURRENCY: 1  # Explicitly limit to exactly ONE Gunicorn worker
+      - MODULE_NAME=main
+      - VARIABLE_NAME=app
+      - WEB_CONCURRENCY=1
+      - JWT_SECRET_KEY=ea7GZD3mQy3EZYD4YZsFmr/9JwBgZFCaWyznnjhOyow=
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=2880
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
 networks:
   video-post:
     external: true
+

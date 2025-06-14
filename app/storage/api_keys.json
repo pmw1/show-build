@@ -1,0 +1,16 @@
+{
+  "Ec2_7C-YiD_zMTkjfX-I9PesRIxIA9jK2MDhnAIF84I": {
+    "key": "Ec2_7C-YiD_zMTkjfX-I9PesRIxIA9jK2MDhnAIF84I",
+    "client_name": "test-service",
+    "access_level": "service",
+    "created_by": "admin",
+    "created_at": "2025-06-14T02:10:09.262631"
+  },
+  "12cleWeKgFtqBezJEHm_m02LJx-PTdDSXJK0J11We5Y": {
+    "key": "12cleWeKgFtqBezJEHm_m02LJx-PTdDSXJK0J11We5Y",
+    "client_name": "fresh-test",
+    "access_level": "service",
+    "created_by": "admin",
+    "created_at": "2025-06-14T02:20:34.746993"
+  }
+}
