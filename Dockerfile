@@ -31,7 +31,10 @@ RUN groupadd -g 1001 disaffected || true && \
     chown -R insider:disaffected /app && \
     chmod -R 755 /app/auth && \
     chmod -R 644 /app/auth/*.py && \
-    chmod 755 /app/auth/__init__.py
+    chmod 755 /app/auth/__init__.py && \
+    mkdir -p /app/storage && \
+    chown -R insider:disaffected /app/storage && \
+    chmod -R 755 /app/storage
 USER insider
 # UNTOUCHABLE ZONE END
 

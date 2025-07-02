@@ -147,7 +147,7 @@ export default {
   data() {
     return {
       rundownTypes: ['Advert', 'CTA', 'Promo', 'Segment', 'Trans'],
-      interfaceTypes: ['Highlight', 'Dropline', 'DragLight'],  // Added DragLight
+      interfaceTypes: ['Selection', 'Hover', 'Highlight', 'Dropline', 'DragLight'],  // Added Selection and Hover
       typeColors: {},
       showConfirmation: false,
       isSaving: false,
@@ -199,6 +199,30 @@ export default {
         { label: 'Yellow Accent', value: 'yellow-accent', group: 'Yellow Colors' },
         { label: 'Yellow Dark', value: 'yellow-dark', group: 'Yellow Colors' },
         { label: 'Yellow Light', value: 'yellow-light', group: 'Yellow Colors' },
+
+        // Orange family
+        { label: 'Orange', value: 'orange-base', group: 'Orange Colors' },
+        { label: 'Orange Accent', value: 'orange-accent', group: 'Orange Colors' },
+        { label: 'Orange Dark', value: 'orange-dark', group: 'Orange Colors' },
+        { label: 'Orange Light', value: 'orange-light', group: 'Orange Colors' },
+
+        // Pink family
+        { label: 'Pink', value: 'pink-base', group: 'Pink Colors' },
+        { label: 'Pink Accent', value: 'pink-accent', group: 'Pink Colors' },
+        { label: 'Pink Dark', value: 'pink-dark', group: 'Pink Colors' },
+        { label: 'Pink Light', value: 'pink-light', group: 'Pink Colors' },
+
+        // Purple family
+        { label: 'Purple', value: 'purple-base', group: 'Purple Colors' },
+        { label: 'Purple Accent', value: 'purple-accent', group: 'Purple Colors' },
+        { label: 'Purple Dark', value: 'purple-dark', group: 'Purple Colors' },
+        { label: 'Purple Light', value: 'purple-light', group: 'Purple Colors' },
+
+        // Cyan family
+        { label: 'Cyan', value: 'cyan-base', group: 'Cyan Colors' },
+        { label: 'Cyan Accent', value: 'cyan-accent', group: 'Cyan Colors' },
+        { label: 'Cyan Dark', value: 'cyan-dark', group: 'Cyan Colors' },
+        { label: 'Cyan Light', value: 'cyan-light', group: 'Cyan Colors' },
 
         // Grey family
         { label: 'Grey', value: 'grey-base', group: 'Grey Colors' },

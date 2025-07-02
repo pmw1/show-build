@@ -1,5 +1,29 @@
 📦 Show-Build — Disaffected Rundown Management System
-The Show-Build project is a full-stack application designed for the Disaffected media automation environment, delivering a web-based platform to enhance media production efficiency. It integrates with Obsidian and other markdown workflows, aiming to streamline segment management across the production lifecycle.
+The Show-Build project is a full-stack application designed for the Disaff🚀 Usage
+
+Navigate to http://192.168.51.210:8080/rundown-manager/0225 to manage episode 0225.
+Use the episode selector to switch episodes (e.g., 0226, 0227).
+Drag and drop segments to reorder, then click "Save & Commit" to persist changes.
+View segment metadata (title, ID, length) and colors based on segment type.
+
+## Python Tools Configuration
+
+The `tools/` directory contains Python utilities with centralized path management:
+
+- **`paths.py`**: Central configuration for all Python script paths
+  - Defines `EPISODE_ROOT`, `BLUEPRINTS`, `HEADER_PATH` 
+  - Contains validation constants like `VALID_CUE_TYPES`
+  - Ensures consistent path handling across all Python tools
+
+- **`compile-script-dev.py`**: Episode script compilation
+  - Imports path configurations from `paths.py`
+  - Validates and compiles episode markdown into HTML scripts
+  - Usage: `python compile-script-dev.py 0225 [--validate]`
+
+To add new Python tools, import from `paths.py` for consistent path management:
+```python
+from paths import EPISODE_ROOT, BLUEPRINTS, VALID_CUE_TYPES
+```media automation environment, delivering a web-based platform to enhance media production efficiency. It integrates with Obsidian and other markdown workflows, aiming to streamline segment management across the production lifecycle.
 
 📚 Table of Contents
 
@@ -81,6 +105,9 @@ show-build/
 │   ├── rundown-order-flow.md  # Rundown reordering workflow documentation
 │   └── vue.config.js     # Vue build configuration
 ├── tools/                # Additional utility scripts or tools
+│   ├── compile-script-dev.py  # Script compilation utility
+│   ├── media_job_queue.py     # Media processing job queue
+│   └── paths.py               # Centralized path configurations for Python scripts
 ├── .gatherignore         # Files and directories to ignore in documentation generation
 ├── .gitignore            # Git ignore file
 ├── docker-compose.yml    # Docker Compose configuration

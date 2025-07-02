@@ -15,27 +15,54 @@
 
       <v-spacer></v-spacer>
 
-      <!-- User Menu -->
-      <v-menu>
-        <template v-slot:activator="{ props }">
-          <v-btn
-            icon
-            v-bind="props"
-          >
-            <v-icon>mdi-account-circle</v-icon>
-          </v-btn>
-        </template>
-        <v-list>
-          <v-list-item
-            v-for="(item, i) in userMenuItems"
-            :key="i"
-            :prepend-icon="item.icon"
-            :title="item.title"
-            @click="handleUserMenuItem(item)"
-          >
-          </v-list-item>
-        </v-list>
-      </v-menu>
+      <!-- Authentication Status -->
+      <div v-if="isAuthenticated" class="d-flex align-center">
+        <!-- Welcome message -->
+        <div class="me-4 d-none d-sm-flex">
+          <span class="text-body-2 text-grey-darken-1">Welcome, </span>
+          <span class="text-body-2 font-weight-medium ml-1">{{ currentUser.username }}</span>
+        </div>
+
+        <!-- User Menu -->
+        <v-menu>
+          <template v-slot:activator="{ props }">
+            <v-btn
+              icon
+              v-bind="props"
+            >
+              <v-avatar size="32">
+                <v-img
+                  v-if="currentUser.profile_picture"
+                  :src="currentUser.profile_picture"
+                  :alt="currentUser.username"
+                />
+                <v-icon v-else>mdi-account-circle</v-icon>
+              </v-avatar>
+            </v-btn>
+          </template>
+          <v-list>
+            <v-list-item
+              v-for="(item, i) in userMenuItems"
+              :key="i"
+              :prepend-icon="item.icon"
+              :title="item.title"
+              @click="handleUserMenuItem(item)"
+            >
+            </v-list-item>
+          </v-list>
+        </v-menu>
+      </div>
+
+      <!-- Login Button (when not authenticated) -->
+      <v-btn
+        v-else
+        color="primary"
+        variant="outlined"
+        prepend-icon="mdi-login"
+        @click="showLoginModal = true"
+      >
+        Login
+      </v-btn>
     </v-app-bar>
 
     <!-- Navigation Drawer -->
@@ -62,14 +89,29 @@
         <router-view></router-view>
       </v-container>
     </v-main>
+
+    <!-- Login Modal -->
+    <LoginModal
+      v-model="showLoginModal"
+      @login-success="handleLoginSuccess"
+    />
   </v-app>
 </template>
 
 <script>
+import LoginModal from '@/components/LoginModal.vue'
+import axios from 'axios'
+
 export default {
   name: 'App',
+  components: {
+    LoginModal
+  },
   data: () => ({
     drawer: false,
+    showLoginModal: false,
+    isAuthenticated: false,
+    currentUser: {},
     navItems: [
       {
         title: 'Dashboard',
@@ -115,10 +157,82 @@ export default {
       }
     ]
   }),
+  mounted() {
+    this.checkAuthStatus()
+    this.setupAxiosInterceptors()
+  },
   methods: {
+    checkAuthStatus() {
+      const token = localStorage.getItem('auth-token')
+      const expiry = localStorage.getItem('auth-token-expiry')
+      const userData = localStorage.getItem('user-data')
+
+      if (token && expiry && userData) {
+        const currentTime = Date.now()
+        const expiryTime = parseInt(expiry)
+
+        if (currentTime < expiryTime) {
+          // Token is still valid
+          this.isAuthenticated = true
+          this.currentUser = JSON.parse(userData)
+          
+          // Set auth header for axios
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+        } else {
+          // Token expired, clear auth data
+          this.clearAuthData()
+        }
+      }
+    },
+    setupAxiosInterceptors() {
+      // Add response interceptor to handle token expiration
+      axios.interceptors.response.use(
+        response => response,
+        error => {
+          if (error.response?.status === 401) {
+            // Token expired or invalid, clear auth and show login
+            this.clearAuthData()
+            this.showLoginModal = true
+          }
+          return Promise.reject(error)
+        }
+      )
+    },
+    handleLoginSuccess(authData) {
+      this.isAuthenticated = true
+      this.currentUser = authData.user
+      console.log('Login successful:', authData.user)
+    },
     handleUserMenuItem(item) {
-      console.log(`User menu action: ${item.action}`);
-      // Implement user menu actions
+      switch (item.action) {
+        case 'profile':
+          this.$router.push('/profile')
+          break
+        case 'settings':
+          this.$router.push('/settings')
+          break
+        case 'logout':
+          this.handleLogout()
+          break
+        default:
+          console.log(`User menu action: ${item.action}`)
+      }
+    },
+    handleLogout() {
+      this.clearAuthData()
+      this.$router.push('/dashboard')
+    },
+    clearAuthData() {
+      this.isAuthenticated = false
+      this.currentUser = {}
+      
+      // Clear localStorage
+      localStorage.removeItem('auth-token')
+      localStorage.removeItem('auth-token-expiry')
+      localStorage.removeItem('user-data')
+      
+      // Clear axios auth header
+      delete axios.defaults.headers.common['Authorization']
     }
   }
 }

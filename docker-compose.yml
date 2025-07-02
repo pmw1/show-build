@@ -5,8 +5,9 @@ services:
       context: .
       no_cache: true
     container_name: show-build-server
+    user: "1000:1001"  # Run as kevin:disaffected to match file ownership
     ports:
-      - "8888:80"
+      - "0.0.0.0:8888:80"
     volumes:
       - ./app:/app
       - ./app/storage:/app/storage

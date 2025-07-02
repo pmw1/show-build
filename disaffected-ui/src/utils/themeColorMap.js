@@ -5,7 +5,13 @@ const defaultColors = {
   'promo': 'green-accent',
   'cta': 'red-accent',
   'trans': 'yellow-accent',
-  'unknown': 'grey-light'
+  'unknown': 'grey-light',
+  // UI/System colors
+  'selection': 'orange-accent',     // Selected item highlight
+  'hover': 'blue-light',           // Hover state
+  'draglight': 'cyan-light',       // Drag source highlight
+  'highlight': 'yellow-light',     // General highlight
+  'dropline': 'green-accent'       // Drop indicator
 };
 
 // Load colors from storage

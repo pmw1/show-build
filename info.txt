@@ -1,7 +1,7 @@
 
 
 
-Document generated on: 2025-06-13 23:04:19
+Document generated on: 2025-07-01 21:59:25
 
 
 
@@ -269,14 +269,8 @@ Next: Plan for v0.3.0 with transcription outcues and frontend Dockerization.
 
 
 Included files and directories (tree):
-├── .continue
-│   └── prompts
-│       └── new-prompt.yaml
 ├── app
 │   ├── auth
-│   │   ├── __pycache__
-│   │   │   ├── __init__.cpython-312.pyc
-│   │   │   └── models.cpython-312.pyc
 │   │   ├── __init__.py
 │   │   ├── models.py
 │   │   ├── router.py
@@ -306,6 +300,9 @@ Included files and directories (tree):
 │   │   │   └── ColorSelector.md
 │   │   ├── ColorSelector.md
 │   │   └── RundownEditor.md
+│   ├── public
+│   │   ├── favicon.ico
+│   │   └── index.html
 │   ├── src
 │   │   ├── assets
 │   │   │   ├── config
@@ -316,6 +313,7 @@ Included files and directories (tree):
 │   │   │   ├── ColorSelector.md
 │   │   │   ├── ColorSelector.vue
 │   │   │   ├── HelloWorld.vue
+│   │   │   ├── LoginModal.vue
 │   │   │   ├── RundownManager.vue
 │   │   │   └── RundownManagerBACKUP.vue
 │   │   ├── modules
@@ -323,6 +321,9 @@ Included files and directories (tree):
 │   │   │       ├── auth.service.ts
 │   │   │       └── types.ts
 │   │   ├── modulesauth
+│   │   ├── plugins
+│   │   │   ├── vuetify.js
+│   │   │   └── webfontloader.js
 │   │   ├── router
 │   │   │   └── index.js
 │   │   ├── utils
@@ -330,6 +331,7 @@ Included files and directories (tree):
 │   │   ├── views
 │   │   │   ├── AssetsView.vue
 │   │   │   ├── DashboardView.vue
+│   │   │   ├── ProfileView.vue
 │   │   │   ├── SettingsView.vue
 │   │   │   └── TemplatesView.vue
 │   │   ├── # Code Citations.md
@@ -344,16 +346,19 @@ Included files and directories (tree):
 │   ├── rundown-order-flow.md
 │   ├── vite.config.js
 │   └── vue.config.js
+├── docs
+│   └── video_manipulation_mqtt.md
 ├── tools
+│   └── media_job_queue.py
 ├── .gather
 ├── .gatherignore
 ├── .gitignore
+├── AUTHENTICATION_GUIDE.md
 ├── docker-compose.yml
 ├── Dockerfile
 ├── find-asset-id-refs.sh
-├── gather.py
-├── gather.sh
 ├── info.txt
+├── package.json
 ├── README.md
 ├── requirements.txt
 ├── restart-dockers.sh
@@ -361,7 +366,8 @@ Included files and directories (tree):
 ├── test_api_auth.ps1
 ├── test_api_auth.sh
 ├── test_auth.py
-└── verify_setup.py
+├── verify_setup.py
+└── workload.json
 
 
 BEGIN SCRIPT OUTPUT
@@ -372,62 +378,6 @@ absolute: /mnt/process/show-build/test_api_auth.ps1
 └── test_api_auth.ps1
 
 ```
-# API Key Authentication Test Script for PowerShell
-
-Write-Host "=== API Key Authentication Test ===" -ForegroundColor Green
-Write-Host "Testing with stored API keys from api_keys.json"
-Write-Host
-
-# Read and parse the API keys JSON file
-try {
-    $jsonContent = Get-Content "app\storage\api_keys.json" -Raw | ConvertFrom-Json
-    $apiKeys = $jsonContent.PSObject.Properties.Name
-
-    if ($apiKeys.Count -gt 0) {
-        $firstKey = $apiKeys[0]
-        Write-Host "Using API key: $($firstKey.Substring(0,8))..." -ForegroundColor Yellow
-        Write-Host
-
-        # Test the secured endpoint with API key
-        Write-Host "Testing /secured-route with API key..." -ForegroundColor Cyan
-
-        $headers = @{
-            "Content-Type" = "application/json"
-            "X-API-Key" = $firstKey
-        }
-
-        $body = @{
-            test = "data"
-        } | ConvertTo-Json
-
-        try {
-            $response = Invoke-RestMethod -Uri "http://localhost:8000/secured-route" `
-                                        -Method POST `
-                                        -Headers $headers `
-                                        -Body $body `
-                                        -TimeoutSec 10
-
-            Write-Host "✅ Success! Response:" -ForegroundColor Green
-            $response | ConvertTo-Json -Depth 3
-
-        } catch {
-            $statusCode = $_.Exception.Response.StatusCode.Value__
-            $errorContent = $_.ErrorDetails.Message
-
-            Write-Host "❌ Request failed with status: $statusCode" -ForegroundColor Red
-            Write-Host "Error details: $errorContent" -ForegroundColor Red
-        }
-
-    } else {
-        Write-Host "❌ No API keys found in storage" -ForegroundColor Red
-    }
-
-} catch {
-    Write-Host "❌ Failed to read API keys file: $($_.Exception.Message)" -ForegroundColor Red
-}
-
-Write-Host
-Write-Host "=== Test completed ===" -ForegroundColor Green
 ```
 
 
@@ -475,6 +425,113 @@ networks:
   video-post:
     external: true
 
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: docs/video_manipulation_mqtt.md
+absolute: /mnt/process/show-build/docs/video_manipulation_mqtt.md
+├── docs/
+│   └── video_manipulation_mqtt.md
+
+```
+# Video Manipulation & MQTT Messaging System
+
+## Overview
+This document describes the architecture, workflow, and integration of the video manipulation tools and the MQTT messaging system within the Show Builder project. It includes textual flow diagrams and block representations to clarify the system’s operation.
+
+---
+
+## System Components
+
+- **Watch Folder Monitor**: Observes a directory for new media files.
+- **Job Publisher (Python, Dockerized)**: Publishes job requests to the MQTT broker when new files are detected.
+- **MQTT Broker (Mosquitto, Dockerized)**: Routes messages between publishers and workers.
+- **FFmpeg Worker (Dockerized)**: Subscribes to job topics, processes media (e.g., converts to MP3), and publishes results.
+- **Result Listener/Frontend**: Optionally subscribes to result topics for status/telemetry.
+
+---
+
+## Workflow Diagram (Textual)
+
+```
+[Watch Folder]
+     |
+     v
+[Job Publisher Script] --(MQTT:ffmpeg/tasks)--> [MQTT Broker] --(MQTT:ffmpeg/tasks)--> [FFmpeg Worker]
+                                                                 |
+                                                                 v
+                                                    (MQTT:ffmpeg/results)
+                                                                 |
+                                                                 v
+                                                      [Result Listener/Frontend]
+```
+
+---
+
+## Block Diagram (Textual)
+
+```
++-------------------+      MQTT:ffmpeg/tasks      +-------------------+
+|  Job Publisher    |--------------------------->|   MQTT Broker     |
+|  (Python Script)  |                           |   (Mosquitto)     |
++-------------------+                           +-------------------+
+         |                                               |
+         |                                               |
+         |      MQTT:ffmpeg/results                      |
+         +-----------------------------------------------+
+         |                                               |
++-------------------+      MQTT:ffmpeg/tasks      +-------------------+
+|  FFmpeg Worker    |<---------------------------|   MQTT Broker     |
+|  (Docker)         |                            |   (Mosquitto)     |
++-------------------+                            +-------------------+
+         |
+         v
+   [Media Output]
+```
+
+---
+
+## Job Payload Example
+
+```json
+{
+  "task_id": "unique-task-id",
+  "operation": "convert_to_mp3",
+  "input_file": "/watch_folder/video.mp4",
+  "output_file": "/output_folder/video.mp3",
+  "options": {}
+}
+```
+
+---
+
+## Detailed Flow
+1. **File Detection**: The Watch Folder Monitor detects a new file.
+2. **Job Creation**: The Job Publisher creates a job payload and publishes it to `ffmpeg/tasks` via MQTT.
+3. **Job Processing**: The FFmpeg Worker receives the job, processes the file (e.g., converts to MP3), and saves the output.
+4. **Result Reporting**: The Worker publishes a result/status message to `ffmpeg/results`.
+5. **Frontend/Listener**: Optionally, a frontend or listener script can subscribe to `ffmpeg/results` for real-time updates and display progress/status.
+
+---
+
+## Extensibility
+- Additional operations (e.g., thumbnail generation, video trimming) can be added by defining new `operation` types in the job payload.
+- Multiple workers can subscribe to the same topic for load balancing.
+- The system is fully Dockerized for portability and isolation.
+
+---
+
+## Notes
+- Ensure all paths are accessible to the relevant Docker containers (use shared volumes).
+- MQTT topics should be consistent and documented for all job types.
+- Security: Consider authentication for MQTT if exposed beyond localhost.
+
+---
+
+*This document will be updated as the system evolves. Add diagrams, payload examples, and workflow notes as new features are implemented.*
 ```
 
 
@@ -542,27 +599,6 @@ Desktop.ini
 
 
 ------------------------------------------------------------------------------------------------
-relative to project root: .continue/prompts/new-prompt.yaml
-absolute: /mnt/process/show-build/.continue/prompts/new-prompt.yaml
-├── .continue/
-│   ├── prompts/
-│   │   └── new-prompt.yaml
-
-```
-name: New prompt
-version: 0.0.1
-schema: v1
-prompts:
-  - name: New prompt
-    description: New prompt
-    prompt: Please write a thorough suite of unit tests for this code, making sure
-      to cover all relevant edge cases
-```
-
-
-
-
-------------------------------------------------------------------------------------------------
 relative to project root: restart-dockers.sh
 absolute: /mnt/process/show-build/restart-dockers.sh
 └── restart-dockers.sh
@@ -572,7 +608,6 @@ absolute: /mnt/process/show-build/restart-dockers.sh
 docker compose down
 docker compose build --no-cache
 docker compose up -d
-docker logs -f show-build-server
 ```
 
 
@@ -585,14 +620,86 @@ absolute: /mnt/process/show-build/.gatherignore
 
 ```
 # Generated by gather.py --setup
+.continue/
+.copilot/
 .git/
-/disaffected-ui/babel.config.js
-/disaffected-ui/find-asset-id-refs.sh
-/disaffected-ui/package-lock.json
-backups/
+.github/
+.vscode/
+app/auth/__pycache__/
+copilot/
 disaffected-ui/node_modules/
-disaffected-ui/public/
-disaffected-ui/src/plugins/
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: tools/media_job_queue.py
+absolute: /mnt/process/show-build/tools/media_job_queue.py
+├── tools/
+│   └── media_job_queue.py
+
+```
+"""
+Media Job Queue Tool
+
+This tool allows you to queue media processing jobs (e.g., video/audio tasks) to be handled by FFmpeg running in a Docker container. Jobs are published to an MQTT topic for processing by the FFmpeg builder Docker. Status and telemetry can be extended for frontend integration.
+"""
+
+import json
+import time
+import uuid
+import paho.mqtt.client as mqtt
+from pathlib import Path
+
+# MQTT Configuration
+MQTT_BROKER = 'localhost'  # Update if needed
+MQTT_PORT = 1883
+MQTT_TOPIC = 'media/jobs/queue'
+
+# Job queue file (for persistence/logging)
+QUEUE_FILE = Path('media_job_queue.json')
+
+
+def queue_job(file_path, operation, options=None):
+    job_id = str(uuid.uuid4())
+    job = {
+        'id': job_id,
+        'file_path': file_path,
+        'operation': operation,
+        'options': options or {},
+        'status': 'queued',
+        'timestamp': time.time()
+    }
+    # Save to queue file
+    jobs = []
+    if QUEUE_FILE.exists():
+        with open(QUEUE_FILE, 'r') as f:
+            jobs = json.load(f)
+    jobs.append(job)
+    with open(QUEUE_FILE, 'w') as f:
+        json.dump(jobs, f, indent=2)
+    # Publish to MQTT
+    client = mqtt.Client()
+    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client.publish(MQTT_TOPIC, json.dumps(job))
+    client.disconnect()
+    print(f"Queued job {job_id} for {file_path} ({operation})")
+    return job_id
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Queue a media processing job.')
+    parser.add_argument('file_path', help='Path to the media file')
+    parser.add_argument('operation', help='Operation to perform (e.g., trim, convert, preview)')
+    parser.add_argument('--options', help='JSON string of additional options', default='{}')
+    args = parser.parse_args()
+    options = json.loads(args.options)
+    queue_job(args.file_path, args.operation, options)
+
+if __name__ == '__main__':
+    main()
 ```
 
 
@@ -1251,6 +1358,56 @@ const defaults = {
 
 
 ------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/public/index.html
+absolute: /mnt/process/show-build/disaffected-ui/public/index.html
+├── disaffected-ui/
+│   ├── public/
+│   │   └── index.html
+
+```
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <link rel="icon" href="<%= BASE_URL %>favicon.ico">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vuetify@2.7.2/dist/vuetify.min.css">
+    <title><%= htmlWebpackPlugin.options.title %></title>
+    <style>
+      table {
+        width: 100% !important;
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>
+      <strong>We're sorry but <%= htmlWebpackPlugin.options.title %> doesn't work properly without JavaScript enabled. Please enable it to continue.</strong>
+    </noscript>
+    <div id="app"></div>
+    <!-- built files will be auto injected -->
+  </body>
+</html>
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/public/favicon.ico
+absolute: /mnt/process/show-build/disaffected-ui/public/favicon.ico
+├── disaffected-ui/
+│   ├── public/
+│   │   └── favicon.ico
+
+```
+[Error reading /mnt/process/show-build/disaffected-ui/public/favicon.ico: 'utf-8' codec can't decode byte 0xa8 in position 14: invalid start byte]
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
 relative to project root: disaffected-ui/babel.config.js
 absolute: /mnt/process/show-build/disaffected-ui/babel.config.js
 ├── disaffected-ui/
@@ -1512,27 +1669,54 @@ absolute: /mnt/process/show-build/disaffected-ui/src/App.vue
 
       <v-spacer></v-spacer>
 
-      <!-- User Menu -->
-      <v-menu>
-        <template v-slot:activator="{ props }">
-          <v-btn
-            icon
-            v-bind="props"
-          >
-            <v-icon>mdi-account-circle</v-icon>
-          </v-btn>
-        </template>
-        <v-list>
-          <v-list-item
-            v-for="(item, i) in userMenuItems"
-            :key="i"
-            :prepend-icon="item.icon"
-            :title="item.title"
-            @click="handleUserMenuItem(item)"
-          >
-          </v-list-item>
-        </v-list>
-      </v-menu>
+      <!-- Authentication Status -->
+      <div v-if="isAuthenticated" class="d-flex align-center">
+        <!-- Welcome message -->
+        <div class="me-4 d-none d-sm-flex">
+          <span class="text-body-2 text-grey-darken-1">Welcome, </span>
+          <span class="text-body-2 font-weight-medium ml-1">{{ currentUser.username }}</span>
+        </div>
+
+        <!-- User Menu -->
+        <v-menu>
+          <template v-slot:activator="{ props }">
+            <v-btn
+              icon
+              v-bind="props"
+            >
+              <v-avatar size="32">
+                <v-img
+                  v-if="currentUser.profile_picture"
+                  :src="currentUser.profile_picture"
+                  :alt="currentUser.username"
+                />
+                <v-icon v-else>mdi-account-circle</v-icon>
+              </v-avatar>
+            </v-btn>
+          </template>
+          <v-list>
+            <v-list-item
+              v-for="(item, i) in userMenuItems"
+              :key="i"
+              :prepend-icon="item.icon"
+              :title="item.title"
+              @click="handleUserMenuItem(item)"
+            >
+            </v-list-item>
+          </v-list>
+        </v-menu>
+      </div>
+
+      <!-- Login Button (when not authenticated) -->
+      <v-btn
+        v-else
+        color="primary"
+        variant="outlined"
+        prepend-icon="mdi-login"
+        @click="showLoginModal = true"
+      >
+        Login
+      </v-btn>
     </v-app-bar>
 
     <!-- Navigation Drawer -->
@@ -1559,14 +1743,29 @@ absolute: /mnt/process/show-build/disaffected-ui/src/App.vue
         <router-view></router-view>
       </v-container>
     </v-main>
+
+    <!-- Login Modal -->
+    <LoginModal
+      v-model="showLoginModal"
+      @login-success="handleLoginSuccess"
+    />
   </v-app>
 </template>
 
 <script>
+import LoginModal from '@/components/LoginModal.vue'
+import axios from 'axios'
+
 export default {
   name: 'App',
+  components: {
+    LoginModal
+  },
   data: () => ({
     drawer: false,
+    showLoginModal: false,
+    isAuthenticated: false,
+    currentUser: {},
     navItems: [
       {
         title: 'Dashboard',
@@ -1612,10 +1811,82 @@ export default {
       }
     ]
   }),
+  mounted() {
+    this.checkAuthStatus()
+    this.setupAxiosInterceptors()
+  },
   methods: {
+    checkAuthStatus() {
+      const token = localStorage.getItem('auth-token')
+      const expiry = localStorage.getItem('auth-token-expiry')
+      const userData = localStorage.getItem('user-data')
+
+      if (token && expiry && userData) {
+        const currentTime = Date.now()
+        const expiryTime = parseInt(expiry)
+
+        if (currentTime < expiryTime) {
+          // Token is still valid
+          this.isAuthenticated = true
+          this.currentUser = JSON.parse(userData)
+
+          // Set auth header for axios
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+        } else {
+          // Token expired, clear auth data
+          this.clearAuthData()
+        }
+      }
+    },
+    setupAxiosInterceptors() {
+      // Add response interceptor to handle token expiration
+      axios.interceptors.response.use(
+        response => response,
+        error => {
+          if (error.response?.status === 401) {
+            // Token expired or invalid, clear auth and show login
+            this.clearAuthData()
+            this.showLoginModal = true
+          }
+          return Promise.reject(error)
+        }
+      )
+    },
+    handleLoginSuccess(authData) {
+      this.isAuthenticated = true
+      this.currentUser = authData.user
+      console.log('Login successful:', authData.user)
+    },
     handleUserMenuItem(item) {
-      console.log(`User menu action: ${item.action}`);
-      // Implement user menu actions
+      switch (item.action) {
+        case 'profile':
+          this.$router.push('/profile')
+          break
+        case 'settings':
+          this.$router.push('/settings')
+          break
+        case 'logout':
+          this.handleLogout()
+          break
+        default:
+          console.log(`User menu action: ${item.action}`)
+      }
+    },
+    handleLogout() {
+      this.clearAuthData()
+      this.$router.push('/dashboard')
+    },
+    clearAuthData() {
+      this.isAuthenticated = false
+      this.currentUser = {}
+
+      // Clear localStorage
+      localStorage.removeItem('auth-token')
+      localStorage.removeItem('auth-token-expiry')
+      localStorage.removeItem('user-data')
+
+      // Clear axios auth header
+      delete axios.defaults.headers.common['Authorization']
     }
   }
 }
@@ -2354,6 +2625,233 @@ td:nth-child(2) :deep(.v-text-field) {
 td:nth-child(2) :deep(.v-input.v-text-field.v-select) {
   padding-top: 0 !important;
   margin-top: 0 !important;
+}
+</style>
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/components/LoginModal.vue
+absolute: /mnt/process/show-build/disaffected-ui/src/components/LoginModal.vue
+├── disaffected-ui/
+│   ├── src/
+│   │   ├── components/
+│   │   │   └── LoginModal.vue
+
+```
+<template>
+  <v-dialog v-model="isVisible" max-width="400" persistent>
+    <v-card>
+      <v-card-title class="text-h5 text-center pa-6">
+        <v-icon size="large" class="mb-2" color="primary">mdi-account-key</v-icon>
+        <div>Login to Show Builder</div>
+      </v-card-title>
+
+      <v-card-text class="px-6 pb-0">
+        <v-form ref="loginForm" v-model="formValid" @submit.prevent="handleLogin">
+          <v-text-field
+            v-model="credentials.username"
+            label="Username"
+            prepend-inner-icon="mdi-account"
+            variant="outlined"
+            :rules="usernameRules"
+            :error-messages="fieldErrors.username"
+            required
+            autofocus
+            class="mb-3"
+          />
+
+          <v-text-field
+            v-model="credentials.password"
+            label="Password"
+            prepend-inner-icon="mdi-lock"
+            :type="showPassword ? 'text' : 'password'"
+            :append-inner-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
+            @click:append-inner="showPassword = !showPassword"
+            variant="outlined"
+            :rules="passwordRules"
+            :error-messages="fieldErrors.password"
+            required
+            class="mb-4"
+          />
+
+          <v-alert
+            v-if="errorMessage"
+            type="error"
+            variant="tonal"
+            class="mb-4"
+            closable
+            @click:close="errorMessage = ''"
+          >
+            {{ errorMessage }}
+          </v-alert>
+        </v-form>
+      </v-card-text>
+
+      <v-card-actions class="px-6 pb-6">
+        <v-spacer />
+        <v-btn
+          color="primary"
+          size="large"
+          :loading="isLoading"
+          :disabled="!formValid"
+          @click="handleLogin"
+          block
+        >
+          <v-icon start>mdi-login</v-icon>
+          Login
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+</template>
+
+<script>
+import axios from 'axios'
+
+export default {
+  name: 'LoginModal',
+  props: {
+    modelValue: {
+      type: Boolean,
+      default: false
+    }
+  },
+  emits: ['update:modelValue', 'login-success'],
+  data() {
+    return {
+      formValid: false,
+      showPassword: false,
+      isLoading: false,
+      errorMessage: '',
+      credentials: {
+        username: '',
+        password: ''
+      },
+      fieldErrors: {
+        username: [],
+        password: []
+      },
+      usernameRules: [
+        v => !!v || 'Username is required',
+        v => (v && v.length >= 3) || 'Username must be at least 3 characters'
+      ],
+      passwordRules: [
+        v => !!v || 'Password is required',
+        v => (v && v.length >= 4) || 'Password must be at least 4 characters'
+      ]
+    }
+  },
+  computed: {
+    isVisible: {
+      get() {
+        return this.modelValue
+      },
+      set(value) {
+        this.$emit('update:modelValue', value)
+      }
+    }
+  },
+  methods: {
+    async handleLogin() {
+      if (!this.formValid) return
+
+      this.isLoading = true
+      this.errorMessage = ''
+      this.fieldErrors = { username: [], password: [] }
+
+      try {
+        // Create form data for OAuth2PasswordRequestForm
+        const formData = new FormData()
+        formData.append('username', this.credentials.username)
+        formData.append('password', this.credentials.password)
+
+        const response = await axios.post(
+          'http://192.168.51.210:8888/auth/login',
+          formData,
+          {
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+            }
+          }
+        )
+
+        if (response.data.access_token) {
+          // Store token with 48-hour expiration
+          const expirationTime = Date.now() + (48 * 60 * 60 * 1000) // 48 hours
+          localStorage.setItem('auth-token', response.data.access_token)
+          localStorage.setItem('auth-token-expiry', expirationTime.toString())
+          localStorage.setItem('user-data', JSON.stringify(response.data.user))
+
+          // Set default auth header for future requests
+          axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.access_token}`
+
+          // Emit success event with user data
+          this.$emit('login-success', {
+            token: response.data.access_token,
+            user: response.data.user
+          })
+
+          // Close modal and reset form
+          this.isVisible = false
+          this.resetForm()
+        }
+      } catch (error) {
+        console.error('Login error:', error)
+
+        if (error.response?.status === 401) {
+          this.errorMessage = 'Invalid username or password'
+        } else if (error.response?.status === 422) {
+          this.errorMessage = 'Please check your input'
+        } else {
+          this.errorMessage = 'Login failed. Please try again.'
+        }
+      } finally {
+        this.isLoading = false
+      }
+    },
+    resetForm() {
+      this.credentials = { username: '', password: '' }
+      this.errorMessage = ''
+      this.fieldErrors = { username: [], password: [] }
+      this.showPassword = false
+      if (this.$refs.loginForm) {
+        this.$refs.loginForm.reset()
+      }
+    }
+  },
+  watch: {
+    isVisible(newValue) {
+      if (newValue) {
+        // Reset form when modal opens
+        this.resetForm()
+      }
+    }
+  }
+}
+</script>
+
+<style scoped>
+.v-card {
+  border-radius: 12px !important;
+}
+
+.v-card-title {
+  background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.v-text-field {
+  margin-bottom: 8px;
+}
+
+.v-btn {
+  border-radius: 8px !important;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.5px;
 }
 </style>
 ```
@@ -3583,6 +4081,16 @@ import { createRouter, createWebHistory } from 'vue-router'
 import RundownManager from '@/components/RundownManager.vue'
 import DashboardView from '@/views/DashboardView.vue'
 
+// Authentication check function
+function isAuthenticated() {
+  const token = localStorage.getItem('auth-token')
+  const expiry = localStorage.getItem('auth-token-expiry')
+
+  if (!token || !expiry) return false
+
+  return Date.now() < parseInt(expiry)
+}
+
 const routes = [
   {
     path: '/',
@@ -3621,6 +4129,12 @@ const routes = [
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue')
+  },
+  {
+    path: '/profile',
+    name: 'profile',
+    component: () => import('@/views/ProfileView.vue'),
+    meta: { requiresAuth: true }
   }
 ]
 
@@ -3629,7 +4143,144 @@ const router = createRouter({
   routes
 })
 
+// Navigation guard to check authentication
+router.beforeEach((to, from, next) => {
+  if (to.meta.requiresAuth && !isAuthenticated()) {
+    // Redirect to dashboard if not authenticated
+    next('/dashboard')
+  } else {
+    next()
+  }
+})
+
 export default router
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/plugins/vuetify.js
+absolute: /mnt/process/show-build/disaffected-ui/src/plugins/vuetify.js
+├── disaffected-ui/
+│   ├── src/
+│   │   ├── plugins/
+│   │   │   └── vuetify.js
+
+```
+// Styles
+import '@mdi/font/css/materialdesignicons.css'
+import 'vuetify/styles'
+
+// Vuetify
+import { createVuetify } from 'vuetify'
+import * as components from 'vuetify/components'
+import * as directives from 'vuetify/directives'
+
+export const vuetify = createVuetify({
+  components,
+  directives,
+  theme: {
+    themes: {
+      light: {
+        colors: {
+          // Red family
+          'red-base': '#F44336',
+          'red-accent': '#FF5252',
+          'red-dark': '#D32F2F',
+          'red-light': '#FFCDD2',
+
+          // Deep Purple family
+          'deep-purple-base': '#673AB7',
+          'deep-purple-accent': '#7C4DFF',
+          'deep-purple-dark': '#512DA8',
+          'deep-purple-light': '#D1C4E9',
+
+          // Blue family
+          'blue-base': '#2196F3',
+          'blue-accent': '#448AFF',
+          'blue-dark': '#1976D2',
+          'blue-light': '#BBDEFB',
+
+          // Indigo family
+          'indigo-base': '#3F51B5',
+          'indigo-accent': '#536DFE',
+          'indigo-dark': '#303F9F',
+          'indigo-light': '#C5CAE9',
+
+          // Teal family
+          'teal-base': '#009688',
+          'teal-accent': '#64FFDA',
+          'teal-dark': '#00796B',
+          'teal-light': '#B2DFDB',
+
+          // Green family
+          'green-base': '#4CAF50',
+          'green-accent': '#69F0AE',
+          'green-dark': '#388E3C',
+          'green-light': '#C8E6C9',
+
+          // Lime family
+          'lime-base': '#CDDC39',
+          'lime-accent': '#EEFF41',
+          'lime-dark': '#AFB42B',
+          'lime-light': '#F0F4C3',
+
+          // Yellow family (add before Grey family)
+          'yellow-base': '#FFEB3B',
+          'yellow-accent': '#FFD740',
+          'yellow-dark': '#FBC02D',
+          'yellow-light': '#FFF9C4',
+
+          // Grey family
+          'grey-base': '#9E9E9E',
+          'grey-accent': '#BDBDBD',
+          'grey-dark': '#616161',
+          'grey-light': '#F5F5F5',
+
+          // Keep any existing theme colors you need
+          primary: '#1976D2',
+          secondary: '#424242',
+          accent: '#82B1FF',
+          error: '#FF5252',
+          info: '#2196F3',
+          success: '#4CAF50',
+          warning: '#FB8C00',
+        }
+      }
+    }
+  }
+})
+
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/plugins/webfontloader.js
+absolute: /mnt/process/show-build/disaffected-ui/src/plugins/webfontloader.js
+├── disaffected-ui/
+│   ├── src/
+│   │   ├── plugins/
+│   │   │   └── webfontloader.js
+
+```
+/**
+ * plugins/webfontloader.js
+ *
+ * webfontloader documentation: https://github.com/typekit/webfontloader
+ */
+
+export async function loadFonts () {
+  const webFontLoader = await import(/* webpackChunkName: "webfontloader" */'webfontloader')
+
+  webFontLoader.load({
+    google: {
+      families: ['Roboto:100,300,400,500,700,900&display=swap'],
+    },
+  })
+}
 ```
 
 
@@ -3815,6 +4466,254 @@ https://github.com/anhatsingh/Software-Engineering-Project-IITM-Sept2023/blob/41
               <v-card-title
 ```
 
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
+relative to project root: disaffected-ui/src/views/ProfileView.vue
+absolute: /mnt/process/show-build/disaffected-ui/src/views/ProfileView.vue
+├── disaffected-ui/
+│   ├── src/
+│   │   ├── views/
+│   │   │   └── ProfileView.vue
+
+```
+<template>
+  <v-container fluid class="pa-0">
+    <!-- Header Section -->
+    <v-row class="header-row ma-0">
+      <v-col cols="12" class="pa-4">
+        <div class="d-flex align-center mb-4">
+          <v-btn
+            icon="mdi-arrow-left"
+            variant="text"
+            @click="$router.go(-1)"
+            class="me-3"
+          />
+          <h2 class="text-h4 font-weight-bold">User Profile</h2>
+        </div>
+      </v-col>
+    </v-row>
+
+    <!-- Profile Content -->
+    <v-row class="ma-0">
+      <v-col cols="12" md="8" lg="6" class="pa-4">
+        <v-card>
+          <!-- Profile Header -->
+          <v-card-text class="pa-6">
+            <div class="d-flex align-center mb-6">
+              <v-avatar size="80" class="me-4">
+                <v-img
+                  v-if="user.profile_picture"
+                  :src="user.profile_picture"
+                  :alt="user.first_name + ' ' + user.last_name"
+                />
+                <v-icon v-else size="40" color="grey-lighten-1">
+                  mdi-account-circle
+                </v-icon>
+              </v-avatar>
+              <div>
+                <h3 class="text-h5 font-weight-bold mb-1">
+                  {{ user.first_name || user.username }} {{ user.last_name }}
+                </h3>
+                <v-chip
+                  :color="getAccessLevelColor(user.access_level)"
+                  variant="flat"
+                  size="small"
+                  class="text-uppercase font-weight-bold"
+                >
+                  {{ user.access_level }}
+                </v-chip>
+              </div>
+            </div>
+
+            <!-- Profile Information -->
+            <v-divider class="mb-6" />
+
+            <div class="profile-info">
+              <h4 class="text-h6 font-weight-bold mb-4">Contact Information</h4>
+
+              <div class="info-row mb-3">
+                <v-icon class="me-3" color="grey-darken-1">mdi-account</v-icon>
+                <div>
+                  <div class="text-caption text-grey-darken-1">Username</div>
+                  <div class="text-body-1 font-weight-medium">{{ user.username }}</div>
+                </div>
+              </div>
+
+              <div v-if="user.email" class="info-row mb-3">
+                <v-icon class="me-3" color="grey-darken-1">mdi-email</v-icon>
+                <div>
+                  <div class="text-caption text-grey-darken-1">Email</div>
+                  <div class="text-body-1 font-weight-medium">{{ user.email }}</div>
+                </div>
+              </div>
+
+              <div v-if="user.phone" class="info-row mb-3">
+                <v-icon class="me-3" color="grey-darken-1">mdi-phone</v-icon>
+                <div>
+                  <div class="text-caption text-grey-darken-1">Phone</div>
+                  <div class="text-body-1 font-weight-medium">{{ user.phone }}</div>
+                </div>
+              </div>
+
+              <div class="info-row mb-3">
+                <v-icon class="me-3" color="grey-darken-1">mdi-shield-account</v-icon>
+                <div>
+                  <div class="text-caption text-grey-darken-1">Access Level</div>
+                  <div class="text-body-1 font-weight-medium text-capitalize">
+                    {{ user.access_level }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </v-card-text>
+
+          <!-- Profile Actions -->
+          <v-card-actions class="pa-6 pt-0">
+            <v-spacer />
+            <v-btn
+              color="primary"
+              variant="outlined"
+              prepend-icon="mdi-logout"
+              @click="handleLogout"
+            >
+              Logout
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-col>
+
+      <!-- Additional Info Panel -->
+      <v-col cols="12" md="4" lg="6" class="pa-4">
+        <v-card>
+          <v-card-title class="pa-4">
+            <v-icon class="me-2">mdi-information</v-icon>
+            System Information
+          </v-card-title>
+          <v-card-text class="pa-4">
+            <div class="info-row mb-3">
+              <v-icon class="me-3" color="grey-darken-1">mdi-clock</v-icon>
+              <div>
+                <div class="text-caption text-grey-darken-1">Session Expires</div>
+                <div class="text-body-2">{{ getTokenExpiry() }}</div>
+              </div>
+            </div>
+
+            <div class="info-row mb-3">
+              <v-icon class="me-3" color="grey-darken-1">mdi-web</v-icon>
+              <div>
+                <div class="text-caption text-grey-darken-1">Browser</div>
+                <div class="text-body-2">{{ getBrowserInfo() }}</div>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
+  </v-container>
+</template>
+
+<script>
+import axios from 'axios'
+
+export default {
+  name: 'ProfileView',
+  data() {
+    return {
+      user: {}
+    }
+  },
+  mounted() {
+    this.loadUserData()
+  },
+  methods: {
+    loadUserData() {
+      const userData = localStorage.getItem('user-data')
+      if (userData) {
+        this.user = JSON.parse(userData)
+      } else {
+        // Redirect to login if no user data
+        this.$router.push('/')
+      }
+    },
+    getAccessLevelColor(level) {
+      switch (level) {
+        case 'admin':
+          return 'error'
+        case 'user':
+          return 'success'
+        case 'guest':
+          return 'warning'
+        default:
+          return 'grey'
+      }
+    },
+    getTokenExpiry() {
+      const expiry = localStorage.getItem('auth-token-expiry')
+      if (expiry) {
+        const expiryDate = new Date(parseInt(expiry))
+        return expiryDate.toLocaleString()
+      }
+      return 'Unknown'
+    },
+    getBrowserInfo() {
+      return navigator.userAgent.split(' ').slice(-2).join(' ')
+    },
+    handleLogout() {
+      // Clear auth data
+      localStorage.removeItem('auth-token')
+      localStorage.removeItem('auth-token-expiry')
+      localStorage.removeItem('user-data')
+
+      // Clear axios auth header
+      delete axios.defaults.headers.common['Authorization']
+
+      // Redirect to dashboard
+      this.$router.push('/dashboard')
+
+      // Force page reload to update auth state in App.vue
+      window.location.reload()
+    }
+  }
+}
+</script>
+
+<style scoped>
+.header-row {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  background: white;
+}
+
+.v-card {
+  border-radius: 12px !important;
+}
+
+.info-row {
+  display: flex;
+  align-items: flex-start;
+}
+
+.profile-info .info-row {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.profile-info .info-row:last-child {
+  border-bottom: none;
+}
+
+.v-avatar {
+  border: 3px solid rgba(0, 0, 0, 0.1);
+}
+
+.v-chip {
+  font-size: 0.75rem !important;
+  height: 24px !important;
+}
+</style>
 ```
 
 
@@ -16747,98 +17646,6 @@ absolute: /mnt/process/show-build/test_auth.py
 └── test_auth.py
 
 ```
-#!/usr/bin/env python3
-
-import json
-import sys
-from pathlib import Path
-
-# Add the app directory to the Python path
-app_dir = Path(__file__).parent / "app"
-sys.path.insert(0, str(app_dir))
-
-# Import our auth modules
-from auth.models import load_api_keys, save_api_keys, APIKey
-from auth.utils import get_current_user_or_key
-from datetime import datetime
-
-def test_api_key_storage():
-    """Test API key storage and retrieval"""
-    print("=== Testing API key storage ===")
-
-    # Check if any keys exist
-    keys = load_api_keys()
-    print(f"Current keys in storage: {len(keys)}")
-    for key, api_key_obj in keys.items():
-        print(f"  Key: {key[:8]}... -> Client: {api_key_obj.client_name}")
-
-    # If no keys exist, create a test key
-    if not keys:
-        print("No keys found, creating test key...")
-        test_key = "test-key-12345"
-        test_api_key = APIKey(
-            key=test_key,
-            client_name="Test Client",
-            access_level="service",
-            created_by="test",
-            created_at=datetime.utcnow()
-        )
-        keys[test_key] = test_api_key
-        if save_api_keys(keys):
-            print(f"✅ Test key created: {test_key}")
-        else:
-            print("❌ Failed to save test key")
-
-    return keys
-
-def test_auth_function():
-    """Test the authentication function directly"""
-    print("\n=== Testing authentication function ===")
-
-    # This won't work directly because it's async and depends on FastAPI,
-    # but we can test the key loading logic
-    keys = load_api_keys()
-    if keys:
-        test_key = list(keys.keys())[0]
-        print(f"Testing with key: {test_key[:8]}...")
-
-        if test_key in keys:
-            print(f"✅ Key found in loaded keys")
-            api_key_obj = keys[test_key]
-            print(f"  Client: {api_key_obj.client_name}")
-            print(f"  Access Level: {api_key_obj.access_level}")
-        else:
-            print("❌ Key not found in loaded keys")
-    else:
-        print("❌ No keys available for testing")
-
-if __name__ == "__main__":
-    print("FastAPI Authentication Test")
-    print("=" * 40)
-
-    try:
-        keys = test_api_key_storage()
-        test_auth_function()
-
-        print("\n=== Summary ===")
-        print(f"Total API keys: {len(keys)}")
-        print("Test completed successfully!")
-
-    except Exception as e:
-        print(f"❌ Test failed: {str(e)}")
-        import traceback
-        traceback.print_exc()
-```
-
-
-
-
-------------------------------------------------------------------------------------------------
-relative to project root: gather.py
-absolute: /mnt/process/show-build/gather.py
-└── gather.py
-
-```
 ```
 
 
@@ -16884,292 +17691,378 @@ grep -rIn --color=always \
 
 
 ------------------------------------------------------------------------------------------------
-relative to project root: gather.sh
-absolute: /mnt/process/show-build/gather.sh
-└── gather.sh
+relative to project root: package.json
+absolute: /mnt/process/show-build/package.json
+└── package.json
 
 ```
-#!/usr/bin/env bash
-# This script generates a text file with project information
+{
+  "name": "disaffected-ui",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "serve": "vue-cli-service serve",
+    "build": "vue-cli-service build",
+    "lint": "vue-cli-service lint"
+  },
+  "dependencies": {
+    "@mdi/font": "5.9.55",
+    "axios": "^1.9.0",
+    "core-js": "^3.8.3",
+    "roboto-fontface": "*",
+    "vue": "^3.2.13",
+    "vue-router": "^4.5.1",
+    "vuedraggable": "^4.1.0",
+    "vuetify": "^3.8.8",
+    "webfontloader": "^1.0.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.12.16",
+    "@babel/eslint-parser": "^7.12.16",
+    "@vue/cli-plugin-babel": "~5.0.0",
+    "@vue/cli-plugin-eslint": "~5.0.0",
+    "@vue/cli-service": "~5.0.0",
+    "eslint": "^7.32.0",
+    "eslint-plugin-vue": "^8.0.3",
+    "vue-cli-plugin-vuetify": "~2.5.8",
+    "webpack-plugin-vuetify": "^2.0.0-alpha.0"
+  },
+  "eslintConfig": {
+    "root": true,
+    "env": {
+      "node": true
+    },
+    "extends": [
+      "plugin:vue/vue3-essential",
+      "eslint:recommended"
+    ],
+    "parserOptions": {
+      "parser": "@babel/eslint-parser"
+    },
+    "rules": {}
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions",
+    "not dead",
+    "not ie 11"
+  ]
+}
+```
 
-# Check for minimum Bash version 4
-if ((BASH_VERSINFO[0] < 4)); then
-    echo "This script requires Bash version 4 or higher." >&2
-    exit 1
-fi
 
 
-# Check for required commands
-if ! command -v tree &>/dev/null; then
-    echo "The 'tree' command is required but not installed."
-    echo "To install on Ubuntu/Debian: sudo apt-get install tree"
-    echo "To install on MacOS (Homebrew): brew install tree"
-    exit 1
-fi
 
-if ! command -v realpath &>/dev/null; then
-    echo "The 'realpath' command is required but not installed."
-    echo "To install on Ubuntu/Debian: sudo apt-get install realpath"
-    echo "To install on MacOS (Homebrew): brew install coreutils"
-    exit 1
-fi
+------------------------------------------------------------------------------------------------
+relative to project root: AUTHENTICATION_GUIDE.md
+absolute: /mnt/process/show-build/AUTHENTICATION_GUIDE.md
+└── AUTHENTICATION_GUIDE.md
 
-print_file_info() {
-    local filepath="$1"
-    local abs_path
-    abs_path="$(realpath "$filepath")"
-    local rel_path
-    rel_path="$(realpath --relative-to="$(pwd)" "$filepath")"
+```
+# FastAPI Authentication Guide
 
-    echo "------------------------------------------------------------------------------------------------"
-    echo "relative to project root: $rel_path"
-    echo "absolute: $abs_path"
-    echo
-    echo '```'
-    while IFS= read -r line; do
-        echo "$line"
-    done < "$filepath"
-    echo '```'
-    echo
-    echo
+This guide explains how to use both JWT token and API key authentication in your FastAPI application.
+
+## Table of Contents
+1. [Authentication Overview](#authentication-overview)
+2. [JWT Token Authentication](#jwt-token-authentication)
+3. [API Key Authentication](#api-key-authentication)
+4. [Securing Endpoints](#securing-endpoints)
+5. [Testing Examples](#testing-examples)
+6. [Troubleshooting](#troubleshooting)
+
+## Authentication Overview
+
+Your FastAPI application supports two authentication methods:
+
+1. **JWT Tokens** - For user sessions (48-hour expiry)
+2. **API Keys** - For automated systems (permanent until revoked)
+
+Both methods can be used on the same endpoints interchangeably.
+
+## JWT Token Authentication
+
+### 1. Login to Get Token
+
+**Endpoint:** `POST /auth/login`
+
+```bash
+curl -X POST "http://localhost:8888/auth/login" \
+     -H "Content-Type: application/x-www-form-urlencoded" \
+     -d "username=admin&password=password123"
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "user": {
+    "username": "admin",
+    "access_level": "admin"
+  }
+}
+```
+
+### 2. Use Token in Requests
+
+Include the token in the `Authorization` header with `Bearer` prefix:
+
+```bash
+curl -X POST "http://localhost:8888/secured-route" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+     -d '{"test": "data"}'
+```
+
+## API Key Authentication
+
+### 1. Create API Key (Admin Required)
+
+First, get a JWT token as admin, then create an API key:
+
+```bash
+# Step 1: Login as admin
+TOKEN=$(curl -s -X POST "http://localhost:8888/auth/login" \
+     -H "Content-Type: application/x-www-form-urlencoded" \
+     -d "username=admin&password=password123" | jq -r '.access_token')
+
+# Step 2: Create API key
+curl -X POST "http://localhost:8888/auth/apikey?client_name=my-service" \
+     -H "Authorization: Bearer $TOKEN"
+```
+
+**Response:**
+```json
+{
+  "key": "Ec2_7C-YiD_zMTkjfX-I9PesRIxIA9jK2MDhnAIF84I",
+  "client_name": "my-service",
+  "access_level": "service",
+  "created_by": "admin",
+  "created_at": "2025-06-14T02:10:09.262631"
+}
+```
+
+### 2. Use API Key in Requests
+
+Include the API key in the `X-API-Key` header:
+
+```bash
+curl -X POST "http://localhost:8888/secured-route" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: Ec2_7C-YiD_zMTkjfX-I9PesRIxIA9jK2MDhnAIF84I" \
+     -d '{"test": "data"}'
+```
+
+### 3. List Existing API Keys
+
+```bash
+curl -X GET "http://localhost:8888/auth/apikeys" \
+     -H "Authorization: Bearer $TOKEN"
+```
+
+### 4. Debug API Keys
+
+```bash
+curl -X GET "http://localhost:8888/auth/debug/apikeys" \
+     -H "Authorization: Bearer $TOKEN"
+```
+
+## Securing Endpoints
+
+### Method 1: JWT Only
+For user-only endpoints, use `get_current_user`:
+
+```python
+from auth.utils import get_current_user
+
+@app.post("/user-only-endpoint")
+async def user_endpoint(current_user: dict = Depends(get_current_user)):
+    return {"message": "User authenticated", "user": current_user}
+```
+
+### Method 2: API Key OR JWT (Recommended)
+For endpoints that should accept both authentication methods:
+
+```python
+from auth.utils import get_current_user_or_key
+
+@app.post("/flexible-endpoint")
+async def flexible_endpoint(current_user: dict = Depends(get_current_user_or_key)):
+    return {"message": "Authenticated", "user": current_user}
+```
+
+### Method 3: Admin Only
+For admin-only endpoints, check the access level:
+
+```python
+@app.post("/admin-endpoint")
+async def admin_endpoint(current_user: dict = Depends(get_current_user_or_key)):
+    if current_user["access_level"] != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    return {"message": "Admin endpoint", "user": current_user}
+```
+
+## Testing Examples
+
+### Complete PowerShell Test Script
+
+```powershell
+# Test both authentication methods
+
+$baseUrl = "http://localhost:8888"
+
+Write-Host "=== Testing JWT Authentication ===" -ForegroundColor Green
+
+# 1. Login to get token
+$loginResponse = Invoke-RestMethod -Uri "$baseUrl/auth/login" `
+                                  -Method POST `
+                                  -ContentType "application/x-www-form-urlencoded" `
+                                  -Body "username=admin&password=password123"
+
+$token = $loginResponse.access_token
+Write-Host "Got JWT token: $($token.Substring(0,20))..."
+
+# 2. Test secured endpoint with JWT
+$jwtHeaders = @{
+    "Authorization" = "Bearer $token"
+    "Content-Type" = "application/json"
 }
 
-scan_and_print_files() {
-    local base_path="$1"
-    local project_root
-    project_root="$(pwd)"
-    local include_dirs=()
-    local subdirs=()
+$jwtResponse = Invoke-RestMethod -Uri "$baseUrl/secured-route" `
+                                -Method POST `
+                                -Headers $jwtHeaders `
+                                -Body '{"test": "jwt data"}'
 
-    # Gather subdirectories
-    while IFS= read -r -d '' dir; do
-        subdirs+=("$dir")
-    done < <(find "$base_path" -mindepth 1 -maxdepth 1 -type d -print0)
+Write-Host "JWT Response: $($jwtResponse | ConvertTo-Json)"
 
-    # Prompt user for each subdirectory
-    for dir in "${subdirs[@]}"; do
-        dir_name="$(basename "$dir")"
-        echo "Directory: $dir_name"
-        echo -n "Include this directory in scan? (i=include, o=omit): "
-        read -n 1 choice
-        echo
-        if [[ "$choice" == "i" ]]; then
-            include_dirs+=("$dir")
-        fi
-    done
+Write-Host "`n=== Testing API Key Authentication ===" -ForegroundColor Green
 
-    # Build find arguments for included directories
-    find_args=()
-    if [ "${#include_dirs[@]}" -eq 0 ]; then
-        find_args=("$base_path")
-    else
-        for inc in "${include_dirs[@]}"; do
-            find_args+=("$inc")
-        done
-    fi
+# 3. Use existing API key (replace with your actual key)
+$apiKey = "Ec2_7C-YiD_zMTkjfX-I9PesRIxIA9jK2MDhnAIF84I"
 
-    # Find all files in included directories (or base if none included)
-    while IFS= read -r -d '' file; do
-        local abs_path
-        abs_path="$(realpath "$file")"
-        local rel_path
-        rel_path="$(realpath --relative-to="$project_root" "$file")"
-
-        echo "------------------------------------------------------------------------------------------------"
-        echo "relative to project root: $rel_path"
-        echo "absolute: $abs_path"
-        echo
-        echo "Tree to file from project root:"
-        tree -L 100 -f --noreport "$project_root" | grep --color=never "$rel_path"
-        echo
-        echo '```'
-        cat "$file"
-        echo '```'
-        echo
-        echo
-    done < <(find "${find_args[@]}" -type f -print0)
+$apiHeaders = @{
+    "X-API-Key" = $apiKey
+    "Content-Type" = "application/json"
 }
 
-list_and_exclude_directories() {
-    local base_path="$1"
-    local -a dir_list
-    local -A dir_map
-    local idx=1
+$apiResponse = Invoke-RestMethod -Uri "$baseUrl/secured-route" `
+                                -Method POST `
+                                -Headers $apiHeaders `
+                                -Body '{"test": "api key data"}'
 
-    # Gather all directories recursively
-    while IFS= read -r -d '' dir; do
-        dir_list+=("$dir")
-        dir_map["$idx"]="$dir"
-        ((idx++))
-    done < <(find "$base_path" -type d -print0)
+Write-Host "API Key Response: $($apiResponse | ConvertTo-Json)"
+```
 
-    # Print enumerated directory list
-    echo "Enumerated directory list:"
-    for i in "${!dir_list[@]}"; do
-        num=$((i+1))
-        rel_dir="$(realpath --relative-to="$base_path" "${dir_list[$i]}")"
-        echo "$num) $rel_dir"
-    done
+### Complete Bash Test Script
 
-    echo
-    echo "Enter comma-separated numbers of directories to EXCLUDE (e.g. 2,5,7), or leave blank for none:"
-    read -r exclude_input
+```bash
+#!/bin/bash
 
-    # Parse exclusions
-    IFS=',' read -ra exclude_nums <<< "$exclude_input"
-    declare -A exclude_dirs
-    for num in "${exclude_nums[@]}"; do
-        num="$(echo "$num" | xargs)" # trim
-        if [[ -n "${dir_map[$num]}" ]]; then
-            exclude_dirs["${dir_map[$num]}"]=1
-        fi
-    done
+BASE_URL="http://localhost:8888"
 
-    # Print tree, showing excluded dirs as "..."
-    print_tree_with_exclusions() {
-        local path="$1"
-        local prefix="$2"
-        local rel_path
-        rel_path="$(realpath --relative-to="$base_path" "$path")"
-        if [[ "${exclude_dirs[$path]}" == "1" ]]; then
-            echo "${prefix}${rel_path}/ ..."
-            return
-        fi
-        echo "${prefix}${rel_path}/"
-        local child
-        while IFS= read -r -d '' child; do
-            print_tree_with_exclusions "$child" "    $prefix"
-        done < <(find "$path" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
-        # List files in this directory
-        while IFS= read -r -d '' file; do
-            file_rel="$(realpath --relative-to="$base_path" "$file")"
-            echo "${prefix}    $file_rel"
-        done < <(find "$path" -mindepth 1 -maxdepth 1 -type f -print0 | sort -z)
-    }
+echo "=== Testing JWT Authentication ==="
 
-    echo
-    echo "Project directory tree (excluded directories shown as ...):"
-    print_tree_with_exclusions "$base_path" ""
-    echo
-}
+# 1. Login to get token
+TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" \
+     -H "Content-Type: application/x-www-form-urlencoded" \
+     -d "username=admin&password=password123" | jq -r '.access_token')
 
+echo "Got JWT token: ${TOKEN:0:20}..."
 
+# 2. Test secured endpoint with JWT
+echo "Testing with JWT token:"
+curl -X POST "$BASE_URL/secured-route" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer $TOKEN" \
+     -d '{"test": "jwt data"}'
 
-print_system_info() {
-    echo "System Information:"
-    echo "-------------------"
-    echo "Hostname: $(hostname)"
-    echo "Date: $(date)"
-    echo "Uptime: $(uptime -p)"
-    echo "User: $(whoami)"
-    echo "OS: $(uname -a)"
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        echo "Distribution: $PRETTY_NAME"
-    fi
-    echo
+echo -e "\n\n=== Testing API Key Authentication ==="
 
-    echo "CPU Info:"
-    if command -v lscpu &>/dev/null; then
-        lscpu | grep -E 'Model name|Socket|Thread|Core|CPU\(s\):'
-    else
-        grep -E 'model name|cpu cores|siblings' /proc/cpuinfo | sort | uniq
-    fi
-    echo
+# 3. Use existing API key
+API_KEY="Ec2_7C-YiD_zMTkjfX-I9PesRIxIA9jK2MDhnAIF84I"
 
-    echo "Memory Info:"
-    free -h
-    echo
+echo "Testing with API key:"
+curl -X POST "$BASE_URL/secured-route" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: $API_KEY" \
+     -d '{"test": "api key data"}'
 
-    echo "Disk Usage:"
-    df -h /
-    echo
+echo -e "\n\n=== Creating New API Key ==="
 
-    if command -v nvidia-smi &>/dev/null; then
-        echo "NVIDIA GPU Info:"
-        nvidia-smi
-        echo
-    else
-        echo "NVIDIA GPU Info: nvidia-smi not found."
-        echo
-    fi
+curl -X POST "$BASE_URL/auth/apikey?client_name=test-client" \
+     -H "Authorization: Bearer $TOKEN"
 
-    echo "Docker Info:"
-    if command -v docker &>/dev/null; then
-        docker info 2>/dev/null | head -n 20
-        echo
-        echo "Docker Containers:"
-        docker ps -a
-        echo
-        echo "Docker Images:"
-        docker images
-        echo
-    else
-        echo "Docker not installed."
-        echo
-    fi
+echo -e "\n\n=== Listing All API Keys ==="
 
-        # Print running Docker containers and their networks
-        if command -v docker &>/dev/null; then
-            echo
-            echo "Running Docker Containers and Networks:"
-            docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}"
-            echo
+curl -X GET "$BASE_URL/auth/apikeys" \
+     -H "Authorization: Bearer $TOKEN"
+```
 
-            echo "Docker Networks and Connected Containers:"
-            docker network ls --format "table {{.Name}}\t{{.Driver}}\t{{.Scope}}"
-            echo
+## Authentication Configuration
 
-            for net in $(docker network ls --format "{{.Name}}"); do
-                echo "Network: $net"
-                docker network inspect "$net" --format '{{range .Containers}}{{.Name}}{{"\t"}}{{end}}'
-                echo
-            done
-            echo
-        fi
-        echo
-}
+### Key Files to Understand
 
+1. **`app/auth/utils.py`** - Core authentication logic
+2. **`app/auth/router.py`** - Authentication endpoints
+3. **`app/auth/models.py`** - User and API key models
+4. **`app/storage/api_keys.json`** - Persistent API key storage
 
-echo "#PROJECT INFO FOR SHOW BUILD" > info.txt
-echo "This document is compiled on-the-fly using a bash script executed in the root of the project." >> info.txt
-echo "The contents of the bash script generating this file will be included in this text file." >> info.txt
-echo "The script is designed to be run in the root directory of the project." >> info.txt
-echo "" >> info.txt
-echo "TABLE OF CONTENTS" >> info.txt
-echo "----------------------------------------" >> info.txt
-echo "Contents of:     This file (info.txt):" >> info.txt
-echo "Contents of:     README.md (the main project documentation file)" >> info.txt
-echo "Contents of:     The project file system structure" >> info.txt
-echo "Contents of:     gather.sh (the bash script generating this file)" >> info.txt
-echo "Contents of:     backend of the system (multiple file) e.g. the app folder and FastAPI/python/routes etc" >> info.txt
-echo "Contents of:     frontend of the system e.g. the app folder and ReactJS/NextJS/components etc" >> info.txt
-echo "----------------------------------------" >> info.txt
-echo "System info:     System information including docker info" >> info.txt
-echo "----------------------------------------" >> info.txt
-echo "" >> info.txt
-echo "BEGIN SCRIPT OUTPUT" >> info.txt
-echo ""
+### Environment Variables
 
-print_file_info "gather.sh" >> info.txt
-print_file_info "README.md" >> info.txt
+Set these in your `docker-compose.yml`:
 
-# Interactive functions: capture output to temp files, then append
-tmpdir=$(mktemp -d)
-list_and_exclude_directories "." > "$tmpdir/tree.txt"
-scan_and_print_files "app" > "$tmpdir/app.txt"
-scan_and_print_files "disaffected-ui" > "$tmpdir/ui.txt"
+```yaml
+environment:
+  - JWT_SECRET_KEY=ea7GZD3mQy3EZYD4YZsFmr/9JwBgZFCaWyznnjhOyow=
+  - JWT_ALGORITHM=HS256
+  - ACCESS_TOKEN_EXPIRE_MINUTES=2880  # 48 hours
+```
 
-cat "$tmpdir/tree.txt" >> info.txt
-cat "$tmpdir/app.txt" >> info.txt
-cat "$tmpdir/ui.txt" >> info.txt
-rm -rf "$tmpdir"
+## Troubleshooting
 
-##system info
-print_system_info >> info.txt
+### Common Issues
 
-echo "Script completed successfully. Project information has been saved to info.txt."
-echo "You can view the file using any text editor."
+1. **401 Unauthorized**
+   - Check if API key exists: `GET /auth/debug/apikeys`
+   - Verify header name is exactly `X-API-Key`
+   - Ensure JWT token isn't expired
+
+2. **403 Forbidden**
+   - User doesn't have required access level
+   - Check `current_user["access_level"]` in your endpoint
+
+3. **API Key Not Found**
+   - Verify key is in `app/storage/api_keys.json`
+   - Check Docker volume mount: `./app/storage:/app/storage`
+
+### Debug Endpoints
+
+- `GET /auth/debug/apikeys` - Show stored API keys
+- `GET /auth/test` - Test auth module loading
+- `GET /health` - Basic health check
+
+### Default Credentials
+
+- **Username:** `admin`
+- **Password:** `password123`
+- **Access Level:** `admin`
+
+## Security Best Practices
+
+1. **Change default admin password** in production
+2. **Use HTTPS** in production
+3. **Rotate API keys** regularly
+4. **Monitor authentication logs**
+5. **Set appropriate token expiry times**
+6. **Use environment variables** for secrets
+
+---
+
+*This guide covers the complete authentication system. Keep it handy for reference when working with secured endpoints!*
 ```
 
 
@@ -17294,7 +18187,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from .utils import verify_password, create_access_token, get_current_user, get_password_hash
 from .models import (
-    USERS,
+    load_users,
+    save_users,
+    get_user,
     UserLogin,
     Token,
     User,
@@ -17314,7 +18209,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = USERS.get(form_data.username)
+    user = get_user(form_data.username)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -17363,8 +18258,8 @@ async def create_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can create users"
         )
-
-    if new_user.username in USERS:
+    users = load_users()
+    if new_user.username in users:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already exists"
@@ -17375,7 +18270,8 @@ async def create_user(
         hashed_password=get_password_hash(new_user.password),
         access_level="user"  # Default to regular user
     )
-    USERS[user.username] = user
+    users[user.username] = user
+    save_users(users)
 
     return user
 
@@ -17387,7 +18283,8 @@ async def list_users(current_user: dict = Depends(get_current_user)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can list users"
         )
-    return list(USERS.values())
+    users = load_users()
+    return list(users.values())
 
 @router.post("/apikey", response_model=APIKey)
 async def create_api_key(
@@ -17582,36 +18479,6 @@ async def get_current_user_or_key(
 
 
 ------------------------------------------------------------------------------------------------
-relative to project root: app/auth/__pycache__/__init__.cpython-312.pyc
-absolute: /mnt/process/show-build/app/auth/__pycache__/__init__.cpython-312.pyc
-├── app/
-│   ├── auth/
-│   │   ├── __pycache__/
-│   │   │   └── __init__.cpython-312.pyc
-
-```
-[Error reading /mnt/process/show-build/app/auth/__pycache__/__init__.cpython-312.pyc: 'utf-8' codec can't decode byte 0xcb in position 0: invalid continuation byte]
-```
-
-
-
-
-------------------------------------------------------------------------------------------------
-relative to project root: app/auth/__pycache__/models.cpython-312.pyc
-absolute: /mnt/process/show-build/app/auth/__pycache__/models.cpython-312.pyc
-├── app/
-│   ├── auth/
-│   │   ├── __pycache__/
-│   │   │   └── models.cpython-312.pyc
-
-```
-[Error reading /mnt/process/show-build/app/auth/__pycache__/models.cpython-312.pyc: 'utf-8' codec can't decode byte 0xcb in position 0: invalid continuation byte]
-```
-
-
-
-
-------------------------------------------------------------------------------------------------
 relative to project root: app/auth/__init__.py
 absolute: /mnt/process/show-build/app/auth/__init__.py
 ├── app/
@@ -17644,10 +18511,11 @@ import logging
 # Password hashing setup
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Define storage path relative to app directory
+# Define storage paths relative to app directory
 APP_DIR = Path(__file__).parent.parent  # Goes up from auth/ to app/
 STORAGE_DIR = APP_DIR / "storage"
 API_KEYS_FILE = STORAGE_DIR / "api_keys.json"
+USERS_FILE = STORAGE_DIR / "users.json"
 
 # Create storage directory if it doesn't exist
 STORAGE_DIR.mkdir(exist_ok=True)
@@ -17656,6 +18524,11 @@ class User(BaseModel):
     username: str
     hashed_password: str
     access_level: str = "user"
+    first_name: str = ""
+    last_name: str = ""
+    email: str = ""
+    phone: str = ""
+    profile_picture: str = ""
 
 class UserLogin(BaseModel):
     username: str
@@ -17666,14 +18539,8 @@ class Token(BaseModel):
     token_type: str
     user: dict
 
-# Initialize with default admin user
-USERS = {
-    "admin": User(
-        username="admin",
-        hashed_password=pwd_context.hash("password123"),
-        access_level="admin"
-    )
-}
+# Initialize empty USERS dictionary - will be loaded from JSON
+USERS: Dict[str, User] = {}
 
 class APIKey(BaseModel):
     key: str
@@ -17742,6 +18609,90 @@ def save_api_keys(api_keys: Dict[str, APIKey]) -> bool:
     except Exception as e:
         logging.error(f"Failed to save API keys: {str(e)}")
         return False
+
+def init_users():
+    """Initialize users file with default users if it doesn't exist"""
+    try:
+        STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+        if not USERS_FILE.exists():
+            # Create default users
+            default_users = {
+                "admin": User(
+                    username="admin",
+                    hashed_password=pwd_context.hash("password123"),
+                    access_level="admin",
+                    first_name="Admin",
+                    last_name="User",
+                    email="admin@showbuild.local",
+                    phone="555-0000",
+                    profile_picture="/static/avatars/admin.png"
+                ),
+                "kevin": User(
+                    username="kevin",
+                    hashed_password=pwd_context.hash("1234"),
+                    access_level="admin",
+                    first_name="Kevin",
+                    last_name="Manager",
+                    email="kevin@showbuild.local",
+                    phone="555-0001",
+                    profile_picture="/static/avatars/kevin.png"
+                ),
+                "josh": User(
+                    username="josh",
+                    hashed_password=pwd_context.hash("1234"),
+                    access_level="user",
+                    first_name="Josh",
+                    last_name="Producer",
+                    email="josh@showbuild.local",
+                    phone="555-0002",
+                    profile_picture="/static/avatars/josh.png"
+                )
+            }
+            save_users(default_users)
+
+        return True
+    except Exception as e:
+        logging.error(f"User initialization failed: {str(e)}")
+        return False
+
+def load_users() -> Dict[str, User]:
+    """Load users from JSON file"""
+    try:
+        if not USERS_FILE.exists():
+            init_users()
+
+        with USERS_FILE.open("r") as f:
+            data = json.load(f)
+            return {k: User(**v) for k, v in data.items()}
+    except Exception as e:
+        logging.error(f"Failed to load users: {str(e)}")
+        return {}
+
+def save_users(users: Dict[str, User]) -> bool:
+    """Save users to JSON file"""
+    try:
+        STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+        serializable = {}
+        for k, v in users.items():
+            serializable[k] = v.dict()
+
+        with USERS_FILE.open("w") as f:
+            json.dump(serializable, f, indent=2)
+        return True
+    except Exception as e:
+        logging.error(f"Failed to save users: {str(e)}")
+        return False
+
+def get_user(username: str) -> Optional[User]:
+    """Get a specific user by username"""
+    users = load_users()
+    return users.get(username)
+
+# Initialize users when module loads
+init_users()
+USERS = load_users()
 ```
 
 
@@ -18962,6 +19913,17 @@ def patch_code_block(payload: PatchPayload):
 
 
 ------------------------------------------------------------------------------------------------
+relative to project root: workload.json
+absolute: /mnt/process/show-build/workload.json
+└── workload.json
+
+```
+```
+
+
+
+
+------------------------------------------------------------------------------------------------
 relative to project root: Dockerfile
 absolute: /mnt/process/show-build/Dockerfile
 └── Dockerfile
@@ -19019,155 +19981,6 @@ absolute: /mnt/process/show-build/verify_setup.py
 └── verify_setup.py
 
 ```
-#!/usr/bin/env python3
-"""
-Simple verification script for API key authentication setup
-This script checks the configuration without requiring FastAPI to be running
-"""
-
-import json
-from pathlib import Path
-
-def check_api_keys():
-    """Check if API keys are properly stored"""
-    print("=== Checking API Key Storage ===")
-
-    api_keys_file = Path("app/storage/api_keys.json")
-
-    if not api_keys_file.exists():
-        print("❌ API keys file does not exist")
-        return False
-
-    try:
-        with open(api_keys_file, 'r') as f:
-            data = json.load(f)
-
-        if not data:
-            print("❌ No API keys found in storage")
-            return False
-
-        print(f"✅ Found {len(data)} API keys in storage:")
-        for key, info in data.items():
-            print(f"  - Key: {key[:8]}... | Client: {info['client_name']} | Level: {info['access_level']}")
-
-        return True
-
-    except Exception as e:
-        print(f"❌ Error reading API keys: {e}")
-        return False
-
-def check_auth_config():
-    """Check authentication configuration"""
-    print("\n=== Checking Authentication Configuration ===")
-
-    utils_file = Path("app/auth/utils.py")
-
-    if not utils_file.exists():
-        print("❌ auth/utils.py not found")
-        return False
-
-    with open(utils_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    # Check for auto_error=False
-    if 'OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)' in content:
-        print("✅ OAuth2PasswordBearer correctly configured with auto_error=False")
-    else:
-        print("❌ OAuth2PasswordBearer not configured correctly")
-        return False
-
-    # Check for API key header
-    if 'APIKeyHeader(name="X-API-Key", auto_error=False)' in content:
-        print("✅ API Key header correctly configured")
-    else:
-        print("❌ API Key header not configured correctly")
-        return False
-
-    # Check for combined auth function
-    if 'get_current_user_or_key' in content:
-        print("✅ Combined authentication function present")
-    else:
-        print("❌ Combined authentication function missing")
-        return False
-
-    return True
-
-def check_main_app():
-    """Check main application configuration"""
-    print("\n=== Checking Main Application ===")
-
-    main_file = Path("app/main.py")
-
-    if not main_file.exists():
-        print("❌ main.py not found")
-        return False
-
-    with open(main_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    # Check for secured route
-    if '/secured-route' in content and 'get_current_user_or_key' in content:
-        print("✅ Secured route correctly configured with combined auth")
-    else:
-        print("❌ Secured route not properly configured")
-        return False
-
-    return True
-
-def check_docker_config():
-    """Check Docker configuration"""
-    print("\n=== Checking Docker Configuration ===")
-
-    compose_file = Path("docker-compose.yml")
-
-    if not compose_file.exists():
-        print("❌ docker-compose.yml not found")
-        return False
-
-    with open(compose_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    # Check for storage mount
-    if './app/storage:/app/storage' in content:
-        print("✅ Storage volume mount configured")
-    else:
-        print("❌ Storage volume mount missing")
-        return False
-
-    # Check for JWT environment variables
-    if 'JWT_SECRET_KEY' in content and 'ACCESS_TOKEN_EXPIRE_MINUTES' in content:
-        print("✅ JWT environment variables configured")
-    else:
-        print("❌ JWT environment variables missing")
-        return False
-
-    return True
-
-def main():
-    print("FastAPI Authentication Configuration Verification")
-    print("=" * 60)
-
-    checks = [
-        check_api_keys(),
-        check_auth_config(),
-        check_main_app(),
-        check_docker_config()
-    ]
-
-    print("\n" + "=" * 60)
-    if all(checks):
-        print("🎉 All checks passed! Authentication should be working.")
-        print("\nTo test:")
-        print("1. Start the application: docker-compose up --build")
-        print("2. Use an API key from storage in X-API-Key header")
-        print("3. Test endpoint: POST /secured-route")
-    else:
-        print("❌ Some checks failed. Please review the configuration.")
-
-    print("=" * 60)
-
-if __name__ == "__main__":
-    main()
 ```
 
 
@@ -19179,28 +19992,6 @@ absolute: /mnt/process/show-build/test_api_auth.sh
 └── test_api_auth.sh
 
 ```
-#!/bin/bash
-
-echo "=== API Key Authentication Test ==="
-echo "Testing with stored API keys from api_keys.json"
-echo
-
-# Extract the first API key from the JSON file
-API_KEY=$(cat app/storage/api_keys.json | grep '"key":' | head -1 | sed 's/.*"key": "//;s/".*//')
-echo "Using API key: ${API_KEY:0:8}..."
-echo
-
-# Test the secured endpoint with API key
-echo "Testing /secured-route with API key..."
-curl -X POST "http://localhost:8000/secured-route" \
-     -H "Content-Type: application/json" \
-     -H "X-API-Key: $API_KEY" \
-     -d '{"test": "data"}' \
-     --max-time 10 \
-     -w "\nHTTP Status: %{http_code}\n" || echo "Connection failed"
-
-echo
-echo "=== Test completed ==="
 ```
 
 
@@ -19455,12 +20246,16 @@ Next: Plan for v0.3.0 with transcription outcues and frontend Dockerization.
 
 
 --- Files and directories ignored by .gatherignore ---
+  .continue
+  copilot
+  .copilot
+  .github
   .git
-  backups
+  .vscode
 System Information:
 -------------------
 Hostname: whisperbox
-Date: 2025-06-13 23:04:19.584904
+Date: 2025-07-01 21:59:25.268819
 User: kevin
 OS: Linux-5.15.0-141-generic-x86_64-with-glibc2.35
 Distribution: Ubuntu 22.04.5 LTS
@@ -19475,17 +20270,17 @@ NUMA node0 CPU(s):                    0-15
 
 Memory Info:
                total        used        free      shared  buff/cache   available
-Mem:            23Gi       1.3Gi       8.3Gi       9.0Mi        13Gi        21Gi
-Swap:          8.0Gi       2.0Mi       8.0Gi
+Mem:            23Gi       3.0Gi       5.1Gi        12Mi        15Gi        19Gi
+Swap:          8.0Gi          0B       8.0Gi
 
 
 Disk Usage:
 Filesystem                         Size  Used Avail Use% Mounted on
-/dev/mapper/ubuntu--vg-ubuntu--lv   54G   45G  6.1G  89% /
+/dev/mapper/ubuntu--vg-ubuntu--lv   54G   49G  1.8G  97% /
 
 
 NVIDIA GPU Info:
-Fri Jun 13 23:04:19 2025       
+Tue Jul  1 21:59:25 2025       
 +-----------------------------------------------------------------------------------------+
 | NVIDIA-SMI 550.144.03             Driver Version: 550.144.03     CUDA Version: 12.4     |
 |-----------------------------------------+------------------------+----------------------+
@@ -19494,7 +20289,7 @@ Fri Jun 13 23:04:19 2025
 |                                         |                        |               MIG M. |
 |=========================================+========================+======================|
 |   0  Quadro P4000                   Off |   00000000:01:00.0 Off |                  N/A |
-| 46%   35C    P8              9W /  105W |    1171MiB /   8192MiB |      0%      Default |
+| 46%   39C    P8              9W /  105W |    1089MiB /   8192MiB |      0%      Default |
 |                                         |                        |                  N/A |
 +-----------------------------------------+------------------------+----------------------+
                                                                                          
@@ -19503,7 +20298,7 @@ Fri Jun 13 23:04:19 2025
 |  GPU   GI   CI        PID   Type   Process name                              GPU Memory |
 |        ID   ID                                                               Usage      |
 |=========================================================================================|
-|    0   N/A  N/A      1778      C   python3                                      1166MiB |
+|    0   N/A  N/A      1855      C   python3                                      1084MiB |
 +-----------------------------------------------------------------------------------------+
 
 
@@ -19522,10 +20317,10 @@ Client: Docker Engine - Community
 
 Server:
  Containers: 10
-  Running: 7
+  Running: 5
   Paused: 0
-  Stopped: 3
- Images: 117
+  Stopped: 5
+ Images: 122
  Server Version: 28.1.1
  Storage Driver: overlay2
   Backing Filesystem: extfs
@@ -19547,135 +20342,140 @@ Server:
  containerd version: 05044ec0a9a75232cad458027ca83437aae3f4da
  runc ver
 Docker Containers:
-CONTAINER ID   IMAGE                                COMMAND                  CREATED          STATUS                     PORTS                                                                                                                                                                                            NAMES
-5d06707072c8   show-build-fastapi                   "/start.sh"              36 minutes ago   Up 36 minutes (healthy)    0.0.0.0:8888->80/tcp, [::]:8888->80/tcp                                                                                                                                                          show-build-server
-86162373b8f3   id-server-api-fastapi                "/start.sh"              13 days ago      Exited (0) 7 days ago                                                                                                                                                                                                       id-server-api
-c6842dfa5b33   ffmpeg-worker:latest                 "python3 mqtt_client…"   3 weeks ago      Up 7 days                                                                                                                                                                                                                   ffmpeg-worker
-30c6bf4f2f3d   ffmpeg-worker:latest                 "python3 mqtt_client…"   3 weeks ago      Exited (130) 3 weeks ago                                                                                                                                                                                                    quirky_bell
-1293e7c120e2   syncthing-syncthing                  "/bin/entrypoint.sh …"   3 weeks ago      Up 7 days (healthy)        0.0.0.0:8384->8384/tcp, 0.0.0.0:21027->21027/udp, [::]:8384->8384/tcp, [::]:21027->21027/udp, 0.0.0.0:22000->22000/tcp, [::]:22000->22000/tcp, 0.0.0.0:22000->22000/udp, [::]:22000->22000/udp   syncthing
-24417c958da5   heimoshuiyu/whisper-fastapi:latest   "python3 whisper_fas…"   4 weeks ago      Up 7 days                  0.0.0.0:8885->5000/tcp, [::]:8885->5000/tcp                                                                                                                                                      whisper-api
-be24c5109ae8   node-red                             "./entrypoint.sh"        4 weeks ago      Up 7 days (healthy)        0.0.0.0:1880->1880/tcp, [::]:1880->1880/tcp                                                                                                                                                      node-red
-42cab699aeef   filebrowser/filebrowser:s6           "/init"                  4 weeks ago      Exited (0) 3 weeks ago                                                                                                                                                                                                      filebrowser
-b1070251da92   eclipse-mosquitto:latest             "/docker-entrypoint.…"   4 weeks ago      Up 7 days                  0.0.0.0:1883->1883/tcp, [::]:1883->1883/tcp                                                                                                                                                      mqtt-broker
-b935c737a704   portainer/portainer-ce               "/portainer"             5 weeks ago      Up 7 days                  8000/tcp, 9443/tcp, 0.0.0.0:9000->9000/tcp, [::]:9000->9000/tcp                                                                                                                                  portainer
+CONTAINER ID   IMAGE                                COMMAND                  CREATED       STATUS                          PORTS                                                                                                                                                                                            NAMES
+57c00dc93ceb   show-build-fastapi                   "/start.sh"              2 weeks ago   Up 2 weeks (healthy)            0.0.0.0:8888->80/tcp, [::]:8888->80/tcp                                                                                                                                                          show-build-server
+86162373b8f3   id-server-api-fastapi                "/start.sh"              4 weeks ago   Exited (0) 3 weeks ago                                                                                                                                                                                                           id-server-api
+c6842dfa5b33   ffmpeg-worker:latest                 "python3 mqtt_client…"   5 weeks ago   Up 2 weeks                                                                                                                                                                                                                       ffmpeg-worker
+30c6bf4f2f3d   ffmpeg-worker:latest                 "python3 mqtt_client…"   5 weeks ago   Exited (130) 5 weeks ago                                                                                                                                                                                                         quirky_bell
+1293e7c120e2   syncthing-syncthing                  "/bin/entrypoint.sh …"   6 weeks ago   Up 2 weeks (healthy)            0.0.0.0:8384->8384/tcp, 0.0.0.0:21027->21027/udp, [::]:8384->8384/tcp, [::]:21027->21027/udp, 0.0.0.0:22000->22000/tcp, [::]:22000->22000/tcp, 0.0.0.0:22000->22000/udp, [::]:22000->22000/udp   syncthing
+24417c958da5   heimoshuiyu/whisper-fastapi:latest   "python3 whisper_fas…"   6 weeks ago   Up 2 weeks                      0.0.0.0:8885->5000/tcp, [::]:8885->5000/tcp                                                                                                                                                      whisper-api
+be24c5109ae8   node-red                             "./entrypoint.sh"        7 weeks ago   Restarting (1) 52 seconds ago                                                                                                                                                                                                    node-red
+42cab699aeef   filebrowser/filebrowser:s6           "/init"                  7 weeks ago   Exited (0) 5 weeks ago                                                                                                                                                                                                           filebrowser
+b1070251da92   eclipse-mosquitto:latest             "/docker-entrypoint.…"   7 weeks ago   Restarting (3) 52 seconds ago                                                                                                                                                                                                    mqtt-broker
+b935c737a704   portainer/portainer-ce               "/portainer"             7 weeks ago   Up 2 weeks                      8000/tcp, 9443/tcp, 0.0.0.0:9000->9000/tcp, [::]:9000->9000/tcp                                                                                                                                  portainer
 
 Docker Images:
-REPOSITORY                    TAG       IMAGE ID       CREATED             SIZE
-show-build-fastapi            latest    2b2d5ce8adad   36 minutes ago      1.12GB
-<none>                        <none>    4f3ade056939   45 minutes ago      1.12GB
-<none>                        <none>    4c156603b2ec   50 minutes ago      1.12GB
-<none>                        <none>    3a286b46501e   57 minutes ago      1.12GB
-<none>                        <none>    597063351539   58 minutes ago      1.12GB
-<none>                        <none>    bfe382f71c1f   About an hour ago   1.12GB
-<none>                        <none>    e63d4066f3bb   3 hours ago         1.12GB
-<none>                        <none>    e2180d0c8ad5   3 hours ago         1.12GB
-<none>                        <none>    2be4195a8fda   3 hours ago         1.12GB
-<none>                        <none>    ea581794fdcb   3 hours ago         1.12GB
-<none>                        <none>    486736f71a09   3 hours ago         1.12GB
-<none>                        <none>    3a350857be45   3 hours ago         1.12GB
-<none>                        <none>    595b5ca0a3a9   3 hours ago         1.12GB
-<none>                        <none>    a753be6df451   4 hours ago         1.12GB
-<none>                        <none>    c5b71da49c07   4 hours ago         1.12GB
-<none>                        <none>    35075df733d3   4 hours ago         1.12GB
-<none>                        <none>    44693d68dcff   4 hours ago         1.12GB
-<none>                        <none>    cc576a70a35a   4 hours ago         1.12GB
-<none>                        <none>    f5a979b43f8b   4 hours ago         1.12GB
-<none>                        <none>    bc993abfee4c   4 hours ago         1.12GB
-<none>                        <none>    683b8775cccb   4 hours ago         1.12GB
-<none>                        <none>    5bb93f2c02e8   4 hours ago         1.12GB
-<none>                        <none>    3dbbf97d18f8   4 hours ago         1.12GB
-<none>                        <none>    e3f0081e7bc9   4 hours ago         1.12GB
-<none>                        <none>    c2bc6f1c38fb   4 hours ago         1.12GB
-<none>                        <none>    be5a9151f344   4 hours ago         1.12GB
-<none>                        <none>    17d98e73ff1c   5 hours ago         1.12GB
-<none>                        <none>    e3496e18200c   5 hours ago         1.12GB
-<none>                        <none>    e0b839aef454   5 hours ago         1.12GB
-<none>                        <none>    d6a99a07f04b   5 hours ago         1.12GB
-<none>                        <none>    fefab304d8b0   5 hours ago         1.12GB
-<none>                        <none>    28f1f7b8dc24   5 hours ago         1.12GB
-<none>                        <none>    8ea94cef890e   5 hours ago         1.13GB
-<none>                        <none>    52605e3c4993   5 hours ago         1.13GB
-<none>                        <none>    9bda9225b232   5 hours ago         1.13GB
-<none>                        <none>    14b86efb6021   5 hours ago         1.13GB
-<none>                        <none>    a3e01e9bdd96   5 hours ago         1.13GB
-<none>                        <none>    259c1c8fecc9   5 hours ago         1.13GB
-<none>                        <none>    eb092e363a69   7 hours ago         1.1GB
-<none>                        <none>    98d480274acf   7 hours ago         1.1GB
-<none>                        <none>    fc7d1525ced3   7 hours ago         1.1GB
-<none>                        <none>    67a101025cbf   16 hours ago        1.1GB
-<none>                        <none>    d480f38abf84   26 hours ago        1.1GB
-<none>                        <none>    685b8b50b8d4   26 hours ago        1.1GB
-<none>                        <none>    bca4c518323f   27 hours ago        1.1GB
-<none>                        <none>    ade851c8c535   27 hours ago        1.1GB
-<none>                        <none>    c339cf61ba14   27 hours ago        1.1GB
-<none>                        <none>    7e0f6c380d45   27 hours ago        1.1GB
-<none>                        <none>    51c7cd2e59c2   27 hours ago        1.1GB
-<none>                        <none>    b53411f05bc9   5 days ago          1.1GB
-<none>                        <none>    ecd98675f2d0   5 days ago          1.1GB
-<none>                        <none>    b3234fcfb384   5 days ago          1.1GB
-<none>                        <none>    0c7a3b7fe011   5 days ago          1.1GB
-<none>                        <none>    b6a9f297b770   6 days ago          1.1GB
-<none>                        <none>    683c65ea894d   6 days ago          1.1GB
-<none>                        <none>    0dfacdd0b74e   6 days ago          1.1GB
-<none>                        <none>    16e5be412f46   6 days ago          1.1GB
-<none>                        <none>    7b3fa25d9332   6 days ago          1.1GB
-<none>                        <none>    8dc3e5b08bc5   6 days ago          1.1GB
-<none>                        <none>    60593fd5e5f6   6 days ago          1.1GB
-<none>                        <none>    d2a609adadad   6 days ago          1.1GB
-<none>                        <none>    07e1ac7e9dcc   6 days ago          1.1GB
-<none>                        <none>    4ec39ec2aea1   6 days ago          1.1GB
-<none>                        <none>    60671e7e4ed1   6 days ago          1.1GB
-<none>                        <none>    6060d69b57df   6 days ago          1.1GB
-<none>                        <none>    b2d79437358f   6 days ago          1.1GB
-<none>                        <none>    ef7459fa2fa7   7 days ago          1.1GB
-<none>                        <none>    12cdfdc7a922   7 days ago          1.1GB
-<none>                        <none>    a287193b82b6   7 days ago          1.1GB
-<none>                        <none>    35c0585c1efa   7 days ago          1.1GB
-<none>                        <none>    fd3bfc759a09   7 days ago          1.1GB
-<none>                        <none>    e21cd331dc29   7 days ago          1.1GB
-<none>                        <none>    27b61bbf2865   7 days ago          1.1GB
-<none>                        <none>    95930a3535dc   7 days ago          1.1GB
-idserver-fastapi              latest    2f9d0cb1391e   3 weeks ago         1.1GB
-<none>                        <none>    43c3e97a0a48   3 weeks ago         1.1GB
-id-server-api-fastapi         latest    30b5096b1ca9   3 weeks ago         1.1GB
-<none>                        <none>    f61a380d4e0e   3 weeks ago         1.1GB
-<none>                        <none>    b34ae36bd66b   3 weeks ago         1.1GB
-<none>                        <none>    a10610fbf3f7   3 weeks ago         1.1GB
-<none>                        <none>    dbcfe0de4a9a   3 weeks ago         1.1GB
-<none>                        <none>    4f0ccb29e574   3 weeks ago         1.1GB
-<none>                        <none>    83c773d5a99c   3 weeks ago         1.1GB
-<none>                        <none>    3caaa33983dd   3 weeks ago         1.1GB
-<none>                        <none>    bf43d2c833ad   3 weeks ago         1.1GB
-<none>                        <none>    931383e42b62   3 weeks ago         1.1GB
-<none>                        <none>    ddba97dda467   3 weeks ago         1.1GB
-<none>                        <none>    7ae5dacd65c1   3 weeks ago         1.1GB
-<none>                        <none>    0fdea7169099   3 weeks ago         1.1GB
-<none>                        <none>    c123f4dace32   3 weeks ago         1.1GB
-<none>                        <none>    8cb4dbdeded3   3 weeks ago         1.1GB
-<none>                        <none>    19a1fada33c6   3 weeks ago         1.1GB
-<none>                        <none>    688d86f4b754   3 weeks ago         1.1GB
-<none>                        <none>    a19f76396493   3 weeks ago         1.1GB
-<none>                        <none>    8c6ad436444b   3 weeks ago         1.1GB
-<none>                        <none>    537513e0c296   3 weeks ago         1.1GB
-<none>                        <none>    817e67237ddf   3 weeks ago         1.1GB
-<none>                        <none>    69eff581182e   3 weeks ago         1.1GB
-<none>                        <none>    9dc469c2bedb   3 weeks ago         1.1GB
-<none>                        <none>    75ca70c2a939   3 weeks ago         1.1GB
-<none>                        <none>    eeed69638d95   3 weeks ago         1.1GB
-<none>                        <none>    0480db915ce2   3 weeks ago         1.1GB
-<none>                        <none>    d35849b4e0ec   3 weeks ago         1.1GB
-<none>                        <none>    23e6b8d95f97   3 weeks ago         1.1GB
-<none>                        <none>    95128b949fc8   3 weeks ago         1.1GB
-<none>                        <none>    20f78e7bf66b   3 weeks ago         1.1GB
-<none>                        <none>    c6bda93c40e1   3 weeks ago         1.1GB
-<none>                        <none>    13ae009298ce   3 weeks ago         1.1GB
-<none>                        <none>    670387c355ee   3 weeks ago         1.1GB
-syncthing-syncthing           latest    c9f16132b156   3 weeks ago         135MB
-fastapi-fastapi               latest    5af078f7d247   4 weeks ago         1.08GB
-node-red                      latest    da6c59578889   4 weeks ago         1.19GB
-ffmpeg-worker                 latest    3f8c953f9f0a   5 weeks ago         865MB
-portainer/portainer-ce        latest    d3e9f39af9c5   6 weeks ago         268MB
-eclipse-mosquitto             latest    35f50ba5c110   3 months ago        9.89MB
-heimoshuiyu/whisper-fastapi   latest    f8329e77469f   4 months ago        4.57GB
-filebrowser/filebrowser       s6        4567130c34df   4 months ago        46.8MB
+REPOSITORY                    TAG       IMAGE ID       CREATED        SIZE
+show-build-fastapi            latest    ce3212ef5a32   2 weeks ago    1.12GB
+<none>                        <none>    e0258b433305   2 weeks ago    1.12GB
+<none>                        <none>    8279ddf17186   2 weeks ago    1.12GB
+<none>                        <none>    dd6eb9542fb0   2 weeks ago    1.12GB
+<none>                        <none>    643b32b8a390   2 weeks ago    1.12GB
+<none>                        <none>    2b2d5ce8adad   2 weeks ago    1.12GB
+<none>                        <none>    4f3ade056939   2 weeks ago    1.12GB
+<none>                        <none>    4c156603b2ec   2 weeks ago    1.12GB
+<none>                        <none>    3a286b46501e   2 weeks ago    1.12GB
+<none>                        <none>    597063351539   2 weeks ago    1.12GB
+<none>                        <none>    bfe382f71c1f   2 weeks ago    1.12GB
+<none>                        <none>    e63d4066f3bb   2 weeks ago    1.12GB
+<none>                        <none>    e2180d0c8ad5   2 weeks ago    1.12GB
+<none>                        <none>    2be4195a8fda   2 weeks ago    1.12GB
+<none>                        <none>    ea581794fdcb   2 weeks ago    1.12GB
+<none>                        <none>    486736f71a09   2 weeks ago    1.12GB
+<none>                        <none>    3a350857be45   2 weeks ago    1.12GB
+<none>                        <none>    595b5ca0a3a9   2 weeks ago    1.12GB
+<none>                        <none>    a753be6df451   2 weeks ago    1.12GB
+<none>                        <none>    c5b71da49c07   2 weeks ago    1.12GB
+<none>                        <none>    35075df733d3   2 weeks ago    1.12GB
+<none>                        <none>    44693d68dcff   2 weeks ago    1.12GB
+<none>                        <none>    cc576a70a35a   2 weeks ago    1.12GB
+<none>                        <none>    f5a979b43f8b   2 weeks ago    1.12GB
+<none>                        <none>    bc993abfee4c   2 weeks ago    1.12GB
+<none>                        <none>    683b8775cccb   2 weeks ago    1.12GB
+<none>                        <none>    5bb93f2c02e8   2 weeks ago    1.12GB
+<none>                        <none>    3dbbf97d18f8   2 weeks ago    1.12GB
+<none>                        <none>    e3f0081e7bc9   2 weeks ago    1.12GB
+<none>                        <none>    c2bc6f1c38fb   2 weeks ago    1.12GB
+<none>                        <none>    be5a9151f344   2 weeks ago    1.12GB
+<none>                        <none>    17d98e73ff1c   2 weeks ago    1.12GB
+<none>                        <none>    e3496e18200c   2 weeks ago    1.12GB
+<none>                        <none>    e0b839aef454   2 weeks ago    1.12GB
+<none>                        <none>    d6a99a07f04b   2 weeks ago    1.12GB
+<none>                        <none>    fefab304d8b0   2 weeks ago    1.12GB
+<none>                        <none>    28f1f7b8dc24   2 weeks ago    1.12GB
+<none>                        <none>    8ea94cef890e   2 weeks ago    1.13GB
+<none>                        <none>    52605e3c4993   2 weeks ago    1.13GB
+<none>                        <none>    9bda9225b232   2 weeks ago    1.13GB
+<none>                        <none>    14b86efb6021   2 weeks ago    1.13GB
+<none>                        <none>    a3e01e9bdd96   2 weeks ago    1.13GB
+<none>                        <none>    259c1c8fecc9   2 weeks ago    1.13GB
+<none>                        <none>    eb092e363a69   2 weeks ago    1.1GB
+<none>                        <none>    98d480274acf   2 weeks ago    1.1GB
+<none>                        <none>    fc7d1525ced3   2 weeks ago    1.1GB
+<none>                        <none>    67a101025cbf   2 weeks ago    1.1GB
+<none>                        <none>    d480f38abf84   2 weeks ago    1.1GB
+<none>                        <none>    685b8b50b8d4   2 weeks ago    1.1GB
+<none>                        <none>    bca4c518323f   2 weeks ago    1.1GB
+<none>                        <none>    ade851c8c535   2 weeks ago    1.1GB
+<none>                        <none>    c339cf61ba14   2 weeks ago    1.1GB
+<none>                        <none>    7e0f6c380d45   2 weeks ago    1.1GB
+<none>                        <none>    51c7cd2e59c2   2 weeks ago    1.1GB
+<none>                        <none>    b53411f05bc9   3 weeks ago    1.1GB
+<none>                        <none>    ecd98675f2d0   3 weeks ago    1.1GB
+<none>                        <none>    b3234fcfb384   3 weeks ago    1.1GB
+<none>                        <none>    0c7a3b7fe011   3 weeks ago    1.1GB
+<none>                        <none>    b6a9f297b770   3 weeks ago    1.1GB
+<none>                        <none>    683c65ea894d   3 weeks ago    1.1GB
+<none>                        <none>    0dfacdd0b74e   3 weeks ago    1.1GB
+<none>                        <none>    16e5be412f46   3 weeks ago    1.1GB
+<none>                        <none>    7b3fa25d9332   3 weeks ago    1.1GB
+<none>                        <none>    8dc3e5b08bc5   3 weeks ago    1.1GB
+<none>                        <none>    60593fd5e5f6   3 weeks ago    1.1GB
+<none>                        <none>    d2a609adadad   3 weeks ago    1.1GB
+<none>                        <none>    07e1ac7e9dcc   3 weeks ago    1.1GB
+<none>                        <none>    4ec39ec2aea1   3 weeks ago    1.1GB
+<none>                        <none>    60671e7e4ed1   3 weeks ago    1.1GB
+<none>                        <none>    6060d69b57df   3 weeks ago    1.1GB
+<none>                        <none>    b2d79437358f   3 weeks ago    1.1GB
+<none>                        <none>    ef7459fa2fa7   3 weeks ago    1.1GB
+<none>                        <none>    12cdfdc7a922   3 weeks ago    1.1GB
+<none>                        <none>    a287193b82b6   3 weeks ago    1.1GB
+<none>                        <none>    35c0585c1efa   3 weeks ago    1.1GB
+<none>                        <none>    fd3bfc759a09   3 weeks ago    1.1GB
+<none>                        <none>    e21cd331dc29   3 weeks ago    1.1GB
+<none>                        <none>    27b61bbf2865   3 weeks ago    1.1GB
+<none>                        <none>    95930a3535dc   3 weeks ago    1.1GB
+idserver-fastapi              latest    2f9d0cb1391e   5 weeks ago    1.1GB
+<none>                        <none>    43c3e97a0a48   5 weeks ago    1.1GB
+id-server-api-fastapi         latest    30b5096b1ca9   5 weeks ago    1.1GB
+<none>                        <none>    f61a380d4e0e   5 weeks ago    1.1GB
+<none>                        <none>    b34ae36bd66b   5 weeks ago    1.1GB
+<none>                        <none>    a10610fbf3f7   5 weeks ago    1.1GB
+<none>                        <none>    dbcfe0de4a9a   5 weeks ago    1.1GB
+<none>                        <none>    4f0ccb29e574   5 weeks ago    1.1GB
+<none>                        <none>    83c773d5a99c   5 weeks ago    1.1GB
+<none>                        <none>    3caaa33983dd   5 weeks ago    1.1GB
+<none>                        <none>    bf43d2c833ad   5 weeks ago    1.1GB
+<none>                        <none>    931383e42b62   5 weeks ago    1.1GB
+<none>                        <none>    ddba97dda467   5 weeks ago    1.1GB
+<none>                        <none>    7ae5dacd65c1   5 weeks ago    1.1GB
+<none>                        <none>    0fdea7169099   5 weeks ago    1.1GB
+<none>                        <none>    c123f4dace32   5 weeks ago    1.1GB
+<none>                        <none>    8cb4dbdeded3   5 weeks ago    1.1GB
+<none>                        <none>    19a1fada33c6   5 weeks ago    1.1GB
+<none>                        <none>    688d86f4b754   5 weeks ago    1.1GB
+<none>                        <none>    a19f76396493   5 weeks ago    1.1GB
+<none>                        <none>    8c6ad436444b   5 weeks ago    1.1GB
+<none>                        <none>    537513e0c296   5 weeks ago    1.1GB
+<none>                        <none>    817e67237ddf   5 weeks ago    1.1GB
+<none>                        <none>    69eff581182e   5 weeks ago    1.1GB
+<none>                        <none>    9dc469c2bedb   5 weeks ago    1.1GB
+<none>                        <none>    75ca70c2a939   5 weeks ago    1.1GB
+<none>                        <none>    eeed69638d95   5 weeks ago    1.1GB
+<none>                        <none>    0480db915ce2   5 weeks ago    1.1GB
+<none>                        <none>    d35849b4e0ec   5 weeks ago    1.1GB
+<none>                        <none>    23e6b8d95f97   5 weeks ago    1.1GB
+<none>                        <none>    95128b949fc8   5 weeks ago    1.1GB
+<none>                        <none>    20f78e7bf66b   5 weeks ago    1.1GB
+<none>                        <none>    c6bda93c40e1   5 weeks ago    1.1GB
+<none>                        <none>    13ae009298ce   5 weeks ago    1.1GB
+<none>                        <none>    670387c355ee   5 weeks ago    1.1GB
+syncthing-syncthing           latest    c9f16132b156   6 weeks ago    135MB
+fastapi-fastapi               latest    5af078f7d247   6 weeks ago    1.08GB
+node-red                      latest    da6c59578889   7 weeks ago    1.19GB
+ffmpeg-worker                 latest    3f8c953f9f0a   7 weeks ago    865MB
+portainer/portainer-ce        latest    d3e9f39af9c5   2 months ago   268MB
+eclipse-mosquitto             latest    35f50ba5c110   3 months ago   9.89MB
+heimoshuiyu/whisper-fastapi   latest    f8329e77469f   4 months ago   4.57GB
+filebrowser/filebrowser       s6        4567130c34df   5 months ago   46.8MB
 

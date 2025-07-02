@@ -28,9 +28,19 @@ disaffected-ui/.vite/
 disaffected-ui/.cache/
 disaffected-ui/.output/
 
+# Node.js and package manager files
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json*
+yarn.lock*
+
+# VSCode settings and extensions
+.vscode/
+
 # Optional Vue CLI/IDE junk
 disaffected-ui/.idea/
-disaffected-ui/.vscode/
 
 # Local Docker logs
 /home/logs/
@@ -47,4 +57,27 @@ Desktop.ini
 # Secrets or personal data (optional)
 .env
 .env.*
+
+# Development and testing files
+debug_*.py
+temp_*.py
+test_*.py
+test_*.sh
+test_*.ps1
+*_test.py
+reset_*.py
+fix_*.py
+restore_*.py
+verify_*.py
+generate_*.py
+create_*.py
+
+# Temporary files and user data
+app/storage/users.json
+workload.json
+force_restart.sh
+
+# Copilot and AI assistant files
+.copilot/
+copilot/
 

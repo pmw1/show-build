@@ -26,7 +26,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    logger.info(f"Verifying password:")
+    logger.info(f"  Plain password: '{plain_password}' (type: {type(plain_password)}, length: {len(plain_password)})")
+    logger.info(f"  Hashed password: '{hashed_password}' (type: {type(hashed_password)}, length: {len(hashed_password)})")
+    logger.info(f"  Hash starts with: {hashed_password[:10] if hashed_password else 'None'}")
+    
+    try:
+        result = pwd_context.verify(plain_password, hashed_password)
+        logger.info(f"  Verification result: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"  Verification error: {e}")
+        return False
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)

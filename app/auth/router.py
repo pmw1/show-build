@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from .utils import verify_password, create_access_token, get_current_user, get_password_hash
 from .models import (
-    USERS, 
+    load_users, 
+    save_users,
+    get_user,
     UserLogin, 
     Token, 
     User, 
@@ -22,15 +24,26 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = USERS.get(form_data.username)
+    logger.info(f"Login attempt for username: {form_data.username}")
+    
+    user = get_user(form_data.username)
     if not user:
+        logger.warning(f"User not found: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    if not verify_password(form_data.password, user.hashed_password):
+    logger.info(f"User found: {user.username}, checking password...")
+    logger.info(f"Password provided: '{form_data.password}' (length: {len(form_data.password)})")
+    logger.info(f"Stored hash: {user.hashed_password[:20]}...")
+    
+    password_valid = verify_password(form_data.password, user.hashed_password)
+    logger.info(f"Password verification result: {password_valid}")
+    
+    if not password_valid:
+        logger.warning(f"Password verification failed for user: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -71,8 +84,8 @@ async def create_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can create users"
         )
-    
-    if new_user.username in USERS:
+    users = load_users()
+    if new_user.username in users:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already exists"
@@ -83,7 +96,8 @@ async def create_user(
         hashed_password=get_password_hash(new_user.password),
         access_level="user"  # Default to regular user
     )
-    USERS[user.username] = user
+    users[user.username] = user
+    save_users(users)
     
     return user
 
@@ -95,7 +109,8 @@ async def list_users(current_user: dict = Depends(get_current_user)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can list users"
         )
-    return list(USERS.values())
+    users = load_users()
+    return list(users.values())
 
 @router.post("/apikey", response_model=APIKey)
 async def create_api_key(
@@ -153,3 +168,29 @@ async def debug_api_keys(current_user: dict = Depends(get_current_user)):
     # Load keys from persistent storage
     api_keys = load_api_keys()
     return [{"key": k, "client": v.client_name} for k, v in api_keys.items()]
+
+# Debug endpoint for testing password hashing
+@router.post("/debug/hash")
+async def debug_hash_password(password: str):
+    """Debug endpoint to generate and test password hashes"""
+    from .utils import get_password_hash, verify_password
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"Debug hash request for password: '{password}'")
+    
+    # Generate hash
+    new_hash = get_password_hash(password)
+    logger.info(f"Generated hash: {new_hash}")
+    
+    # Test verification
+    verification_result = verify_password(password, new_hash)
+    logger.info(f"Verification test: {verification_result}")
+    
+    return {
+        "password": password,
+        "hash": new_hash,
+        "verification_test": verification_result,
+        "hash_length": len(new_hash),
+        "hash_prefix": new_hash[:10] if new_hash else None
+    }

@@ -2,6 +2,16 @@ import { createRouter, createWebHistory } from 'vue-router'
 import RundownManager from '@/components/RundownManager.vue'
 import DashboardView from '@/views/DashboardView.vue'
 
+// Authentication check function
+function isAuthenticated() {
+  const token = localStorage.getItem('auth-token')
+  const expiry = localStorage.getItem('auth-token-expiry')
+  
+  if (!token || !expiry) return false
+  
+  return Date.now() < parseInt(expiry)
+}
+
 const routes = [
   {
     path: '/',
@@ -40,12 +50,28 @@ const routes = [
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue')
+  },
+  {
+    path: '/profile',
+    name: 'profile',
+    component: () => import('@/views/ProfileView.vue'),
+    meta: { requiresAuth: true }
   }
 ]
 
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+// Navigation guard to check authentication
+router.beforeEach((to, from, next) => {
+  if (to.meta.requiresAuth && !isAuthenticated()) {
+    // Redirect to dashboard if not authenticated
+    next('/dashboard')
+  } else {
+    next()
+  }
 })
 
 export default router
