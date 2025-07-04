@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import RundownManager from '@/components/RundownManager.vue'
+import ContentEditor from '@/components/ContentEditor.vue'
 import DashboardView from '@/views/DashboardView.vue'
 
 // Authentication check function
@@ -34,6 +35,12 @@ const routes = [
     redirect: to => {
       return { path: `/rundown/${to.params.episode || ''}` }
     }
+  },
+  {
+    path: '/content-editor/:episode?',
+    name: 'content-editor',
+    component: ContentEditor,
+    props: true
   },
   // Add new routes for other sections
   {

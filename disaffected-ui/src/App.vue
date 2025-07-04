@@ -124,6 +124,11 @@ export default {
         to: '/rundown'
       },
       {
+        title: 'Content Editor',
+        icon: 'mdi-script-text-outline',
+        to: '/content-editor'
+      },
+      {
         title: 'Asset Manager',
         icon: 'mdi-folder',
         to: '/assets'

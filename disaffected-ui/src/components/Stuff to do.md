@@ -2,7 +2,7 @@ Stuff to do
 
 Note to Copiolot: Please change the font style to strikethrough when the task is completed.
 
-~~1. In the rundown folder of each episode there is a file called info.md which contains all of the information for that episode. The frontmatter looks like this:
+1. In the rundown folder of each episode there is a file called info.md which contains all of the information for that episode. The frontmatter looks like this:
 ---
 type: full_show
 airdate: 2025-06-29
@@ -15,9 +15,7 @@ tags:
 slug: Fuck New York
 status: production
 ---
-I think the frontmatter portion of this markdown file can be used as a central source of truth for the episode information.  Some of the fields must be calculated: episode number, duration.  There could be a very breif overview of this data in the rundown editor with a button to "edit show details" or something like that~~
-
-**COMPLETED**: Enhanced with inline editing - episode info is now prominently displayed at the top of the rundown editor with all fields directly editable (title, subtitle, duration, air date, guests, status, tags) and a save button for immediate updates without requiring a dialog.  
+I think the frontmatter portion of this markdown file can be used as a central source of truth for the episode information.  Some of the fields must be calculated: episode number, duration.  There could be a very breif overview of this data in the rundown editor with a button to "edit show details" or something like that  
 
 
 
