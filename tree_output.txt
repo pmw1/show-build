@@ -1,0 +1,767 @@
+.
+├── app
+│   ├── api_config.py
+│   ├── api_config_router.py
+│   ├── app
+│   │   └── storage
+│   │       ├── api_configs.json
+│   │       └── encryption.key
+│   ├── auth
+│   │   ├── __init__.py
+│   │   ├── models.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-310.pyc
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   ├── models.cpython-310.pyc
+│   │   │   ├── models.cpython-312.pyc
+│   │   │   ├── router.cpython-310.pyc
+│   │   │   └── utils.cpython-310.pyc
+│   │   ├── router.py
+│   │   └── utils.py
+│   ├── __init__.py
+│   ├── logs
+│   │   └── last.id
+│   ├── main.py
+│   ├── mqttcurl.sh
+│   ├── preproc_delegate.py
+│   ├── preproc_mqtt_listen.py
+│   ├── preproc_mqtt_pub.py
+│   ├── preproc-queue-sots.json
+│   ├── __pycache__
+│   │   ├── api_config.cpython-310.pyc
+│   │   ├── api_config_router.cpython-310.pyc
+│   │   ├── main.cpython-310.pyc
+│   │   ├── preproc_mqtt_listen.cpython-310.pyc
+│   │   └── preproc_mqtt_pub.cpython-310.pyc
+│   ├── requirements.txt
+│   ├── services
+│   │   ├── agentIO.py
+│   │   ├── sot_processor.py
+│   │   └── testboot.mqtt.py
+│   ├── storage
+│   │   ├── api_keys.json
+│   │   └── users.json
+│   ├── testup.sh
+│   └── utils
+│       ├── curl-test.sh
+│       ├── frontmatter_parser.py
+│       ├── id.py
+│       ├── __pycache__
+│       │   ├── frontmatter_parser.cpython-310.pyc
+│       │   ├── id.cpython-310.pyc
+│       │   └── validator.cpython-310.pyc
+│       └── validator.py
+├── AUTHENTICATION_GUIDE.md
+├── .copilot
+│   ├── python-config-update.md
+│   ├── tick.txt
+│   └── workload.json
+├── copilot
+│   ├── docs
+│   │   ├── chat.log
+│   │   ├── definitions.txt
+│   │   ├── instantiate.md
+│   │   ├── jobs.txt
+│   │   ├── notes.txt
+│   │   ├── policy.sh
+│   │   ├── read-me-first.txt
+│   │   └── read-me-first.txt.DELETE.ME
+│   ├── imported
+│   │   ├── DELETE.ME.txt
+│   │   └── README.md
+│   ├── memory.py
+│   ├── notify.py
+│   ├── policy.py
+│   ├── policy.sh
+│   ├── status
+│   │   ├── active.json
+│   │   ├── STATUS.IDLE
+│   │   └── toggle_status.sh
+│   ├── tick.py
+│   ├── ticky.py
+│   ├── workload.md
+│   ├── workload.py
+│   └── workload.sh
+├── create_users.py
+├── debug_bcrypt.py
+├── disaffected-ui
+│   ├── babel.config.js
+│   ├── cat_stuff.sh
+│   ├── COPILOT_WORKFLOW_NOTES.md
+│   ├── docs
+│   │   └── COLOR_SYSTEM_GUIDE.md
+│   ├── jsconfig.json
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── PROJECT_ARCHITECTURE_REPORT.md
+│   ├── public
+│   │   ├── css
+│   │   │   ├── 142.b5d18351.css
+│   │   │   ├── 297.39a2ef2c.css
+│   │   │   ├── 867.db50dd30.css
+│   │   │   ├── app.9268b0df.css
+│   │   │   └── chunk-vendors.cb820e62.css
+│   │   ├── favicon.ico
+│   │   ├── fonts
+│   │   │   ├── materialdesignicons-webfont.21f691f0.ttf
+│   │   │   ├── materialdesignicons-webfont.54b0f60d.woff2
+│   │   │   ├── materialdesignicons-webfont.5d875350.eot
+│   │   │   └── materialdesignicons-webfont.d671cbf6.woff
+│   │   ├── index.html
+│   │   └── js
+│   │       ├── 142.9aa4ec31.js
+│   │       ├── 142.9aa4ec31.js.map
+│   │       ├── 297.b9928a72.js
+│   │       ├── 297.b9928a72.js.map
+│   │       ├── 867.ecb6c051.js
+│   │       ├── 867.ecb6c051.js.map
+│   │       ├── 874.3913b607.js
+│   │       ├── 874.3913b607.js.map
+│   │       ├── app.cd2924ca.js
+│   │       ├── app.cd2924ca.js.map
+│   │       ├── chunk-vendors.b84947db.js
+│   │       ├── chunk-vendors.b84947db.js.map
+│   │       ├── webfontloader.aa358af7.js
+│   │       └── webfontloader.aa358af7.js.map
+│   ├── review_files.txt
+│   ├── simple-server.js
+│   ├── src
+│   │   ├── App.vue
+│   │   ├── assets
+│   │   │   ├── config
+│   │   │   │   └── colorMap.js
+│   │   │   ├── logo.png
+│   │   │   └── logo.svg
+│   │   ├── components
+│   │   │   ├── ColorSelector.md
+│   │   │   ├── ColorSelector.vue
+│   │   │   ├── content-editor
+│   │   │   │   ├── CueToolbar.vue
+│   │   │   │   ├── EditorPanel.vue
+│   │   │   │   ├── modals
+│   │   │   │   │   ├── CueModal.vue
+│   │   │   │   │   ├── GfxModal.vue
+│   │   │   │   │   └── NewItemModal.vue
+│   │   │   │   ├── RundownPanel.vue
+│   │   │   │   └── ShowInfoHeader.vue
+│   │   │   ├── content-editor.rar
+│   │   │   ├── ContentEditor.vue
+│   │   │   ├── EditorPanel.vue
+│   │   │   ├── EpisodeListTest.vue
+│   │   │   ├── EpisodeSelector.vue
+│   │   │   ├── LoginModal.vue
+│   │   │   ├── modals
+│   │   │   │   ├── AssetBrowserModal.vue
+│   │   │   │   ├── FsqModal.vue
+│   │   │   │   ├── GfxModal.vue
+│   │   │   │   ├── NatModal.vue
+│   │   │   │   ├── NewItemModal.vue
+│   │   │   │   ├── PkgModal.vue
+│   │   │   │   ├── SotModal.vue
+│   │   │   │   └── VoModal.vue
+│   │   │   ├── RundownManagerBACKUP.vue
+│   │   │   ├── RundownManager.vue
+│   │   │   ├── RundownPanel.vue
+│   │   │   └── Stuff to do.md
+│   │   ├── composables
+│   │   │   ├── useAuth.js
+│   │   │   ├── useContentEditor.js
+│   │   │   └── useEditorUtils.js
+│   │   ├── config.js
+│   │   ├── main.js
+│   │   ├── modules
+│   │   │   └── auth
+│   │   │       ├── auth.service.ts
+│   │   │       └── types.ts
+│   │   ├── modulesauth
+│   │   ├── plugins
+│   │   │   ├── vuetify.js
+│   │   │   └── webfontloader.js
+│   │   ├── router
+│   │   │   └── index.js
+│   │   ├── stores
+│   │   │   └── auth.js
+│   │   ├── utils
+│   │   │   └── themeColorMap.js
+│   │   └── views
+│   │       ├── AssetsView.vue
+│   │       ├── DashboardView.vue
+│   │       ├── ProfileView.vue
+│   │       ├── SettingsView.vue
+│   │       └── TemplatesView.vue
+│   ├── STUBS_TODO.md
+│   ├── stuff to do.md
+│   ├── STYLE_GUIDE.md
+│   ├── vite.config.js.backup
+│   └── vue.config.js
+├── docker-compose.yml
+├── Dockerfile
+├── docs
+│   ├── architecture.markdown
+│   ├── copilot_color_transition_instructions.markdown
+│   ├── copilot_instructions.markdown
+│   ├── features_and_integrations.markdown
+│   ├── migration_and_workflow.markdown
+│   ├── PROJECT_REHYDRATION.md
+│   ├── rehydration_main.markdown
+│   ├── rundown_item_types.markdown
+│   ├── setup_and_deployment.markdown
+│   ├── style_guide.markdown
+│   └── todo_and_issues.markdown
+├── find-asset-id-refs.sh
+├── fix_auth.py
+├── fix_bcrypt_hashes.py
+├── force_restart.sh
+├── .gather
+├── .gatherignore
+├── generate_hashes.py
+├── .github
+│   ├── chatmodes
+│   │   └── free-for-all.chatmode.md
+│   └── prompts
+│       └── rundown-rows.prompt.md
+├── .gitignore
+├── info.txt
+├── package.json
+├── package-lock.json
+├── README.md
+├── requirements.txt
+├── reset_users.py
+├── restart-dockers.sh
+├── restore_working_hashes.py
+├── secret.key
+├── temp_hash_gen.py
+├── test_api_auth.ps1
+├── test_api_auth.sh
+├── test_auth_direct.py
+├── test_auth.py
+├── test_auth_system.py
+├── test_login.py
+├── test_storage.py
+├── tools
+│   ├── compile-script-dev.py
+│   ├── media_job_queue.py
+│   ├── mosquitto.conf
+│   ├── paths.py
+│   ├── __pycache__
+│   │   └── paths.cpython-310.pyc
+│   └── README.md
+├── tree_output.txt
+├── tree.txt
+├── .venv
+│   ├── .gitignore
+│   ├── Include
+│   ├── Lib
+│   │   └── site-packages
+│   │       ├── pip
+│   │       │   ├── __init__.py
+│   │       │   ├── _internal
+│   │       │   │   ├── build_env.py
+│   │       │   │   ├── cache.py
+│   │       │   │   ├── cli
+│   │       │   │   │   ├── autocompletion.py
+│   │       │   │   │   ├── base_command.py
+│   │       │   │   │   ├── cmdoptions.py
+│   │       │   │   │   ├── command_context.py
+│   │       │   │   │   ├── index_command.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── main_parser.py
+│   │       │   │   │   ├── main.py
+│   │       │   │   │   ├── parser.py
+│   │       │   │   │   ├── progress_bars.py
+│   │       │   │   │   ├── req_command.py
+│   │       │   │   │   ├── spinners.py
+│   │       │   │   │   └── status_codes.py
+│   │       │   │   ├── commands
+│   │       │   │   │   ├── cache.py
+│   │       │   │   │   ├── check.py
+│   │       │   │   │   ├── completion.py
+│   │       │   │   │   ├── configuration.py
+│   │       │   │   │   ├── debug.py
+│   │       │   │   │   ├── download.py
+│   │       │   │   │   ├── freeze.py
+│   │       │   │   │   ├── hash.py
+│   │       │   │   │   ├── help.py
+│   │       │   │   │   ├── index.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── inspect.py
+│   │       │   │   │   ├── install.py
+│   │       │   │   │   ├── list.py
+│   │       │   │   │   ├── lock.py
+│   │       │   │   │   ├── search.py
+│   │       │   │   │   ├── show.py
+│   │       │   │   │   ├── uninstall.py
+│   │       │   │   │   └── wheel.py
+│   │       │   │   ├── configuration.py
+│   │       │   │   ├── distributions
+│   │       │   │   │   ├── base.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── installed.py
+│   │       │   │   │   ├── sdist.py
+│   │       │   │   │   └── wheel.py
+│   │       │   │   ├── exceptions.py
+│   │       │   │   ├── index
+│   │       │   │   │   ├── collector.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── package_finder.py
+│   │       │   │   │   └── sources.py
+│   │       │   │   ├── __init__.py
+│   │       │   │   ├── locations
+│   │       │   │   │   ├── base.py
+│   │       │   │   │   ├── _distutils.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   └── _sysconfig.py
+│   │       │   │   ├── main.py
+│   │       │   │   ├── metadata
+│   │       │   │   │   ├── base.py
+│   │       │   │   │   ├── importlib
+│   │       │   │   │   │   ├── _compat.py
+│   │       │   │   │   │   ├── _dists.py
+│   │       │   │   │   │   ├── _envs.py
+│   │       │   │   │   │   └── __init__.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── _json.py
+│   │       │   │   │   └── pkg_resources.py
+│   │       │   │   ├── models
+│   │       │   │   │   ├── candidate.py
+│   │       │   │   │   ├── direct_url.py
+│   │       │   │   │   ├── format_control.py
+│   │       │   │   │   ├── index.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── installation_report.py
+│   │       │   │   │   ├── link.py
+│   │       │   │   │   ├── pylock.py
+│   │       │   │   │   ├── scheme.py
+│   │       │   │   │   ├── search_scope.py
+│   │       │   │   │   ├── selection_prefs.py
+│   │       │   │   │   ├── target_python.py
+│   │       │   │   │   └── wheel.py
+│   │       │   │   ├── network
+│   │       │   │   │   ├── auth.py
+│   │       │   │   │   ├── cache.py
+│   │       │   │   │   ├── download.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── lazy_wheel.py
+│   │       │   │   │   ├── session.py
+│   │       │   │   │   ├── utils.py
+│   │       │   │   │   └── xmlrpc.py
+│   │       │   │   ├── operations
+│   │       │   │   │   ├── check.py
+│   │       │   │   │   ├── freeze.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── install
+│   │       │   │   │   │   ├── editable_legacy.py
+│   │       │   │   │   │   ├── __init__.py
+│   │       │   │   │   │   └── wheel.py
+│   │       │   │   │   └── prepare.py
+│   │       │   │   ├── pyproject.py
+│   │       │   │   ├── req
+│   │       │   │   │   ├── constructors.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── req_dependency_group.py
+│   │       │   │   │   ├── req_file.py
+│   │       │   │   │   ├── req_install.py
+│   │       │   │   │   ├── req_set.py
+│   │       │   │   │   └── req_uninstall.py
+│   │       │   │   ├── resolution
+│   │       │   │   │   ├── base.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── legacy
+│   │       │   │   │   │   ├── __init__.py
+│   │       │   │   │   │   └── resolver.py
+│   │       │   │   │   └── resolvelib
+│   │       │   │   │       ├── base.py
+│   │       │   │   │       ├── candidates.py
+│   │       │   │   │       ├── factory.py
+│   │       │   │   │       ├── found_candidates.py
+│   │       │   │   │       ├── __init__.py
+│   │       │   │   │       ├── provider.py
+│   │       │   │   │       ├── reporter.py
+│   │       │   │   │       ├── requirements.py
+│   │       │   │   │       └── resolver.py
+│   │       │   │   ├── self_outdated_check.py
+│   │       │   │   ├── utils
+│   │       │   │   │   ├── appdirs.py
+│   │       │   │   │   ├── compatibility_tags.py
+│   │       │   │   │   ├── compat.py
+│   │       │   │   │   ├── datetime.py
+│   │       │   │   │   ├── deprecation.py
+│   │       │   │   │   ├── direct_url_helpers.py
+│   │       │   │   │   ├── egg_link.py
+│   │       │   │   │   ├── entrypoints.py
+│   │       │   │   │   ├── filesystem.py
+│   │       │   │   │   ├── filetypes.py
+│   │       │   │   │   ├── glibc.py
+│   │       │   │   │   ├── hashes.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── _jaraco_text.py
+│   │       │   │   │   ├── logging.py
+│   │       │   │   │   ├── _log.py
+│   │       │   │   │   ├── misc.py
+│   │       │   │   │   ├── packaging.py
+│   │       │   │   │   ├── retry.py
+│   │       │   │   │   ├── setuptools_build.py
+│   │       │   │   │   ├── subprocess.py
+│   │       │   │   │   ├── temp_dir.py
+│   │       │   │   │   ├── unpacking.py
+│   │       │   │   │   ├── urls.py
+│   │       │   │   │   ├── virtualenv.py
+│   │       │   │   │   └── wheel.py
+│   │       │   │   ├── vcs
+│   │       │   │   │   ├── bazaar.py
+│   │       │   │   │   ├── git.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── mercurial.py
+│   │       │   │   │   ├── subversion.py
+│   │       │   │   │   └── versioncontrol.py
+│   │       │   │   └── wheel_builder.py
+│   │       │   ├── __main__.py
+│   │       │   ├── __pip-runner__.py
+│   │       │   ├── py.typed
+│   │       │   └── _vendor
+│   │       │       ├── cachecontrol
+│   │       │       │   ├── adapter.py
+│   │       │       │   ├── cache.py
+│   │       │       │   ├── caches
+│   │       │       │   │   ├── file_cache.py
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── redis_cache.py
+│   │       │       │   ├── _cmd.py
+│   │       │       │   ├── controller.py
+│   │       │       │   ├── filewrapper.py
+│   │       │       │   ├── heuristics.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── serialize.py
+│   │       │       │   └── wrapper.py
+│   │       │       ├── certifi
+│   │       │       │   ├── cacert.pem
+│   │       │       │   ├── core.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   └── py.typed
+│   │       │       ├── dependency_groups
+│   │       │       │   ├── _implementation.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _lint_dependency_groups.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   ├── _pip_wrapper.py
+│   │       │       │   ├── py.typed
+│   │       │       │   └── _toml_compat.py
+│   │       │       ├── distlib
+│   │       │       │   ├── compat.py
+│   │       │       │   ├── database.py
+│   │       │       │   ├── index.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── locators.py
+│   │       │       │   ├── manifest.py
+│   │       │       │   ├── markers.py
+│   │       │       │   ├── metadata.py
+│   │       │       │   ├── resources.py
+│   │       │       │   ├── scripts.py
+│   │       │       │   ├── t32.exe
+│   │       │       │   ├── t64-arm.exe
+│   │       │       │   ├── t64.exe
+│   │       │       │   ├── util.py
+│   │       │       │   ├── version.py
+│   │       │       │   ├── w32.exe
+│   │       │       │   ├── w64-arm.exe
+│   │       │       │   ├── w64.exe
+│   │       │       │   └── wheel.py
+│   │       │       ├── distro
+│   │       │       │   ├── distro.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   └── py.typed
+│   │       │       ├── idna
+│   │       │       │   ├── codec.py
+│   │       │       │   ├── compat.py
+│   │       │       │   ├── core.py
+│   │       │       │   ├── idnadata.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── intranges.py
+│   │       │       │   ├── package_data.py
+│   │       │       │   ├── py.typed
+│   │       │       │   └── uts46data.py
+│   │       │       ├── __init__.py
+│   │       │       ├── msgpack
+│   │       │       │   ├── exceptions.py
+│   │       │       │   ├── ext.py
+│   │       │       │   ├── fallback.py
+│   │       │       │   └── __init__.py
+│   │       │       ├── packaging
+│   │       │       │   ├── _elffile.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── licenses
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── _spdx.py
+│   │       │       │   ├── _manylinux.py
+│   │       │       │   ├── markers.py
+│   │       │       │   ├── metadata.py
+│   │       │       │   ├── _musllinux.py
+│   │       │       │   ├── _parser.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── requirements.py
+│   │       │       │   ├── specifiers.py
+│   │       │       │   ├── _structures.py
+│   │       │       │   ├── tags.py
+│   │       │       │   ├── _tokenizer.py
+│   │       │       │   ├── utils.py
+│   │       │       │   └── version.py
+│   │       │       ├── pkg_resources
+│   │       │       │   └── __init__.py
+│   │       │       ├── platformdirs
+│   │       │       │   ├── android.py
+│   │       │       │   ├── api.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── macos.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── unix.py
+│   │       │       │   ├── version.py
+│   │       │       │   └── windows.py
+│   │       │       ├── pygments
+│   │       │       │   ├── console.py
+│   │       │       │   ├── filter.py
+│   │       │       │   ├── filters
+│   │       │       │   │   └── __init__.py
+│   │       │       │   ├── formatter.py
+│   │       │       │   ├── formatters
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── _mapping.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── lexer.py
+│   │       │       │   ├── lexers
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   ├── _mapping.py
+│   │       │       │   │   └── python.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   ├── modeline.py
+│   │       │       │   ├── plugin.py
+│   │       │       │   ├── regexopt.py
+│   │       │       │   ├── scanner.py
+│   │       │       │   ├── sphinxext.py
+│   │       │       │   ├── style.py
+│   │       │       │   ├── styles
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── _mapping.py
+│   │       │       │   ├── token.py
+│   │       │       │   ├── unistring.py
+│   │       │       │   └── util.py
+│   │       │       ├── pyproject_hooks
+│   │       │       │   ├── _impl.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _in_process
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── _in_process.py
+│   │       │       │   └── py.typed
+│   │       │       ├── requests
+│   │       │       │   ├── adapters.py
+│   │       │       │   ├── api.py
+│   │       │       │   ├── auth.py
+│   │       │       │   ├── certs.py
+│   │       │       │   ├── compat.py
+│   │       │       │   ├── cookies.py
+│   │       │       │   ├── exceptions.py
+│   │       │       │   ├── help.py
+│   │       │       │   ├── hooks.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _internal_utils.py
+│   │       │       │   ├── models.py
+│   │       │       │   ├── packages.py
+│   │       │       │   ├── sessions.py
+│   │       │       │   ├── status_codes.py
+│   │       │       │   ├── structures.py
+│   │       │       │   ├── utils.py
+│   │       │       │   └── __version__.py
+│   │       │       ├── resolvelib
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── providers.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── reporters.py
+│   │       │       │   ├── resolvers
+│   │       │       │   │   ├── abstract.py
+│   │       │       │   │   ├── criterion.py
+│   │       │       │   │   ├── exceptions.py
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── resolution.py
+│   │       │       │   └── structs.py
+│   │       │       ├── rich
+│   │       │       │   ├── abc.py
+│   │       │       │   ├── align.py
+│   │       │       │   ├── ansi.py
+│   │       │       │   ├── bar.py
+│   │       │       │   ├── box.py
+│   │       │       │   ├── cells.py
+│   │       │       │   ├── _cell_widths.py
+│   │       │       │   ├── color.py
+│   │       │       │   ├── color_triplet.py
+│   │       │       │   ├── columns.py
+│   │       │       │   ├── console.py
+│   │       │       │   ├── constrain.py
+│   │       │       │   ├── containers.py
+│   │       │       │   ├── control.py
+│   │       │       │   ├── default_styles.py
+│   │       │       │   ├── diagnose.py
+│   │       │       │   ├── _emoji_codes.py
+│   │       │       │   ├── emoji.py
+│   │       │       │   ├── _emoji_replace.py
+│   │       │       │   ├── errors.py
+│   │       │       │   ├── _export_format.py
+│   │       │       │   ├── _extension.py
+│   │       │       │   ├── _fileno.py
+│   │       │       │   ├── file_proxy.py
+│   │       │       │   ├── filesize.py
+│   │       │       │   ├── highlighter.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _inspect.py
+│   │       │       │   ├── json.py
+│   │       │       │   ├── jupyter.py
+│   │       │       │   ├── layout.py
+│   │       │       │   ├── live.py
+│   │       │       │   ├── live_render.py
+│   │       │       │   ├── logging.py
+│   │       │       │   ├── _log_render.py
+│   │       │       │   ├── _loop.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   ├── markup.py
+│   │       │       │   ├── measure.py
+│   │       │       │   ├── _null_file.py
+│   │       │       │   ├── padding.py
+│   │       │       │   ├── pager.py
+│   │       │       │   ├── palette.py
+│   │       │       │   ├── _palettes.py
+│   │       │       │   ├── panel.py
+│   │       │       │   ├── _pick.py
+│   │       │       │   ├── pretty.py
+│   │       │       │   ├── progress_bar.py
+│   │       │       │   ├── progress.py
+│   │       │       │   ├── prompt.py
+│   │       │       │   ├── protocol.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── _ratio.py
+│   │       │       │   ├── region.py
+│   │       │       │   ├── repr.py
+│   │       │       │   ├── rule.py
+│   │       │       │   ├── scope.py
+│   │       │       │   ├── screen.py
+│   │       │       │   ├── segment.py
+│   │       │       │   ├── spinner.py
+│   │       │       │   ├── _spinners.py
+│   │       │       │   ├── _stack.py
+│   │       │       │   ├── status.py
+│   │       │       │   ├── styled.py
+│   │       │       │   ├── style.py
+│   │       │       │   ├── syntax.py
+│   │       │       │   ├── table.py
+│   │       │       │   ├── terminal_theme.py
+│   │       │       │   ├── text.py
+│   │       │       │   ├── theme.py
+│   │       │       │   ├── themes.py
+│   │       │       │   ├── _timer.py
+│   │       │       │   ├── traceback.py
+│   │       │       │   ├── tree.py
+│   │       │       │   ├── _win32_console.py
+│   │       │       │   ├── _windows.py
+│   │       │       │   ├── _windows_renderer.py
+│   │       │       │   └── _wrap.py
+│   │       │       ├── tomli
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _parser.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── _re.py
+│   │       │       │   └── _types.py
+│   │       │       ├── tomli_w
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── py.typed
+│   │       │       │   └── _writer.py
+│   │       │       ├── truststore
+│   │       │       │   ├── _api.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _macos.py
+│   │       │       │   ├── _openssl.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── _ssl_constants.py
+│   │       │       │   └── _windows.py
+│   │       │       ├── typing_extensions.py
+│   │       │       ├── urllib3
+│   │       │       │   ├── _collections.py
+│   │       │       │   ├── connectionpool.py
+│   │       │       │   ├── connection.py
+│   │       │       │   ├── contrib
+│   │       │       │   │   ├── _appengine_environ.py
+│   │       │       │   │   ├── appengine.py
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   ├── ntlmpool.py
+│   │       │       │   │   ├── pyopenssl.py
+│   │       │       │   │   ├── _securetransport
+│   │       │       │   │   │   ├── bindings.py
+│   │       │       │   │   │   ├── __init__.py
+│   │       │       │   │   │   └── low_level.py
+│   │       │       │   │   ├── securetransport.py
+│   │       │       │   │   └── socks.py
+│   │       │       │   ├── exceptions.py
+│   │       │       │   ├── fields.py
+│   │       │       │   ├── filepost.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── packages
+│   │       │       │   │   ├── backports
+│   │       │       │   │   │   ├── __init__.py
+│   │       │       │   │   │   ├── makefile.py
+│   │       │       │   │   │   └── weakref_finalize.py
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── six.py
+│   │       │       │   ├── poolmanager.py
+│   │       │       │   ├── request.py
+│   │       │       │   ├── response.py
+│   │       │       │   ├── util
+│   │       │       │   │   ├── connection.py
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   ├── proxy.py
+│   │       │       │   │   ├── queue.py
+│   │       │       │   │   ├── request.py
+│   │       │       │   │   ├── response.py
+│   │       │       │   │   ├── retry.py
+│   │       │       │   │   ├── ssl_match_hostname.py
+│   │       │       │   │   ├── ssl_.py
+│   │       │       │   │   ├── ssltransport.py
+│   │       │       │   │   ├── timeout.py
+│   │       │       │   │   ├── url.py
+│   │       │       │   │   └── wait.py
+│   │       │       │   └── _version.py
+│   │       │       └── vendor.txt
+│   │       └── pip-25.1.1.dist-info
+│   │           └── licenses
+│   │               ├── AUTHORS.txt
+│   │               └── LICENSE.txt
+│   ├── pip.pyz
+│   ├── pyvenv.cfg
+│   └── Scripts
+│       ├── activate
+│       ├── activate.bat
+│       ├── activate.fish
+│       ├── Activate.ps1
+│       ├── deactivate.bat
+│       ├── python.exe
+│       └── pythonw.exe
+├── verify_auth.py
+├── verify_setup.py
+├── .vscode
+│   ├── extensions
+│   │   └── tick-extension
+│   │       ├── copilot-tick-extension-0.0.1.vsix
+│   │       ├── out
+│   │       │   ├── extension.js
+│   │       │   └── extension.js.map
+│   │       ├── package.json
+│   │       ├── package-lock.json
+│   │       ├── README.md
+│   │       ├── src
+│   │       │   └── extension.ts
+│   │       └── tsconfig.json
+│   ├── setting.json
+│   ├── settings.json
+│   └── tasks.json
+└── workload.json
+
+108 directories, 656 files

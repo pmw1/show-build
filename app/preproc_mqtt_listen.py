@@ -3,9 +3,10 @@ import subprocess
 from paho.mqtt import client as mqtt_client
 import paho.mqtt.client as mqtt
 import threading
+import time
 
 # Constants for Mosquitto running in Docker
-MQTT_BROKER = 'MQTT Broker'  # Use your broker hostname
+MQTT_BROKER = 'mqtt-broker'  # Use your broker hostname
 MQTT_PORT = 1883
 MQTT_TOPIC = 'preprocessing/command'
 CLIENT_ID = 'Preprocessor_Listener'
@@ -26,7 +27,15 @@ class MQTTListener:
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
 
-        self.client.connect("mqtt-broker", 1883, 60)
+        connected = False
+        while not connected:
+            try:
+                self.client.connect("mqtt-broker", 1883, 60)
+                connected = True
+            except ConnectionRefusedError:
+                print("MQTT connection refused. Retrying in 5 seconds...")
+                time.sleep(5)
+
         self.client.loop_forever()
 
     def subscribe_to_topic(self, topic):

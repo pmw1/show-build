@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).parent.parent  # show-build/
 TOOLS_DIR = PROJECT_ROOT / "tools"
 
 # Episode and content paths  
-EPISODE_ROOT = PROJECT_ROOT.parent / "episodes"  # Up to process level, then episodes/
+EPISODE_ROOT = PROJECT_ROOT / "episodes"  # episodes directory under show-build
 BLUEPRINTS = TOOLS_DIR / "blueprints" / "printing"
 
 # Template paths

@@ -1,12 +1,13 @@
 <template>
   <div class="color-selector">
-    <!-- Rundown Items Table -->
+    <!-- Rundown Items Table (TWO DROPDOWNS, FIXED) -->
     <h2>Rundown Item Colors</h2>
     <table>
       <thead>
         <tr>
           <th>Type</th>
-          <th>Color</th>
+          <th>Base Color</th>
+          <th>Variant</th>
           <th>Preview</th>
         </tr>
       </thead>
@@ -15,35 +16,66 @@
           <td>{{ type }}</td>
           <td>
             <v-select
-              v-model="typeColors[type]"
-              :items="colorOptions"
-              item-title="label"
-              item-value="value"
-              group-by="group"
+              v-model="baseColor[type]"
+              :items="baseColorOptions"
+              label="Base"
               dense
               outlined
               hide-details
-              @update:model-value="updateColor(type)"
+              style="width: 110px"
+              @change="onBaseChange(type)"
+              item-title="title"
+              item-value="value"
             >
-              <template #item="{ props, item }">
-                <v-list-item v-bind="props" :title="null">
-                  <template #prepend>
-                    <span class="color-dot" :class="`bg-${item.raw.value}`"></span>
-                  </template>
-                  <v-list-item-title>{{ item.raw.label }}</v-list-item-title>
+              <template #item="{ item, props }">
+                <v-list-item v-if="item && item.value" v-bind="props">
+                  <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                  <span>{{ item.title }}</span>
                 </v-list-item>
               </template>
               <template #selection="{ item }">
-                <span class="color-dot" :class="`bg-${item.raw.value}`"></span>
-                {{ item.raw.label }}
+                <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                <span>{{ item.title }}</span>
+              </template>
+            </v-select>
+          </td>
+          <td>
+            <v-select
+              v-model="variant[type]"
+              :items="variantOptions(baseColor[type])"
+              label="Variant"
+              dense
+              outlined
+              hide-details
+              style="width: 110px"
+              :disabled="!baseColor[type]"
+            >
+              <template #item="{ item, props }">
+                <v-list-item v-if="item && item.value" v-bind="props">
+                  <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(baseColor[type] + (item.value ? ' ' + item.value : '')), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                  <span>{{ item.title }}</span>
+                </v-list-item>
+              </template>
+              <template #selection="{ item }">
+                <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(baseColor[type] + (item.value ? ' ' + item.value : '')), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                <span>{{ item.title }}</span>
               </template>
             </v-select>
           </td>
           <td>
             <div 
               class="preview-box" 
-              :class="`bg-${typeColors[type]}`"
-              :style="{ color: getTextColor(typeColors[type]) }"
+              :style="{
+                backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(getFullColor(type)), $vuetify),
+                color: getTextColor(resolveVuetifyColor(vuetifyColorNameToThemeKey(getFullColor(type)), $vuetify)),
+                width: '60px',
+                height: '28px',
+                borderRadius: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 500
+              }"
             >
               {{ type }}
             </div>
@@ -58,7 +90,8 @@
       <thead>
         <tr>
           <th>Type</th>
-          <th>Color</th>
+          <th>Base Color</th>
+          <th>Variant</th>
           <th>Preview</th>
         </tr>
       </thead>
@@ -67,32 +100,127 @@
           <td>{{ type }}</td>
           <td>
             <v-select
-              v-model="typeColors[type]"
-              :items="colorOptions"
-              item-title="label"
-              item-value="value"
-              group-by="group"
+              v-model="baseColor[type + '-interface']"
+              :items="baseColorOptions"
+              label="Base"
               dense
               outlined
               hide-details
-              @update:model-value="updateColor(type)"
+              style="width: 110px"
+              @change="onBaseChange(type + '-interface')"
+              item-title="title"
+              item-value="value"
             >
-              <template #item="{ props, item }">
-                <v-list-item v-bind="props" :title="null">
-                  <template #prepend>
-                    <span class="color-dot" :class="`bg-${item.raw.value}`"></span>
-                  </template>
-                  <v-list-item-title>{{ item.raw.label }}</v-list-item-title>
+              <template #item="{ item, props }">
+                <v-list-item v-if="item && item.value" v-bind="props">
+                  <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                  <span>{{ item.title }}</span>
                 </v-list-item>
               </template>
               <template #selection="{ item }">
-                <span class="color-dot" :class="`bg-${item.raw.value}`"></span>
-                {{ item.raw.label }}
+                <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                <span>{{ item.title }}</span>
               </template>
             </v-select>
           </td>
           <td>
-            <div class="preview-box" :class="`bg-${typeColors[type]}`"></div>
+            <v-select
+              v-model="variant[type + '-interface']"
+              :items="variantOptions(baseColor[type + '-interface'])"
+              label="Variant"
+              dense
+              outlined
+              hide-details
+              style="width: 110px"
+              :disabled="!baseColor[type + '-interface']"
+            >
+              <template #item="{ item, props }">
+                <v-list-item v-if="item && item.value" v-bind="props">
+                  <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(baseColor[type + '-interface'] + (item.value ? ' ' + item.value : '')), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                  <span>{{ item.title }}</span>
+                </v-list-item>
+              </template>
+              <template #selection="{ item }">
+                <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(baseColor[type + '-interface'] + (item.value ? ' ' + item.value : '')), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                <span>{{ item.title }}</span>
+              </template>
+            </v-select>
+          </td>
+          <td>
+            <div class="preview-box" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey((baseColor[type + '-interface'] || '') + (variant[type + '-interface'] ? ' ' + variant[type + '-interface'] : '')), $vuetify), color: getTextColor(resolveVuetifyColor(vuetifyColorNameToThemeKey((baseColor[type + '-interface'] || '') + (variant[type + '-interface'] ? ' ' + variant[type + '-interface'] : '')), $vuetify)) }">
+              {{ type }}
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Script Status Colors Table -->
+    <h2 class="mt-6">Script Status Colors</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Base Color</th>
+          <th>Variant</th>
+          <th>Preview</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="type in scriptStatusTypes" :key="type">
+          <td>{{ type }}</td>
+          <td>
+            <v-select
+              v-model="baseColor[type + '-script']"
+              :items="baseColorOptions"
+              label="Base"
+              dense
+              outlined
+              hide-details
+              style="width: 110px"
+              @change="onBaseChange(type + '-script')"
+              item-title="title"
+              item-value="value"
+            >
+              <template #item="{ item, props }">
+                <v-list-item v-if="item && item.value" v-bind="props">
+                  <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                  <span>{{ item.title }}</span>
+                </v-list-item>
+              </template>
+              <template #selection="{ item }">
+                <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                <span>{{ item.title }}</span>
+              </template>
+            </v-select>
+          </td>
+          <td>
+            <v-select
+              v-model="variant[type + '-script']"
+              :items="variantOptions(baseColor[type + '-script'])"
+              label="Variant"
+              dense
+              outlined
+              hide-details
+              style="width: 110px"
+              :disabled="!baseColor[type + '-script']"
+            >
+              <template #item="{ item, props }">
+                <v-list-item v-if="item && item.value" v-bind="props">
+                  <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(baseColor[type + '-script'] + (item.value ? ' ' + item.value : '')), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                  <span>{{ item.title }}</span>
+                </v-list-item>
+              </template>
+              <template #selection="{ item }">
+                <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(baseColor[type + '-script'] + (item.value ? ' ' + item.value : '')), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                <span>{{ item.title }}</span>
+              </template>
+            </v-select>
+          </td>
+          <td>
+            <div class="preview-box" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey((baseColor[type + '-script'] || '') + (variant[type + '-script'] ? ' ' + variant[type + '-script'] : '')), $vuetify), color: getTextColor(resolveVuetifyColor(vuetifyColorNameToThemeKey((baseColor[type + '-script'] || '') + (variant[type + '-script'] ? ' ' + variant[type + '-script'] : '')), $vuetify)) }">
+              {{ type }}
+            </div>
           </td>
         </tr>
       </tbody>
@@ -136,363 +264,161 @@
 </template>
 
 <script>
-import { useTheme } from 'vuetify'
-import { getColorValue, updateColor } from '../utils/themeColorMap'
+import { resolveVuetifyColor, updateColor, getColorValue } from '../utils/themeColorMap';
+import { debounce } from 'lodash-es';
 
 export default {
-  setup() {
-    const theme = useTheme()
-    return { theme }
-  },
   data() {
     return {
-      rundownTypes: ['Advert', 'CTA', 'Promo', 'Segment', 'Trans'],
-      interfaceTypes: ['Selection', 'Hover', 'Highlight', 'Dropline', 'DragLight'],  // Added Selection and Hover
+      rundownTypes: ['segment', 'ad', 'promo', 'cta', 'trans'],
+      interfaceTypes: ['Selection', 'Hover', 'Highlight', 'Dropline', 'DragLight'],
+      scriptStatusTypes: ['Draft', 'Approved', 'Production', 'Completed'],
       typeColors: {},
       showConfirmation: false,
       isSaving: false,
-      colorOptions: [
-        // Red family
-        { label: 'Red', value: 'red-base', group: 'Red Colors' },
-        { label: 'Red Accent', value: 'red-accent', group: 'Red Colors' },
-        { label: 'Red Dark', value: 'red-dark', group: 'Red Colors' },
-        { label: 'Red Light', value: 'red-light', group: 'Red Colors' },
-        
-        // Deep Purple family
-        { label: 'Deep Purple', value: 'deep-purple-base', group: 'Deep Purple Colors' },
-        { label: 'Deep Purple Accent', value: 'deep-purple-accent', group: 'Deep Purple Colors' },
-        { label: 'Deep Purple Dark', value: 'deep-purple-dark', group: 'Deep Purple Colors' },
-        { label: 'Deep Purple Light', value: 'deep-purple-light', group: 'Deep Purple Colors' },
-
-        // Blue family
-        { label: 'Blue', value: 'blue-base', group: 'Blue Colors' },
-        { label: 'Blue Accent', value: 'blue-accent', group: 'Blue Colors' },
-        { label: 'Blue Dark', value: 'blue-dark', group: 'Blue Colors' },
-        { label: 'Blue Light', value: 'blue-light', group: 'Blue Colors' },
-
-        // Indigo family
-        { label: 'Indigo', value: 'indigo-base', group: 'Indigo Colors' },
-        { label: 'Indigo Accent', value: 'indigo-accent', group: 'Indigo Colors' },
-        { label: 'Indigo Dark', value: 'indigo-dark', group: 'Indigo Colors' },
-        { label: 'Indigo Light', value: 'indigo-light', group: 'Indigo Colors' },
-
-        // Teal family
-        { label: 'Teal', value: 'teal-base', group: 'Teal Colors' },
-        { label: 'Teal Accent', value: 'teal-accent', group: 'Teal Colors' },
-        { label: 'Teal Dark', value: 'teal-dark', group: 'Teal Colors' },
-        { label: 'Teal Light', value: 'teal-light', group: 'Teal Colors' },
-
-        // Green family
-        { label: 'Green', value: 'green-base', group: 'Green Colors' },
-        { label: 'Green Accent', value: 'green-accent', group: 'Green Colors' },
-        { label: 'Green Dark', value: 'green-dark', group: 'Green Colors' },
-        { label: 'Green Light', value: 'green-light', group: 'Green Colors' },
-
-        // Lime family
-        { label: 'Lime', value: 'lime-base', group: 'Lime Colors' },
-        { label: 'Lime Accent', value: 'lime-accent', group: 'Lime Colors' },
-        { label: 'Lime Dark', value: 'lime-dark', group: 'Lime Colors' },
-        { label: 'Lime Light', value: 'lime-light', group: 'Lime Colors' },
-
-        // Yellow family
-        { label: 'Yellow', value: 'yellow-base', group: 'Yellow Colors' },
-        { label: 'Yellow Accent', value: 'yellow-accent', group: 'Yellow Colors' },
-        { label: 'Yellow Dark', value: 'yellow-dark', group: 'Yellow Colors' },
-        { label: 'Yellow Light', value: 'yellow-light', group: 'Yellow Colors' },
-
-        // Orange family
-        { label: 'Orange', value: 'orange-base', group: 'Orange Colors' },
-        { label: 'Orange Accent', value: 'orange-accent', group: 'Orange Colors' },
-        { label: 'Orange Dark', value: 'orange-dark', group: 'Orange Colors' },
-        { label: 'Orange Light', value: 'orange-light', group: 'Orange Colors' },
-
-        // Pink family
-        { label: 'Pink', value: 'pink-base', group: 'Pink Colors' },
-        { label: 'Pink Accent', value: 'pink-accent', group: 'Pink Colors' },
-        { label: 'Pink Dark', value: 'pink-dark', group: 'Pink Colors' },
-        { label: 'Pink Light', value: 'pink-light', group: 'Pink Colors' },
-
-        // Purple family
-        { label: 'Purple', value: 'purple-base', group: 'Purple Colors' },
-        { label: 'Purple Accent', value: 'purple-accent', group: 'Purple Colors' },
-        { label: 'Purple Dark', value: 'purple-dark', group: 'Purple Colors' },
-        { label: 'Purple Light', value: 'purple-light', group: 'Purple Colors' },
-
-        // Cyan family
-        { label: 'Cyan', value: 'cyan-base', group: 'Cyan Colors' },
-        { label: 'Cyan Accent', value: 'cyan-accent', group: 'Cyan Colors' },
-        { label: 'Cyan Dark', value: 'cyan-dark', group: 'Cyan Colors' },
-        { label: 'Cyan Light', value: 'cyan-light', group: 'Cyan Colors' },
-
-        // Grey family
-        { label: 'Grey', value: 'grey-base', group: 'Grey Colors' },
-        { label: 'Grey Accent', value: 'grey-accent', group: 'Grey Colors' },
-        { label: 'Grey Dark', value: 'grey-dark', group: 'Grey Colors' },
-        { label: 'Grey Light', value: 'grey-light', group: 'Grey Colors' }
-      ]
+      baseColor: {},
+      variant: {},
     }
+  },
+  computed: {
+    themeColors() {
+      const theme = this.$vuetify?.theme?.themes?.light;
+      return theme ? Object.keys(theme.colors || {}) : [];
+    },
+    baseColorOptions() {
+      const theme = this.$vuetify?.theme?.themes?.light?.colors || {};
+      return Object.entries(theme).map(([key]) => ({
+        title: key.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        value: key,
+      }));
+    },
+    variantOptions() {
+      // Returns a function to get variant options for a base
+      return () => {
+        const variants = ['base', 'lighten-1', 'lighten-2', 'lighten-3', 'lighten-4', 'darken-1', 'darken-2', 'darken-3', 'darken-4'];
+        return variants.map(v => ({ title: v, value: v }));
+      };
+    },
   },
   methods: {
-    updateColor(type, newColor) {
-      console.log("[DEBUG] ColorSelector updating:", { type, newColor });
-      
-      // Handle both direct calls and v-select updates
-      const colorToApply = newColor || this.typeColors[type];
-      
-      if (colorToApply) {
-        // Update color map and return result
-        const result = updateColor(type.toLowerCase(), colorToApply);
-        console.log("[DEBUG] Color update result:", { 
-          type, 
-          color: colorToApply, 
-          success: result 
-        });
-        return result;
-      }
+    resolveVuetifyColor,
+    vuetifyColorNameToThemeKey(name) {
+      if (!name) return '';
+      const parts = name.toLowerCase().split(' ');
+      const base = parts[0];
+      const variant = parts.length > 1 ? parts.slice(1).join('-') : '';
+      return variant ? `${base}-${variant}` : base;
     },
-    
-    async saveColors() {
-      this.isSaving = true
-      try {
-        // Maybe add validation or API sync here
-        console.log('Colors already saved in map')
-        this.showConfirmation = true
-      } finally {
-        this.isSaving = false
-      }
+    onBaseChange(type) {
+      // When base color changes, reset the variant
+      this.variant[type] = null;
     },
-    
-    // Add this new method
-    getTextColor(backgroundColor) {
-      // Extract color values from background class
-      const colorMap = {
-        'light': '#ffffff',
-        'dark': '#000000',
-        'base': '#424242',
-        'accent': '#212121'
-      };
-      
-      const bgColor = colorMap[backgroundColor.split('-').pop()] || '#424242';
-      
-      // Calculate relative luminance
-      const hex = bgColor.replace('#', '');
-      const r = parseInt(hex.substr(0, 2), 16) / 255;
-      const g = parseInt(hex.substr(2, 2), 16) / 255;
-      const b = parseInt(hex.substr(4, 2), 16) / 255;
-      const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
-      
-      // Return white for dark backgrounds, black for light backgrounds
-      return luminance > 0.5 ? 'rgba(0, 0, 0, 0.87)' : '#ffffff';
-    }
+    getFullColor(type) {
+      const base = this.baseColor[type];
+      const variant = this.variant[type];
+      if (!base) return null;
+      return variant ? `${base} ${variant}` : base;
+    },
+    getTextColor(bgColor) {
+      // Basic logic to determine if text should be black or white
+      if (!bgColor) return '#000000';
+      const color = (bgColor.charAt(0) === '#') ? bgColor.substring(1, 7) : bgColor;
+      const r = parseInt(color.substring(0, 2), 16);
+      const g = parseInt(color.substring(2, 4), 16);
+      const b = parseInt(color.substring(4, 6), 16);
+      return (((r * 0.299) + (g * 0.587) + (b * 0.114)) > 186) ? '#000000' : '#FFFFFF';
+    },
+    initializeColors() {
+      const allTypes = [
+        ...this.rundownTypes,
+        ...this.interfaceTypes.map(t => t + '-interface'),
+        ...this.scriptStatusTypes.map(t => t + '-script'),
+      ];
+
+      allTypes.forEach(type => {
+        const colorValue = getColorValue(type); // Get color from central config
+        if (colorValue) {
+          const parts = colorValue.split(' ');
+          this.baseColor[type] = parts[0] || null;
+          this.variant[type] = parts[1] || null;
+        } else {
+          this.baseColor[type] = null;
+          this.variant[type] = null;
+        }
+      });
+    },
+    saveColors: debounce(function () {
+      this.isSaving = true;
+      const allTypes = [
+        ...this.rundownTypes,
+        ...this.interfaceTypes.map(t => t + '-interface'),
+        ...this.scriptStatusTypes.map(t => t + '-script'),
+      ];
+
+      allTypes.forEach(type => {
+        const fullColor = this.getFullColor(type);
+        if (fullColor) {
+          updateColor(type, fullColor); // Update central config
+        }
+      });
+
+      setTimeout(() => {
+        this.isSaving = false;
+        this.showConfirmation = true;
+      }, 1000);
+    }, 1000),
   },
   created() {
-    // Initialize all types with their stored or default colors
-    [...this.rundownTypes, ...this.interfaceTypes].forEach(type => {
-      // Get color from theme color map
-      const colorValue = getColorValue(type)
-      
-      // Set initial color in component state
-      this.typeColors[type] = colorValue
-      
-      // Store in localStorage if not present
-      if (!localStorage.getItem(`color_${type}`)) {
-        updateColor(type, colorValue)
-      }
-    })
-  }
-}
+    this.initializeColors();
+  },
+  mounted() {
+    // this.initializeColors();
+  },
+};
 </script>
 
-<style>
-/* Base table styles */
-.color-selector table {
+<style scoped>
+.color-selector {
+  padding: 1rem;
+  background-color: #1E1E1E;
+  color: #FFFFFF;
+}
+h2 {
+  border-bottom: 1px solid #444;
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+  font-weight: 500;
+}
+table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
-  border: 1px solid #e0e0e0;
-  margin: 0.5em;  /* Increased from 0.25em */
 }
-
-/* Container margins */
-.color-selector {
-  margin: 0.5em;  /* Increased from 0.25em */
-  width: calc(100% - 1em);  /* Adjust width to account for larger margins */
-}
-
-/* Header styling */
-th {
-  background-color: #2c3e50;  /* Darker background */
-  color: white;              /* White text */
-  font-weight: 600;         /* Bolder text */
-  height: 2.5em;           /* Increased from 2em to 2.5em */
-  border: 1px solid #1a2634; /* Darker border */
+th, td {
+  border: 1px solid #333;
+  padding: 8px;
   text-align: left;
-  padding: 0 8px;
-  font-size: 0.875rem;      /* Slightly larger text */
-  text-transform: uppercase; /* Optional: makes headers more distinct */
-  letter-spacing: 0.05em;   /* Optional: better readability */
 }
-
-/* Optional: Add subtle transition on hover */
-th:hover {
-  background-color: #34495e;
+th {
+  background-color: #2a2a2a;
 }
-
-/* Cell borders and alignment */
-td {
-  border: 1px solid #e0e0e0;
-  height: 20px;  /* Reduced from 25px */
-  padding: 0;
-  vertical-align: middle;
-  font-size: 0.75rem;
-}
-
-/* Type label cell */
-td:first-child {
-  width: 15%;
-  text-align: center;
-  font-weight: 500;
-  padding: 0 4px;
-  font-size: 1.1em;  /* Increased from 0.75rem */
-  color: rgba(0, 0, 0, 0.87);  /* Better contrast */
-  letter-spacing: 0.01em;  /* Slightly better readability */
-}
-
-/* Dropdown cell with tighter v-select positioning */
-td:nth-child(2) {
-  width: 65%;
-  padding: 0;
-  position: relative;
-}
-
-/* Preview cell */
-td:last-child {
-  width: 20%;
-  padding: 0;
-  position: relative;
-}
-
-/* Preview box - full height and width */
 .preview-box {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-align: center;
+  font-weight: bold;
+  width: 100px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 500;
-  transition: all 0.2s ease;
+  border: 1px solid #000;
 }
-
-/* Force v-select to fill cell with no spacing */
-:deep(.v-select) {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  margin: 0;
-  padding: 0;
-  height: 100% !important;
-}
-
-/* Remove internal field spacing */
-:deep(.v-field) {
-  border-radius: 0;
-  height: 100% !important;
-  min-height: unset !important;
-  --v-field-padding-top: 0 !important;
-  --v-field-padding-bottom: 0 !important;
-}
-
-/* Control input container spacing */
-:deep(.v-field__input) {
-  padding: 0 4px !important;
-  min-height: unset !important;
-  height: 100% !important;
-  color: rgba(0, 0, 0, 0.87) !important;
-}
-
-/* Adjust field layout */
-:deep(.v-field__field) {
-  padding: 0 !important;
-  min-height: unset !important;
-  height: 100% !important;
-}
-
-/* Control input wrapper */
-:deep(.v-input__control) {
-  height: 100% !important;
-  min-height: unset !important;
-}
-
-/* Adjust input text size */
-:deep(.v-field__input, .v-select__content) {
-  font-size: 0.75rem;  /* Even smaller font */
-}
-
-/* Color dot adjustments */
-.color-dot {
-  width: 12px;  /* Even smaller */
-  height: 12px;  /* Even smaller */
-  border-radius: 50%;
-  margin-right: 4px;  /* Less margin */
-}
-
-/* Add spacing between tables */
-h2.mt-6 {
-  margin-top: 24px;
-}
-
-.mt-4 {
-  margin-top: 16px;
-}
-
-/* Remove v-select top padding */
-:deep(.v-field.v-field--variant-filled) {
-  padding-top: 0 !important;
-  --v-field-padding-top: 0 !important;
-}
-
-:deep(.v-input.v-select) {
-  padding-top: 0 !important;
-}
-
-:deep(.v-field__field) {
-  padding-top: 0 !important;
-}
-
-:deep(.v-field__input) {
-  padding-top: 0 !important;
-  min-height: 20px !important;  /* Match new height */
-  line-height: 20px !important; /* Match new height */
-}
-
-:deep(.v-select__selection) {
-  padding-top: 0 !important;
-  margin-top: 0 !important;
-  line-height: 20px !important; /* Match new height */
-  color: rgba(0, 0, 0, 0.87);
-  font-weight: 500;
-}
-
-/* Ensure content is vertically centered */
-:deep(.v-field__input > *) {
-  margin: auto 0 !important;
-}
-
-/* Specific selector for v-text-field in color column */
-td:nth-child(2) :deep(.v-text-field) {
-  padding-top: 0 !important;
-  margin-top: 0 !important;
-}
-
-/* Additional specificity for the input wrapper */
-td:nth-child(2) :deep(.v-input.v-text-field.v-select) {
-  padding-top: 0 !important;
-  margin-top: 0 !important;
+.color-swatch {
+  width: 20px;
+  height: 20px;
+  display: inline-block;
+  margin-right: 8px;
+  border-radius: 3px;
+  border: 1px solid #555;
 }
 </style>

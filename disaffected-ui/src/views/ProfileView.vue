@@ -135,29 +135,17 @@
 </template>
 
 <script>
-import axios from 'axios'
+import { useAuth } from '@/composables/useAuth'
+import { useRouter } from 'vue-router'
+import { onMounted } from 'vue'
 
 export default {
   name: 'ProfileView',
-  data() {
-    return {
-      user: {}
-    }
-  },
-  mounted() {
-    this.loadUserData()
-  },
-  methods: {
-    loadUserData() {
-      const userData = localStorage.getItem('user-data')
-      if (userData) {
-        this.user = JSON.parse(userData)
-      } else {
-        // Redirect to login if no user data
-        this.$router.push('/')
-      }
-    },
-    getAccessLevelColor(level) {
+  setup() {
+    const { currentUser, handleLogout } = useAuth()
+    const router = useRouter()
+    
+    const getAccessLevelColor = (level) => {
       switch (level) {
         case 'admin':
           return 'error'
@@ -168,32 +156,39 @@ export default {
         default:
           return 'grey'
       }
-    },
-    getTokenExpiry() {
+    }
+    
+    const getTokenExpiry = () => {
       const expiry = localStorage.getItem('auth-token-expiry')
       if (expiry) {
         const expiryDate = new Date(parseInt(expiry))
         return expiryDate.toLocaleString()
       }
       return 'Unknown'
-    },
-    getBrowserInfo() {
+    }
+    
+    const getBrowserInfo = () => {
       return navigator.userAgent.split(' ').slice(-2).join(' ')
-    },
-    handleLogout() {
-      // Clear auth data
-      localStorage.removeItem('auth-token')
-      localStorage.removeItem('auth-token-expiry')
-      localStorage.removeItem('user-data')
-      
-      // Clear axios auth header
-      delete axios.defaults.headers.common['Authorization']
-      
-      // Redirect to dashboard
-      this.$router.push('/dashboard')
-      
-      // Force page reload to update auth state in App.vue
+    }
+    
+    const handleUserLogout = () => {
+      handleLogout()
+      router.push('/dashboard')
       window.location.reload()
+    }
+    
+    onMounted(() => {
+      if (!currentUser.value || Object.keys(currentUser.value).length === 0) {
+        router.push('/')
+      }
+    })
+    
+    return {
+      user: currentUser,
+      getAccessLevelColor,
+      getTokenExpiry,
+      getBrowserInfo,
+      handleLogout: handleUserLogout
     }
   }
 }

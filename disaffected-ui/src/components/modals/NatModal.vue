@@ -1,26 +1,62 @@
 <template>
-  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="600">
+  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="500">
     <v-card>
-      <v-card-title>Add NAT (Natural Sound)</v-card-title>
+      <v-card-title>Add Natural Sound (NAT) Cue</v-card-title>
       <v-card-text>
-        <!-- NAT fields will be populated based on user's next message -->
-        <p class="text-caption">NAT modal fields coming soon...</p>
+        <v-text-field v-model="slug" label="Slug" required :rules="[v => !!v || 'Slug is required', v => !duplicateSlugs.includes(v) || 'Slug must be unique']"></v-text-field>
+        <v-textarea v-model="description" label="Description" required :rules="[v => !!v || 'Description is required']" rows="4"></v-textarea>
+        <v-text-field v-model="duration" label="Duration (HH:MM:SS)" required :rules="[v => /^\d{2}:\d{2}:\d{2}$/.test(v) || 'Format must be HH:MM:SS']"></v-text-field>
+        <v-text-field v-model="timestamp" label="Timestamp (HH:MM:SS, optional)" :rules="[v => !v || /^\d{2}:\d{2}:\d{2}$/.test(v) || 'Format must be HH:MM:SS']"></v-text-field>
+        <v-file-input label="Audio File (optional)" accept="audio/mp3,audio/wav" @change="file = $event"></v-file-input>
       </v-card-text>
       <v-card-actions>
         <v-spacer></v-spacer>
-        <v-btn color="primary" @click="$emit('submit')">Insert</v-btn>
-        <v-btn color="secondary" @click="$emit('update:show', false)">Cancel</v-btn>
+        <v-btn color="error" @click="$emit('update:show', false)">Cancel</v-btn>
+        <v-btn color="success" @click="submit" :disabled="!slug || !description || !duration">Submit</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
 </template>
-
 <script>
+import axios from 'axios';
 export default {
   name: 'NatModal',
-  props: {
-    show: { type: Boolean, required: true },
+  props: { show: Boolean, episode: String, duplicateSlugs: Array },
+  data() { return { slug: '', description: '', duration: '', timestamp: '', file: null }; },
+  methods: {
+    async submit() {
+      const normalizedSlug = this.slug.toLowerCase().replace(/['".,!?]/g, '').replace(/\s+/g, '-');
+      try {
+        const formData = new FormData();
+        formData.append('type', 'nat');
+        formData.append('slug', normalizedSlug);
+        const response = await axios.post('http://192.168.51.210:8888/next-id', formData, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
+        });
+        const assetID = response.data.id;
+        let mediaURL = '';
+        if (this.file) {
+          const uploadForm = new FormData();
+          uploadForm.append('type', 'nat');
+          uploadForm.append('episode', this.episode);
+          uploadForm.append('asset_id', assetID);
+          uploadForm.append('file', this.file);
+          uploadForm.append('slug', normalizedSlug);
+          uploadForm.append('duration', this.duration);
+          uploadForm.append('timestamp', this.timestamp || '00:00:00');
+          await axios.post('http://192.168.51.210:8888/preproc_nat', uploadForm, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
+          });
+          mediaURL = `episodes/${this.episode}/assets/audio/${normalizedSlug}.${this.file.name.split('.').pop()}`;
+        }
+        this.$emit('submit', { description: this.description, duration: this.duration, timestamp: this.timestamp, slug: normalizedSlug, assetID, mediaURL });
+        this.$toast.success('NAT cue added');
+        this.reset();
+      } catch (error) { this.$toast.error('Failed to add NAT cue'); }
+    },
+    reset() { this.slug = ''; this.description = ''; this.duration = ''; this.timestamp = ''; this.file = null; this.$emit('update:show', false); }
   },
-  emits: ['update:show', 'submit'],
-};
+  watch: { show(val) { if (!val) this.reset(); } }
+}
 </script>
+<style scoped>.v-card { padding: 16px; }</style>

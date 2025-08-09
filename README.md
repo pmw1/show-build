@@ -23,7 +23,7 @@ The `tools/` directory contains Python utilities with centralized path managemen
 To add new Python tools, import from `paths.py` for consistent path management:
 ```python
 from paths import EPISODE_ROOT, BLUEPRINTS, VALID_CUE_TYPES
-```media automation environment, delivering a web-based platform to enhance media production efficiency. It integrates with Obsidian and other markdown workflows, aiming to streamline segment management across the production lifecycle.
+```media automation environment, delivering a web-based platform to enhance media production efficiency. **As the system matures, it will phase out Obsidian dependencies** and become the primary content creation platform, streamlining segment management across the production lifecycle with broadcast-specific features.
 
 📚 Table of Contents
 
@@ -33,6 +33,7 @@ from paths import EPISODE_ROOT, BLUEPRINTS, VALID_CUE_TYPES
 🖥️ Setup and Installation
 🚀 Usage
 🌈 Features
+📖 Documentation
 🎯 Major Goals
 📋 Project Status and Next Steps
 👉 Future Enhancements
@@ -46,7 +47,7 @@ from paths import EPISODE_ROOT, BLUEPRINTS, VALID_CUE_TYPES
 
 
 🧠 Overview
-Show-Build is a foundational tool within the Disaffected media ecosystem, designed to empower producers, editors, and creators by centralizing episode rundown management. It leverages markdown integration for editorial flexibility and supports automated workflows to reduce manual effort, with a vision to revolutionize media production through scalability and collaboration.
+Show-Build is a foundational tool within the Disaffected media ecosystem, designed to **replace Obsidian with a broadcast-focused UI** while maintaining **complete file format compatibility**. The system provides producers, editors, and creators with a unified broadcast-focused application that operates on **the same markdown files and organizational structure as Obsidian**, enabling seamless transition without data migration. The vision is to revolutionize media production through a purpose-built interface while preserving existing content workflows and file structures.
 Current State and Roadmap
 While the ultimate vision includes advanced features like automated metadata tagging and live content distribution, Show-Build is currently in an early phase. As of June 12, 2025, 06:55 PM EDT, development focuses on enhancing the RundownManager with Vuetify color coding. The immediate next step is to deploy a basic Vuetify template, integrating RundownManager into a broader interface with tools like ColorSelector and HelloWorld, building toward a comprehensive dashboard. Future iterations will tackle transcription outcues, multi-platform exports, and more.
 
@@ -55,8 +56,8 @@ While the ultimate vision includes advanced features like automated metadata tag
 Frontend: Vue 3, Vuetify 3, vuedraggable, Axios.
 Backend: FastAPI, Python 3.11, Pydantic, MQTT (paho-mqtt), ffmpeg-python.
 Containerization: Docker, Docker Compose.
-Database/Storage: File-based (markdown in /mnt/sync/disaffected/episodes/).
-Integration: Obsidian and other markdown-based systems for markdown management.
+Database/Storage: **Obsidian-compatible markdown files** in `/mnt/sync/disaffected/episodes/` (maintains full file format compatibility).
+Integration: **Direct file compatibility** with Obsidian (no conversion required).
 
 Dependencies
 
@@ -90,12 +91,24 @@ show-build/
 │   │   │   └── logo.svg
 │   │   ├── components/   # Reusable Vue components
 │   │   │   ├── ColorSelector.vue
-│   │   │   ├── HelloWorld.vue
+│   │   │   ├── ContentEditor.vue
+│   │   │   ├── EditorPanel.vue
 │   │   │   ├── RundownManager.vue
-│   │   │   └── RundownManagerBACKUP.vue
+│   │   │   ├── modals/
+│   │   │   │   ├── AssetBrowserModal.vue
+│   │   │   │   ├── GfxModal.vue
+│   │   │   │   ├── FsqModal.vue
+│   │   │   │   ├── SotModal.vue
+│   │   │   │   ├── VoModal.vue
+│   │   │   │   ├── NatModal.vue
+│   │   │   │   ├── PkgModal.vue
+│   │   │   │   ├── NewItemModal.vue
+│   │   │   │   └── TemplateManagerModal.vue
 │   │   ├── router/       # Routing configuration
 │   │   │   └── index.js
-│   │   ├── views/        # View components (currently empty)
+│   │   ├── views/        # View components
+│   │   │   ├── AssetsView.vue
+│   │   │   └── TemplatesView.vue
 │   │   ├── App.vue       # Root component
 │   │   └── main.js       # Vue app entry point
 │   ├── babel.config.js   # Babel configuration
@@ -152,24 +165,65 @@ Access at http://192.168.51.210:8080.
 
 🚀 Usage
 
-Navigate to http://192.168.51.210:8080/rundown-manager/0225 to manage episode 0225.
-Use the episode selector to switch episodes (e.g., 0226, 0227).
-Drag and drop segments to reorder, then click “Save & Commit” to persist changes.
-View segment metadata (title, ID, length) and colors based on segment type.
-
+Navigate to http://192.168.51.210:8080/ to access the main dashboard.
 
 🌈 Features
 
-Drag-and-Drop Reordering: Reorder segments with vuedraggable.
-Episode Management: Select and load different episode rundowns.
-API Endpoints: 
-GET /rundown/{episode}: Fetch segment metadata.
-POST /rundown/{episode}/reorder: Update segment order in markdown.
-POST /proc_vid: Upload and process video files.
-POST /publish/, GET /listen/: MQTT messaging.
+- **Drag-and-Drop Reordering**: Reorder segments with vuedraggable.
+- **Episode Management**: Select and load different episode rundowns.
+- **Modal-based Cue Editing**: Dedicated modals for `VO`, `NAT`, `PKG`, `GFX`, `FSQ`, and `SOT` cues.
+- **Asset Management**: A dedicated view for managing project assets, with support for upload, deletion, and preview.
+- **Template Management**: A dedicated view for managing templates.
+- **Virtual Scrolling**: Efficiently renders long rundowns.
+- **API Endpoints**: 
+  - `GET /rundown/{episode}`: Fetch segment metadata.
+  - `POST /rundown/{episode}/reorder`: Update segment order in markdown.
+  - `POST /proc_vid`: Upload and process video files.
+  - `POST /publish/`, `GET /listen/`: MQTT messaging.
+  - `GET, POST /assets/`: Manage assets.
+  - `GET, POST /templates/`: Manage templates.
+- **File Compatibility**: Maintains Obsidian markdown format and organizational structure (same files, enhanced UI).
 
 
-Obsidian Integration: Markdown files updated with order: field.
+## 📖 Documentation
+
+### Content Type References
+
+The system supports two complementary content management approaches, each with detailed specifications:
+
+#### **[Rundown Item Types Reference](./docs/RUNDOWN_ITEM_TYPES_REFERENCE.md)**
+Complete specification for the five primary structural elements of broadcast rundowns:
+- **ad** - Advertisement blocks with customer and sponsor metadata
+- **cta** - Call to action prompts for audience engagement  
+- **promo** - Promotional content for shows and events
+- **segment** - Main content blocks (interviews, discussions, features)
+- **trans** - Transition elements with audio and timing metadata
+
+*Uses YAML front matter templates stored as individual Markdown files.*
+
+#### **[Cue Types Reference](./docs/CUE_TYPES_REFERENCE.md)**
+Specification for inline media cues embedded within content:
+- **GFX** - Graphics cues (logos, lower thirds, charts)
+- **FSQ** - Full Screen Quote overlays with attribution
+- **SOT** - Sound on Tape video/audio clips with trimming and transcription
+
+*Embedded inline within rundown content using structured block syntax.*
+
+#### **[Obsidian Migration Guide](./docs/obsidian_integration.md)**
+Transition strategy from Obsidian workflows to native Show-Build content management:
+- Migration phases and timeline
+- Content structure preservation
+- User training and adoption strategies
+
+#### **[Project Rehydration](./docs/PROJECT_REHYDRATION.md)**
+Comprehensive technical documentation covering:
+- Architecture overview and system integration
+- Content Editor implementation details
+- Network configuration and deployment setup
+- Current working configuration and startup procedures
+
+### For Developers
+These reference documents provide complete field specifications, implementation examples, and integration guidance for extending the content management system.
 
 
 🎯 Major Goals
@@ -260,4 +314,30 @@ Next: Plan for v0.3.0 with transcription outcues and frontend Dockerization.
 
 📝 License
 [MIT License] - See LICENSE file for details (add a LICENSE file if needed).
+
+# Disaffected Production Suite
+
+The Disaffected Production Suite is an evolution of the Show-Build project, integrating advanced media management features and real-time collaboration tools for a comprehensive production experience.
+
+## Key Features
+
+- **Rundown Management**: Create, reorder, and manage rundown items, including cues for VO, NAT, PKG, GFX, and more.
+- **Real-time Collaboration**: (Future) Support for multiple users working on the same rundown.
+- **Asset Management**: Upload, browse, and manage media assets.
+- **Template Management**: Create and reuse templates for common rundown items.
+- **Obsidian Integration**: Seamlessly sync content with Obsidian for a powerful note-taking and scripting workflow.
+
+## Current Status (As of July 9, 2025)
+
+The project is nearing production-readiness. Key features implemented include:
+
+- **Full-featured Cue Modals**: `VO`, `NAT`, and `PKG` cues can be added with complete metadata and media file uploads.
+- **Virtual Scrolling**: The rundown view (`RundownManager.vue`) now uses virtual scrolling for efficient handling of large rundowns.
+- **Asset and Template Management**: The `AssetsView.vue` and `TemplatesView.vue` pages are now fully implemented with CRUD functionality.
+- **Standardized Modal Naming**: Modal invocation in `ContentEditor.vue` and `EditorPanel.vue` has been standardized for better maintainability.
+- **Obsidian Plugin Alignment**: The frontend (`main.js`) and the Obsidian plugin now share a unified event bus and cue type definitions, ensuring compatibility.
+
+## Getting Started
+
+// ...existing code...
 

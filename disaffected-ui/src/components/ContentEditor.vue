@@ -1,95 +1,135 @@
 <template>
-  <div class="content-editor-container">
-    <!-- Show Information Header -->
-    <div class="show-info-header-fixed">
-      <ShowInfoHeader
-        :current-show-title="currentShowTitle"
-        :current-episode-info="currentEpisodeInfo"
-        :current-episode-number="currentEpisodeNumber"
-        :current-air-date="currentAirDate"
-        :current-production-status="currentProductionStatus"
-        :total-runtime="totalRuntime"
-        :total-runtime-label="'Total Running Time'"
-        :production-statuses="productionStatuses"
-        :episodes="episodes"
-        @update:episode-number="currentEpisodeNumber = $event"
-        @update:air-date="currentAirDate = $event"
-        @update:production-status="currentProductionStatus = $event"
-      />
-    </div>
+  <div class="content-editor-wrapper">
+    <!-- Main Toolbar -->
+    <v-toolbar dense flat class="main-toolbar" style="height: 128px; min-height: 128px; max-height: 128px; align-items: flex-start;">
+      <v-spacer></v-spacer>
+      <v-toolbar-items>
+        <v-btn text @click="saveAllContent">Save</v-btn>
+        <v-btn text>Publish</v-btn>
+      </v-toolbar-items>
+    </v-toolbar>
 
-    <!-- Main Content Area -->
-    <div class="main-content">
-      <!-- Cue Insertion Toolbar - Full Width, Flush with Headers -->
-      <div class="cue-toolbar-container">
-        <div class="cue-toolbar-row">
-          <!-- Rundown Header Section (Left) -->
-          <div v-if="showRundownPanel" class="rundown-header-section" :style="{ width: rundownHeaderWidth }">
-            <v-card-title class="d-flex align-center pa-2 rundown-title">
-              <span class="text-h6">Rundown</span>
-              <v-spacer></v-spacer>
-              <v-btn icon size="small" @click="rundownPanelWidth = rundownPanelWidth === 'narrow' ? 'wide' : 'narrow'">
-                <v-icon>{{ rundownPanelWidth === 'narrow' ? 'mdi-arrow-expand-horizontal' : 'mdi-arrow-collapse-horizontal' }}</v-icon>
-              </v-btn>
-              <v-btn icon size="small" @click="showRundownPanel = false">
-                <v-icon>mdi-close</v-icon>
-              </v-btn>
-            </v-card-title>
-          </div>
-          <!-- Removed duplicate script mode display and collapsed the space -->
+    <!-- Show Info Header (restored) -->
+    <ShowInfoHeader
+      :title="currentShowTitle"
+      :episode-info="currentEpisodeInfo"
+      :episode-number="currentEpisodeNumber"
+      :air-date="currentAirDate"
+      :production-status="currentProductionStatus"
+      :total-runtime="totalRuntime"
+      :episodes="episodes"
+      :production-statuses="productionStatuses"
+      @update:episodeNumber="handleEpisodeChange"
+      @update:airDate="val => currentAirDate = val"
+      @update:productionStatus="val => currentProductionStatus = val"
+    />
+
+    <!-- Color Configuration Panel -->
+    <ColorSelector />
+
+    <!-- Main Content Area (restored) -->
+    <div class="main-content-area">
+      <!-- Rundown Panel -->
+      <v-card class="rundown-panel" flat
+             :style="{ border: '2px solid ' + statusBarColor, borderRadius: '0' }">
+        <div class="script-status-horizontal-bar"
+             :style="{ backgroundColor: statusBarColor, color: statusBarTextColor }">
+          <span class="status-text">{{ currentProductionStatus }}</span>
         </div>
-      </div>
+        <div class="rundown-header-row">
+          <span class="rundown-header-title">Rundown</span>
+          <div style="flex:1"></div>
+          <v-btn icon x-small class="rundown-header-btn" @click="showNewItemModal = true"><v-icon size="18">mdi-plus</v-icon></v-btn>
+          <v-btn icon x-small class="rundown-header-btn"><v-icon size="18">mdi-dots-vertical</v-icon></v-btn>
+        </div>
+        <div>
+          <div class="rundown-table-header">
+            <div class="index-container">Index</div>
+            <div class="item-type-cell">Type</div>
+            <div class="item-details">Slug</div>
+            <div class="item-duration">Duration</div>
+          </div>
+          <v-virtual-scroll
+            :items="rundownItems"
+            :item-height="26"
+            class="rundown-list"
+            bench="10"
+          >
+            <template v-slot:default="{ item, index }">
+              <div
+                class="rundown-item"
+                :class="{
+                  'selected-item': selectedItemIndex === index,
+                  'ghost-class': isDragging && draggedIndex === index,
+                  'drag-over-above': dragOverIndex === index && dropZonePosition === 'above',
+                  'drag-over-below': dragOverIndex === index && dropZonePosition === 'below'
+                }"
+                :style="resolveItemStyle(item, index)"
+                draggable="true"
+                @click="selectRundownItem(index)"
+                @dragstart="dragStart($event, item, index)"
+                @dragend="dragEnd($event, item, index)"
+                @dragover.prevent="dragOver($event, index)"
+                @drop.prevent="dragDrop($event, index)"
+              >
+                <div class="item-content">
+                  <div class="index-container">
+                    <span class="item-index">{{ index + 1 }}</span>
+                  </div>
+                  <div class="item-type-cell">
+                    <span class="item-type">{{ item.type.toUpperCase() }}</span>
+                  </div>
+                  <div class="item-details">
+                    <span class="item-slug">{{ item.slug.toLowerCase() }}</span>
+                  </div>
+                  <span class="item-duration">{{ item.duration }}</span>
+                </div>
+              </div>
+            </template>
+          </v-virtual-scroll>
+        </div>
+      </v-card>
 
-      <div class="content-row">
-        <!-- Left Panel - Rundown Manager -->
-        <RundownPanel
-          v-if="showRundownPanel"
-          :items="rundownItems"
-          :rundown-panel-width="rundownPanelWidth"
-          :selected-item-index="selectedItemIndex"
-          :editing-item-index="editingItemIndex"
-          :loading-rundown="loadingRundown"
-          @select-item="selectRundownItem"
-          @edit-item="startEditingItem"
-          @new-item="showNewItemModal = true"
-          @import="importRundown"
-          @export="exportRundown"
-          @sort="sortRundown"
-          @refresh="refreshRundown"
-        />
-
-        <!-- Main Editor Panel -->
+      <!-- Editor Panel -->
+      <div class="editor-panel">
         <EditorPanel
-          v-model:editorMode="editorMode"
-          v-model:scriptContent="scriptContent"
-          v-model:scratchContent="scratchContent"
-          v-model:metadata="currentItemMetadata"
+          :item="currentRundownItem"
+          v-model:script-content="scriptContent"
+          v-model:scratch-content="scratchContent"
+          v-model:editor-mode="editorMode"
+          @update:editor-mode="editorMode = $event"
           :has-unsaved-changes="hasUnsavedChanges"
           :show-rundown-panel="showRundownPanel"
-          :item-types="itemTypes"
-          :title-rules="titleRules"
-          :duration-rules="durationRules"
-          @save="saveContent"
-          @show-asset-browser="showAssetBrowser = true"
+          @save="saveAllContent"
           @toggle-rundown-panel="showRundownPanel = !showRundownPanel"
-          @asset-drop="handleAssetDrop"
+          @show-asset-browser-modal="showAssetBrowserModal = true"
+          @show-template-manager-modal="showTemplateManagerModal = true"
           @show-gfx-modal="showGfxModal = true"
           @show-fsq-modal="showFsqModal = true"
           @show-sot-modal="showSotModal = true"
           @show-vo-modal="showVoModal = true"
           @show-nat-modal="showNatModal = true"
           @show-pkg-modal="showPkgModal = true"
+          @show-vox-modal="showVoxModal = true"
+          @show-mus-modal="showMusModal = true"
+          @show-live-modal="showLiveModal = true"
+          @content-change="onContentChange"
+          @metadata-change="onMetadataChange"
         />
       </div>
     </div>
 
     <!-- Modals -->
     <AssetBrowserModal
-      v-model:show="showAssetBrowser"
-      v-model:selected-files="selectedFiles"
-      :available-assets="availableAssets"
-      @upload="uploadAssets"
-      @insert-asset="insertAssetReference"
+      :visible="showAssetBrowserModal"
+      @update:visible="showAssetBrowserModal = $event"
+      @asset-selected="insertAssetReference"
+    />
+
+    <TemplateManagerModal
+      :visible="showTemplateManagerModal"
+      @update:visible="showTemplateManagerModal = $event"
+      @template-selected="insertTemplateReference"
     />
 
     <GfxModal
@@ -108,6 +148,9 @@
     <VoModal v-model:show="showVoModal" @submit="submitVo" />
     <NatModal v-model:show="showNatModal" @submit="submitNat" />
     <PkgModal v-model:show="showPkgModal" @submit="submitPkg" />
+    <VoxModal v-model:show="showVoxModal" @submit="submitVox" />
+    <MusModal v-model:show="showMusModal" @submit="submitMus" />
+    <LiveModal v-model:show="showLiveModal" @submit="submitLive" />
 
     <NewItemModal
       v-model:show="showNewItemModal"
@@ -115,7 +158,6 @@
       v-model:type="newItemType"
       v-model:slug="newItemSlug"
       v-model:duration="newItemDuration"
-      v-model:owner="newItemOwner"
       v-model:description="newItemDescription"
       :loading="creatingNewItem"
       :item-types="rundownItemTypes"
@@ -123,69 +165,69 @@
       @create="createNewItem"
       @cancel="cancelNewItem"
     />
-
   </div>
 </template>
 
 <script>
-import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
-import RundownPanel from './RundownPanel.vue';
+import axios from 'axios';
+// import { API_BASE_URL } from '@/config.js'; // Temporarily remove to simplify
 import EditorPanel from './EditorPanel.vue';
 import AssetBrowserModal from './modals/AssetBrowserModal.vue';
+import TemplateManagerModal from './modals/TemplateManagerModal.vue';
 import GfxModal from './modals/GfxModal.vue';
 import FsqModal from './modals/FsqModal.vue';
 import SotModal from './modals/SotModal.vue';
-import VoModal from './modals/VoModal';
+import VoModal from './modals/VoModal.vue';
 import NatModal from './modals/NatModal.vue';
 import PkgModal from './modals/PkgModal.vue';
+import VoxModal from './modals/VoxModal.vue';
+import MusModal from './modals/MusModal.vue';
+import LiveModal from './modals/LiveModal.vue';
 import NewItemModal from './modals/NewItemModal.vue';
-import { getColorValue } from '../utils/themeColorMap';
+import ColorSelector from './ColorSelector.vue';
+import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
+import { getColorValue, resolveVuetifyColor } from '../utils/themeColorMap';
 import { debounce } from 'lodash-es';
-import yaml from 'js-yaml';
-
-// Error handling utility
-const handleError = (context, error, fallback = null) => {
-  console.warn(`[ContentEditor:${context}]`, error);
-  return fallback;
-};
 
 export default {
   name: 'ContentEditor',
   
-  // Add error capture for better debugging
-  errorCaptured(err, instance, info) {
-    console.error('[ContentEditor] Error captured:', {
-      error: err,
-      instance: instance?.$options.name || 'Unknown',
-      info
-    });
-    
-    // Return false to stop the error from propagating further
-    return false;
+  async mounted() {
+    await this.fetchShowInfo();
+    await this.fetchEpisodes();
   },
 
   created() {
+    // Initialize currentEpisodeNumber from sessionStorage if available
+    const lastEpisode = sessionStorage.getItem('selectedEpisode');
+    if (lastEpisode) {
+      this.currentEpisodeNumber = lastEpisode;
+    }
     this.debouncedAutoSave = debounce(this.saveAllContent, 2500);
   },
 
   components: {
-    ShowInfoHeader,
-    RundownPanel,
     EditorPanel,
     AssetBrowserModal,
+    TemplateManagerModal,
     GfxModal,
     FsqModal,
     SotModal,
     VoModal,
     NatModal,
     PkgModal,
+    VoxModal,
+    MusModal,
+    LiveModal,
     NewItemModal,
+    ColorSelector,
+    ShowInfoHeader,
   },
   props: {
-    episode: {
-      type: String,
-      default: null
-    }
+    // episode: {
+    //   type: String,
+    //   default: null
+    // }
   },
   data() {
     return {
@@ -194,15 +236,17 @@ export default {
       rundownPanelWidth: 'wide', // 'narrow' or 'wide'
       
       // Editor state
-      editorMode: 'script', // 'script' or 'scratch'
+      editorMode: 'script', // 'script', 'scratch', 'metadata', or 'code'
       selectedItemIndex: -1, // Start with no selection
       editingItemIndex: -1, // Index of item being edited (grows by 2%)
       hasUnsavedChanges: false,
+      loadingRundown: true, // Start in loading state
+      rundownError: null,
       
       // Show Information
-      currentShowTitle: 'Disaffected',
-      currentEpisodeNumber: 'EP001',
-      currentAirDate: '2025-07-15',
+      showInfo: {},
+      currentEpisodeNumber: '', // This will be updated from session
+      currentAirDate: '',
       currentProductionStatus: 'draft',
       productionStatuses: [
         { title: 'Draft', value: 'draft' },
@@ -211,13 +255,9 @@ export default {
         { title: 'Completed', value: 'completed' }
       ],
       
-      // Episode management - will be moved to App.vue
-      selectedEpisode: 'EP001',
-      episodes: [
-        { title: 'EP001 - Pilot Episode', value: 'EP001' },
-        { title: 'EP002 - Getting Started', value: 'EP002' },
-        { title: 'EP003 - Deep Dive', value: 'EP003' }
-      ],
+      // Episode management
+      selectedEpisode: null,
+      episodes: [],
       loading: false,
       saving: false,
       
@@ -225,18 +265,22 @@ export default {
       isDragging: false,
       draggedIndex: -1,
       draggedItem: null,
+      dragOverIndex: -1, // Index of the item being dragged over
+      dropZonePosition: null, // 'above' or 'below'
       
       // Auto-save tracking
       itemContentBackup: {},
       autoSaveOnSwitch: true, // Auto-save when switching items instead of prompting
       autoSaveTimeout: null,
+      hoveredItemIndex: -1, // Index of the item being hovered
       
       // Content
       scriptContent: '',
       scratchContent: '',
       
       // Asset management
-      showAssetBrowser: false,
+      showAssetBrowserModal: false, // Standardized name
+      showTemplateManagerModal: false, // Standardized name
       selectedFiles: [],
       availableAssets: [
         // Mock data - will be replaced with API calls
@@ -255,37 +299,43 @@ export default {
         }
       ],
       
-      // Mock rundown data - will be replaced with props/API
+      // Mock rundown data - TODO: Replace with props/API when backend is ready
       rundownItems: [
+        // Mock data for testing drag and drop - remove when API is integrated
         {
-          slug: 'cold open graphics',
+          id: 'item_001',
           type: 'segment',
-          duration: '0:30',
-          content: '# Cold Open\n\nWelcome to the show...'
+          slug: 'opening-segment',
+          duration: '00:02:30',
+          description: 'Opening segment with intro graphics'
         },
         {
-          slug: 'sponsor message',
-          type: 'advert',
-          duration: '1:00',
-          content: '# Sponsor Message\n\nToday we have...'
+          id: 'item_002',
+          type: 'sot',
+          slug: 'interview-smith',
+          duration: '00:05:45',
+          description: 'Interview with John Smith'
         },
         {
-          slug: 'main interview segment',
-          type: 'segment',
-          duration: '15:00',
-          content: '# Main Interview\n\n[SOT: interview_segment.mp4]'
+          id: 'item_003',
+          type: 'pkg',
+          slug: 'climate-report',
+          duration: '00:03:15',
+          description: 'Climate change report package'
         },
         {
-          slug: 'promo for next episode',
-          type: 'promo',
-          duration: '0:30',
-          content: '# Next Episode Promo\n\nNext week we will...'
+          id: 'item_004',
+          type: 'commercial',
+          slug: 'commercial-break-1',
+          duration: '00:02:00',
+          description: 'First commercial break'
         },
         {
-          slug: 'call to action',
-          type: 'cta',
-          duration: '0:45',
-          content: '# Closing CTA\n\nThanks for watching...'
+          id: 'item_005',
+          type: 'vo',
+          slug: 'sports-highlights',
+          duration: '00:01:45',
+          description: 'Sports highlights voiceover'
         }
       ],
       
@@ -306,25 +356,26 @@ export default {
       customMetadataYaml: '',
       itemTypes: [
         { title: 'Segment', value: 'segment' },
-        { title: 'Advertisement', value: 'advert' },
+        { title: 'Advertisement', value: 'ad' },
         { title: 'Promo', value: 'promo' },
         { title: 'Call to Action', value: 'cta' },
         { title: 'Unknown', value: 'unknown' }
       ],
       
       // Graphic attachment state
-      showGraphicModal: false,
       showGfxModal: false,
       showFsqModal: false,
       showSotModal: false,
       showVoModal: false,
       showNatModal: false,
       showPkgModal: false,
+      showVoxModal: false,
+      showMusModal: false,
+      showLiveModal: false,
       
       // Rundown management state
       showNewItemModal: false,
       showRundownOptions: false,
-      loadingRundown: false,
       
       // New item form state
       newItemFormValid: false,
@@ -357,40 +408,58 @@ export default {
       graphicFile: null,
       
       // Total runtime for the episode
-      totalRuntime: '00:00:00'
+      totalRuntime: '00:00:00',
+
+      // Show title for the current episode
+      showTitle: 'Disaffected',
     }
   },
    computed: {
-    safeRundownItems() {
-      try {
-        if (!this.rundownItems) {
-          return [];
+    styleCache() {
+      // This computed property acts as a reactive cache for our item styles.
+      // It depends on the Vuetify theme object, so it will automatically
+      // re-calculate if the user changes the application's theme colors.
+      const theme = this.$vuetify.theme;
+      if (!theme) return {};
+
+      const cache = {};
+      const currentTheme = theme.dark ? 'dark' : 'light';
+      const themeColors = theme.themes[currentTheme];
+
+      // Define all possible sources for colors.
+      const itemTypes = this.rundownItemTypes.map(t => t.value ? t.value.toLowerCase() : '');
+      const states = ['selection', 'hover', 'draglight', 'highlight', 'dropline'];
+      const allColorSources = [...new Set([...states, ...itemTypes, 'unknown'])];
+
+      for (const source of allColorSources) {
+        const colorName = getColorValue(source);
+        const colorValue = themeColors[colorName]; // e.g., themeColors['primary']
+        if (colorValue) {
+          cache[source] = { backgroundColor: colorValue };
         }
-        
-        if (!Array.isArray(this.rundownItems)) {
-          console.warn('rundownItems is not an array:', this.rundownItems);
-          return [];
-        }
-        
-        return this.rundownItems.filter(item => item != null);
-      } catch (error) {
-        return handleError('safeRundownItems', error, []);
       }
+
+      return cache;
     },
 
-    currentContent() {
-      try {
-        return this.editorMode === 'script' ? this.scriptContent : this.scratchContent;
-      } catch (error) {
-        return handleError('currentContent', error, '');
-      }
+    currentShowTitle() {
+      // Use the title from showTitle data property if available, otherwise fallback
+      return this.showTitle || (this.showInfo && this.showInfo.title) || 'Disaffected';
     },
 
     currentEpisodeInfo() {
       try {
-        return `${this.currentEpisodeNumber} • ${this.currentAirDate} • ${this.getStatusLabel()}`;
+        const episode = this.episodes.find(e => e.id === this.selectedEpisodeId);
+        if (!episode) {
+          return { title: 'No episode selected', status: 'unknown' };
+        }
+        return {
+          title: episode.title,
+          status: episode.status || 'unknown'
+        };
       } catch (error) {
-        return handleError('currentEpisodeInfo', error, 'Episode Info Unavailable');
+        // console.error('Error in currentEpisodeInfo:', error);
+        return { title: 'Error', status: 'error' };
       }
     },
     
@@ -408,22 +477,28 @@ export default {
       return this.rundownPanelWidth === 'narrow' ? '75%' : '60%'
     },
     
+    statusBarColor() {
+      try {
+        const status = this.currentEpisodeInfo.status;
+        const color = this.themeColorMap.status[status];
+        return color || 'grey';
+      } catch (error) {
+        // console.error('Error in statusBarColor computed property:', error);
+        return 'grey';
+      }
+    },
+    statusBarTextColor() {
+      try {
+        const color = this.statusBarColor;
+        return this.isDarkColor(color) ? 'white' : 'black';
+      } catch (error) {
+        // console.error('Error in statusBarTextColor computed property:', error);
+        return 'black';
+      }
+    },
+    
     scriptPlaceholder() {
-      return `# ${this.currentRundownItem?.slug || 'Script Content'}
-
-Write your script content here using Markdown...
-
-Use the toolbar buttons above to insert:
-- **GFX** cues for graphics
-- **FSQ** cues for full-screen quotes  
-- **SOT** cues for video content
-
-Example:
-[GFX: opening_title.png]
-Welcome to today's show...
-
-[SOT: interview_clip.mp4 | 0:30-2:15]
-Here's what our guest had to say...`
+      return `# ${this.currentRundownItem?.slug || 'Script Content'}\n\nWrite your script content here using Markdown...\n\nUse the toolbar buttons above to insert:\n- **GFX** cues for graphics\n- **FSQ** cues for full-screen quotes  \n- **SOT** cues for video content\n\nExample:\n[GFX: opening_title.png]\nWelcome to today's show...\n\n[SOT: interview_clip.mp4 | 0:30-2:15]\nHere's what our guest had to say...`
     },
     
     scratchPlaceholder() {
@@ -451,647 +526,813 @@ Try dropping an image or video file here!`
     // Form validation rules
     titleRules() {
       return [
-        v => !!v || 'Title is required',
-        v => v.length >= 3 || 'Title must be at least 3 characters',
-        v => v.length <= 100 || 'Title must be less than 100 characters'
-      ];
+        v => !!v || 'Title is required'
+      ]
     },
-    
     durationRules() {
       return [
-        v => !v || /^(\d{1,2}:)?[0-5]?\d:[0-5]\d$/.test(v) || 'Duration must be in MM:SS or HH:MM:SS format'
-      ];
-    },
-    
-    linkRules() {
-      return [
-        v => !v || /^https?:\/\/.+/.test(v) || 'Link must start with http:// or https://'
-      ];
-    },
-  },
-  
-  watch: {
-    selectedItemIndex: {
-      handler(newIndex) {
-        // Only load content if rundownItems is ready
-        if (this.rundownItems && Array.isArray(this.rundownItems)) {
-          this.loadItemContent(newIndex)
-        }
-      },
-      immediate: true
-    },
-    
-    editorMode() {
-      this.hasUnsavedChanges = false
+        v => !v || /^\d{2}:\d{2}:\d{2}$/.test(v) || 'Duration must be in HH:MM:SS format'
+      ]
     }
   },
-  
-  mounted() {
-    // Add keyboard event listeners
-    document.addEventListener('keydown', this.handleKeyDown);
-    
-    // Add keyboard shortcuts
-    document.addEventListener('keydown', this.handleKeyboardShortcuts);
-    
-    // Initialize metadata for the first item after the component is mounted
-    this.$nextTick(() => {
-      if (this.rundownItems && this.rundownItems.length > 0) {
-        this.selectedItemIndex = 0;
-        this.loadCurrentItemMetadata();
-      }
-    });
-  },
-
-  beforeUnmount() {
-    // Clean up event listeners
-    document.removeEventListener('keydown', this.handleKeyDown);
-    
-    // Remove keyboard shortcuts
-    document.removeEventListener('keydown', this.handleKeyboardShortcuts);
-  },
-  
   methods: {
-    saveContent() {
-      this.saveAllContent();
-    },
+    resolveItemStyle(item, index) {
+      try {
+        const itemType = item && item.type ? item.type.toLowerCase() : 'unknown';
+        let style = {};
 
-    // Show Information Methods
-    getStatusLabel() {
-      const status = this.productionStatuses.find(s => s.value === this.currentProductionStatus);
-      return status ? status.title : 'Unknown';
-    },
-    
-    calculateTotalRuntime() {
-      if (!this.rundownItems || this.rundownItems.length === 0) {
-        return '00:00:00';
-      }
-      
-      let totalSeconds = 0;
-      this.rundownItems.forEach(item => {
-        if (item.duration) {
-          const formatted = this.formatDuration(item.duration);
-          const parts = formatted.split(':');
-          if (parts.length === 3) {
-            totalSeconds += parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+        // Base style from the theme color map
+        const colorName = getColorValue(itemType);
+        const resolvedColor = resolveVuetifyColor(colorName, this.$vuetify);
+
+        if (resolvedColor) {
+          style.backgroundColor = resolvedColor;
+          // Simple luminance check for text color
+          if (resolvedColor.startsWith('#')) {
+            const hex = resolvedColor.replace('#', '');
+            if (hex.length === 6) {
+              const r = parseInt(hex.substr(0,2), 16);
+              const g = parseInt(hex.substr(2,2), 16);
+              const b = parseInt(hex.substr(4,2), 16);
+              style.color = (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5 ? '#FFFFFF' : '#000000';
+            } else {
+              style.color = '#000000';
+            }
+          } else {
+            style.color = '#000000';
+          }
+        } else {
+          style.backgroundColor = '#E0E0E0'; // Fallback grey
+          style.color = '#000000';
+        }
+
+        // Override for selected item
+        if (this.selectedItemIndex === index) {
+          const selectionColorName = getColorValue('selection');
+          const selectionColor = resolveVuetifyColor(selectionColorName, this.$vuetify);
+          if (selectionColor) {
+            style.backgroundColor = selectionColor;
+            // Simple luminance check for text color
+            if (selectionColor.startsWith('#')) {
+              const hex = selectionColor.replace('#', '');
+              if (hex.length === 6) {
+                const r = parseInt(hex.substr(0,2), 16);
+                const g = parseInt(hex.substr(2,2), 16);
+                const b = parseInt(hex.substr(4,2), 16);
+                style.color = (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5 ? '#FFFFFF' : '#000000';
+              } else {
+                style.color = '#000000';
+              }
+            } else {
+              style.color = '#000000';
+            }
           }
         }
-      });
-      
-      const hours = Math.floor(totalSeconds / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      const seconds = totalSeconds % 60;
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    },
-    
-    getModeIcon() {
-      switch (this.editorMode) {
-        case 'script': return 'mdi-script-text';
-        case 'scratch': return 'mdi-pencil';
-        case 'metadata': return 'mdi-cog';
-        default: return 'mdi-text';
-      }
-    },
-    
-    formatDuration(duration) {
-      // Convert various duration formats to HH:MM:SS
-      if (!duration) return '00:00:00';
-      
-      // If already in HH:MM:SS format, return as is
-      if (/^\d{2}:\d{2}:\d{2}$/.test(duration)) {
-        return duration;
-      }
-      
-      // If in MM:SS format, add hours
-      if (/^\d{1,2}:\d{2}$/.test(duration)) {
-        return `00:${duration.padStart(5, '0')}`;
-      }
-      
-      // If in M:SS format, pad and add hours
-      if (/^\d:\d{2}$/.test(duration)) {
-        return `00:0${duration}`;
-      }
-      
-      // If just seconds (like "30"), convert to HH:MM:SS
-      if (/^\d+$/.test(duration)) {
-        const totalSeconds = parseInt(duration);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-      }
-      
-      // Try to parse decimal formats like "0:30" or "1:00"
-      if (duration.includes(':')) {
-        const parts = duration.split(':');
-        if (parts.length === 2) {
-          const minutes = parseInt(parts[0]) || 0;
-          const seconds = parseInt(parts[1]) || 0;
-          return `00:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        // Override for hovered item (but not if it's the selected item)
+        else if (this.hoveredItemIndex === index) {
+           const hoverColorName = getColorValue('hover');
+           const hoverColor = resolveVuetifyColor(hoverColorName, this.$vuetify);
+           if (hoverColor) {
+             // Add a subtle border instead of changing the whole background
+             style.boxShadow = `inset 4px 0 0 0 ${hoverColor}`;
+           }
         }
-      }
-      
-      // Default fallback
-      return '00:00:00';
-    },
-    
-    handleKeyDown(event) {
-      // Handle Alt+G for GFX modal
-      if (event.altKey && event.key.toLowerCase() === 'g') {
-        event.preventDefault();
-        this.showGfxModal = true;
-      }
-      // Handle Alt+Q for FSQ modal
-      else if (event.altKey && event.key.toLowerCase() === 'q') {
-        event.preventDefault();
-        this.showFsqModal = true;
-      }
-      // Handle Alt+S for SOT modal
-      else if (event.altKey && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        this.showSotModal = true;
-      }
-      // Handle Alt+V for VO modal
-      else if (event.altKey && event.key.toLowerCase() === 'v') {
-        event.preventDefault();
-        this.showVoModal = true;
-      }
-      // Handle Alt+N for NAT modal
-      else if (event.altKey && event.key.toLowerCase() === 'n') {
-        event.preventDefault();
-        this.showNatModal = true;
-      }
-      // Handle Alt+P for PKG modal
-      else if (event.altKey && event.key.toLowerCase() === 'p') {
-        event.preventDefault();
-        this.showPkgModal = true;
-      }
-      // Handle Ctrl+S for save
-      else if (event.ctrlKey && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        this.saveAllContent();
+
+        return style;
+      } catch (error) {
+        // console.error('Error in resolveItemStyle:', error);
+        return {}; // Return empty object on error
       }
     },
-    
-    // Keyboard shortcuts handler
-    handleKeyboardShortcuts(event) {
-      // Ctrl+Shift+N: New rundown item
-      if (event.ctrlKey && event.shiftKey && event.key === 'N') {
-        event.preventDefault();
-        this.showNewItemModal = true;
-      }
-      
-      // Ctrl+Shift+R: Refresh rundown
-      if (event.ctrlKey && event.shiftKey && event.key === 'R') {
-        event.preventDefault();
-        this.refreshRundown();
-      }
-      
-      // Ctrl+Shift+E: Export rundown
-      if (event.ctrlKey && event.shiftKey && event.key === 'E') {
-        event.preventDefault();
-        this.exportRundown();
+
+    async fetchShowInfo() {
+      this.loading = true;
+      try {
+        // Use a relative path that the proxy will catch
+        const response = await axios.get('/api/show-info');
+        this.showInfo = response.data;
+        this.showTitle = response.data.title || 'Disaffected';
+      } catch (error) {
+        this.rundownError = 'Failed to load show information. Please check backend connection.';
+        this.showTitle = 'Disaffected';
+      } finally {
+        this.loading = false;
       }
     },
-    
-    selectRundownItem(index) {
-      // Safety check for valid index
-      if (!this.rundownItems || !Array.isArray(this.rundownItems) || index < 0 || index >= this.rundownItems.length) {
-        console.warn('Invalid rundown item index:', index);
+
+    async fetchEpisodes() {
+      this.loading = true;
+      this.rundownError = null;
+      try {
+        // Use a relative path that the proxy will catch
+        const response = await axios.get('/api/episodes');
+        const episodesArr = response.data.episodes || [];
+        if (Array.isArray(episodesArr)) {
+          this.episodes = episodesArr.map(episode => ({
+            // Always use zero-padded string for value
+            title: `${episode.id || episode.episode_number}: ${episode.title || 'Untitled'}`,
+            value: episode.id ? episode.id.toString().padStart(4, '0') : (episode.episode_number ? episode.episode_number.toString().padStart(4, '0') : ''),
+            air_date: episode.airdate,
+            status: episode.status || 'unknown'
+          }));
+        } else {
+          this.episodes = [];
+        }
+        
+        // Restore last selected episode from session storage
+        const lastEpisode = sessionStorage.getItem('selectedEpisode');
+        let episodeToLoad = null;
+
+        if (lastEpisode && this.episodes.some(e => e.value == lastEpisode)) {
+          episodeToLoad = lastEpisode;
+        } else if (this.episodes.length > 0) {
+          // Default to the latest episode (assuming they are sorted by episode_number)
+          const sortedEpisodes = [...this.episodes].sort((a, b) => b.value - a.value);
+          episodeToLoad = sortedEpisodes[0].value;
+        }
+        
+        if (episodeToLoad) {
+          this.handleEpisodeChange(episodeToLoad, true);
+        }
+        // Ensure currentEpisodeNumber matches a value in the episodes list
+        if (!this.episodes.some(e => e.value === this.currentEpisodeNumber) && this.episodes.length > 0) {
+          this.currentEpisodeNumber = this.episodes[0].value;
+        }
+        
+      } catch (error) {
+        this.rundownError = `Failed to load episodes. ${error.message}. Check console for details.`;
+        this.rundownError = 'Failed to load episodes. No data available.';
+        this.episodes = [];
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    padEpisodeNumber(num) {
+      // Always returns a string padded to 4 digits
+      if (typeof num === 'number') num = String(num);
+      return num ? num.padStart(4, '0') : '';
+    },
+    async fetchRundown(episodeId) {
+      const paddedId = this.padEpisodeNumber(episodeId);
+      if (!paddedId) {
+        this.rundownItems = [];
         return;
       }
-      
-      if (this.hasUnsavedChanges) {
-        // Auto-save or prompt user
-        const shouldSave = this.autoSaveOnSwitch || confirm('You have unsaved changes. Save before switching items?');
-        if (shouldSave) {
-          this.saveContent()
-        } else {
-          // Discard changes by reloading content
-          this.hasUnsavedChanges = false
-        }
-      }
-      this.selectedItemIndex = index
-      // Clear editing state when selecting different item
-      if (this.editingItemIndex !== index) {
-        this.editingItemIndex = -1
-      }
-      
-      // Load metadata for the selected item
-      this.loadCurrentItemMetadata();
-    },
-    
-    startEditingItem(index) {
-      this.selectedItemIndex = index
-      this.editingItemIndex = index
-      // Set selection highlight color
-      const selectionColor = getColorValue('selection');
-      document.documentElement.style.setProperty('--selection-color', `rgb(var(--v-theme-${selectionColor}))`);
-    },
-    
-    // Native HTML5 drag-and-drop handlers (temporarily disabled to fix parentNode errors)
-    /*
-    handleDragStart(index, event) {
+      this.loadingRundown = true;
+      this.rundownError = null;
       try {
-        this.isDragging = true;
-        this.draggedIndex = index;
-        this.draggedItem = this.rundownItems[index];
-        
-        // Set drag effect
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', index.toString());
-        
-        // Add visual feedback
-        const dragLightColor = getColorValue('draglight');
-        const highlightColor = getColorValue('highlight');
-        const droplineColor = getColorValue('dropline');
+        const response = await axios.get(`/api/episodes/${paddedId}/rundown`);
+        this.rundownItems = response.data.items;
+        this.selectedItemIndex = this.rundownItems.length > 0 ? 0 : -1;
+        if (this.selectedItemIndex !== -1) {
+          this.loadItemContent(this.rundownItems[this.selectedItemIndex]);
+        }
+      } catch (error) {
+        this.rundownError = `Failed to load rundown for episode ${paddedId}.`;
+        this.rundownItems = [];
+      } finally {
+        this.loadingRundown = false;
+      }
+    },
+    async saveAllContent() {
+      const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
+      this.hasUnsavedChanges = false;
+      this.saving = true;
+      try {
+        const payload = {
+          // ... construct payload
+        };
+        await axios.post(`/api/episodes/${paddedId}/rundown`, payload);
+        this.hasUnsavedChanges = false;
+      } catch (error) {
+        // Handle save error
+      } finally {
+        this.saving = false;
+      }
+    },
+    async handleEpisodeChange(episodeNumber, skipSessionUpdate = false) {
+      const paddedNumber = this.padEpisodeNumber(episodeNumber);
+      if (!paddedNumber) return;
 
-        document.documentElement.style.setProperty('--highlight-color', `rgb(var(--v-theme-${highlightColor}))`);
-        document.documentElement.style.setProperty('--draglight-color', `rgb(var(--v-theme-${dragLightColor}))`);
-        document.documentElement.style.setProperty('--dropline-color', `rgb(var(--v-theme-${droplineColor}))`);
-      } catch (error) {
-        console.warn('Error in handleDragStart:', error);
-        this.isDragging = false;
+      // Set the current episode number and update session storage
+      this.currentEpisodeNumber = paddedNumber;
+      if (!skipSessionUpdate) {
+        sessionStorage.setItem('selectedEpisode', paddedNumber);
       }
-    },
-    
-    handleDragEnd() {
+
       try {
-        this.isDragging = false;
-        this.draggedIndex = -1;
-        this.draggedItem = null;
-        
-        // Clear drag colors
-        document.documentElement.style.removeProperty('--highlight-color');
-        document.documentElement.style.removeProperty('--draglight-color');
-        document.documentElement.style.removeProperty('--dropline-color');
-      } catch (error) {
-        console.warn('Error in handleDragEnd:', error);
+        // Fetch new episode data, but do not reset the episode number here.
+        const infoRes = await axios.get(`/api/episodes/${paddedNumber}/info`);
+        const info = infoRes.data.info || {};
+        this.currentAirDate = info.airdate || '';
+        this.currentProductionStatus = info.status || 'draft';
+        this.totalRuntime = info.total_runtime || '01:00:00';
+        this.showTitle = info.title || 'Untitled';
+        this.currentShowSubtitle = info.subtitle || 'No Subtitle';
+      } catch (err) {
+        // Clear out old data on failure
+        this.currentAirDate = '';
+        this.currentProductionStatus = 'draft';
+        this.totalRuntime = '00:00:00';
+        this.showTitle = 'Untitled';
+        this.currentShowSubtitle = 'No Subtitle';
       }
+
+      // Fetch the rundown with the correct, verified episode number
+      this.fetchRundown(this.currentEpisodeNumber);
     },
-    
-    handleDragOver(index, event) {
-      if (this.isDragging && this.draggedIndex !== index) {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'move';
-      }
+    getStatusLabel(status) {
+      // TODO: Implement actual logic for status label
+      return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown';
     },
-    
-    handleDrop(dropIndex, event) {
-      try {
-        event.preventDefault();
-        
-        if (!this.isDragging || this.draggedIndex === -1 || this.draggedIndex === dropIndex) {
-          return;
-        }
-        
-        // Reorder the items array
-        const draggedItem = this.rundownItems.splice(this.draggedIndex, 1)[0];
-        this.rundownItems.splice(dropIndex, 0, draggedItem);
-        
-        // Update selection if needed
-        if (this.selectedItemIndex === this.draggedIndex) {
-          this.selectedItemIndex = dropIndex;
-        } else if (this.selectedItemIndex > this.draggedIndex && this.selectedItemIndex <= dropIndex) {
-          this.selectedItemIndex--;
-        } else if (this.selectedItemIndex < this.draggedIndex && this.selectedItemIndex >= dropIndex) {
-          this.selectedItemIndex++;
-        }
-        
-        // Mark as having unsaved changes
-        this.hasUnsavedChanges = true;
-        
-        console.log('Drag reorder:', { from: this.draggedIndex, to: dropIndex });
-      } catch (error) {
-        console.warn('Error in handleDrop:', error);
-      }
+    loadItemContent(/* item */) {
+      // TODO: Implement actual logic to load item content
+      // For now, just log the item
     },
-    */
-    
-    // Transition group animation handlers (temporarily disabled to fix parentNode errors)
-    /*
-    beforeEnter(el) {
-      el.style.opacity = 0;
-      el.style.transform = 'translateX(-30px)';
-    },
-    
-    enter(el, done) {
-      el.style.transition = 'all 0.3s ease';
-      setTimeout(() => {
-        el.style.opacity = 1;
-        el.style.transform = 'translateX(0)';
-      }, 10);
-      setTimeout(done, 300);
-    },
-    
-    leave(el, done) {
-      el.style.transition = 'all 0.3s ease';
-      el.style.opacity = 0;
-      el.style.transform = 'translateX(30px)';
-      setTimeout(done, 300);
-    },
-    */
-    
-    // Legacy drag methods for compatibility (can be removed later)
-    dragStart() {
-      console.warn('Legacy dragStart called - using new HTML5 drag implementation');
+    dragStart(event, item, index) {
+      if (!item) return;
+      this.isDragging = true;
+      this.draggedIndex = index;
+      this.draggedItem = item;
+      event.dataTransfer.setData('text/plain', index.toString());
+      event.dataTransfer.effectAllowed = 'move';
     },
     
     dragEnd() {
-      console.warn('Legacy dragEnd called - using new HTML5 drag implementation');
+      this.isDragging = false;
+      this.draggedIndex = -1;
+      this.draggedItem = null;
+      this.dragOverIndex = -1;
+      this.dropZonePosition = null;
     },
     
-    handleDragChange(event) {
-      console.warn('Legacy handleDragChange called - using new HTML5 drag implementation', event);
+    dragOver(event, index) {
+      if (!this.isDragging || index === this.draggedIndex || !this.rundownItems[index]) return;
+      
+      const rect = event.currentTarget.getBoundingClientRect();
+      const midpoint = rect.top + rect.height / 2;
+      const isAbove = event.clientY < midpoint;
+      
+      this.dragOverIndex = index;
+      this.dropZonePosition = isAbove ? 'above' : 'below';
     },
     
-    handleEpisodeChange(newEpisode) {
-      console.log('Episode changed to:', newEpisode);
-      // Here you would load rundown items for the selected episode
-      this.loadEpisodeRundown(newEpisode);
-    },
-    
-    loadEpisodeRundown(episode) {
-      this.loading = true;
-      // Mock loading - replace with real API call
-      setTimeout(() => {
-        console.log('Loading rundown for episode:', episode);
-        this.loading = false;
-      }, 500);
-    },
-    
-    saveAllContent() {
-      this.saving = true;
-      // Mock save - replace with real API call
-      setTimeout(() => {
-        console.log('Saving all content for episode:', this.selectedEpisode);
-        this.hasUnsavedChanges = false;
-        this.saving = false;
-      }, 1000);
-    },
-    
-    loadItemContent(index) {
-      if (!this.rundownItems || !Array.isArray(this.rundownItems) || index < 0 || index >= this.rundownItems.length) {
-        this.scriptContent = ''
-        this.scratchContent = ''
-        this.hasUnsavedChanges = false
-        return
+    dragEnter(event, index) {
+      event.preventDefault();
+      event.stopPropagation();
+      
+      if (!this.isDragging) return;
+      
+      // Don't update if we're dragging over the same item
+      if (index === this.draggedIndex) {
+        return;
       }
       
-      const item = this.rundownItems[index]
-      if (item) {
-        this.scriptContent = item.content || ''
-        this.scratchContent = item.scratchContent || ''
-        this.hasUnsavedChanges = false
+      // Determine drop zone position
+      const rect = event.currentTarget.getBoundingClientRect();
+      const midpoint = rect.top + rect.height / 2;
+      const isAbove = event.clientY < midpoint;
+      
+      this.dragOverIndex = index;
+      this.dropZonePosition = isAbove ? 'above' : 'below';
+    },
+    
+    dragLeave(event) {
+      // Only clear drag state if leaving the entire rundown area
+      const rundownList = document.querySelector('.rundown-list');
+      if (rundownList && event.relatedTarget && !rundownList.contains(event.relatedTarget)) {
+        this.dragOverIndex = -1;
+        this.dropZonePosition = null;
       }
     },
     
-    onContentChange() {
-      this.debouncedAutoSave();
-    },
+    dragDrop(event, targetIndex) {
+      if (!this.isDragging || !this.draggedItem || !this.rundownItems[targetIndex]) return;
 
-    loadCurrentItemMetadata() {
-      try {
-        const item = this.currentRundownItem;
-        if (!item) {
-          // Reset or set to default if no item is selected
-          this.currentItemMetadata = {
-            title: '',
-            type: 'segment',
-            slug: '',
-            duration: '00:00:00',
-            description: '',
-            guests: '',
-            tags: '',
-            sponsor: '',
-            campaign: '',
-            segment_number: 0,
-            live_status: 'off-air'
-          };
-          this.customMetadataYaml = '';
-          return;
-        }
+      // Immediately clear visual drop indicators to prevent render errors
+      this.dragOverIndex = -1;
+      this.dropZonePosition = null;
 
-        // Map rundown item data to metadata object
-        this.currentItemMetadata = {
-          title: item.slug || '', // Assuming slug is the primary title for now
-          type: item.type || 'unknown',
-          slug: item.slug || '',
-          duration: this.formatDuration(item.duration || '0'),
-          description: item.description || '', // Assuming description exists
-          guests: item.guests || '',
-          tags: Array.isArray(item.tags) ? item.tags.join(', ') : (item.tags || ''),
-          sponsor: item.sponsor || '',
-          campaign: item.campaign || '',
-          segment_number: this.selectedItemIndex + 1,
-          live_status: item.live_status || 'off-air'
-        };
-
-        // Handle custom metadata if it exists
-        if (item.metadata_yaml) {
-          this.customMetadataYaml = item.metadata_yaml;
-          // Optionally, merge YAML into the main metadata object
-          try {
-            const customMeta = yaml.load(item.metadata_yaml);
-            Object.assign(this.currentItemMetadata, customMeta);
-          } catch (e) {
-            console.warn('[ContentEditor] Failed to parse custom metadata YAML:', e);
-          }
-        } else {
-          this.customMetadataYaml = '';
-        }
-      } catch (error) {
-        handleError('loadCurrentItemMetadata', error);
+      const sourceIndex = this.draggedIndex;
+      
+      // If dropped on the same item, just reset the drag state
+      if (sourceIndex === targetIndex) {
+        this.isDragging = false;
+        this.draggedIndex = -1;
+        this.draggedItem = null;
+        return;
       }
-    },
+      
+      let finalTargetIndex = targetIndex;
+      if (this.dropZonePosition === 'below') {
+        finalTargetIndex = targetIndex + 1;
+      }
+      if (sourceIndex < finalTargetIndex) {
+        finalTargetIndex--;
+      }
 
-    onMetadataChange() {
-      // Mark as having unsaved changes when metadata is modified
+      const newItems = [...this.rundownItems];
+      const [draggedItem] = newItems.splice(sourceIndex, 1);
+      newItems.splice(finalTargetIndex, 0, draggedItem);
+      
+      this.rundownItems = newItems;
       this.hasUnsavedChanges = true;
-      this.debouncedAutoSave();
       
-      // Update the rundown item with new metadata
-      if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
-        // Update item content
-        this.rundownItems[this.selectedItemIndex].content = this.currentContent;
+      if (this.selectedItemIndex === sourceIndex) {
+        this.selectedItemIndex = finalTargetIndex;
       }
+      
+      this.isDragging = false;
+      this.draggedIndex = -1;
+      this.draggedItem = null;
+    },
+    getNextEpisodeNumber() {
+      // Find the highest episode number in this.episodes and increment
+      let maxNum = 0;
+      this.episodes.forEach(e => {
+        const num = parseInt(e.value, 10);
+        if (!isNaN(num) && num > maxNum) maxNum = num;
+      });
+      return String(maxNum + 1).padStart(4, '0');
+    },
+    selectRundownItem(index) {
+      this.selectedItemIndex = index;
+    },
+    
+    // Missing stub methods to prevent Vue warnings
+    onContentChange(/* content */) {
+      this.hasUnsavedChanges = true;
+    },
+    
+    onMetadataChange(/* metadata */) {
+      this.hasUnsavedChanges = true;
+    },
+    
+    insertAssetReference(/* assetData */) {
+      // Stub implementation - could be enhanced to actually insert asset reference
+      this.hasUnsavedChanges = true;
     },
 
-    onCustomMetadataChange() {
-      try {
-        this.currentItemMetadata.custom = yaml.load(this.customMetadataYaml);
-        this.onMetadataChange();
-      } catch (e) {
-        console.warn("Invalid YAML in custom metadata:", e.message);
-        // Optionally, provide user feedback about the invalid YAML
-      }
+    insertTemplateReference(/* templateData */) {
+      // Stub implementation
+      this.hasUnsavedChanges = true;
     },
+
+    // Missing modal and action methods
+    pasteFromClipboard() {
+    },
+    
+    selectFile() {
+    },
+    
+    pasteUrl() {
+    },
+    
+    submitGraphic() {
+    },
+    
+    submitFsq(data) {
+      this.scriptContent += `[FSQ: ${data.quote} | ${data.source}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
+      this.showFsqModal = false;
+      this.hasUnsavedChanges = true;
+    },
+    
+    submitSot(data) {
+      this.scriptContent += `[SOT: ${data.filename} | ${data.duration}${data.description ? ' | ' + data.description : ''}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
+      this.showSotModal = false;
+      this.hasUnsavedChanges = true;
+    },
+    
+    submitVo(data) {
+      this.scriptContent += `[VO: ${data.text}${data.duration ? ' | ' + data.duration : ''}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
+      this.showVoModal = false;
+      this.hasUnsavedChanges = true;
+    },
+    
+    submitNat(data) {
+      this.scriptContent += `[NAT: ${data.description}${data.duration ? ' | ' + data.duration : ''}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
+      this.showNatModal = false;
+      this.hasUnsavedChanges = true;
+    },
+    
+    submitPkg(data) {
+      this.scriptContent += `[PKG: ${data.title} | ${data.duration}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
+      this.showPkgModal = false;
+      this.hasUnsavedChanges = true;
+    },
+    
+    submitVox(data) {
+      this.scriptContent += `[VOX: ${data.slug} | ${data.description} | ${data.duration}]\n`;
+      this.showVoxModal = false;
+      this.hasUnsavedChanges = true;
+    },
+
+    submitMus(data) {
+      this.scriptContent += `[MUS: ${data.slug} | ${data.description} | ${data.duration}]\n`;
+      this.showMusModal = false;
+      this.hasUnsavedChanges = true;
+    },
+
+    submitLive(data) {
+      this.scriptContent += `[LIVE: ${data.slug} | ${data.description} | ${data.duration}]\n`;
+      this.showLiveModal = false;
+      this.hasUnsavedChanges = true;
+    },
+
+    createNewItem() {
+    },
+    
+    cancelNewItem() {
+    },
+    
+    // Color utility methods
+    hexToRgb(hex) {
+      // Remove # if present
+      hex = hex.replace('#', '');
+      
+      // Convert hex to RGB
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      
+      return { r, g, b };
+    },
+    
+    isColorDark(rgbString) {
+      // If rgbString is an object with r, g, b properties
+      if (typeof rgbString === 'object' && rgbString.r !== undefined) {
+        const { r, g, b } = rgbString;
+        // Calculate luminance
+        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        return luminance < 0.5;
+      }
+      
+      // If rgbString is a string like "rgb(r, g, b)"
+      if (typeof rgbString === 'string' && rgbString.startsWith('rgb')) {
+        const matches = rgbString.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+        if (matches) {
+          const r = parseInt(matches[1]);
+          const g = parseInt(matches[2]);
+          const b = parseInt(matches[3]);
+          const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+          return luminance < 0.5;
+        }
+      }
+      
+      // Default to false if we can't parse the color
+      return false;
+    }
   }
-};
+}
 </script>
 
 <style scoped>
-.content-editor-container {
+.content-editor-wrapper {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow: hidden; /* Prevent full-page scrollbars */
 }
 
-/* Fix ShowInfoHeader height to prevent layout bounce */
-.show-info-header-fixed {
-  min-height: 64px; /* Reduced height for more compact header */
-  padding-top: 8px;
-  padding-bottom: 8px;
-  width: 100%;
-  /* Adjust 80px as needed to match your header's normal height */
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  box-sizing: border-box;
+.main-toolbar {
+  background-color: var(--v-toolbar-bg, #FFFFFF);
+  border-bottom: 1px solid var(--v-divider-color, #E0E0E0);
 }
 
-/* Use :deep() to ensure padding overrides apply to Vuetify v-text-field and v-select internals */
-:deep(.show-info-header-fixed .v-input input),
-:deep(.show-info-header-fixed .v-input textarea),
-:deep(.show-info-header-fixed .v-field__input),
-:deep(.show-info-header-fixed .v-field__slot),
-:deep(.show-info-header-fixed .v-field__overlay),
-:deep(.show-info-header-fixed .v-field__field),
-:deep(.show-info-header-fixed input),
-:deep(.show-info-header-fixed textarea) {
-  padding-left: 12px !important;
-  padding-right: 12px !important;
-  padding-top: 4px !important;
-  padding-bottom: 4px !important;
-  font-size: 0.95rem !important;
-  color: rgb(var(--v-theme-on-surface), 1) !important;
-  background: transparent !important;
-  height: auto !important;
-  min-height: 32px !important;
-  line-height: 1.3 !important;
-  box-sizing: border-box;
-}
-
-.show-info-header-fixed .v-label {
-  font-size: 0.80rem !important; /* Smaller label font */
-}
-
-/* Reduce width and spacing for compact look */
-.show-info-header-fixed .v-input,
-.show-info-header-fixed .v-field {
-  min-width: 260px !important;
-  max-width: 700px !important;
-  margin-left: 4px !important;
-  margin-right: 4px !important;
-  width: 100% !important;
-}
-
-:deep(.show-info-header-fixed .showinfo-field) {
-  width: 100% !important;
-}
-
-:deep(.show-info-header-fixed .v-col) {
-  flex: 1 1 0 !important;
-  min-width: 260px !important;
-  max-width: 700px !important;
-}
-
-/* Reduce select dropdown font/height */
-.show-info-header-fixed .v-select__selection {
-  font-size: 0.85rem !important;
-  min-height: 24px !important;
-}
-
-.main-content {
+.rundown-panel {
+  position: relative;
+  width: 40%;
+  /* Remove static border-right so only dynamic border shows */
+  /* border-right: 1px solid var(--v-divider-color, #E0E0E0); */
   display: flex;
   flex-direction: column;
-  flex-grow: 1;
-  overflow: hidden;
+  transition: width 0.3s ease;
+  border: 2px solid transparent; /* fallback for dynamic border */
+  border-radius: 0 !important;
+  box-sizing: border-box;
+  min-height: 0; /* Allow flexbox to shrink */
+  overflow: hidden; /* Prevent content overflow */
 }
 
-.content-row {
+.script-status-horizontal-bar {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 1px;
+  margin: 0;
+  padding: 0;
+  border-radius: 0 !important;
+  border: none;
+}
+.status-text {
+  width: 100%;
+  text-align: center;
+}
+
+.rundown-header-row {
   display: flex;
   flex-direction: row;
-  flex-grow: 1;
-  overflow: hidden; /* Each panel will have its own scrollbar */
+  align-items: center;
+  background-color: var(--v-toolbar-bg, #F5F5F5);
+  border-bottom: 1px solid var(--v-divider-color, #E0E0E0);
+  padding: 0 16px;
+  height: 48px;
 }
 
-/* --- Lighter Toolbar Background Override --- */
-.lighter-toolbar-bg {
-  background: #f5f5f5 !important;
-  /* fallback for light mode */
-  background-color: rgba(255,255,255,0.85) !important;
-  /* for extra lightness and transparency */
-  box-shadow: none !important;
+.rundown-header-title {
+  font-weight: 500;
+  color: var(--v-primary-text-color, #000000);
+  font-size: 1.2rem;
+  margin-left: 12px;
 }
 
-/* Editor Textarea Styles - Fix fade/gradient issues */
-.editor-textarea textarea,
-.editor-textarea .v-field__input,
-.editor-textarea .v-input__control {
-  opacity: 1 !important;
-  background: transparent !important;
-  background-image: none !important;
-  mask: none !important;
-  -webkit-mask: none !important;
-  padding-top: 20px !important; /* Add padding to prevent text from being hidden behind headers */
+.status-box {
+  border-radius: 4px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  height: 36px;
+  min-width: 90px;
+  justify-content: center;
+  background: #888;
+  color: #fff;
 }
 
-.editor-textarea .v-field {
-  background: transparent !important;
-  background-image: none !important;
+.panel-toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  background-color: var(--v-toolbar-bg, #F5F5F5);
+  border-bottom: 1px solid var(--v-divider-color, #E0E0E0);
 }
 
-.editor-textarea .v-field__field {
-  opacity: 1 !important;
-  background: transparent !important;
-  padding-top: 20px !important; /* Ensure the field has proper padding */
+.toolbar-title {
+  font-weight: 500;
+  color: var(--v-primary-text-color, #000000);
 }
 
-/* Remove any gradient overlays from Vuetify */
-.editor-textarea .v-field__overlay,
-.editor-textarea .v-field__loader {
-  display: none !important;
-}
-
-/* Ensure text is always fully visible */
-.editor-textarea textarea {
-  color: rgb(var(--v-theme-on-surface)) !important;
-  opacity: 1 !important;
-  padding-top: 20px !important; /* Critical: Add top padding to prevent text clipping */
-  box-sizing: border-box !important;
-}
-
-/* Fix any potential clipping or overflow issues */
-.editor-content {
-  overflow: visible !important;
-  padding-top: 10px; /* Add some breathing room */
-}
-
-.editor-content .fill-height {
-  height: 100% !important;
-  min-height: 400px;
-}
-
-/* Ensure the main editor panel has proper spacing */
-.editor-panel .v-card-text {
-  padding-top: 15px !important;
-  padding-left: 15px !important;
-  padding-right: 15px !important;
-}
-
-/* Fix text visibility issues specifically for the main textarea */
-.editor-panel .v-textarea .v-field__input {
-  padding-top: 25px !important;
-  line-height: 1.5 !important;
-}
-
-/* Ensure proper scrolling without content being hidden */
-.editor-panel .v-card-text .fill-height {
+.rundown-list {
+  flex: 1;
   overflow-y: auto;
-  max-height: calc(100vh - 200px); /* Account for headers */
+  padding: 0;
+  margin: 0;
+  min-height: 0; /* Allow flexbox to shrink */
+  height: auto; /* Remove any fixed height constraints */
 }
 
-/* Add more styling here as needed */
+.rundown-item {
+  --base-row-height: 26px;
+  cursor: grab;
+  padding: 0;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--v-divider-color, #E0E0E0);
+  min-height: var(--base-row-height);
+  height: var(--base-row-height);
+  position: relative;
+}
+
+.rundown-item:active {
+  cursor: grabbing;
+}
+
+.rundown-item.selected-item {
+  /* Remove static selected background, let inline style handle it */
+  /* background: none !important; */
+  /* color: inherit !important; */
+  height: calc(var(--base-row-height) * 2); /* Dynamically double the base height */
+  transform: translateX(8px);
+  border-left: 4px solid var(--v-accent-base, #FFC107);
+}
+
+.rundown-item.ghost-class {
+  opacity: 0.5;
+  background: #c8ebfb;
+}
+
+.rundown-item.dragging {
+  opacity: 0.7;
+  transform: rotate(2deg);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+}
+
+.rundown-item:hover {
+  background-color: rgba(0,0,0,0.02);
+}
+
+.rundown-item.no-hover:hover {
+  background-color: unset;
+}
+
+.item-content {
+  flex: 1;
+  display: flex;
+  align-items: stretch; /* Make children fill height */
+  width: 100%;
+}
+
+.index-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px; /* Reduced from 12px to 6px (50% reduction) */
+  background-color: rgba(0,0,0,0.5);
+  color: white;
+  flex-shrink: 0;
+  min-width: 48px; /* Ensures all index cells are at least this wide */
+  width: 48px;     /* Fixed width for all index cells */
+  box-sizing: border-box;
+}
+
+.rundown-item.selected-item .index-container {
+  background-color: rgba(0,0,0,0.65);
+  color: white;
+}
+
+.rundown-item.selected-item .item-type-cell {
+  background-color: rgba(255,255,255,0.25);
+}
+
+.item-index {
+  font-weight: 500;
+  font-size: 12px; /* Reduced by 2 points from typical 14px */
+}
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.item-type-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 65px;
+  width: 65px;
+  max-width: 65px;
+  box-sizing: border-box;
+  background-color: rgba(255,255,255,0.15);
+}
+
+.item-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* Vertical centering */
+  padding: 2px 6px; /* Reduced from 4px 12px to 2px 6px (50% reduction) */
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.item-type {
+  font-size: 9px;
+  font-weight: 400;
+  text-transform: uppercase;
+  line-height: 1.2;
+  /* Remove vertical-align, use flex centering */
+}
+
+.item-slug {
+  font-size: 14px;
+  font-weight: 300;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  text-transform: lowercase;
+}
+
+.item-duration {
+  font-size: 12px;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  padding: 0 8px; /* Reduced from 16px to 8px (50% reduction) */
+  flex-shrink: 0;
+}
+
+.editor-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content-area {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0; /* Allow flexbox to shrink properly */
+}
+
+.rundown-table-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  width: 100%;
+  background: rgba(0,0,0,0.08);
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 1px solid var(--v-divider-color, #E0E0E0);
+}
+.rundown-table-header > div {
+  text-align: center;
+  padding: 8px 0;
+}
+.rundown-table-header .index-container {
+  min-width: 48px;
+  width: 48px;
+  max-width: 48px;
+}
+.rundown-table-header .item-type-cell {
+  min-width: 65px;
+  width: 65px;
+  max-width: 65px;
+}
+.rundown-table-header .item-details {
+  flex: 1;
+  text-align: left;
+  padding-left: 12px;
+}
+.rundown-table-header .item-duration {
+  min-width: 60px;
+  width: 60px;
+  max-width: 60px;
+  text-align: right;
+  padding-right: 16px;
+}
+
+.rundown-header-btn {
+  padding: 0 2px !important;
+  margin-left: 4px;
+  height: 28px !important;
+  width: 28px !important;
+ 
+  opacity: 0.5;
+  transform: rotate(1deg);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  background: rgba(255, 193, 7, 0.1) !important;
+}
+
+.dragging {
+  opacity: 0.8;
+  transform: rotate(1deg);
+  z-index: 1000;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.drag-over-above::before {
+  content: '';
+  position: absolute;
+  top: -12px;
+  left: 0;
+  right: 0;
+  height: 12px;
+  background: #FFC107;
+  z-index: 1000;
+}
+
+.drag-over-below::after {
+  content: '';
+  position: absolute;
+  bottom: -12px;
+  left: 0;
+  right: 0;
+  height: 12px;
+  background: #FFC107;
+  z-index: 1000;
+}
+
+@keyframes pulse-yellow {
+  0% {
+    background: rgba(255, 193, 7, 0.8);
+    border-color: rgba(255, 193, 7, 0.9);
+    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4);
+    transform: scale(1);
+  }
+  100% {
+    background: rgba(255, 193, 7, 1);
+    border-color: rgba(255, 193, 7, 1);
+    box-shadow: 0 6px 16px rgba(255, 193, 7, 0.7);
+    transform: scale(1.02);
+  }
+}
+
+.rundown-item {
+  transition: all 0.2s ease;
+}
+
+.rundown-item:not(.ghost-class):not(.dragging) {
+  transform: translateZ(0);
+}
 </style>
 

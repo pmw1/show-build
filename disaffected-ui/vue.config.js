@@ -3,7 +3,7 @@ module.exports = defineConfig({
   transpileDependencies: true,
   
   devServer: {
-    host: '0.0.0.0', // Bind to all interfaces
+    host: '0.0.0.0',
     port: 8080,
     allowedHosts: 'all',
     proxy: {
@@ -11,10 +11,8 @@ module.exports = defineConfig({
         target: 'http://192.168.51.210:8888',
         changeOrigin: true,
         secure: false,
-        pathRewrite: {
-          '^/api': ''
-        }
+        pathRewrite: { '^/api': '' }
       }
     }
   }
-})
+});

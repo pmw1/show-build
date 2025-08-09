@@ -2,15 +2,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 import RundownManager from '@/components/RundownManager.vue'
 import ContentEditor from '@/components/ContentEditor.vue'
 import DashboardView from '@/views/DashboardView.vue'
+import { useAuth } from '@/composables/useAuth';
 
 // Authentication check function
 function isAuthenticated() {
-  const token = localStorage.getItem('auth-token')
-  const expiry = localStorage.getItem('auth-token-expiry')
-  
-  if (!token || !expiry) return false
-  
-  return Date.now() < parseInt(expiry)
+  const { isAuthenticated: isAuth } = useAuth();
+  return isAuth.value;
 }
 
 const routes = [

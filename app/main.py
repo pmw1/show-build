@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from utils.id import get_next_id
 from utils.validator import validate_front_matter
+from utils.frontmatter_parser import parse_markdown_file
 from auth.utils import get_current_user_or_key, get_current_user  # Add get_current_user
 import logging
 import hashlib
@@ -20,6 +21,9 @@ import re
 import yaml  # Add yaml import for debug endpoint
 import random  # Add random import for asset ID generation
 from pathlib import Path
+from glob import glob
+import markdown
+import traceback
 
 # Absolute path to the app directory
 APP_DIR = Path(__file__).resolve().parent
@@ -34,6 +38,9 @@ print(f"Auth directory contents: {os.listdir(APP_DIR / 'auth')}")
 # Now try importing the auth module
 try:
     from auth.router import router as auth_router
+    from api_config_router import router as api_config_router
+    from assets_router import router as assets_router
+    from templates_router import router as templates_router
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Current directory: {os.getcwd()}")
@@ -57,6 +64,15 @@ app.add_middleware(
 
 # Include the auth router
 app.include_router(auth_router)
+
+# Include the API configuration router
+app.include_router(api_config_router)
+
+# Include the assets router
+app.include_router(assets_router, prefix="/api", tags=["assets"])
+
+# Include the templates router
+app.include_router(templates_router, prefix="/api", tags=["templates"])
 
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
@@ -144,6 +160,73 @@ async def listen_endpoint(topic: str):
 async def health():
     return {"status": "healthy"}
 
+@app.get("/show-info")
+async def get_show_info():
+    """
+    Returns basic information about the show.
+    For now, it's hardcoded, but could be read from a config file.
+    """
+    return {
+        "show_title": "Disaffected",
+        "show_description": "A show about current events and technology.",
+        "episodes_base_path": "/home/episodes"
+    }
+
+@app.get("/episodes")
+async def list_episodes():
+    """
+    Lists all available episodes by scanning the /home/episodes directory.
+    An episode is considered a directory with a 'rundown' subdirectory.
+    """
+    base_path = "/home/episodes"
+    if not os.path.isdir(base_path):
+        logging.error(f"Episodes base path not found: {base_path}")
+        raise HTTPException(status_code=500, detail="Episodes directory not configured.")
+
+    episodes = []
+    for item in sorted(os.listdir(base_path), reverse=True):
+        episode_path = os.path.join(base_path, item)
+        if not os.path.isdir(episode_path):
+            continue
+
+        # We no longer require a 'rundown' subdirectory to list an episode
+        info_path = os.path.join(episode_path, "info.md")
+        
+        # Default values
+        title = f"Episode {item}"
+        airdate = None
+        status = "unknown"
+
+        if os.path.exists(info_path):
+            metadata = None  # Ensure metadata is reset for each episode
+            try:
+                metadata, _ = parse_markdown_file(info_path)
+                
+                # Defensive check: ensure metadata is a dictionary
+                if metadata and isinstance(metadata, dict):
+                    title = metadata.get("title", title)
+                    airdate = metadata.get("airdate")
+                    status = metadata.get("status", "unknown")
+                elif metadata:
+                    # Log if metadata is not a dictionary, to debug the 'tuple' error
+                    logging.warning(f"Metadata for episode {item} is not a dictionary. Type: {type(metadata)}. Data: {metadata}")
+
+            except Exception as e:
+                # This will catch errors during parsing or attribute access
+                logging.warning(f"Could not process info.md for episode {item}: {e}")
+        
+        episodes.append({
+            "episode_number": item, 
+            "title": title, 
+            "airdate": airdate,
+            "status": status
+        })
+            
+    if not episodes:
+        logging.warning(f"No valid episodes found in {base_path}")
+
+    return {"episodes": episodes}
+
 @app.post("/next-id")
 async def next_id(slug: str = Form(...), type: str = Form(...)):
     try:
@@ -197,6 +280,53 @@ async def upload(
     except Exception as e:
         logging.error(f"Failed to save file: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+
+@app.post("/upload_image")
+async def upload_image(
+    file: UploadFile = File(..., alias="file"),
+    id: str = Form(..., alias="id"),
+    episode: str = Form(..., alias="episode"),
+    slug: str = Form(..., alias="slug"),
+):
+    """
+    Upload an image file for processing.
+
+    Args:
+        file (UploadFile): The image file to upload.
+        id (str): Unique identifier for the asset.
+        episode (str): Episode identifier.
+        slug (str): Slug for naming convention.
+
+    Returns:
+        dict: Status, file path, and asset ID.
+    """
+    if not file:
+        raise HTTPException(status_code=400, detail="File is required")
+
+    file_content = await file.read()
+
+    if not file_content:
+        raise HTTPException(status_code=422, detail="File content is empty")
+
+    if not file.filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
+        raise HTTPException(status_code=422, detail="File must be an image (png, jpg, jpeg, gif)")
+
+    md5_hash = hashlib.md5(file_content).hexdigest()
+    work_dir = f"/shared_media/images/{id}"
+    os.makedirs(work_dir, exist_ok=True)
+    filepath = os.path.join(work_dir, file.filename)
+
+    try:
+        with open(filepath, "wb") as f:
+            f.write(file_content)
+
+        logging.info(f"Image successfully saved: {filepath}, MD5: {md5_hash}")
+        return {"status": "image uploaded", "filepath": filepath, "md5": md5_hash}
+
+    except Exception as e:
+        logging.error(f"Failed to save image: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @app.get("/rundown/{episode_number}/debug")
 async def debug_rundown(episode_number: str):
@@ -277,18 +407,22 @@ async def debug_rundown(episode_number: str):
     
     return debug_info
 
-@app.get("/rundown/{episode_number}")
-async def get_rundown(episode_number: str):
-    base_path = "/home/episodes"
+@app.get("/episodes/{episode_number}/rundown")
+async def get_episode_rundown(episode_number: str):
+    """Provides rundown items in a format expected by the frontend.
+    Flattens the metadata into the main item object.
+    """
+    base_path = os.getenv("EPISODE_ROOT", "/home/episodes")
+    print(f"[DEBUG] get_episode_rundown: base_path={base_path}, episode_number={episode_number}")
     episode_path = os.path.join(base_path, episode_number, "rundown")
 
     if not os.path.isdir(episode_path):
-        raise HTTPException(
-            status_code=404, detail=f"Episode {episode_number} not found."
-        )
+        error_msg = f"Episode path not found: {episode_path}"
+        print(f"[ERROR] {error_msg}")
+        # Raise for full traceback
+        raise Exception(error_msg)
 
     rundown_items = []
-
     for file_name in sorted(os.listdir(episode_path)):
         if file_name.endswith(".md"):
             file_path = os.path.join(episode_path, file_name)
@@ -299,19 +433,32 @@ async def get_rundown(episode_number: str):
                 if content.startswith("---"):
                     fm_end = content.find("\n---", 4)
                     if fm_end == -1:
-                        raise ValueError("Front matter block not properly closed")
+                        continue # Skip malformed files
                     yaml_block = content[4:fm_end]
                     front_matter = yaml.safe_load(yaml_block)
+                    script_content = content[fm_end + 4:].strip()
                 else:
-                    raise ValueError("No YAML front matter found")
+                    continue # Skip files without frontmatter
 
                 validated_metadata = validate_front_matter(front_matter, filename=file_name)
-                rundown_items.append({"filename": file_name, "metadata": validated_metadata})
+                
+                # Flatten the structure
+                item = {
+                    "id": validated_metadata.get('id', file_name),
+                    "type": validated_metadata.get('type', 'unknown'),
+                    "slug": validated_metadata.get('slug', 'No Slug'),
+                    "duration": validated_metadata.get('duration', '00:00:00'),
+                    "script": script_content,
+                    **validated_metadata # Include all other metadata fields
+                }
+                rundown_items.append(item)
 
             except Exception as e:
-                #logging.warning(f"Invalid metadata in {file_name}: {e}")
-                pass  ##skipping the warning messages about unvalidated fields for now  uncomment above to re-enable
-    return JSONResponse(content=jsonable_encoder(rundown_items))
+                logging.warning(f"Skipping invalid file {file_name} in rundown: {e}")
+                pass
+    
+    return {"items": rundown_items}
+
 
 @app.post("/rundown/{episode_number}/reorder")
 async def reorder_rundown(episode_number: str, payload: ReorderRequest):
@@ -387,7 +534,7 @@ async def create_rundown_item(episode_number: str, item: NewRundownItem):
     
     # Create a safe filename from the title
     safe_title = "".join(c for c in item.title if c.isalnum() or c in (' ', '-', '_')).rstrip()
-    safe_title = safe_title.replace(' ', ' ')  # Normalize spaces
+    safe_title = safe_title.replace(' ', '-') # Normalize spaces
     
     # Get the next order number
     existing_files = [f for f in os.listdir(episode_path) if f.endswith('.md')]
@@ -463,25 +610,72 @@ Add script content here...
             detail=f"Failed to create rundown item: {str(e)}"
         )
 
+@app.get("/show-info")
+async def get_show_info():
+    """
+    Returns basic information about the show.
+    For now, it's hardcoded, but could be read from a config file.
+    """
+    return {
+        "show_title": "Disaffected",
+        "show_description": "A show about current events and technology.",
+        "episodes_base_path": "/home/episodes"
+    }
+
 @app.get("/episodes")
 async def list_episodes():
-    """List all available episode numbers by scanning /home/episodes directory"""
+    """
+    Lists all available episodes by scanning the /home/episodes directory.
+    An episode is considered a directory with a 'rundown' subdirectory.
+    """
     base_path = "/home/episodes"
-    try:
-        # Get directories that have a rundown subdirectory
-        episodes = [
-            d for d in os.listdir(base_path)
-            if os.path.isdir(os.path.join(base_path, d)) and
-               os.path.isdir(os.path.join(base_path, d, "rundown")) and
-               re.match(r'^\d{4}$', d)  # Must be 4 digits
-        ]
-        return sorted(episodes)  # Return sorted list of valid episode numbers
-    except Exception as e:
-        logging.error(f"Failed to list episodes: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list episodes: {str(e)}"
-        )
+    if not os.path.isdir(base_path):
+        logging.error(f"Episodes base path not found: {base_path}")
+        raise HTTPException(status_code=500, detail="Episodes directory not configured.")
+
+    episodes = []
+    for item in sorted(os.listdir(base_path), reverse=True):
+        episode_path = os.path.join(base_path, item)
+        if not os.path.isdir(episode_path):
+            continue
+
+        # We no longer require a 'rundown' subdirectory to list an episode
+        info_path = os.path.join(episode_path, "info.md")
+        
+        # Default values
+        title = f"Episode {item}"
+        airdate = None
+        status = "unknown"
+
+        if os.path.exists(info_path):
+            metadata = None  # Ensure metadata is reset for each episode
+            try:
+                metadata, _ = parse_markdown_file(info_path)
+                
+                # Defensive check: ensure metadata is a dictionary
+                if metadata and isinstance(metadata, dict):
+                    title = metadata.get("title", title)
+                    airdate = metadata.get("airdate")
+                    status = metadata.get("status", "unknown")
+                elif metadata:
+                    # Log if metadata is not a dictionary, to debug the 'tuple' error
+                    logging.warning(f"Metadata for episode {item} is not a dictionary. Type: {type(metadata)}. Data: {metadata}")
+
+            except Exception as e:
+                # This will catch errors during parsing or attribute access
+                logging.warning(f"Could not process info.md for episode {item}: {e}")
+        
+        episodes.append({
+            "episode_number": item, 
+            "title": title, 
+            "airdate": airdate,
+            "status": status
+        })
+            
+    if not episodes:
+        logging.warning(f"No valid episodes found in {base_path}")
+
+    return {"episodes": episodes}
 
 @app.get("/protected-endpoint")
 async def protected_route(current_user: dict = Depends(get_current_user_or_key)):

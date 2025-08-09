@@ -1,16 +1,19 @@
 <template>
   <v-card class="show-info-header full-width-bg" flat>
     <v-card-text class="pa-3">
+      <div v-if="loadingRundown" style="margin-bottom: 8px;">
+        <v-progress-linear indeterminate color="primary" height="4" rounded></v-progress-linear>
+      </div>
       <div class="header-container">
         <div class="show-title-area">
-          <h2 class="text-h5 mb-1">{{ currentShowTitle || 'Disaffected' }}</h2>
-          <p class="text-caption text-medium-emphasis mb-0">{{ currentEpisodeInfo || 'Episode Production Workspace' }}</p>
+          <h2 class="show-title-fit text-h5 mb-1">{{ title || 'Disaffected' }}</h2>
+          <p class="text-caption text-medium-emphasis mb-0">{{ episodeInfo || 'Episode Production Workspace' }}</p>
         </div>
 
         <div class="fields-area">
           <v-select
             label="Episode"
-            :model-value="currentEpisodeNumber"
+            :model-value="episodeNumber"
             :items="episodes"
             item-title="title"
             item-value="value"
@@ -19,11 +22,16 @@
             class="showinfo-field"
             hide-details
             @update:model-value="$emit('update:episodeNumber', $event)"
+            :item-props="episode => ({
+              title: (typeof episode.title === 'string')
+                ? episode.title.split(':')[0] + (episode.title.includes(':') ? ':' : '') + ' ' + (episode.title.split(':')[1] ? episode.title.split(':')[1].trim() : '')
+                : ''
+            })"
           ></v-select>
 
           <v-text-field
             label="Air Date"
-            :model-value="currentAirDate"
+            :model-value="airDate"
             variant="outlined"
             density="comfortable"
             class="showinfo-field"
@@ -33,7 +41,7 @@
 
           <v-select
             label="Status"
-            :model-value="currentProductionStatus"
+            :model-value="productionStatus"
             :items="productionStatuses"
             variant="outlined"
             density="comfortable"
@@ -51,6 +59,10 @@
             hide-details
             readonly
           ></v-text-field>
+
+          <div class="status-indicator" :style="{ backgroundColor: statusColor, color: '#fff', borderRadius: '4px', padding: '4px 12px', display: 'inline-block', marginBottom: '8px', fontWeight: 600, letterSpacing: '1px' }">
+            {{ productionStatus }}
+          </div>
         </div>
       </div>
     </v-card-text>
@@ -58,27 +70,29 @@
 </template>
 
 <script>
+import { getColorValue } from '../../utils/themeColorMap';
+
 export default {
   name: 'ShowInfoHeader',
   emits: ['update:episodeNumber', 'update:airDate', 'update:productionStatus'],
   props: {
-    currentShowTitle: {
+    title: {
       type: String,
       default: 'Disaffected'
     },
-    currentEpisodeInfo: {
+    episodeInfo: {
       type: String,
       default: 'Episode Production Workspace'
     },
-    currentEpisodeNumber: {
+    episodeNumber: {
       type: [String, Number],
       default: ''
     },
-    currentAirDate: {
+    airDate: {
       type: String,
       default: ''
     },
-    currentProductionStatus: {
+    productionStatus: {
       type: String,
       default: 'Pre-Production'
     },
@@ -93,14 +107,34 @@ export default {
     productionStatuses: {
       type: Array,
       default: () => ['Draft', 'Approved', 'Production', 'Completed']
+    },
+    loadingRundown: {
+      type: Boolean,
+      default: false
     }
   },
-}
+  computed: {
+    statusColor() {
+      // Use getColorValue to get the color for the current status
+      return getColorValue((this.productionStatus || '').toLowerCase());
+    }
+  }
+};
 </script>
 
 <style scoped>
 .show-info-header {
   border-bottom: 1px solid #e0e0e0;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  position: relative;
+  transition: height 0.2s;
+  padding-top: 0;
 }
 
 .full-width-bg {
@@ -111,21 +145,41 @@ export default {
 .header-container {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: 16px;
+  align-content: flex-start;
+  height: 100%;
 }
 
 .show-title-area {
-  flex: 1 1 auto;
+  width: 320px;
+  min-width: 200px;
+  max-width: 400px;
+  flex: 0 0 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.show-title-fit {
+  width: 100%;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: clamp(1.1rem, 2.5vw, 2rem);
 }
 
 .fields-area {
   display: flex;
   flex-wrap: nowrap;
   gap: 16px;
-  flex: 2 1 600px; /* Give more space to fields area */
+  flex: 2 1 600px;
   justify-content: flex-end;
+  align-items: flex-start;
+  align-self: flex-start;
 }
 
 .showinfo-field {

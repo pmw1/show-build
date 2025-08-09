@@ -1013,7 +1013,6 @@ export default {
   methods: {
     authorizeGoogle() {
       // Google authorization logic - opens OAuth flow
-      console.log('Starting Google OAuth authorization...')
       // Implementation would redirect to Google OAuth
     },
     addCustomEndpoint() {
@@ -1037,7 +1036,6 @@ export default {
       this.apiConfigs.webhooks.splice(index, 1)
     },
     async saveApiConfigs() {
-      this.savingApiConfigs = true
       try {
         // Convert Vue data structure to backend structure
         const backendConfig = {
@@ -1095,80 +1093,22 @@ export default {
           throw new Error(result.message || 'Failed to save configurations')
         }
       } catch (error) {
-        console.error('Error saving API configs:', error)
         this.$toast.error('Failed to save API configurations. Please try again.')
       } finally {
         this.savingApiConfigs = false
       }
     },
     async loadApiConfigs() {
+      this.isLoading = true;
       try {
-        const response = await fetch('/api/settings/api-configs', {
-          headers: {
-            'Authorization': `Bearer ${this.$store.state.auth.token}`
-          }
-        })
-        
-        if (response.ok) {
-          const result = await response.json()
-          if (result.success && result.data) {
-            // Convert backend structure to Vue data structure
-            const config = result.data
-            
-            // Pre-production services
-            if (config.preproduction?.ai_services) {
-              Object.assign(this.apiConfigs, {
-                ollama: config.preproduction.ai_services.ollama || this.apiConfigs.ollama,
-                whisper: config.preproduction.ai_services.whisper || this.apiConfigs.whisper,
-                openai: config.preproduction.ai_services.openai || this.apiConfigs.openai,
-                anthropic: config.preproduction.ai_services.anthropic || this.apiConfigs.anthropic,
-                gemini: config.preproduction.ai_services.gemini || this.apiConfigs.gemini,
-                grok: config.preproduction.ai_services.grok || this.apiConfigs.grok,
-                stabilityAi: config.preproduction.ai_services.stabilityAi || this.apiConfigs.stabilityAi,
-                elevenLabs: config.preproduction.ai_services.elevenLabs || this.apiConfigs.elevenLabs
-              })
-            }
-            
-            if (config.preproduction?.storage) {
-              Object.assign(this.apiConfigs, {
-                google: config.preproduction.storage.google || this.apiConfigs.google,
-                aws: config.preproduction.storage.aws || this.apiConfigs.aws
-              })
-            }
-            
-            if (config.preproduction?.communication) {
-              Object.assign(this.apiConfigs, {
-                slack: config.preproduction.communication.slack || this.apiConfigs.slack,
-                discord: config.preproduction.communication.discord || this.apiConfigs.discord,
-                twilio: config.preproduction.communication.twilio || this.apiConfigs.twilio,
-                email: config.preproduction.communication.email || this.apiConfigs.email
-              })
-            }
-            
-            // Promotion services
-            if (config.promotion?.social_media) {
-              Object.assign(this.apiConfigs, {
-                youtube: config.promotion.social_media.youtube || this.apiConfigs.youtube,
-                vimeo: config.promotion.social_media.vimeo || this.apiConfigs.vimeo
-              })
-            }
-            
-            // Development services
-            if (config.development) {
-              Object.assign(this.apiConfigs, {
-                github: config.development.github || this.apiConfigs.github,
-                gitlab: config.development.gitlab || this.apiConfigs.gitlab,
-                zapier: config.development.zapier || this.apiConfigs.zapier,
-                webhooks: config.development.webhooks || this.apiConfigs.webhooks,
-                customEndpoints: config.development.customEndpoints || this.apiConfigs.customEndpoints
-              })
-            }
-          }
+        const response = await this.$axios.get('/api/config');
+        if (response.data) {
+          this.apiConfigs = response.data;
         }
       } catch (error) {
-        console.error('Error loading API configs:', error)
-        // Continue with default empty configs
+        alert('Failed to load API configurations.');
       }
+      this.isLoading = false;
     },
     async testApiConnection(service) {
       try {
@@ -1190,7 +1130,6 @@ export default {
           return false
         }
       } catch (error) {
-        console.error(`Error testing ${service}:`, error)
         this.$toast.error(`Failed to test ${service} connection`)
         return false
       }

@@ -65,10 +65,15 @@
       </v-btn>
     </v-app-bar>
 
+    <!-- Show Info Header/Main Toolbar (always visible below app bar) -->
+    <router-view v-slot="{ Component }">
+      <component :is="Component" v-if="$route.name === 'ContentEditor'" />
+    </router-view>
+
     <!-- Navigation Drawer -->
     <v-navigation-drawer
       v-model="drawer"
-      temporary
+      :temporary="$route.name !== 'ContentEditor'"
     >
       <v-list density="compact" nav>
         <v-list-item
@@ -86,7 +91,7 @@
     <!-- Main Content Area -->
     <v-main>
       <v-container fluid class="pa-0">
-        <router-view></router-view>
+        <router-view v-if="$route.name !== 'ContentEditor'" />
       </v-container>
     </v-main>
 
@@ -101,143 +106,76 @@
 <script>
 import LoginModal from '@/components/LoginModal.vue'
 import axios from 'axios'
+import { useAuth } from '@/composables/useAuth'
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 
 export default {
   name: 'App',
   components: {
     LoginModal
   },
-  data: () => ({
-    drawer: false,
-    showLoginModal: false,
-    isAuthenticated: false,
-    currentUser: {},
-    navItems: [
-      {
-        title: 'Dashboard',
-        icon: 'mdi-view-dashboard',
-        to: '/dashboard'
-      },
-      {
-        title: 'Rundown Editor',
-        icon: 'mdi-playlist-edit',
-        to: '/rundown'
-      },
-      {
-        title: 'Content Editor',
-        icon: 'mdi-script-text-outline',
-        to: '/content-editor'
-      },
-      {
-        title: 'Asset Manager',
-        icon: 'mdi-folder',
-        to: '/assets'
-      },
-      {
-        title: 'Templates',
-        icon: 'mdi-file-document',
-        to: '/templates'
-      },
-      {
-        title: 'Settings',
-        icon: 'mdi-cog',
-        to: '/settings'
-      }
-    ],
-    userMenuItems: [
-      {
-        title: 'Profile',
-        icon: 'mdi-account',
-        action: 'profile'
-      },
-      {
-        title: 'Settings',
-        icon: 'mdi-cog',
-        action: 'settings'
-      },
-      {
-        title: 'Logout',
-        icon: 'mdi-logout',
-        action: 'logout'
-      }
+  setup() {
+    const { isAuthenticated, currentUser, checkAuthStatus, handleLogout, setAuth } = useAuth()
+    const router = useRouter()
+    
+    const drawer = ref(false)
+    const showLoginModal = ref(false)
+    
+    const navItems = [
+      { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/dashboard' },
+      { title: 'Rundown Editor', icon: 'mdi-playlist-edit', to: '/rundown' },
+      { title: 'Content Editor', icon: 'mdi-script-text-outline', to: '/content-editor' },
+      { title: 'Asset Manager', icon: 'mdi-folder', to: '/assets' },
+      { title: 'Templates', icon: 'mdi-file-document', to: '/templates' },
+      { title: 'Settings', icon: 'mdi-cog', to: '/settings' }
     ]
-  }),
-  mounted() {
-    this.checkAuthStatus()
-    this.setupAxiosInterceptors()
-  },
-  methods: {
-    checkAuthStatus() {
-      const token = localStorage.getItem('auth-token')
-      const expiry = localStorage.getItem('auth-token-expiry')
-      const userData = localStorage.getItem('user-data')
-
-      if (token && expiry && userData) {
-        const currentTime = Date.now()
-        const expiryTime = parseInt(expiry)
-
-        if (currentTime < expiryTime) {
-          // Token is still valid
-          this.isAuthenticated = true
-          this.currentUser = JSON.parse(userData)
-          
-          // Set auth header for axios
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
-        } else {
-          // Token expired, clear auth data
-          this.clearAuthData()
-        }
+    
+    const userMenuItems = [
+      { title: 'Profile', icon: 'mdi-account', action: 'profile' },
+      { title: 'Settings', icon: 'mdi-cog', action: 'settings' },
+      { title: 'Logout', icon: 'mdi-logout', action: 'logout' }
+    ]
+    
+    const handleLoginSuccess = (authData) => {
+      setAuth(authData.token, authData.user, authData.expiry)
+      showLoginModal.value = false
+    }
+    
+    const handleUserMenuItem = (item) => {
+      if (item.action === 'profile') router.push('/profile')
+      else if (item.action === 'settings') router.push('/settings')
+      else if (item.action === 'logout') {
+        handleLogout()
+        router.push('/dashboard')
       }
-    },
-    setupAxiosInterceptors() {
-      // Add response interceptor to handle token expiration
+    }
+    
+    onMounted(() => {
+      checkAuthStatus()
+      
+      // Setup axios interceptors
       axios.interceptors.response.use(
         response => response,
         error => {
           if (error.response?.status === 401) {
-            // Token expired or invalid, clear auth and show login
-            this.clearAuthData()
-            this.showLoginModal = true
+            handleLogout()
+            showLoginModal.value = true
           }
           return Promise.reject(error)
         }
       )
-    },
-    handleLoginSuccess(authData) {
-      this.isAuthenticated = true
-      this.currentUser = authData.user
-      console.log('Login successful:', authData.user)
-    },
-    handleUserMenuItem(item) {
-      switch (item.action) {
-        case 'profile':
-          this.$router.push('/profile')
-          break
-        case 'settings':
-          this.$router.push('/settings')
-          break
-        case 'logout':
-          this.handleLogout()
-          break
-        default:
-          console.log(`User menu action: ${item.action}`)
-      }
-    },
-    handleLogout() {
-      this.clearAuthData()
-      this.$router.push('/dashboard')
-    },
-    clearAuthData() {
-      this.isAuthenticated = false
-      this.currentUser = {}
-      
-      // Clear localStorage
-      localStorage.removeItem('auth-token')
-      localStorage.removeItem('auth-token-expiry')
-      localStorage.removeItem('user-data')
-      
-      // Clear axios auth header
-      delete axios.defaults.headers.common['Authorization']
+    })
+    
+    return {
+      drawer,
+      showLoginModal,
+      isAuthenticated,
+      currentUser,
+      navItems,
+      userMenuItems,
+      handleLoginSuccess,
+      handleUserMenuItem
     }
   }
 }
@@ -251,14 +189,9 @@ export default {
 
 .v-main {
   background: #f5f5f5;
-  padding-top: 64px !important;  /* Add padding equal to app bar height */
+  padding-top: 64px !important;  /* Only app bar height */
   padding-left: 0 !important;
   padding-right: 0 !important;
   padding-bottom: 0 !important;
-}
-
-.v-main .v-container {
-  max-width: none;
-  padding: 0 !important;
 }
 </style>

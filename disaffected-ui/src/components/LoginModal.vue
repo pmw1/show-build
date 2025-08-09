@@ -18,6 +18,7 @@
             required
             autofocus
             class="mb-3"
+            @keyup.enter="handleLogin"
           />
           
           <v-text-field
@@ -32,6 +33,7 @@
             :error-messages="fieldErrors.password"
             required
             class="mb-4"
+            @keyup.enter="handleLogin"
           />
 
           <v-alert
@@ -156,7 +158,6 @@ export default {
           this.resetForm()
         }
       } catch (error) {
-        console.error('Login error:', error)
         
         if (error.response?.status === 401) {
           this.errorMessage = 'Invalid username or password'

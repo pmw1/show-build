@@ -59,8 +59,8 @@ export default {
         if (text.startsWith('http')) {
           this.graphicPreview = text
         }
-      }).catch(err => {
-        console.warn('Could not read clipboard:', err)
+      }).catch(() => {
+        // console.warn('Could not read clipboard:', err)
       })
     },
     selectFile() {

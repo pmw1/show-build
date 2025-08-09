@@ -68,6 +68,13 @@ export const vuetify = createVuetify({
           'grey-dark': '#616161',
           'grey-light': '#F5F5F5',
 
+          // Purple family
+          'purple-base': '#9C27B0',
+          'purple-accent': '#E040FB',
+          'purple-accent-2': '#CE93D8', // Added for advert rows
+          'purple-dark': '#7B1FA2',
+          'purple-light': '#E1BEE7',
+
           // Keep any existing theme colors you need
           primary: '#1976D2',
           secondary: '#424242',

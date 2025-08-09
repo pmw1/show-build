@@ -259,21 +259,21 @@ def compile_script(episode_number, validate_only=False):
     episode_path = EPISODE_ROOT / episode_number
     info_path = episode_path / "info.md"
     if not episode_path.exists():
-        print(f"\033[31munknown\terror\tepisode_{episode_number}: Episode folder does not exist\033[0m")
+        print(f"\033[31munknown\terror\t{episode_number}: Episode folder does not exist\033[0m")
         return
 
     rundown_path = episode_path / "rundown"
     if not rundown_path.exists():
-        print(f"\033[31munknown\terror\tepisode_{episode_number}: Rundown folder does not exist\033[0m")
+        print(f"\033[31munknown\terror\t{episode_number}: Rundown folder does not exist\033[0m")
         return
 
     segment_files = sorted(rundown_path.glob("*.md"))
     if not segment_files:
-        print(f"\033[31munknown\terror\tepisode_{episode_number}: No markdown files found\033[0m")
+        print(f"\033[31munknown\terror\t{episode_number}: No markdown files found\033[0m")
         return
 
     if not validate_cue_blocks(segment_files):
-        print(f"\033[31munknown\terror\tepisode_{episode_number}: Validation failed, aborting\033[0m")
+        print(f"\033[31munknown\terror\t{episode_number}: Validation failed, aborting\033[0m")
         return
 
     if validate_only:
@@ -380,13 +380,45 @@ def compile_script(episode_number, validate_only=False):
         print(f"\033[31munknown\terror\t{output_path.name}: Failed to write output file\033[0m")
 
 if __name__ == "__main__":
+    print("[DEBUG] Environment variables:")
+    for k, v in os.environ.items():
+        print(f"    {k}={v}")
+    print(f"[DEBUG] sys.path: {sys.path}")
+    print(f"[DEBUG] os.getcwd(): {os.getcwd()}")
+    print(f"[DEBUG] __file__: {__file__}")
+    from paths import EPISODE_ROOT, BLUEPRINTS, HEADER_PATH, VALID_CUE_TYPES
+    print(f"[DEBUG] EPISODE_ROOT: {EPISODE_ROOT.resolve()}")
     parser = argparse.ArgumentParser(description="Compile script or validate cue blocks")
     parser.add_argument("episode_number", help="4-digit episode number (e.g., 0224)")
     parser.add_argument("--validate", action="store_true", help="Run validate only")
     args = parser.parse_args()
-
+    print(f"[DEBUG] Input episode_number: {args.episode_number}")
     if not re.match(r"^\d{4}$", args.episode_number):
         print("Usage: python compile_script.py <episode_number> [--validate] (episode_number: 4-digit, e.g., 0224)")
         sys.exit(1)
-
+    # Print the full path to the episode folder and info.md
+    episode_path = EPISODE_ROOT / args.episode_number
+    print(f"[DEBUG] episode_path: {episode_path.resolve()}")
+    info_path = episode_path / "info.md"
+    print(f"[DEBUG] info_path: {info_path.resolve()}")
+    rundown_path = episode_path / "rundown"
+    print(f"[DEBUG] rundown_path: {rundown_path.resolve()}")
+    # Print if the episode folder and info.md exist
+    print(f"[DEBUG] episode_path exists: {episode_path.exists()}")
+    print(f"[DEBUG] info_path exists: {info_path.exists()}")
+    print(f"[DEBUG] rundown_path exists: {rundown_path.exists()}")
+    # Print YAML frontmatter loaded from info.md
+    if info_path.exists():
+        with open(info_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            print(f"[DEBUG] info.md content:\n{content}")
+            info_data = parse_yaml_frontmatter(content)
+            print(f"[DEBUG] Parsed YAML frontmatter: {info_data}")
+            print(f"[DEBUG] YAML episode_number: {info_data.get('episode_number')}")
+    else:
+        info_data = {}
+    # Print the episode number used for compilation
+    episode_num = info_data.get("episode_number", args.episode_number)
+    print(f"[DEBUG] Final episode_num used: {episode_num}")
+    # Continue with normal script logic
     compile_script(args.episode_number, validate_only=args.validate)

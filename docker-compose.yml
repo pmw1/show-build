@@ -1,6 +1,6 @@
 version: '3.8'
 services:
-  fastapi:
+  server:
     build:
       context: .
       no_cache: true
@@ -30,8 +30,21 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    depends_on:
+      - mqtt-broker
+
+  mqtt-broker:
+    image: eclipse-mosquitto
+    container_name: mqtt-broker
+    networks:
+      - video-post
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      # Mount Mosquitto config for remote access
+      - ./tools/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
 networks:
   video-post:
-    external: true
 

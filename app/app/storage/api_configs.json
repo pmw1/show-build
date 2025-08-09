@@ -1,0 +1,153 @@
+{
+  "metadata": {
+    "created": "2025-07-02T12:09:54.526578",
+    "version": "1.0",
+    "description": "API configurations for pre-production, production, and promotion workflows",
+    "last_saved": "2025-07-02T12:09:54.526597"
+  },
+  "preproduction": {
+    "ai_services": {
+      "ollama": {
+        "host": "",
+        "apiKey": "",
+        "enabled": false
+      },
+      "whisper": {
+        "host": "",
+        "endpoint": "",
+        "enabled": false
+      },
+      "openai": {
+        "apiKey": "",
+        "organization": "",
+        "enabled": false
+      },
+      "anthropic": {
+        "apiKey": "",
+        "enabled": false
+      },
+      "gemini": {
+        "apiKey": "",
+        "enabled": false
+      },
+      "grok": {
+        "apiKey": "",
+        "enabled": false
+      },
+      "stabilityAi": {
+        "apiKey": "",
+        "enabled": false
+      },
+      "elevenLabs": {
+        "apiKey": "",
+        "enabled": false
+      }
+    },
+    "storage": {
+      "google": {
+        "clientId": "",
+        "clientSecret": "",
+        "serviceAccount": "",
+        "driveEnabled": false,
+        "calendarEnabled": false
+      },
+      "aws": {
+        "accessKeyId": "",
+        "secretAccessKey": "",
+        "region": "",
+        "bucket": "",
+        "enabled": false
+      }
+    },
+    "communication": {
+      "slack": {
+        "botToken": "",
+        "webhookUrl": "",
+        "enabled": false
+      },
+      "discord": {
+        "botToken": "",
+        "webhookUrl": "",
+        "enabled": false
+      },
+      "twilio": {
+        "accountSid": "",
+        "authToken": "",
+        "phoneNumber": "",
+        "enabled": false
+      },
+      "email": {
+        "provider": "",
+        "apiKey": "",
+        "fromEmail": "",
+        "enabled": false
+      }
+    }
+  },
+  "production": {
+    "streaming": {},
+    "recording": {},
+    "live_control": {}
+  },
+  "promotion": {
+    "social_media": {
+      "youtube": {
+        "apiKey": "",
+        "clientId": "",
+        "enabled": false
+      },
+      "vimeo": {
+        "accessToken": "",
+        "enabled": false
+      },
+      "twitter": {
+        "apiKey": "",
+        "apiSecret": "",
+        "accessToken": "",
+        "enabled": false
+      },
+      "facebook": {
+        "accessToken": "",
+        "pageId": "",
+        "enabled": false
+      },
+      "instagram": {
+        "accessToken": "",
+        "enabled": false
+      },
+      "linkedin": {
+        "accessToken": "",
+        "enabled": false
+      },
+      "tiktok": {
+        "accessToken": "",
+        "enabled": false
+      },
+      "rumble": {
+        "apiKey": "",
+        "channelId": "",
+        "enabled": false
+      }
+    },
+    "analytics": {},
+    "advertising": {}
+  },
+  "development": {
+    "github": {
+      "accessToken": "",
+      "organization": "",
+      "enabled": false
+    },
+    "gitlab": {
+      "accessToken": "",
+      "baseUrl": "https://gitlab.com",
+      "enabled": false
+    },
+    "zapier": {
+      "webhookUrl": "",
+      "enabled": false
+    },
+    "webhooks": [],
+    "customEndpoints": []
+  }
+}
