@@ -43,7 +43,7 @@ curl http://192.168.51.210:8080/                 # Frontend access
 ## Architecture Overview
 
 ### Core Stack
-- **Frontend**: Vue 3 + Vuetify 3 + Vue Router at `disaffected-ui/`
+- **Frontend**: Vue 3 + Vuetify 3 + Vue Router + TypeScript at `disaffected-ui/`
 - **Backend**: FastAPI + Python 3.11 at `app/`
 - **Messaging**: Eclipse Mosquitto MQTT broker
 - **Storage**: File-based at `/mnt/sync/disaffected/episodes/` with JSON storage for users/API keys
@@ -100,6 +100,13 @@ from paths import EPISODE_ROOT, BLUEPRINTS, VALID_CUE_TYPES
 - Jest configuration in `disaffected-ui/jest.config.js`
 - Mocks for axios and Vuetify in `tests/mocks/`
 - Unit tests focus on `ContentEditor.vue` and `RundownManager.vue`
+
+### TypeScript Integration
+- **Configuration**: `tsconfig.json` with Vue 3 and strict typing
+- **Type Definitions**: Comprehensive types in `src/types/` (API, components, Vuetify extensions)
+- **Gradual Migration**: JavaScript and TypeScript files coexist seamlessly
+- **Build System**: Vue CLI handles TypeScript compilation automatically
+- **IDE Support**: Full IntelliSense and type checking for development
 
 ## Documentation System
 
