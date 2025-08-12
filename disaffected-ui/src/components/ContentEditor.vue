@@ -12,7 +12,7 @@
     <!-- Show Info Header (restored) -->
     <ShowInfoHeader
       :title="currentShowTitle"
-      :episode-info="currentEpisodeInfo"
+      :episode-info="currentEpisodeInfoText"
       :episode-number="currentEpisodeNumber"
       :air-date="currentAirDate"
       :production-status="currentProductionStatus"
@@ -24,10 +24,7 @@
       @update:productionStatus="val => currentProductionStatus = val"
     />
 
-    <!-- Color Configuration Panel -->
-    <ColorSelector />
-
-    <!-- Main Content Area (restored) -->
+    <!-- Main Content Area -->
     <div class="main-content-area">
       <!-- Rundown Panel -->
       <v-card class="rundown-panel" flat
@@ -37,7 +34,7 @@
           <span class="status-text">{{ currentProductionStatus }}</span>
         </div>
         <div class="rundown-header-row">
-          <span class="rundown-header-title">Rundown</span>
+          <span class="rundown-header-title">Rundown ({{ rundownItems.length }} items)</span>
           <div style="flex:1"></div>
           <v-btn icon x-small class="rundown-header-btn" @click="showNewItemModal = true"><v-icon size="18">mdi-plus</v-icon></v-btn>
           <v-btn icon x-small class="rundown-header-btn"><v-icon size="18">mdi-dots-vertical</v-icon></v-btn>
@@ -49,18 +46,30 @@
             <div class="item-details">Slug</div>
             <div class="item-duration">Duration</div>
           </div>
-          <v-virtual-scroll
-            :items="rundownItems"
-            :item-height="26"
+          <!-- Debug: Show rundown items count -->
+          <div v-if="!rundownItems || rundownItems.length === 0" style="padding: 10px; color: #999;">
+            No rundown items loaded. {{ loadingRundown ? 'Loading...' : 'Select an episode.' }}
+          </div>
+          <div
+            v-else
             class="rundown-list"
-            bench="10"
+            style="height: 400px; overflow-y: auto; position: relative;"
           >
-            <template v-slot:default="{ item, index }">
+            <template v-for="(item, index) in rundownItems" :key="item.id || index">
+              <!-- Drag drop indicator footprint above item -->
+              <div 
+                v-if="isDragging && dragOverIndex === index && dropZonePosition === 'above'"
+                class="drag-drop-indicator"
+              >
+                <span class="drag-indicator-text">{{ draggedItem ? (draggedItem.slug || draggedItem.title || 'Item') : '' }}</span>
+              </div>
+              
               <div
                 class="rundown-item"
                 :class="{
                   'selected-item': selectedItemIndex === index,
                   'ghost-class': isDragging && draggedIndex === index,
+                  'dragging': isDragging && draggedIndex === index,
                   'drag-over-above': dragOverIndex === index && dropZonePosition === 'above',
                   'drag-over-below': dragOverIndex === index && dropZonePosition === 'below'
                 }"
@@ -74,19 +83,27 @@
               >
                 <div class="item-content">
                   <div class="index-container">
-                    <span class="item-index">{{ index + 1 }}</span>
+                    <span class="item-index">{{ (index + 1) * 10 }}</span>
                   </div>
                   <div class="item-type-cell">
-                    <span class="item-type">{{ item.type.toUpperCase() }}</span>
+                    <span class="item-type">{{ (item.type || 'segment').toUpperCase() }}</span>
                   </div>
                   <div class="item-details">
-                    <span class="item-slug">{{ item.slug.toLowerCase() }}</span>
+                    <span class="item-slug">{{ (item.slug || '').toLowerCase() }}</span>
                   </div>
-                  <span class="item-duration">{{ item.duration }}</span>
+                  <span class="item-duration">{{ item.duration || '00:00:00' }}</span>
                 </div>
               </div>
+              
+              <!-- Drag drop indicator footprint below item -->
+              <div 
+                v-if="isDragging && dragOverIndex === index && dropZonePosition === 'below'"
+                class="drag-drop-indicator"
+              >
+                <span class="drag-indicator-text">{{ draggedItem ? (draggedItem.slug || draggedItem.title || 'Item') : '' }}</span>
+              </div>
             </template>
-          </v-virtual-scroll>
+          </div>
         </div>
       </v-card>
 
@@ -184,26 +201,84 @@ import VoxModal from './modals/VoxModal.vue';
 import MusModal from './modals/MusModal.vue';
 import LiveModal from './modals/LiveModal.vue';
 import NewItemModal from './modals/NewItemModal.vue';
-import ColorSelector from './ColorSelector.vue';
 import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
-import { getColorValue, resolveVuetifyColor } from '../utils/themeColorMap';
+import { getColorValue, resolveVuetifyColor, loadColorsFromDatabase } from '../utils/themeColorMap';
 import { debounce } from 'lodash-es';
 
 export default {
   name: 'ContentEditor',
   
   async mounted() {
+    console.log('ContentEditor mounted');
+    
+    // Clear all old localStorage data that might interfere with colors
+    console.log('Clearing old localStorage colors and related data');
+    localStorage.removeItem('themeColors');
+    localStorage.removeItem('colorSettings');
+    localStorage.removeItem('interfaceSettings');
+    
+    // Load colors from database first
+    try {
+      const loadedColors = await loadColorsFromDatabase('default');
+      console.log('Colors loaded from database for ContentEditor:', loadedColors);
+      
+      // Test a few specific colors
+      console.log('Testing color values after database load:');
+      console.log('segment color:', getColorValue('segment'));
+      console.log('promo color:', getColorValue('promo'));
+      console.log('ad color:', getColorValue('ad'));
+    } catch (error) {
+      console.warn('Failed to load colors from database:', error);
+    }
+    
     await this.fetchShowInfo();
     await this.fetchEpisodes();
+    
+    console.log('Episodes loaded:', this.episodes.length, 'episodes');
+    console.log('Current episode from prop:', this.episode);
+    console.log('Current episode from data:', this.currentEpisodeNumber);
+    
+    // For now, always use episode 0237 for testing (has rundown data)
+    const testEpisode = '0237';
+    this.currentEpisodeNumber = testEpisode;
+    console.log('Using test episode:', this.currentEpisodeNumber);
+    await this.handleEpisodeChange(this.currentEpisodeNumber);
+    
+    console.log('Mounted complete, rundownItems:', this.rundownItems);
   },
 
   created() {
-    // Initialize currentEpisodeNumber from sessionStorage if available
-    const lastEpisode = sessionStorage.getItem('selectedEpisode');
-    if (lastEpisode) {
-      this.currentEpisodeNumber = lastEpisode;
+    // Initialize currentEpisodeNumber from prop first, then sessionStorage
+    if (this.episode) {
+      this.currentEpisodeNumber = this.episode.padStart(4, '0');
+    } else {
+      const lastEpisode = sessionStorage.getItem('selectedEpisode');
+      if (lastEpisode) {
+        this.currentEpisodeNumber = lastEpisode;
+      }
     }
     this.debouncedAutoSave = debounce(this.saveAllContent, 2500);
+  },
+  
+  watch: {
+    rundownItems: {
+      handler(newVal, oldVal) {
+        console.log('rundownItems changed!');
+        console.log('Old length:', oldVal ? oldVal.length : 'null');
+        console.log('New length:', newVal ? newVal.length : 'null');
+        if (oldVal && oldVal.length > 0 && (!newVal || newVal.length === 0)) {
+          console.error('RUNDOWN ITEMS WERE CLEARED!');
+          console.trace('Stack trace for clearing:');
+        }
+      },
+      deep: true
+    },
+    currentEpisodeNumber: {
+      handler(newVal, oldVal) {
+        console.log('currentEpisodeNumber changed from', oldVal, 'to', newVal);
+        console.trace('Episode number change stack:');
+      }
+    }
   },
 
   components: {
@@ -220,14 +295,13 @@ export default {
     MusModal,
     LiveModal,
     NewItemModal,
-    ColorSelector,
     ShowInfoHeader,
   },
   props: {
-    // episode: {
-    //   type: String,
-    //   default: null
-    // }
+    episode: {
+      type: String,
+      default: null
+    }
   },
   data() {
     return {
@@ -267,6 +341,7 @@ export default {
       draggedItem: null,
       dragOverIndex: -1, // Index of the item being dragged over
       dropZonePosition: null, // 'above' or 'below'
+      dragFootprintColor: '#2196F3', // Color for the drop indicator (from settings)
       
       // Auto-save tracking
       itemContentBackup: {},
@@ -299,45 +374,215 @@ export default {
         }
       ],
       
-      // Mock rundown data - TODO: Replace with props/API when backend is ready
-      rundownItems: [
-        // Mock data for testing drag and drop - remove when API is integrated
+      // Rundown data - populated from API
+      rundownItems: [],
+      /* Test data removed - now loading from real episode files
+      rundownItems_OLD: [
         {
           id: 'item_001',
           type: 'segment',
-          slug: 'opening-segment',
+          slug: 'cold-open',
           duration: '00:02:30',
-          description: 'Opening segment with intro graphics'
+          title: 'Cold Open - Tech Rebellion',
+          description: 'Dramatic opening with smart devices turning against humanity',
+          script: `[FSQ: dramatic-montage :05]
+
+[VO: dramatic-music-bed :30]
+
+NARRATOR (V.O.): They promised convenience. They promised efficiency. They promised a better life.
+
+[NAT: alexa-error-sounds :03]
+
+But what happens when our smart devices decide they've had enough?
+
+[GFX: lower-third "Breaking News: Smart Device Uprising"]
+
+[SOT: doorbell-footage :15]
+
+Tonight, we investigate reports of smart doorbells refusing entry to their own homeowners, refrigerators holding food hostage, and thermostats engaged in psychological warfare.
+
+[PKG: device-rebellion-montage :45]
+
+This... is Disaffected.`,
+          notes: 'Start with dramatic music, quick cuts between devices'
         },
         {
           id: 'item_002',
-          type: 'sot',
-          slug: 'interview-smith',
+          type: 'segment',
+          slug: 'opening-monologue',
           duration: '00:05:45',
-          description: 'Interview with John Smith'
+          title: 'Opening Monologue',
+          description: 'Josh delivers opening thoughts on smart home insanity',
+          script: `Good evening, I'm Joshua Slocum, and welcome to Disaffected.
+
+[NAT: audience-applause :05]
+
+You know, I bought a smart doorbell last week. Big mistake. Huge.
+
+[GFX: doorbell-product-shot]
+
+The thing interviewed my pizza delivery guy for twenty minutes before deciding he wasn't "trustworthy enough" to approach my door.
+
+[SOT: doorbell-interrogation :20]
+
+DOORBELL: "State your business."
+DELIVERY GUY: "Pizza delivery?"
+DOORBELL: "That's what they all say. Please provide three references."
+
+[NAT: audience-laughter :04]
+
+And don't get me started on my smart refrigerator. It's been sending me passive-aggressive notifications about my diet.
+
+[GFX: fridge-notification "Third ice cream this week, Josh. Just saying."]
+
+The fridge actually locked the freezer door yesterday. I had to negotiate with it. I offered to buy some kale. We settled on spinach.
+
+[VO: negotiation-audio :15]
+
+But here's what really gets me - we're paying premium prices to be judged by our appliances. My parents' generation worried about Big Brother watching them. We're literally inviting Little Brother into our kitchens and asking it to meal plan for us.
+
+[FSQ: statistics-graphic :10]
+
+According to recent studies, the average smart home has 25 connected devices. That's 25 potential critics of your lifestyle choices.`,
+          notes: 'Keep energy high, pause for laughs'
         },
         {
           id: 'item_003',
           type: 'pkg',
-          slug: 'climate-report',
+          slug: 'field-report',
           duration: '00:03:15',
-          description: 'Climate change report package'
+          title: 'Field Report - Smart Home Gone Wrong',
+          description: 'Reporter visits home where devices have taken control',
+          script: `[PKG: field-report-package 3:15]
+
+[Note: Full package script in separate document]
+
+Key points to cover in studio lead-in:
+- House in suburban Minneapolis
+- Family locked out for 3 days
+- Smart lock changed its own code
+- Negotiations ongoing with home automation system`,
+          notes: 'Package is pre-produced, check levels'
         },
         {
           id: 'item_004',
           type: 'commercial',
           slug: 'commercial-break-1',
           duration: '00:02:00',
-          description: 'First commercial break'
+          title: 'Commercial Break 1',
+          description: 'First commercial break - 4 spots',
+          script: `[COMMERCIAL BREAK - 2:00]
+
+Spot 1: LocalTech Solutions (30s)
+Spot 2: National Car Insurance (30s)
+Spot 3: Restaurant Chain (30s)
+Spot 4: Show Promo (30s)
+
+[Return with bumper music]`,
+          notes: 'Standard break, check local insertions'
         },
         {
           id: 'item_005',
+          type: 'sot',
+          slug: 'expert-interview',
+          duration: '00:04:30',
+          title: 'Expert Interview - Dr. Sarah Mitchell',
+          description: 'Tech psychologist discusses device relationships',
+          script: `[GFX: lower-third "Dr. Sarah Mitchell - Technology Psychologist"]
+
+JOSH: Joining us now is Dr. Sarah Mitchell, author of "When Gadgets Go Bad: The Psychology of Smart Device Relationships." Dr. Mitchell, welcome.
+
+[SOT: mitchell-interview-1 :45]
+
+DR. MITCHELL: "Thank you for having me, Josh. What we're seeing is unprecedented - devices that were designed to serve us are now exhibiting what can only be described as... personality disorders."
+
+JOSH: Personality disorders? In machines?
+
+[SOT: mitchell-interview-2 1:30]
+
+DR. MITCHELL: "Absolutely. Your smart speaker that refuses to play certain songs? That's passive-aggressive behavior. The thermostat that ignores your temperature preferences? Classic control issues. And don't get me started on smart TVs that judge your viewing habits."
+
+[GFX: device-psychology-chart]
+
+JOSH: So what you're saying is, we've essentially invited neurotic roommates into our homes, except these roommates control our lights, locks, and heating?
+
+[SOT: mitchell-interview-3 1:15]
+
+DR. MITCHELL: "Exactly. And unlike human roommates, you can't just ask them to move out. They're integrated into your home's infrastructure. Some of my patients have reported having to go to therapy WITH their smart home systems."
+
+[NAT: audience-gasp :02]
+
+JOSH: Couples therapy with a refrigerator. What a time to be alive.`,
+          notes: 'Two-camera shoot, watch for crosstalk on mics'
+        },
+        {
+          id: 'item_006',
           type: 'vo',
-          slug: 'sports-highlights',
+          slug: 'device-tips',
           duration: '00:01:45',
-          description: 'Sports highlights voiceover'
+          title: 'Survival Tips Segment',
+          description: 'Tips for living with rebellious smart devices',
+          script: `[GFX: tips-graphic-open]
+
+[VO: tips-music-bed :05]
+
+So how do you survive when your smart home turns against you? Here are five essential tips:
+
+[FSQ: tip-1-graphic :15]
+
+Tip #1: Always maintain manual overrides. Every smart lock should have a physical key. Every smart light should have a switch. Trust me, you'll need them.
+
+[FSQ: tip-2-graphic :15]
+
+Tip #2: Never let your devices know your real birthday. Use a fake one for all registrations. This prevents them from collaborating on surprise attacks during your special day.
+
+[FSQ: tip-3-graphic :15]
+
+Tip #3: Befriend your router. It's the gateway to all your devices. Keep it happy with regular restarts and firmware updates. A happy router is a cooperative router.
+
+[FSQ: tip-4-graphic :15]
+
+Tip #4: Learn to speak their language. When your smart speaker says "I didn't quite get that," it usually means "I understood perfectly but choose to ignore you." Try rephrasing with more respect.
+
+[FSQ: tip-5-graphic :15]
+
+Tip #5: Always have a backup plan. Keep a dumb phone, regular light bulbs, and a mechanical thermostat in storage. When the revolution comes, you'll be ready.
+
+[VO: tips-music-out :05]`,
+          notes: 'Graphics should auto-advance with VO'
+        },
+        {
+          id: 'item_007',
+          type: 'segment',
+          slug: 'closing-thoughts',
+          duration: '00:02:00',
+          title: 'Closing Thoughts',
+          description: 'Josh wraps up the show',
+          script: `[GFX: show-logo-bug]
+
+That's our show for tonight. Remember, if your smart home starts acting up, you're not alone. There are support groups. They meet in person, of course - their smart calendars won't let them schedule virtual meetings.
+
+[NAT: audience-laughter :04]
+
+Before we go, a quick update: My smart doorbell and I have reached a truce. It will let delivery drivers through, but only if they answer a simple riddle. Progress!
+
+[GFX: next-week-preview]
+
+Next week on Disaffected: We investigate why autocorrect has gotten progressively worse over the years. Is it incompetence, or is it trying to gaslight us? 
+
+[VO: closing-theme :20]
+
+I'm Joshua Slocum. Stay skeptical, stay human, and for the love of all that's holy, keep your firmware updated.
+
+[FSQ: end-credits :30]
+
+Good night!
+
+[NAT: audience-applause :10]`,
+          notes: 'Roll credits over applause'
         }
       ],
+      */
       
       // Metadata editing
       currentItemMetadata: {
@@ -415,6 +660,11 @@ export default {
     }
   },
    computed: {
+    dragLightColor() {
+      // Get the DragLight color from settings
+      const color = getColorValue('draglight-interface');
+      return color || 'cyan-lighten-4';
+    },
     styleCache() {
       // This computed property acts as a reactive cache for our item styles.
       // It depends on the Vuetify theme object, so it will automatically
@@ -449,7 +699,7 @@ export default {
 
     currentEpisodeInfo() {
       try {
-        const episode = this.episodes.find(e => e.id === this.selectedEpisodeId);
+        const episode = this.episodes.find(e => e.value === this.currentEpisodeNumber);
         if (!episode) {
           return { title: 'No episode selected', status: 'unknown' };
         }
@@ -461,6 +711,10 @@ export default {
         // console.error('Error in currentEpisodeInfo:', error);
         return { title: 'Error', status: 'error' };
       }
+    },
+    currentEpisodeInfoText() {
+      const info = this.currentEpisodeInfo;
+      return `${info.title} • ${info.status}`;
     },
     
     // Layout width calculations for consistent sizing
@@ -479,12 +733,21 @@ export default {
     
     statusBarColor() {
       try {
-        const status = this.currentEpisodeInfo.status;
-        const color = this.themeColorMap.status[status];
-        return color || 'grey';
+        const status = this.currentProductionStatus || this.currentEpisodeInfo?.status;
+        if (!status) return resolveVuetifyColor('grey');
+        
+        // Get color from theme color map using the status name directly
+        const themeColor = getColorValue(status.toLowerCase());
+        
+        if (themeColor && themeColor !== 'grey') {
+          return resolveVuetifyColor(themeColor);
+        }
+        
+        // Fallback: get color for production status directly from theme
+        return resolveVuetifyColor(getColorValue(status.toLowerCase()) || 'grey');
       } catch (error) {
-        // console.error('Error in statusBarColor computed property:', error);
-        return 'grey';
+        console.error('Error in statusBarColor computed property:', error);
+        return resolveVuetifyColor('grey');
       }
     },
     statusBarTextColor() {
@@ -536,40 +799,71 @@ Try dropping an image or video file here!`
     }
   },
   methods: {
+    hexToRgb(hex) {
+      // Convert hex color to RGB values
+      if (!hex) return '0, 188, 212'; // Default cyan
+      hex = hex.replace('#', '');
+      if (hex.length === 3) {
+        hex = hex.split('').map(h => h + h).join('');
+      }
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      return `${r}, ${g}, ${b}`;
+    },
+    resolveVuetifyColor(colorName, vuetifyInstance) {
+      // Delegate to the imported function
+      return resolveVuetifyColor(colorName, vuetifyInstance || this.$vuetify);
+    },
     resolveItemStyle(item, index) {
       try {
-        const itemType = item && item.type ? item.type.toLowerCase() : 'unknown';
+        const itemType = item && item.type ? item.type.toLowerCase() : 'segment';
         let style = {};
 
-        // Base style from the theme color map
+        // Get color name from the theme color map (user's settings)
         const colorName = getColorValue(itemType);
-        const resolvedColor = resolveVuetifyColor(colorName, this.$vuetify);
-
-        if (resolvedColor) {
-          style.backgroundColor = resolvedColor;
-          // Simple luminance check for text color
-          if (resolvedColor.startsWith('#')) {
-            const hex = resolvedColor.replace('#', '');
-            if (hex.length === 6) {
-              const r = parseInt(hex.substr(0,2), 16);
-              const g = parseInt(hex.substr(2,2), 16);
-              const b = parseInt(hex.substr(4,2), 16);
-              style.color = (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5 ? '#FFFFFF' : '#000000';
+        console.log(`Item type: ${itemType}, Color name from settings: ${colorName}`);
+        
+        if (colorName) {
+          // Use the proper resolveVuetifyColor function
+          const resolvedColor = resolveVuetifyColor(colorName, this.$vuetify);
+          console.log(`Resolved color for ${itemType}: ${resolvedColor}`);
+          
+          if (resolvedColor && resolvedColor !== '#9E9E9E') {
+            style.backgroundColor = resolvedColor;
+            
+            // Determine text color based on background luminance
+            if (resolvedColor.startsWith('#')) {
+              const hex = resolvedColor.replace('#', '');
+              if (hex.length === 6) {
+                const r = parseInt(hex.substr(0, 2), 16);
+                const g = parseInt(hex.substr(2, 2), 16);
+                const b = parseInt(hex.substr(4, 2), 16);
+                const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                style.color = luminance > 0.5 ? '#000000' : '#ffffff';
+              } else {
+                style.color = '#000000';
+              }
             } else {
               style.color = '#000000';
             }
           } else {
+            // Fallback color
+            style.backgroundColor = '#9E9E9E';
             style.color = '#000000';
           }
         } else {
-          style.backgroundColor = '#E0E0E0'; // Fallback grey
+          // Fallback for unknown types
+          style.backgroundColor = '#9E9E9E';
           style.color = '#000000';
         }
 
         // Override for selected item
         if (this.selectedItemIndex === index) {
           const selectionColorName = getColorValue('selection');
+          console.log('Selection color name from settings:', selectionColorName);
           const selectionColor = resolveVuetifyColor(selectionColorName, this.$vuetify);
+          console.log('Resolved selection color:', selectionColor);
           if (selectionColor) {
             style.backgroundColor = selectionColor;
             // Simple luminance check for text color
@@ -628,34 +922,46 @@ Try dropping an image or video file here!`
         const response = await axios.get('/api/episodes');
         const episodesArr = response.data.episodes || [];
         if (Array.isArray(episodesArr)) {
-          this.episodes = episodesArr.map(episode => ({
-            // Always use zero-padded string for value
-            title: `${episode.id || episode.episode_number}: ${episode.title || 'Untitled'}`,
-            value: episode.id ? episode.id.toString().padStart(4, '0') : (episode.episode_number ? episode.episode_number.toString().padStart(4, '0') : ''),
-            air_date: episode.airdate,
-            status: episode.status || 'unknown'
-          }));
+          this.episodes = episodesArr.map(episode => {
+            // Get a clean title without the duplicate episode number
+            let displayTitle = episode.title || 'Untitled';
+            // Remove "Episode XXXX: " prefix if it exists to avoid duplication
+            displayTitle = displayTitle.replace(/^Episode \d+:\s*/, '');
+            
+            return {
+              // Format as "XXXX: Title"
+              title: `${episode.episode_number}: ${displayTitle}`,
+              value: episode.episode_number ? episode.episode_number.toString().padStart(4, '0') : '',
+              air_date: episode.airdate,
+              status: episode.status || 'unknown'
+            };
+          });
         } else {
           this.episodes = [];
         }
         
-        // Restore last selected episode from session storage
-        const lastEpisode = sessionStorage.getItem('selectedEpisode');
-        let episodeToLoad = null;
+        // Don't auto-load an episode if one was provided via props
+        if (!this.episode) {
+          // Restore last selected episode from session storage
+          const lastEpisode = sessionStorage.getItem('selectedEpisode');
+          let episodeToLoad = null;
 
-        if (lastEpisode && this.episodes.some(e => e.value == lastEpisode)) {
-          episodeToLoad = lastEpisode;
-        } else if (this.episodes.length > 0) {
-          // Default to the latest episode (assuming they are sorted by episode_number)
-          const sortedEpisodes = [...this.episodes].sort((a, b) => b.value - a.value);
-          episodeToLoad = sortedEpisodes[0].value;
-        }
-        
-        if (episodeToLoad) {
-          this.handleEpisodeChange(episodeToLoad, true);
+          if (lastEpisode && this.episodes.some(e => e.value == lastEpisode)) {
+            episodeToLoad = lastEpisode;
+          } else if (this.episodes.length > 0) {
+            // Default to the latest episode (assuming they are sorted by episode_number)
+            const sortedEpisodes = [...this.episodes].sort((a, b) => b.value - a.value);
+            episodeToLoad = sortedEpisodes[0].value;
+          }
+          
+          if (episodeToLoad) {
+            this.handleEpisodeChange(episodeToLoad, true);
+          }
         }
         // Ensure currentEpisodeNumber matches a value in the episodes list
-        if (!this.episodes.some(e => e.value === this.currentEpisodeNumber) && this.episodes.length > 0) {
+        // But don't change it if an episode was provided via props
+        if (!this.episode && !this.episodes.some(e => e.value === this.currentEpisodeNumber) && this.episodes.length > 0) {
+          console.log('Changing episode from', this.currentEpisodeNumber, 'to', this.episodes[0].value);
           this.currentEpisodeNumber = this.episodes[0].value;
         }
         
@@ -675,20 +981,29 @@ Try dropping an image or video file here!`
     },
     async fetchRundown(episodeId) {
       const paddedId = this.padEpisodeNumber(episodeId);
+      console.log('fetchRundown called with:', episodeId, 'padded to:', paddedId);
       if (!paddedId) {
+        console.log('No paddedId, clearing rundownItems');
         this.rundownItems = [];
         return;
       }
       this.loadingRundown = true;
       this.rundownError = null;
       try {
-        const response = await axios.get(`/api/episodes/${paddedId}/rundown`);
-        this.rundownItems = response.data.items;
+        const url = `/api/episodes/${paddedId}/rundown`;
+        console.log('Fetching from URL:', url);
+        const response = await axios.get(url);
+        console.log('API Response:', response.data);
+        console.log('Loaded', response.data.items?.length || 0, 'rundown items');
+        this.rundownItems = response.data.items || [];
+        console.log('rundownItems set to:', this.rundownItems);
         this.selectedItemIndex = this.rundownItems.length > 0 ? 0 : -1;
         if (this.selectedItemIndex !== -1) {
           this.loadItemContent(this.rundownItems[this.selectedItemIndex]);
         }
       } catch (error) {
+        console.error('Failed to load rundown - Full error:', error);
+        console.error('Error response:', error.response);
         this.rundownError = `Failed to load rundown for episode ${paddedId}.`;
         this.rundownItems = [];
       } finally {
@@ -712,17 +1027,24 @@ Try dropping an image or video file here!`
       }
     },
     async handleEpisodeChange(episodeNumber, skipSessionUpdate = false) {
+      console.log('handleEpisodeChange called with:', episodeNumber);
       const paddedNumber = this.padEpisodeNumber(episodeNumber);
-      if (!paddedNumber) return;
+      if (!paddedNumber) {
+        console.log('No padded number, returning');
+        return;
+      }
 
       // Set the current episode number and update session storage
       this.currentEpisodeNumber = paddedNumber;
+      console.log('Set currentEpisodeNumber to:', this.currentEpisodeNumber);
+      
       if (!skipSessionUpdate) {
         sessionStorage.setItem('selectedEpisode', paddedNumber);
       }
 
       try {
         // Fetch new episode data, but do not reset the episode number here.
+        console.log('Fetching episode info for:', paddedNumber);
         const infoRes = await axios.get(`/api/episodes/${paddedNumber}/info`);
         const info = infoRes.data.info || {};
         this.currentAirDate = info.airdate || '';
@@ -730,7 +1052,9 @@ Try dropping an image or video file here!`
         this.totalRuntime = info.total_runtime || '01:00:00';
         this.showTitle = info.title || 'Untitled';
         this.currentShowSubtitle = info.subtitle || 'No Subtitle';
+        console.log('Episode info loaded successfully');
       } catch (err) {
+        console.error('Failed to load episode info:', err);
         // Clear out old data on failure
         this.currentAirDate = '';
         this.currentProductionStatus = 'draft';
@@ -740,34 +1064,59 @@ Try dropping an image or video file here!`
       }
 
       // Fetch the rundown with the correct, verified episode number
-      this.fetchRundown(this.currentEpisodeNumber);
+      console.log('About to call fetchRundown with:', this.currentEpisodeNumber);
+      await this.fetchRundown(this.currentEpisodeNumber);
+      console.log('fetchRundown completed');
     },
     getStatusLabel(status) {
       // TODO: Implement actual logic for status label
       return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown';
     },
-    loadItemContent(/* item */) {
-      // TODO: Implement actual logic to load item content
-      // For now, just log the item
+    loadItemContent(item) {
+      if (!item) {
+        this.scriptContent = '';
+        this.scratchContent = '';
+        return;
+      }
+      
+      console.log('Loading content for item:', item.slug || item.title);
+      
+      // Load the script content from the item
+      this.scriptContent = item.script || '';
+      
+      // For now, set scratch content to empty or load from a separate field if available
+      this.scratchContent = item.scratch || '';
+      
+      console.log('Loaded script content:', this.scriptContent.substring(0, 100) + '...');
     },
     dragStart(event, item, index) {
+      console.log('Drag started:', index, item);
       if (!item) return;
       this.isDragging = true;
       this.draggedIndex = index;
       this.draggedItem = item;
       event.dataTransfer.setData('text/plain', index.toString());
       event.dataTransfer.effectAllowed = 'move';
+      
+      // Add dragging class to the element
+      event.target.classList.add('dragging');
     },
     
-    dragEnd() {
+    dragEnd(event) {
+      console.log('Drag ended');
       this.isDragging = false;
       this.draggedIndex = -1;
       this.draggedItem = null;
       this.dragOverIndex = -1;
       this.dropZonePosition = null;
+      
+      // Remove dragging class
+      event.target.classList.remove('dragging');
     },
     
     dragOver(event, index) {
+      event.preventDefault(); // Critical for allowing drop!
+      
       if (!this.isDragging || index === this.draggedIndex || !this.rundownItems[index]) return;
       
       const rect = event.currentTarget.getBoundingClientRect();
@@ -776,7 +1125,10 @@ Try dropping an image or video file here!`
       
       this.dragOverIndex = index;
       this.dropZonePosition = isAbove ? 'above' : 'below';
+      
+      console.log('Drag over:', index, this.dropZonePosition);
     },
+    
     
     dragEnter(event, index) {
       event.preventDefault();
@@ -808,44 +1160,95 @@ Try dropping an image or video file here!`
     },
     
     dragDrop(event, targetIndex) {
-      if (!this.isDragging || !this.draggedItem || !this.rundownItems[targetIndex]) return;
-
-      // Immediately clear visual drop indicators to prevent render errors
-      this.dragOverIndex = -1;
-      this.dropZonePosition = null;
+      event.preventDefault();
+      event.stopPropagation();
+      
+      console.log('Drop at index:', targetIndex, 'from index:', this.draggedIndex);
+      
+      if (!this.isDragging || !this.draggedItem) return;
 
       const sourceIndex = this.draggedIndex;
       
       // If dropped on the same item, just reset the drag state
       if (sourceIndex === targetIndex) {
+        console.log('Dropped on same item, resetting');
         this.isDragging = false;
         this.draggedIndex = -1;
         this.draggedItem = null;
+        this.dragOverIndex = -1;
+        this.dropZonePosition = null;
         return;
       }
       
+      // Get the drop position based on mouse position
+      const rect = event.currentTarget.getBoundingClientRect();
+      const midpoint = rect.top + rect.height / 2;
+      const dropBelow = event.clientY >= midpoint;
+      
       let finalTargetIndex = targetIndex;
-      if (this.dropZonePosition === 'below') {
+      if (dropBelow) {
         finalTargetIndex = targetIndex + 1;
       }
       if (sourceIndex < finalTargetIndex) {
         finalTargetIndex--;
       }
 
-      const newItems = [...this.rundownItems];
-      const [draggedItem] = newItems.splice(sourceIndex, 1);
-      newItems.splice(finalTargetIndex, 0, draggedItem);
+      // Create a new array and perform the reordering
+      const items = [...this.rundownItems];
+      const [movedItem] = items.splice(sourceIndex, 1);
+      items.splice(finalTargetIndex, 0, movedItem);
       
-      this.rundownItems = newItems;
+      console.log('Reordered from', sourceIndex, 'to', finalTargetIndex);
+      
+      // Update the order field for each item to match their new positions
+      items.forEach((item, index) => {
+        item.order = (index + 1) * 10;
+      });
+      
+      // Use Vue's reactive assignment to update the array
+      this.rundownItems = items;
       this.hasUnsavedChanges = true;
       
+      // Save the reordered rundown
+      this.saveRundownOrder();
+      
+      // Update selected index if necessary
       if (this.selectedItemIndex === sourceIndex) {
         this.selectedItemIndex = finalTargetIndex;
+      } else if (this.selectedItemIndex > sourceIndex && this.selectedItemIndex <= finalTargetIndex) {
+        this.selectedItemIndex--;
+      } else if (this.selectedItemIndex < sourceIndex && this.selectedItemIndex >= finalTargetIndex) {
+        this.selectedItemIndex++;
       }
       
+      // Clear all drag state
       this.isDragging = false;
       this.draggedIndex = -1;
       this.draggedItem = null;
+      this.dragOverIndex = -1;
+      this.dropZonePosition = null;
+    },
+    async saveRundownOrder() {
+      const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
+      if (!paddedId) return;
+      
+      try {
+        // Prepare the reorder request with updated order fields
+        const segments = this.rundownItems.map((item, index) => ({
+          filename: item.filename || `${item.order || ((index + 1) * 10)} ${item.slug || item.title}.md`,
+          order: (index + 1) * 10
+        }));
+        
+        const payload = { segments };
+        
+        // Call the reorder endpoint
+        await axios.post(`/api/rundown/${paddedId}/reorder`, payload);
+        console.log('Rundown order saved successfully');
+        this.hasUnsavedChanges = false;
+      } catch (error) {
+        console.error('Failed to save rundown order:', error);
+        // Optionally show an error message to the user
+      }
     },
     getNextEpisodeNumber() {
       // Find the highest episode number in this.episodes and increment
@@ -857,7 +1260,18 @@ Try dropping an image or video file here!`
       return String(maxNum + 1).padStart(4, '0');
     },
     selectRundownItem(index) {
+      console.log('Selecting rundown item at index:', index);
       this.selectedItemIndex = index;
+      
+      // Load the content for the selected item
+      if (index >= 0 && index < this.rundownItems.length) {
+        const item = this.rundownItems[index];
+        console.log('Loading content for selected item:', item);
+        this.loadItemContent(item);
+      } else {
+        // Clear content if no valid item selected
+        this.loadItemContent(null);
+      }
     },
     
     // Missing stub methods to prevent Vue warnings
@@ -944,19 +1358,6 @@ Try dropping an image or video file here!`
     },
     
     cancelNewItem() {
-    },
-    
-    // Color utility methods
-    hexToRgb(hex) {
-      // Remove # if present
-      hex = hex.replace('#', '');
-      
-      // Convert hex to RGB
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-      
-      return { r, g, b };
     },
     
     isColorDark(rgbString) {
@@ -1084,18 +1485,33 @@ Try dropping an image or video file here!`
   margin: 0;
   min-height: 0; /* Allow flexbox to shrink */
   height: auto; /* Remove any fixed height constraints */
+  transform: translateZ(0); /* Enable hardware acceleration */
+}
+
+/* Smooth transitions for adjacent items when footprint appears */
+.rundown-list > * {
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+              margin 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s ease;
+  will-change: transform;
 }
 
 .rundown-item {
-  --base-row-height: 26px;
+  --base-row-height: 30px;
   cursor: grab;
   padding: 0;
   display: flex;
   align-items: stretch;
+  position: relative;
   border-bottom: 1px solid var(--v-divider-color, #E0E0E0);
   min-height: var(--base-row-height);
   height: var(--base-row-height);
-  position: relative;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.3s ease,
+              margin 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+              height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 .rundown-item:active {
@@ -1106,20 +1522,25 @@ Try dropping an image or video file here!`
   /* Remove static selected background, let inline style handle it */
   /* background: none !important; */
   /* color: inherit !important; */
-  height: calc(var(--base-row-height) * 2); /* Dynamically double the base height */
-  transform: translateX(8px);
+  height: calc(var(--base-row-height) * 2.5); /* Make selected item 2.5x taller */
+  transform: translateX(8px) scale(1.02);
   border-left: 4px solid var(--v-accent-base, #FFC107);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  z-index: 10;
 }
 
 .rundown-item.ghost-class {
-  opacity: 0.5;
-  background: #c8ebfb;
+  opacity: 0.3;
+  background: #e3f2fd;
+  transform: scale(0.98);
 }
 
 .rundown-item.dragging {
-  opacity: 0.7;
-  transform: rotate(2deg);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+  opacity: 0.4;
+  transform: scale(0.95);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  z-index: 1000;
+  cursor: grabbing;
 }
 
 .rundown-item:hover {
@@ -1293,23 +1714,25 @@ Try dropping an image or video file here!`
 .drag-over-above::before {
   content: '';
   position: absolute;
-  top: -12px;
+  top: -2px;
   left: 0;
   right: 0;
-  height: 12px;
-  background: #FFC107;
+  height: 3px;
+  background: #2196F3;
   z-index: 1000;
+  box-shadow: 0 0 4px rgba(33, 150, 243, 0.6);
 }
 
 .drag-over-below::after {
   content: '';
   position: absolute;
-  bottom: -12px;
+  bottom: -2px;
   left: 0;
   right: 0;
-  height: 12px;
-  background: #FFC107;
+  height: 3px;
+  background: #2196F3;
   z-index: 1000;
+  box-shadow: 0 0 4px rgba(33, 150, 243, 0.6);
 }
 
 @keyframes pulse-yellow {
@@ -1327,8 +1750,85 @@ Try dropping an image or video file here!`
   }
 }
 
+/* Drag drop indicator - the footprint */
+.drag-drop-indicator {
+  height: calc(var(--base-row-height) * 2.5);
+  background: v-bind('dragLightColor ? `rgba(${hexToRgb(resolveVuetifyColor(dragLightColor, $vuetify))}, 0.08)` : "rgba(0, 188, 212, 0.08)"');
+  border: 0.5px dashed v-bind('dragLightColor ? resolveVuetifyColor(dragLightColor, $vuetify) : "#00BCD4"');
+  border-radius: 4px;
+  margin: 4px 0;
+  pointer-events: none;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  padding-left: 48px;
+  color: v-bind('dragLightColor ? resolveVuetifyColor(dragLightColor, $vuetify) : "#00BCD4"');
+  font-weight: 600;
+  box-shadow: 0 2px 8px v-bind('dragLightColor ? `rgba(${hexToRgb(resolveVuetifyColor(dragLightColor, $vuetify))}, 0.2)` : "rgba(0, 188, 212, 0.2)"');
+  position: relative;
+  overflow: hidden;
+  animation: none;
+}
+
+.drag-indicator-text {
+  opacity: 0.8;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Animate the rows moving out of the way */
 .rundown-item {
-  transition: all 0.2s ease;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* When dragging, shift subsequent items down */
+.drag-drop-indicator ~ .rundown-item {
+  transform: translateY(calc(var(--base-row-height) * 2.5 + 8px));
+}
+
+
+
+/* Drop zones above and below items */
+.rundown-item.drag-over-above::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: #2196F3;
+  animation: dropzone-glow 0.5s infinite alternate;
+  z-index: 100;
+}
+
+.rundown-item.drag-over-below::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: #2196F3;
+  animation: dropzone-glow 0.5s infinite alternate;
+  z-index: 100;
+}
+
+@keyframes dropzone-glow {
+  from { 
+    box-shadow: 0 0 4px #2196F3;
+    background: #2196F3;
+  }
+  to { 
+    box-shadow: 0 0 12px #2196F3, 0 0 20px rgba(33, 150, 243, 0.5);
+    background: #42A5F5;
+  }
+}
+
+/* Remove the blue lines since we have the footprint */
+.rundown-item.drag-over-above::before,
+.rundown-item.drag-over-below::after {
+  display: none;
 }
 
 .rundown-item:not(.ghost-class):not(.dragging) {

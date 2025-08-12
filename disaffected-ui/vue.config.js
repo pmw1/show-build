@@ -10,8 +10,12 @@ module.exports = defineConfig({
       '/api': {
         target: 'http://192.168.51.210:8888',
         changeOrigin: true,
-        secure: false,
-        pathRewrite: { '^/api': '' }
+        secure: false
+      },
+      '/health': {
+        target: 'http://192.168.51.210:8888',
+        changeOrigin: true,
+        secure: false
       }
     }
   }
