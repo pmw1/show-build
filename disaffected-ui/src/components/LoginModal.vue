@@ -4,6 +4,14 @@
       <v-card-title class="text-h5 text-center pa-6">
         <v-icon size="large" class="mb-2" color="primary">mdi-account-key</v-icon>
         <div>Login to Show Builder</div>
+        <v-btn
+          icon="mdi-close"
+          variant="text"
+          size="small"
+          class="position-absolute"
+          style="top: 8px; right: 8px;"
+          @click="isVisible = false"
+        />
       </v-card-title>
 
       <v-card-text class="px-6 pb-0">
@@ -122,13 +130,13 @@ export default {
       this.fieldErrors = { username: [], password: [] }
 
       try {
-        // Create form data for OAuth2PasswordRequestForm
-        const formData = new FormData()
+        // Create URL-encoded form data for OAuth2PasswordRequestForm
+        const formData = new URLSearchParams()
         formData.append('username', this.credentials.username)
         formData.append('password', this.credentials.password)
 
         const response = await axios.post(
-          'http://192.168.51.210:8888/auth/login',
+          '/api/auth/login',
           formData,
           {
             headers: {
@@ -150,15 +158,15 @@ export default {
           // Emit success event with user data
           this.$emit('login-success', {
             token: response.data.access_token,
-            user: response.data.user
+            user: response.data.user,
+            expiry: expirationTime
           })
 
           // Close modal and reset form
           this.isVisible = false
           this.resetForm()
         }
-      } catch (error) {
-        
+      } catch (error) {        
         if (error.response?.status === 401) {
           this.errorMessage = 'Invalid username or password'
         } else if (error.response?.status === 422) {

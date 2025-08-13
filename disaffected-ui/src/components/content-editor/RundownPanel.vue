@@ -24,7 +24,9 @@
       
       <!-- Rundown Toolbar -->
       <v-toolbar density="compact" color="surface" class="rundown-toolbar" flat>
+        <!-- New Item Button - Icon only in narrow mode -->
         <v-btn
+          v-if="panelWidth === 'wide'"
           size="small"
           color="primary"
           variant="elevated"
@@ -38,19 +40,24 @@
         </v-btn>
         
         <v-btn
+          v-else
+          icon
           size="small"
-          color="secondary"
-          variant="outlined"
-          @click="$emit('import')"
-          prepend-icon="mdi-import"
-          class="ml-1"
+          color="primary"
+          variant="elevated"
+          @click="$emit('new-item')"
         >
-          Import
+          <v-icon>mdi-plus</v-icon>
+          <v-tooltip activator="parent" location="bottom">
+            Add New Rundown Item (Ctrl+Shift+N)
+          </v-tooltip>
         </v-btn>
         
         <v-spacer></v-spacer>
         
+        <!-- Export Button - Hidden in narrow mode -->
         <v-btn
+          v-if="panelWidth === 'wide'"
           icon
           size="small"
           @click="$emit('export')"
@@ -59,15 +66,7 @@
           <v-tooltip activator="parent" location="bottom">Export Rundown (Ctrl+Shift+E)</v-tooltip>
         </v-btn>
         
-        <v-btn
-          icon
-          size="small"
-          @click="$emit('sort')"
-        >
-          <v-icon>mdi-sort</v-icon>
-          <v-tooltip activator="parent" location="bottom">Sort Items</v-tooltip>
-        </v-btn>
-        
+        <!-- Refresh Button - Always visible -->
         <v-btn
           icon
           size="small"
@@ -78,7 +77,9 @@
           <v-tooltip activator="parent" location="bottom">Refresh Rundown (Ctrl+Shift+R)</v-tooltip>
         </v-btn>
         
+        <!-- Options Button - Hidden in narrow mode -->
         <v-btn
+          v-if="panelWidth === 'wide'"
           icon
           size="small"
           @click="$emit('toggle-options')"
@@ -104,16 +105,18 @@
             :key="`rundown-item-${index}`"
             outlined
             :class="[
-              resolveTypeClass(element?.type || 'unknown'),
               'elevation-1',
               'rundown-item-card',
               'mb-1',
               { 'selected-item': selectedItemIndex === index },
               { 'editing-item': editingItemIndex === index }
             ]"
+            :style="{ 
+              backgroundColor: getBackgroundColorForItem(element?.type || 'unknown'),
+              cursor: 'pointer'
+            }"
             @click="$emit('select-item', index)"
             @dblclick="$emit('edit-item', index)"
-            style="cursor: pointer;"
           >
             <div class="compact-rundown-row" :style="{ color: getTextColorForItem(element?.type || 'unknown') }">
               <!-- Index Number -->
@@ -145,7 +148,7 @@
 </template>
 
 <script>
-import { themeColorMap } from '@/utils/themeColorMap'
+import { themeColorMap, getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap'
 
 export default {
   name: 'RundownPanel',
@@ -153,9 +156,7 @@ export default {
     'close', 
     'toggle-width', 
     'new-item', 
-    'import', 
     'export', 
-    'sort', 
     'refresh', 
     'toggle-options',
     'select-item',
@@ -186,20 +187,23 @@ export default {
   },
   computed: {
     panelWidthValue() {
-      return this.panelWidth === 'narrow' ? '200px' : '350px'
+      return this.panelWidth === 'narrow' ? '300px' : '520px'
     },
     safeItems() {
       return this.items || []
     }
   },
   methods: {
-    resolveTypeClass(type) {
-      const colorMapping = themeColorMap[type] || themeColorMap.unknown
-      return `type-${type.toLowerCase()}-bg`
-    },
     getTextColorForItem(type) {
       const colorMapping = themeColorMap[type] || themeColorMap.unknown
       return colorMapping.textColor || 'inherit'
+    },
+    
+    getBackgroundColorForItem(type) {
+      const colorValue = getColorValue(type.toLowerCase()) || 'grey'
+      const resolvedColor = resolveVuetifyColor(colorValue)
+      console.log(`[RundownPanel] Color for ${type}: ${colorValue} -> ${resolvedColor}`)
+      return resolvedColor
     },
     formatDuration(duration) {
       if (!duration) return '0:00'
@@ -251,7 +255,10 @@ export default {
 }
 
 .rundown-panel.narrow .rundown-headers {
-  grid-template-columns: 40px 60px 1fr;
+  grid-template-columns: 30px 50px 1fr;
+  padding: 6px 8px;
+  font-size: 11px;
+  gap: 6px;
 }
 
 .compact-rundown-row {
@@ -264,7 +271,10 @@ export default {
 }
 
 .rundown-panel.narrow .compact-rundown-row {
-  grid-template-columns: 40px 60px 1fr;
+  grid-template-columns: 30px 50px 1fr;
+  padding: 6px 8px;
+  font-size: 12px;
+  gap: 6px;
 }
 
 .index-number {
@@ -313,5 +323,35 @@ export default {
 .rundown-items-container {
   max-height: calc(100vh - 350px);
   overflow-y: auto;
+}
+
+/* Enhanced narrow mode styling */
+.rundown-panel.narrow .rundown-title {
+  min-height: 48px;
+}
+
+.rundown-panel.narrow .rundown-toolbar {
+  padding: 4px;
+}
+
+.rundown-panel.narrow .index-number {
+  font-size: 10px;
+}
+
+.rundown-panel.narrow .type-label {
+  font-size: 9px;
+}
+
+.rundown-panel.narrow .slug-text {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.rundown-panel.narrow .rundown-item-card {
+  margin-bottom: 2px !important;
+}
+
+.rundown-panel.narrow .rundown-item-card:hover {
+  transform: translateY(-0.5px);
 }
 </style>

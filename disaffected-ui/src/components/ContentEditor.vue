@@ -1,7 +1,8 @@
 <template>
   <div class="content-editor-wrapper">
     <!-- Main Toolbar -->
-    <v-toolbar dense flat class="main-toolbar" style="height: 128px; min-height: 128px; max-height: 128px; align-items: flex-start;">
+    <v-toolbar dense flat class="main-toolbar">
+      <v-toolbar-title>Content Editor</v-toolbar-title>
       <v-spacer></v-spacer>
       <v-toolbar-items>
         <v-btn text @click="saveAllContent">Save</v-btn>
@@ -21,19 +22,40 @@
       :production-statuses="productionStatuses"
       @update:airDate="val => currentAirDate = val"
       @update:productionStatus="val => currentProductionStatus = val"
+      @episode-changed="handleEpisodeChange"
     />
 
     <!-- Main Content Area -->
     <div class="main-content-area">
       <!-- Rundown Panel -->
       <RundownPanel
+        v-if="showRundownPanel"
         :items="rundownItems"
         :selected-item-index="selectedItemIndex"
         :loading="loadingRundown"
-        panel-width="wide"
+        :panel-width="rundownPanelWidth"
         @select-item="selectRundownItem"
         @new-item="showNewItemModal = true"
+        @toggle-width="toggleRundownWidth"
+        @close="showRundownPanel = false"
       />
+      
+      <!-- Reopen Rundown Button (when panel is closed) -->
+      <div v-else class="rundown-reopen-button">
+        <v-btn
+          icon
+          color="primary"
+          variant="elevated"
+          size="small"
+          @click="showRundownPanel = true"
+          class="reopen-btn"
+        >
+          <v-icon>mdi-playlist-edit</v-icon>
+          <v-tooltip activator="parent" location="right">
+            Show Rundown Panel
+          </v-tooltip>
+        </v-btn>
+      </div>
 
       <!-- Editor Panel -->
       <div class="editor-panel">
@@ -710,6 +732,32 @@ Try dropping an image or video file here!`
     }
   },
   methods: {
+    async handleEpisodeChange(newEpisodeNumber) {
+      console.log('Episode change requested to:', newEpisodeNumber);
+      
+      if (!newEpisodeNumber || newEpisodeNumber === this.currentEpisodeNumber) {
+        console.log('No episode change needed');
+        return;
+      }
+
+      // Confirm episode change if there are unsaved changes
+      if (this.hasUnsavedChanges) {
+        const confirmChange = confirm('You have unsaved changes. Are you sure you want to switch episodes? Unsaved changes will be lost.');
+        if (!confirmChange) {
+          return;
+        }
+      }
+
+      // Load the new episode
+      try {
+        await this.loadEpisode(newEpisodeNumber);
+        console.log('Episode successfully changed to:', newEpisodeNumber);
+      } catch (error) {
+        console.error('Failed to change episode:', error);
+        alert('Failed to load the selected episode. Please try again.');
+      }
+    },
+
     hexToRgb(hex) {
       // Convert hex color to RGB values
       if (!hex) return '0, 188, 212'; // Default cyan
@@ -1040,6 +1088,11 @@ Try dropping an image or video file here!`
         // Clear content if no valid item selected
         this.loadItemContent(null);
       }
+    },
+
+    toggleRundownWidth() {
+      this.rundownPanelWidth = this.rundownPanelWidth === 'narrow' ? 'wide' : 'narrow';
+      console.log('Rundown panel width toggled to:', this.rundownPanelWidth);
     },
 
     // Vue.Draggable event handlers for drag and drop
@@ -1667,6 +1720,24 @@ Try dropping an image or video file here!`
   box-shadow: 0 6px 16px rgba(0,0,0,0.3);
   z-index: 2000;
   border: 2px solid #17a2b8 !important;
+}
+
+/* Rundown Panel Reopen Button */
+.rundown-reopen-button {
+  position: fixed;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+}
+
+.reopen-btn {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+}
+
+.reopen-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
 }
 </style>
 

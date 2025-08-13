@@ -5,7 +5,7 @@ from typing import Optional
 import os
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, APIKeyHeader
-from .models import API_KEYS, load_api_keys
+from .db_service import AuthService
 import logging
 
 # Password hashing setup
@@ -55,6 +55,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        if not token:
+            raise credentials_exception
+            
         if not SECRET_KEY:
             raise HTTPException(
                 status_code=500,
@@ -66,11 +69,15 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         if username is None:
             raise credentials_exception
             
-        # For now, return basic user info
-        # TODO: Replace with actual DB lookup
+        # Get user from database
+        user = AuthService.get_user(username)
+        if not user:
+            raise credentials_exception
+            
         return {
-            "username": username,
-            "access_level": "admin"  # Hardcoded for testing
+            "id": user['id'],
+            "username": user['username'],
+            "access_level": user['access_level']
         }
     except JWTError:
         raise credentials_exception
@@ -88,27 +95,21 @@ async def get_current_user_or_key(
     logger.info(f"API Key received: {api_key[:8] if api_key else 'None'}...")
     logger.info(f"JWT Token received: {'Yes' if token else 'No'}")
 
-    # Load keys from persistent storage
-    api_keys = load_api_keys()
-    print(f"Loaded {len(api_keys)} keys from storage")
-    logger.info(f"Loaded {len(api_keys)} keys from storage")
-    logger.info(f"Available key prefixes: {[k[:8] for k in api_keys.keys()]}")
-
     # Try API key authentication first
     if api_key:
         print(f"Checking API key: {api_key[:8]}...")
         logger.info(f"Checking API key: {api_key[:8]}...")
-        if api_key in api_keys:
+        
+        api_key_record = AuthService.get_api_key(api_key)
+        if api_key_record:
             print("✅ API key found and authenticated!")
             logger.info("✅ API key found and authenticated!")
             return {
-                "username": api_keys[api_key].client_name,
-                "access_level": api_keys[api_key].access_level
+                "username": api_key_record['client_name'],
+                "access_level": api_key_record['access_level']
             }
-        print(f"❌ API key {api_key[:8]}... not found in storage")
-        logger.warning(f"❌ API key {api_key[:8]}... not found in storage")
-        print(f"Available keys: {list(api_keys.keys())[:3]}")  # Show first 3 full keys for comparison
-        logger.warning(f"Available keys: {list(api_keys.keys())[:3]}")  # Show first 3 full keys for comparison
+        print(f"❌ API key {api_key[:8]}... not found in database")
+        logger.warning(f"❌ API key {api_key[:8]}... not found in database")
 
     # Try JWT token if no API key worked
     if token:

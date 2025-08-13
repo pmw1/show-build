@@ -1,5 +1,27 @@
-# ...existing requirements...
+# Core FastAPI and web dependencies
+fastapi>=0.100.0
+uvicorn>=0.22.0
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+bcrypt==4.0.1
 python-multipart>=0.0.6
-cryptography>=3.4.8
+
+# HTTP client
+requests>=2.31.0
+paho-mqtt>=1.6.1
+markdown>=3.4.3
+pydantic>=2.0.3
+ffmpeg-python>=0.2.0
+python-frontmatter>=1.0.0
+
+# Database dependencies  
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+psycopg2-binary>=2.9.9
+asyncpg>=0.29.0
+pymysql>=1.0.0
+
+# Celery and Redis dependencies
+celery>=5.3.0
+redis>=5.0.0
+flower>=2.0.1

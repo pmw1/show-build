@@ -168,10 +168,11 @@ export default {
       { title: 'Episodes', icon: 'mdi-television-classic', to: '/episodes' },
       { title: 'Tools', icon: 'mdi-toolbox', to: '/tools' },
       { title: 'Organization', icon: 'mdi-domain', to: '/organization' },
-      { title: 'Rundown Editor', icon: 'mdi-playlist-edit', to: '/rundown' },
+      { title: 'Stack Manager', icon: 'mdi-playlist-edit', to: '/stack' },
       { title: 'Content Editor', icon: 'mdi-script-text-outline', to: '/content-editor' },
       { title: 'Asset Manager', icon: 'mdi-folder', to: '/assets' },
       { title: 'Templates', icon: 'mdi-file-document', to: '/templates' },
+      { title: 'Item Types', icon: 'mdi-format-list-bulleted-type', to: '/item-types' },
       { title: 'Settings', icon: 'mdi-cog', to: '/settings' }
     ]
     

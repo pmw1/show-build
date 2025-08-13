@@ -31,7 +31,7 @@ export function useContentEditor() {
   const currentEpisodeInfo = ref('Episode Production Workspace')
   const currentEpisodeNumber = ref('')
   const currentAirDate = ref('')
-  const currentProductionStatus = ref('Pre-Production')
+  const currentProductionStatus = ref('draft')
   
   // Modal states
   const showGfxModal = ref(false)
@@ -46,7 +46,7 @@ export function useContentEditor() {
   
   // Computed properties
   const rundownPanelWidthValue = computed(() => {
-    return rundownPanelWidth.value === 'narrow' ? '200px' : '350px'
+    return rundownPanelWidth.value === 'narrow' ? '300px' : '520px'
   })
   
   const rundownHeaderWidth = computed(() => {
@@ -61,12 +61,12 @@ export function useContentEditor() {
     return rundownItems.value || []
   })
   
-  const totalRuntime = computed(() => {
-    return calculateTotalRuntime()
+  const duration = computed(() => {
+    return calculateDuration()
   })
   
   // Methods
-  const calculateTotalRuntime = () => {
+  const calculateDuration = () => {
     if (!rundownItems.value || rundownItems.value.length === 0) {
       return '0:00'
     }
@@ -214,10 +214,10 @@ export function useContentEditor() {
     rundownHeaderWidth,
     cueToolbarWidth,
     safeRundownItems,
-    totalRuntime,
+    duration,
     
     // Methods
-    calculateTotalRuntime,
+    calculateDuration,
     selectRundownItem,
     startEditingItem,
     toggleRundownPanel,

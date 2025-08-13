@@ -69,8 +69,8 @@
         </div>
       </v-toolbar>
 
-      <!-- Cue Insertion Buttons Toolbar: now inside EditorPanel, above the text area -->
-      <v-toolbar v-if="editorMode === 'script'" density="comfortable" class="cue-buttons-toolbar px-2 py-1" style="border-bottom: 1px solid var(--v-theme-outline); min-height: 48px; background: rgba(0,0,0,0.05);">
+      <!-- Cue Insertion Buttons Toolbar: Hidden when using ScriptEditor since it has its own -->
+      <v-toolbar v-if="editorMode === 'script' && false" density="comfortable" class="cue-buttons-toolbar px-2 py-1" style="border-bottom: 1px solid var(--v-theme-outline); min-height: 48px; background: rgba(0,0,0,0.05);">
         <span class="text-overline mr-4">Insert Element Cues</span>
         <v-spacer></v-spacer>
         <v-btn size="small" class="mx-1 cue-btn" @click="$emit('show-gfx-modal')" color="blue-darken-3" variant="elevated">
@@ -123,19 +123,15 @@
 
       <!-- Editor Content Area -->
       <v-card-text class="pa-0 editor-content">
-        <!-- Script Mode - Markdown Editor -->
+        <!-- Script Mode - Rich Script Editor -->
         <div v-if="editorMode === 'script'" class="fill-height">
-          <v-textarea
+          <ScriptEditor
             :model-value="scriptContent"
             @update:model-value="onContentInput('script', $event)"
-            :placeholder="scriptPlaceholder"
-            variant="plain"
-            hide-details
-            class="editor-textarea"
-            style="height: 100%;"
-            rows="30"
-            auto-grow
-          ></v-textarea>
+            :segment-id="item?.id || 'default'"
+            @save="$emit('save')"
+            @cue-inserted="handleCueInserted"
+          />
         </div>
 
         <!-- Scratch Mode - Brainstorming Editor -->
@@ -226,9 +222,13 @@
 </template>
 
 <script>
+import ScriptEditor from './ScriptEditor.vue';
 
 export default {
   name: 'EditorPanel',
+  components: {
+    ScriptEditor
+  },
   props: {
     item: {
       type: Object,
@@ -273,7 +273,8 @@ export default {
     'show-vox-modal',
     'show-mus-modal',
     'show-live-modal',
-    'toggle-rundown-panel'
+    'toggle-rundown-panel',
+    'cue-inserted'
   ],
   data() {
     return {
@@ -341,6 +342,11 @@ export default {
       if (files.length > 0) {
         // Handle file drop, e.g., emit an event
       }
+    },
+    handleCueInserted(cueData) {
+      console.log('Cue inserted:', cueData);
+      // Optionally emit this up to ContentEditor
+      this.$emit('cue-inserted', cueData);
     }
   }
 };

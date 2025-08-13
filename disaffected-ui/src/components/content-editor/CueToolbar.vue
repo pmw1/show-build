@@ -19,7 +19,6 @@
       <!-- Cue Insertion Buttons with proper spacing -->
       <div v-if="editorMode === 'script'" class="cue-buttons-container">
         <v-btn 
-          size="x-small" 
           @click="$emit('show-modal', 'gfx')" 
           color="blue-darken-3" 
           variant="elevated" 
@@ -31,7 +30,6 @@
         </v-btn>
         
         <v-btn 
-          size="x-small" 
           @click="$emit('show-modal', 'fsq')" 
           color="green-darken-3" 
           variant="elevated" 
@@ -43,7 +41,6 @@
         </v-btn>
         
         <v-btn 
-          size="x-small" 
           @click="$emit('show-modal', 'sot')" 
           color="purple-darken-3" 
           variant="elevated" 
@@ -55,7 +52,6 @@
         </v-btn>
         
         <v-btn 
-          size="x-small" 
           @click="$emit('show-modal', 'vo')" 
           color="deep-orange-darken-3" 
           variant="elevated" 
@@ -67,7 +63,6 @@
         </v-btn>
         
         <v-btn 
-          size="x-small" 
           @click="$emit('show-modal', 'nat')" 
           color="teal-darken-3" 
           variant="elevated" 
@@ -79,7 +74,6 @@
         </v-btn>
         
         <v-btn 
-          size="x-small" 
           @click="$emit('show-modal', 'pkg')" 
           color="red-darken-3" 
           variant="elevated" 
@@ -145,6 +139,8 @@ export default {
 }
 
 .cue-btn {
-  min-width: 60px; /* Ensure buttons have a consistent width */
+  min-width: 60px;
+  height: calc(56px - 8px) !important; /* Fill available height minus toolbar padding */
+  border-radius: 0 !important; /* Remove rounded edges */
 }
 </style>

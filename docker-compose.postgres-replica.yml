@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  postgres-replica:
+    image: postgres:15-alpine
+    container_name: show-build-postgres-replica
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: showbuild
+      POSTGRES_USER: showbuild
+      POSTGRES_PASSWORD: showbuild_primary_2025
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: replicator_secure_2025
+      PGUSER: postgres
+      POSTGRES_PRIMARY_HOST: postgres-primary
+      POSTGRES_PRIMARY_PORT: 5432
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts on same host
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./postgres-config/replica:/docker-entrypoint-initdb.d
+      - ./postgres-config/replica/postgresql.conf:/etc/postgresql/postgresql.conf
+      - ./postgres-config/replica/pg_hba.conf:/etc/postgresql/pg_hba.conf
+      - ./postgres-config/replica/recovery.conf:/etc/postgresql/recovery.conf
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    networks:
+      - postgres-replication
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U showbuild -d showbuild"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres-primary
+
+volumes:
+  postgres_replica_data:
+    driver: local
+
+networks:
+  postgres-replication:
+    external: true

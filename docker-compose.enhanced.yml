@@ -1,0 +1,147 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:13
+    container_name: showbuild-postgres
+    environment:
+      POSTGRES_DB: showbuild
+      POSTGRES_USER: showbuild
+      POSTGRES_PASSWORD: showbuild
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - video-post
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U showbuild -d showbuild"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Celery
+  redis:
+    image: redis:7-alpine
+    container_name: showbuild-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - video-post
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Enhanced FastAPI Backend with database
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.enhanced
+      no_cache: false
+    container_name: show-build-server
+    user: "1000:1001"
+    ports:
+      - "0.0.0.0:8888:80"
+    volumes:
+      - ./app:/app
+      - ./app/storage:/app/storage
+      - /mnt/sync/disaffected/logs:/home/logs
+      - /mnt/sync/shared_media:/shared_media
+      - /mnt/sync/disaffected/episodes:/home/episodes
+    networks:
+      - video-post
+    environment:
+      - MODULE_NAME=main
+      - VARIABLE_NAME=app
+      - WEB_CONCURRENCY=1
+      - JWT_SECRET_KEY=ea7GZD3mQy3EZYD4YZsFmr/9JwBgZFCaWyznnjhOyow=
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=2880
+      # Database configuration
+      - DATABASE_URL=postgresql://showbuild:showbuild@postgres:5432/showbuild
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mqtt-broker:
+        condition: service_started
+
+  # Celery Worker for background processing
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.enhanced
+      no_cache: false
+    container_name: showbuild-celery-worker
+    user: "1000:1001"
+    volumes:
+      - ./app:/app
+      - /mnt/sync/disaffected/episodes:/home/episodes
+      - /mnt/sync/shared_media:/shared_media
+    networks:
+      - video-post
+    environment:
+      - DATABASE_URL=postgresql://showbuild:showbuild@postgres:5432/showbuild
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+    restart: unless-stopped
+
+  # Celery Flower for monitoring
+  celery_flower:
+    build:
+      context: .
+      dockerfile: Dockerfile.enhanced
+      no_cache: false
+    container_name: showbuild-celery-flower
+    ports:
+      - "5555:5555"
+    volumes:
+      - ./app:/app
+    networks:
+      - video-post
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    command: ["celery", "-A", "celery_app", "flower", "--port=5555"]
+    restart: unless-stopped
+
+  # Existing MQTT broker
+  mqtt-broker:
+    image: eclipse-mosquitto
+    container_name: mqtt-broker
+    networks:
+      - video-post
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./tools/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+networks:
+  video-post:
+
+volumes:
+  postgres_data:
+  redis_data:

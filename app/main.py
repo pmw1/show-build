@@ -1,6 +1,6 @@
 # main.py
 
-from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Depends
+from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Depends, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.encoders import jsonable_encoder
@@ -9,7 +9,6 @@ from preproc_mqtt_listen import MQTTListener
 from pydantic import BaseModel, Field
 from typing import Optional
 from utils.id import get_next_id
-from utils.validator import validate_front_matter
 from utils.frontmatter_parser import parse_markdown_file
 from auth.utils import get_current_user_or_key, get_current_user  # Add get_current_user
 import logging
@@ -24,6 +23,17 @@ from pathlib import Path
 from glob import glob
 import markdown
 import traceback
+from enhanced_reorder import reorder_rundown_with_rename
+
+# Database and background processing imports
+from database import engine, Base, get_db
+from models import ProcessingJob  # Keep only non-conflicting legacy models
+from models_episode import BlueprintTemplate, BlueprintNode, EpisodeTemplate  
+from models_assetid import AssetIDRegistry, AssetIDRelationship, AssetIDPendingMessage
+from models_v2 import Organization, Show, Season, Episode, Break, Rundown, RundownItem, Segment, Script, Element, Cue, AssetLink, AssetMessage
+from services.script_compilation import compile_episode_script
+from websocket import websocket_endpoint, manager
+from celery_app import celery_app
 
 # Absolute path to the app directory
 APP_DIR = Path(__file__).resolve().parent
@@ -41,6 +51,16 @@ try:
     from api_config_router import router as api_config_router
     from assets_router import router as assets_router
     from templates_router import router as templates_router
+    from docs_router import router as docs_router
+    from assetid_router import router as assetid_router
+    from organization_router import router as organization_router
+    from show_router import router as show_router
+    from media_router import router as media_router
+    from settings_router import router as settings_router
+    from settings_colors_router import router as settings_colors_router
+    from episodes_router import router as episodes_router
+    from episode_scaffold_router import router as episode_scaffold_router
+    from setup_router import router as setup_router
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Current directory: {os.getcwd()}")
@@ -52,7 +72,14 @@ listener = MQTTListener()
 
 @app.on_event("startup")
 def startup_event():
+    """Initialize database and start background services."""
+    # Create database tables
+    Base.metadata.create_all(bind=engine)
+    
+    # Start MQTT listener
     threading.Thread(target=listener.start, daemon=True).start()
+    
+    logging.info("Show-Build server started with database and background processing")
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,8 +89,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include the auth router
-app.include_router(auth_router)
+# Include the auth router with /api prefix
+app.include_router(auth_router, prefix="/api")
 
 # Include the API configuration router
 app.include_router(api_config_router)
@@ -73,6 +100,35 @@ app.include_router(assets_router, prefix="/api", tags=["assets"])
 
 # Include the templates router
 app.include_router(templates_router, prefix="/api", tags=["templates"])
+
+# Include the documentation router
+app.include_router(docs_router)
+
+# Include the enhanced AssetID router
+app.include_router(assetid_router)
+
+# Include the organization router
+app.include_router(organization_router, prefix="/api")
+
+# Include the show router
+app.include_router(show_router, prefix="/api")
+
+# Include the media router
+app.include_router(media_router, prefix="/api")
+
+# Include the settings router 
+app.include_router(settings_router, prefix="/api")
+# Include the database-based color settings router
+app.include_router(settings_colors_router)
+
+# Include the episodes router
+app.include_router(episodes_router, prefix="/api")
+
+# Include the episode scaffolding router
+app.include_router(episode_scaffold_router, prefix="/api")
+
+# Include the setup router
+app.include_router(setup_router, prefix="/api")
 
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
@@ -158,7 +214,53 @@ async def listen_endpoint(topic: str):
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    health_status = {"status": "healthy", "database": "unknown"}
+    
+    # Test database connectivity
+    try:
+        from pathlib import Path
+        import json
+        import asyncpg
+        
+        # Load database config if it exists
+        config_dir = Path("/app/config") if Path("/app").exists() else Path("app/config")
+        db_config_file = config_dir / "database.json"
+        
+        if db_config_file.exists():
+            with open(db_config_file, 'r') as f:
+                db_config = json.load(f)
+            
+            # Test connection
+            conn = await asyncpg.connect(
+                host=db_config.get("host", "postgres"),
+                port=db_config.get("port", 5432),
+                database=db_config.get("database", "showbuild"),
+                user=db_config.get("username", "showbuild"),
+                password=db_config.get("password", "showbuild")
+            )
+            
+            # Simple connectivity test
+            await conn.fetchval("SELECT 1")
+            await conn.close()
+            
+            health_status["database"] = "connected"
+        else:
+            health_status["database"] = "no_config"
+            
+    except asyncpg.InvalidAuthorizationSpecificationError:
+        health_status["database"] = "auth_failed"
+    except asyncpg.InvalidCatalogNameError:
+        health_status["database"] = "db_not_found"
+    except OSError:
+        health_status["database"] = "connection_refused"
+    except Exception as e:
+        health_status["database"] = f"error: {str(e)[:50]}"
+    
+    # Set overall status based on database
+    if health_status["database"] not in ["connected", "no_config"]:
+        health_status["status"] = "degraded"
+    
+    return health_status
 
 @app.get("/show-info")
 async def get_show_info():
@@ -228,10 +330,26 @@ async def list_episodes():
     return {"episodes": episodes}
 
 @app.post("/next-id")
-async def next_id(slug: str = Form(...), type: str = Form(...)):
+async def next_id_legacy_redirect(slug: str = Form(...), type: str = Form(...)):
+    """
+    DEPRECATED: Use /assetid/generate-legacy instead.
+    This endpoint redirects to the new AssetID service for backwards compatibility.
+    """
+    from fastapi.responses import RedirectResponse
+    
+    # Log deprecation warning
+    logging.warning(f"DEPRECATED: /next-id endpoint used. Migrate to /assetid/generate-legacy")
+    
+    # For now, keep the old functionality but encourage migration
     try:
+        from utils.id import get_next_id
         next_id_value = get_next_id(slug, type)
-        return {"id": next_id_value}
+        return {
+            "id": next_id_value,
+            "deprecated": True,
+            "message": "This endpoint is deprecated. Use /assetid/generate-legacy instead.",
+            "migration_url": "/assetid/generate-legacy"
+        }
     except ValueError as ve:
         raise HTTPException(status_code=422, detail=str(ve))
     except Exception as e:
@@ -440,16 +558,14 @@ async def get_episode_rundown(episode_number: str):
                 else:
                     continue # Skip files without frontmatter
 
-                validated_metadata = validate_front_matter(front_matter, filename=file_name)
-                
-                # Flatten the structure
+                # Flatten the structure directly from front_matter
                 item = {
-                    "id": validated_metadata.get('id', file_name),
-                    "type": validated_metadata.get('type', 'unknown'),
-                    "slug": validated_metadata.get('slug', 'No Slug'),
-                    "duration": validated_metadata.get('duration', '00:00:00'),
+                    "id": front_matter.get('id', file_name.replace('.md', '')),
+                    "type": front_matter.get('type', 'segment'),
+                    "slug": front_matter.get('slug', file_name.replace('.md', '').lower()),
+                    "duration": front_matter.get('duration', '00:00:00'),
                     "script": script_content,
-                    **validated_metadata # Include all other metadata fields
+                    **front_matter # Include all other metadata fields
                 }
                 rundown_items.append(item)
 
@@ -462,61 +578,8 @@ async def get_episode_rundown(episode_number: str):
 
 @app.post("/rundown/{episode_number}/reorder")
 async def reorder_rundown(episode_number: str, payload: ReorderRequest):
-    base_path = "/home/episodes"
-    episode_path = os.path.join(base_path, episode_number, "rundown")
-
-    if not os.path.isdir(episode_path):
-        raise HTTPException(
-            status_code=404, detail=f"Episode {episode_number} not found."
-        )
-
-    try:
-        for index, segment in enumerate(payload.segments):
-            filename = segment.get("filename")
-            if not filename or not filename.endswith(".md"):
-                raise HTTPException(
-                    status_code=422, detail=f"Invalid or missing filename in segment {index}"
-                )
-
-            file_path = os.path.join(episode_path, filename)
-            if not os.path.isfile(file_path):
-                raise HTTPException(
-                    status_code=404, detail=f"File {filename} not found."
-                )
-
-            # Read existing file
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-
-            if not content.startswith("---"):
-                raise HTTPException(
-                    status_code=422, detail=f"No YAML frontmatter in {filename}"
-                )
-
-            fm_end = content.find("\n---", 4)
-            if fm_end == -1:
-                raise HTTPException(
-                    status_code=422, detail=f"Invalid YAML frontmatter in {filename}"
-                )
-
-            yaml_block = content[4:fm_end]
-            body = content[fm_end + 4:]
-            front_matter = yaml.safe_load(yaml_block) or {}
-
-            # Update order
-            front_matter["order"] = (index + 1) * 10
-
-            # Write back to file
-            new_yaml = yaml.safe_dump(front_matter, sort_keys=False)
-            new_content = f"---\n{new_yaml}---\n{body}"
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-
-        return {"status": "success", "message": f"Rundown for episode {episode_number} reordered"}
-
-    except Exception as e:
-        logging.error(f"Failed to reorder rundown: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to reorder rundown: {str(e)}")
+    """Reorder rundown items and rename files to match their new order."""
+    return await reorder_rundown_with_rename(episode_number, payload.dict())
 
 @app.post("/rundown/{episode_number}/item")
 async def create_rundown_item(episode_number: str, item: NewRundownItem):
@@ -779,3 +842,100 @@ async def update_episode_info(episode_number: str, info_data: dict, current_user
             status_code=500,
             detail=f"Failed to update episode info: {str(e)}"
         )
+
+# WebSocket endpoint for real-time updates
+@app.websocket("/ws/{client_id}")
+async def websocket_connection(websocket: WebSocket, client_id: str):
+    """WebSocket endpoint for real-time job status updates."""
+    await websocket_endpoint(websocket, client_id)
+
+# Enhanced script compilation endpoint with background processing
+@app.post("/episodes/{episode_id}/compile-script")
+async def compile_script_async(
+    episode_id: str,
+    output_format: str = "html",
+    include_cues: bool = True,
+    validate_only: bool = False,
+    current_user: dict = Depends(get_current_user_or_key),
+    db = Depends(get_db)
+):
+    """
+    Start script compilation as background job with real-time updates.
+    Server handles all heavy processing, client receives WebSocket updates.
+    """
+    try:
+        # Check if episode exists in filesystem
+        from core.paths import paths
+        if not paths.episode_exists(episode_id):
+            raise HTTPException(status_code=404, detail="Episode not found")
+        
+        # Start background compilation job
+        job = compile_episode_script.delay(
+            episode_id=episode_id,
+            output_format=output_format,
+            include_cues=include_cues,
+            validate_only=validate_only
+        )
+        
+        # Create database record for job tracking
+        from models import ProcessingStatus
+        db_job = ProcessingJob(
+            job_type="script_compilation",
+            job_id=job.id,
+            status=ProcessingStatus.PENDING,
+            parameters={
+                "episode_id": episode_id,
+                "output_format": output_format,
+                "include_cues": include_cues,
+                "validate_only": validate_only
+            }
+        )
+        
+        # Find or create episode record
+        episode = db.query(Episode).filter(Episode.episode_number == episode_id).first()
+        if episode:
+            db_job.episode_id = episode.id
+        
+        db.add(db_job)
+        db.commit()
+        
+        return {
+            "job_id": job.id,
+            "status": "started",
+            "message": f"Script compilation started for episode {episode_id}",
+            "websocket_url": f"/ws/{{client_id}}",
+            "check_status_url": f"/jobs/{job.id}/status"
+        }
+        
+    except Exception as e:
+        logging.error(f"Failed to start script compilation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Job status endpoint
+@app.get("/jobs/{job_id}/status")
+async def get_job_status(
+    job_id: str,
+    current_user: dict = Depends(get_current_user_or_key),
+    db = Depends(get_db)
+):
+    """Get current status of a background processing job."""
+    job = db.query(ProcessingJob).filter(ProcessingJob.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Get Celery task result
+    celery_result = celery_app.AsyncResult(job_id)
+    
+    return {
+        "job_id": job_id,
+        "status": job.status,
+        "celery_status": celery_result.status,
+        "progress": job.progress,
+        "job_type": job.job_type,
+        "parameters": job.parameters,
+        "result": job.result,
+        "error_message": job.error_message,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at
+    }

@@ -1,21 +1,22 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from .utils import verify_password, create_access_token, get_current_user, get_password_hash
-from .models import (
-    load_users, 
-    save_users,
-    get_user,
-    UserLogin, 
-    Token, 
-    User, 
-    APIKey, 
-    load_api_keys, 
-    save_api_keys
-)
+from .utils import verify_password, create_access_token, get_current_user, get_current_user_or_key, get_password_hash
+from .db_service import AuthService
+from pydantic import BaseModel
 from datetime import timedelta
 from typing import List
 from secrets import token_urlsafe
 import logging
+
+# Pydantic models for API responses
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user: dict
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     logger.info(f"Login attempt for username: {form_data.username}")
     
-    user = get_user(form_data.username)
+    user = AuthService.get_user(form_data.username)
     if not user:
         logger.warning(f"User not found: {form_data.username}")
         raise HTTPException(
@@ -35,11 +36,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    logger.info(f"User found: {user.username}, checking password...")
+    logger.info(f"User found: {user['username']}, checking password...")
     logger.info(f"Password provided: '{form_data.password}' (length: {len(form_data.password)})")
-    logger.info(f"Stored hash: {user.hashed_password[:20]}...")
+    logger.info(f"Stored hash: {user['hashed_password'][:20]}...")
     
-    password_valid = verify_password(form_data.password, user.hashed_password)
+    password_valid = verify_password(form_data.password, user['hashed_password'])
     logger.info(f"Password verification result: {password_valid}")
     
     if not password_valid:
@@ -50,8 +51,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Update last login timestamp
+    AuthService.update_last_login(user['username'])
+
     access_token = create_access_token(
-        data={"sub": user.username},
+        data={"sub": user['username']},
         expires_delta=timedelta(minutes=2880)  # 48 hours
     )
     
@@ -59,8 +63,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         access_token=access_token,
         token_type="bearer",
         user={
-            "username": user.username,
-            "access_level": user.access_level
+            "username": user['username'],
+            "access_level": user['access_level']
         }
     )
 
@@ -74,48 +78,64 @@ async def test_auth():
     return {"message": "Auth module loaded successfully"}
 
 # Admin-only: Create new user
-@router.post("/users", response_model=User)
+@router.post("/users", response_model=dict)
 async def create_user(
     new_user: UserLogin,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user_or_key)
 ):
     if current_user["access_level"] != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can create users"
         )
-    users = load_users()
-    if new_user.username in users:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already exists"
-        )
     
-    user = User(
+    # Create new user
+    user = AuthService.create_user(
         username=new_user.username,
-        hashed_password=get_password_hash(new_user.password),
+        password=new_user.password,
         access_level="user"  # Default to regular user
     )
-    users[user.username] = user
-    save_users(users)
     
-    return user
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create user"
+        )
+    
+    return {
+        "username": user.username,
+        "access_level": user.access_level,
+        "created_at": user.created_at.isoformat()
+    }
 
 # Admin-only: List all users
-@router.get("/users", response_model=List[User])
-async def list_users(current_user: dict = Depends(get_current_user)):
+@router.get("/users", response_model=List[dict])
+async def list_users(current_user: dict = Depends(get_current_user_or_key)):
     if current_user["access_level"] != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can list users"
         )
-    users = load_users()
-    return list(users.values())
+    
+    users = AuthService.list_users()
+    return [
+        {
+            "username": user.username,
+            "access_level": user.access_level,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email": user.email,
+            "is_active": user.is_active,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "last_login": user.last_login.isoformat() if user.last_login else None
+        }
+        for user in users
+    ]
 
-@router.post("/apikey", response_model=APIKey)
+@router.post("/apikey", response_model=dict)
 async def create_api_key(
     client_name: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user_or_key)
 ):
     """Create a permanent API key for automated systems"""
     if current_user["access_level"] != "admin":
@@ -124,50 +144,67 @@ async def create_api_key(
             detail="Only admins can create API keys"
         )
     
-    # Load existing keys
-    api_keys = load_api_keys()
-    
     # Generate secure random key
     api_key = token_urlsafe(32)
     
-    # Create new key
-    new_key = APIKey(
-        key=api_key,
+    # Create new key in database
+    new_key = AuthService.create_api_key(
+        api_key=api_key,
         client_name=client_name,
-        access_level="service",
-        created_by=current_user["username"]
+        created_by=current_user["username"],
+        access_level="service"
     )
     
-    # Add to keys and save
-    api_keys[api_key] = new_key
-    save_api_keys(api_keys)
+    if not new_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create API key"
+        )
     
     # Debug logging
     logger.info(f"Created API key for {client_name}")
-    logger.info(f"Total keys in storage: {len(api_keys)}")
     
-    return new_key
+    return {
+        "key": api_key,  # Return the actual key (only shown once)
+        "client_name": new_key.client_name,
+        "access_level": new_key.access_level,
+        "created_by": new_key.created_by_username,
+        "created_at": new_key.created_at.isoformat()
+    }
 
-@router.get("/apikeys", response_model=List[APIKey])
-async def list_api_keys(current_user: dict = Depends(get_current_user)):
+@router.get("/apikeys", response_model=List[dict])
+async def list_api_keys(current_user: dict = Depends(get_current_user_or_key)):
     """List all API keys (admin only)"""
     if current_user["access_level"] != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can list API keys"
         )
-    api_keys = load_api_keys()
-    return list(api_keys.values())
+    
+    api_keys = AuthService.list_api_keys()
+    return [
+        {
+            "key_prefix": key.key_prefix,
+            "client_name": key.client_name,
+            "access_level": key.access_level,
+            "created_by": key.created_by_username,
+            "created_at": key.created_at.isoformat() if key.created_at else None,
+            "last_used": key.last_used.isoformat() if key.last_used else None,
+            "usage_count": key.usage_count,
+            "is_active": key.is_active
+        }
+        for key in api_keys
+    ]
 
 @router.get("/apikeys/debug", response_model=List[dict])
-async def debug_api_keys(current_user: dict = Depends(get_current_user)):
+async def debug_api_keys(current_user: dict = Depends(get_current_user_or_key)):
     """Debug endpoint to list stored API keys (admin only)"""
     if current_user["access_level"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     
-    # Load keys from persistent storage
-    api_keys = load_api_keys()
-    return [{"key": k, "client": v.client_name} for k, v in api_keys.items()]
+    # Load keys from database
+    api_keys = AuthService.list_api_keys()
+    return [{"key": key.key_hash, "client": key.client_name} for key in api_keys]
 
 # Debug endpoint for testing password hashing
 @router.post("/debug/hash")

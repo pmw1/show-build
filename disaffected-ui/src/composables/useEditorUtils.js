@@ -24,17 +24,18 @@ export function useEditorUtils() {
   }
 
   const getItemTypeColor = (type) => {
+    // Updated color mapping to match database values
     const colorMap = {
       opening: 'green',
-      segment: 'blue', 
-      ad: 'orange',
+      segment: 'info',      // Updated to match database  
+      ad: 'primary',        // Updated to match database
       interview: 'purple',
       music: 'teal',
-      cta: 'red',
+      cta: 'accent',        // Updated to match database
       closing: 'indigo',
       outro: 'brown',
-      story: 'blue',
-      commercial: 'orange',
+      story: 'info',        // Updated to match database
+      commercial: 'primary', // Updated to match database
       weather: 'cyan',
       sports: 'green',
       feature: 'purple',
@@ -182,12 +183,10 @@ export function useEditorUtils() {
 
   // Constants
   const productionStatuses = [
-    'Pre-Production',
-    'In Production', 
-    'Post-Production',
-    'Ready to Air',
-    'Aired',
-    'Archived'
+    { title: 'Draft', value: 'draft' },
+    { title: 'Approved', value: 'approved' },
+    { title: 'Production', value: 'production' },
+    { title: 'Completed', value: 'completed' }
   ]
 
   const itemTypes = [

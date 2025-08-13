@@ -20,10 +20,26 @@ def validate_front_matter(front_matter: dict, filename: str = None) -> dict:
     # Normalize all keys to lowercase and create the base metadata object
     metadata = {k.strip().lower(): v for k, v in front_matter.items()}
 
-    # Ensure 'slug' is present, as it's critical for routing and ID generation
+    # Ensure 'slug' is present, generate from filename if missing
     if "slug" not in metadata or not metadata["slug"]:
-        # If no slug, we can't generate a proper ID, this is a critical error
-        raise ValueError(f"Missing or invalid 'slug' in {filename or 'front matter'}")
+        # Generate slug from filename if missing
+        if filename:
+            # Remove .md extension and clean up the filename to create a slug
+            base_name = filename.replace('.md', '')
+            # Remove order numbers (like "10 ", "20 ") from the beginning
+            import re
+            clean_name = re.sub(r'^\d+\s+', '', base_name)
+            # Convert to lowercase slug format
+            slug = re.sub(r'[^a-z0-9]+', '-', clean_name.lower()).strip('-')
+            metadata["slug"] = slug
+            system_messages.append(f"Generated slug from filename: '{slug}'")
+        else:
+            raise ValueError(f"Missing or invalid 'slug' and no filename available to generate one")
+    
+    # Ensure 'type' has a default value
+    if "type" not in metadata or not metadata["type"]:
+        metadata["type"] = "segment"  # Default to segment
+        system_messages.append(f"Missing type field, defaulting to 'segment'")
 
     # Validate 'id' or generate a new one if missing/invalid
     if "id" not in metadata or not str(metadata.get("id")).strip():

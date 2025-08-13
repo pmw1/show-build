@@ -1,0 +1,6 @@
+{
+  "publicKey": "dummy_public_key_for_testing",
+  "privateKey": "***STORED_SECURELY***",
+  "listenPort": 51820,
+  "endpoint": null
+}

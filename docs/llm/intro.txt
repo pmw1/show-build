@@ -1,4 +1,0 @@
-Good morning.  
-I am working with VSCode Copilot directly in the app to write code for me.  I have copilot running in a virtually complete autonomous mode where it casn amke changes and execute with minimal interactions from me.  I would like your help in reviewing co-pilots work for accuracy and staying onpoint.
-
-

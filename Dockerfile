@@ -7,11 +7,18 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install -r /app/requirements.txt
 # UNTOUCHABLE ZONE END
 
-# Add authentication dependencies
+# Add authentication and database dependencies
 RUN pip install --no-cache-dir \
     "python-jose[cryptography]" \
     "passlib[bcrypt]" \
-    "python-multipart"
+    "python-multipart" \
+    "sqlalchemy>=2.0.0" \
+    "alembic>=1.13.0" \
+    "psycopg2-binary>=2.9.9" \
+    "asyncpg>=0.29.0" \
+    "celery>=5.3.0" \
+    "redis>=5.0.0" \
+    "websockets>=12.0"
 
 # Copy application code
 COPY ./app /app/

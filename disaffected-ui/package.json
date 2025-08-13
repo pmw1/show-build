@@ -20,6 +20,7 @@
     "pinia": "^2.1.7",
     "roboto-fontface": "*",
     "vue": "^3.2.13",
+    "vue-draggable-next": "^2.2.1",
     "vue-router": "^4.5.1",
     "vue-toastification": "^2.0.0-rc.5",
     "vuedraggable": "^4.1.0",
@@ -45,7 +46,8 @@
   "eslintConfig": {
     "root": true,
     "env": {
-      "node": true
+      "node": true,
+      "vue/setup-compiler-macros": true
     },
     "extends": [
       "plugin:vue/vue3-essential",
@@ -55,7 +57,13 @@
       "parser": "@babel/eslint-parser",
       "requireConfigFile": false
     },
-    "rules": {}
+    "rules": {},
+    "globals": {
+      "defineProps": "readonly",
+      "defineEmits": "readonly",
+      "defineExpose": "readonly",
+      "withDefaults": "readonly"
+    }
   },
   "browserslist": [
     "> 1%",

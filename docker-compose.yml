@@ -23,6 +23,7 @@ services:
       - JWT_SECRET_KEY=ea7GZD3mQy3EZYD4YZsFmr/9JwBgZFCaWyznnjhOyow=
       - JWT_ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=2880
+      - MEDIA_ROOT=/home
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
@@ -32,6 +33,46 @@ services:
       start_period: 40s
     depends_on:
       - mqtt-broker
+      - postgres
+
+  postgres:
+    image: postgres:13
+    container_name: show-build-postgres
+    environment:
+      POSTGRES_DB: showbuild
+      POSTGRES_USER: showbuild
+      POSTGRES_PASSWORD: showbuild
+    ports:
+      - "0.0.0.0:5433:5432"  # Map to 5433 externally to avoid conflicts
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - video-post
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U showbuild -d showbuild"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./disaffected-ui
+      no_cache: true
+    container_name: show-build-frontend
+    ports:
+      - "0.0.0.0:8090:80"
+    networks:
+      - video-post
+    depends_on:
+      - server
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   mqtt-broker:
     image: eclipse-mosquitto
@@ -44,6 +85,9 @@ services:
     volumes:
       # Mount Mosquitto config for remote access
       - ./tools/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+volumes:
+  postgres_data:
 
 networks:
   video-post:

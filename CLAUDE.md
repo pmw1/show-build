@@ -4,169 +4,215 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Show-Build is a broadcast content management system that replaces Obsidian workflows while maintaining Markdown file compatibility. It's a full-stack application with Vue.js frontend, FastAPI backend, and Docker deployment targeting the Disaffected media production environment.
+Show-Build is a full-stack broadcast rundown management system designed for the Disaffected media ecosystem. It serves as a drop-in replacement for Obsidian-based workflows while maintaining complete file format compatibility. The system operates on the same markdown files and organizational structure as Obsidian.
 
-## Common Development Commands
+## Architecture
 
-### Frontend (Vue.js)
+### Backend (FastAPI + Python)
+- **Main Application**: `app/main.py` - Central FastAPI application with comprehensive API endpoints
+- **Database**: PostgreSQL with SQLAlchemy ORM (`app/database.py`)
+- **Authentication**: JWT-based auth system in `app/auth/` with role-based access control
+- **Background Processing**: Celery with Redis for async tasks (`app/celery_app.py`)
+- **File Storage**: Episode data stored in `/home/episodes` (container) or `/mnt/sync/disaffected/episodes/` (host)
+
+### Frontend (Vue 3 + Vuetify)
+- **Framework**: Vue 3 with Composition API, Vuetify 3 for UI components
+- **State Management**: Pinia stores, composables in `src/composables/`
+- **Routing**: Vue Router with authentication guards (`src/router/index.js`)
+- **Components**: Modular Vue components in `src/components/`
+
+### Key Components
+- **RundownManager.vue**: Drag-and-drop rundown editing with virtual scrolling
+- **ContentEditor.vue**: Markdown content editing with live preview
+- **Auth System**: Login/JWT authentication with API key fallback
+- **Asset Management**: File upload and media processing capabilities
+
+## Development Commands
+
+### Backend
+```bash
+# Start all services (backend, frontend, database, MQTT)
+docker compose up --build
+
+# Backend only
+docker compose up --build server
+
+# View logs
+docker logs show-build-server
+```
+
+### Frontend
 ```bash
 cd disaffected-ui
-npm install --legacy-peer-deps    # Install dependencies (note: legacy flag required)
-npm run serve                     # Development server at http://192.168.51.210:8080
-npm run build                     # Production build
-npm run lint                      # ESLint checking
-npm test                         # Run Jest unit tests
-npm run test:watch               # Watch mode for tests
+npm install
+npm run serve    # Development server
+npm run build    # Production build
+npm run lint     # ESLint
+npm test         # Jest tests
 ```
 
-### Backend (FastAPI)
+### Database
 ```bash
-cd /mnt/process/show-build
-docker compose up -d             # Start all services (FastAPI + MQTT broker)
-docker compose up --build       # Rebuild and start containers
-docker compose down              # Stop services
-docker logs show-build-server    # View backend logs
+# Connect to PostgreSQL
+docker exec -it show-build-postgres psql -U showbuild -d showbuild
+
+# Run migrations
+cd app && python -m alembic upgrade head
 ```
 
-### Python Tools
+## File Structure and Data Flow
+
+### Episode Data Structure
+Episodes are stored as directories in `/home/episodes/{episode_number}/`:
+- `rundown/` - Individual markdown files for each rundown item
+- `info.md` - Episode metadata with YAML frontmatter
+- `assets/` - Media files and assets
+
+### Rundown Items
+Each rundown item is a markdown file with YAML frontmatter:
+```yaml
+---
+id: '12345'
+slug: segment-title
+type: segment
+order: 10
+duration: "00:03:30"
+status: draft
+title: "Segment Title"
+---
+# Content here
+```
+
+### Content Types
+- **Segments**: Main content blocks (interviews, discussions)
+- **Ads**: Advertisement blocks with customer metadata
+- **Promos**: Promotional content for shows/events
+- **CTAs**: Call-to-action prompts
+- **Trans**: Transition elements with audio/timing
+
+## API Endpoints
+
+### Core Endpoints
+- `GET /episodes` - List all episodes
+- `GET /episodes/{episode}/rundown` - Get rundown items
+- `POST /rundown/{episode}/reorder` - Reorder rundown items
+- `POST /rundown/{episode}/item` - Create new rundown item
+
+### Authentication
+- `POST /api/auth/login` - User login
+- `POST /api/auth/register` - User registration
+- `GET /api/auth/me` - Get current user
+
+### Media & Assets
+- `POST /proc_vid` - Upload video files for processing
+- `POST /upload_image` - Upload image files
+- `GET /api/assets/` - List assets
+- `POST /api/assets/` - Upload asset
+
+## Authentication System
+
+The system supports dual authentication:
+1. **JWT Tokens**: Standard user authentication with role-based access
+2. **API Keys**: Service-to-service authentication
+
+Use `get_current_user_or_key` dependency for endpoints that accept both auth methods.
+
+## Database Models
+
+### Core Models
+- **User**: Authentication and user management (`app/models_user.py`)
+- **Organization/Show/Episode**: Content hierarchy (`app/models_v2.py`)
+- **AssetIDRegistry**: Asset tracking system (`app/models_assetid.py`)
+- **ProcessingJob**: Background job tracking (`app/models.py`)
+
+## Testing and Development
+
+### Running Tests
 ```bash
-cd tools
-python compile-script-dev.py 0225 [--validate]    # Compile episode scripts
+# Frontend tests
+cd disaffected-ui && npm test
+
+# Backend tests (if implemented)
+cd app && python -m pytest
 ```
-
-### Health Checks
-```bash
-curl http://192.168.51.210:8888/health           # Backend API health
-curl http://192.168.51.210:8080/                 # Frontend access
-```
-
-## Architecture Overview
-
-### Core Stack
-- **Frontend**: Vue 3 + Vuetify 3 + Vue Router + TypeScript at `disaffected-ui/`
-- **Backend**: FastAPI + Python 3.11 at `app/`
-- **Messaging**: Eclipse Mosquitto MQTT broker
-- **Storage**: File-based at `/mnt/sync/disaffected/episodes/` with JSON storage for users/API keys
-- **Authentication**: JWT with bcrypt hashing
-- **Deployment**: Docker Compose with volume mounts
-
-### Key Architectural Patterns
-
-**Episode Data Structure**:
-```
-/mnt/sync/disaffected/episodes/
-├── 0228/                    # Episode folders by number
-│   ├── assets/             # Media files (audio/, video/, graphics/, images/)
-│   ├── rundown/            # Script and rundown items
-│   ├── info.md             # Episode metadata
-│   └── exports/            # Processed outputs
-```
-
-**Modal System Pattern**: New cue types follow standardized pattern:
-1. Modal component in `disaffected-ui/src/components/modals/{Type}Modal.vue`
-2. Integration in `ContentEditor.vue` with v-model binding
-3. Button in `EditorPanel.vue` toolbar
-4. Backend endpoint `/preproc_{type}` for uploads
-
-**Color System**: Centralized in `disaffected-ui/src/utils/themeColorMap.js` with Vuetify theme integration and configurable via `ColorSelector.vue`.
-
-### Critical Components
-
-**ContentEditor.vue**: Main split-view editor combining rundown management and Markdown editing with modal system for cue insertion (VO, NAT, PKG, GFX, FSQ, SOT).
-
-**RundownManager.vue**: Drag-and-drop interface with virtual scrolling for performance with large rundowns.
-
-**Authentication Flow**: JWT tokens stored in localStorage with 48-hour expiry, managed via `composables/useAuth.js` composable.
-
-### Path Management
-All Python scripts use centralized `tools/paths.py`:
-```python
-from paths import EPISODE_ROOT, BLUEPRINTS, VALID_CUE_TYPES
-```
-
-### Network Configuration
-- Frontend dev: `192.168.51.210:8080` with API proxy to backend
-- Backend API: `192.168.51.210:8888` 
-- MQTT broker: `192.168.51.210:1883`
-- Docker network: `video-post` for inter-container communication
-
-### Data Persistence
-- **Episode files**: Obsidian-compatible Markdown with YAML frontmatter
-- **User accounts**: `app/storage/users.json` with bcrypt hashes
-- **API configurations**: `app/storage/api_keys.json`
-- **Asset naming**: Files renamed to match slugs (lowercase, hyphens)
-
-### Testing Infrastructure
-- Jest configuration in `disaffected-ui/jest.config.js`
-- Mocks for axios and Vuetify in `tests/mocks/`
-- Unit tests focus on `ContentEditor.vue` and `RundownManager.vue`
-
-### TypeScript Integration
-- **Configuration**: `tsconfig.json` with Vue 3 and strict typing
-- **Type Definitions**: Comprehensive types in `src/types/` (API, components, Vuetify extensions)
-- **Gradual Migration**: JavaScript and TypeScript files coexist seamlessly
-- **Build System**: Vue CLI handles TypeScript compilation automatically
-- **IDE Support**: Full IntelliSense and type checking for development
-
-## Documentation System
-
-### Documentation Organization
-Project documentation is organized in the `docs/` folder with two approaches:
-
-**Individual Files** - For specific topics:
-- `docs/01_architecture.markdown` - Technical architecture details
-- `docs/02_setup_and_deployment.markdown` - Installation and deployment
-- `docs/AUTHENTICATION_GUIDE.md` - JWT and API key authentication
-- `docs/MODAL_USAGE.md` - Modal system conventions
-- `tools/README.md` - Python utilities documentation
-
-**Themed Development Chunks** - For focused development work:
-```bash
-./generate_dev_docs.sh
-# Creates 6 themed documentation files:
-# - docs/dev_architecture.md (setup, deployment, technical stack)
-# - docs/dev_features.md (components, modals, cue system)
-# - docs/dev_workflow.md (development practices, style guides)
-# - docs/dev_auth.md (authentication patterns)
-# - docs/dev_issues.md (current tasks, known issues)
-# - docs/dev_api.md (API documentation, integrations)
-```
-
-### Complete Context Options
-**Full Documentation:**
-```bash
-./generate_rehydrate.sh
-# Creates docs/rehydrate.md with all documentation concatenated
-```
-
-**Chunked by Size:**
-```bash
-./generate_rehydrate.sh --chunk --chunk-size 2048
-# Creates docs/rehydrate_chunk_1.md, docs/rehydrate_chunk_2.md, etc.
-```
-
-Use themed chunks for focused development work, or full rehydration for comprehensive project context.
-
-## Development Notes
-
-### Docker Volume Mounts
-Host `/mnt/sync/disaffected/episodes/` maps to container `/home/episodes` for episode data sharing.
-
-### MQTT Integration
-Used for preprocessing job coordination with configuration in `tools/mosquitto.conf`. Backend publishes via `preproc_mqtt_pub.py` and listens via `preproc_mqtt_listen.py`.
-
-### Authentication Requirements
-Protected endpoints require `Authorization: Bearer {token}` header. Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES` (default 2880 = 48 hours).
-
-### Obsidian Compatibility
-Maintains full file format compatibility - same Markdown files and directory structure work with both Show-Build and Obsidian.
 
 ### Development Workflow
-When making changes:
-1. Test both frontend (`npm run serve`) and backend (`docker compose up -d`) locally
-2. Run linting (`npm run lint`) and tests (`npm test`) before commits
-3. Verify Docker container startup after changes
-4. Test authentication flows work properly
-5. Test with actual episode data in `/mnt/sync/disaffected/episodes/`
-6. Update documentation in `docs/` folder as needed
-7. Regenerate `docs/rehydrate.md` if providing context to other LLMs
+1. Make changes to code
+2. For backend: `docker compose up --build server`
+3. For frontend: `npm run serve` in `disaffected-ui/`
+4. Test changes at `http://localhost:8080` (frontend) and `http://localhost:8888` (backend)
+
+### Health Check
+- Backend health: `GET /health`
+- Database connectivity included in health response
+
+## Color System and Theming
+
+Colors are centralized in `disaffected-ui/src/utils/themeColorMap.js`:
+- **Segment Types**: Each type (segment, ad, promo, etc.) has dedicated colors
+- **Status Colors**: draft, approved, production, completed states
+- **Implementation**: Uses Vuetify theme colors with fallbacks
+
+## Key Configuration Files
+
+- `docker-compose.yml` - Multi-service Docker setup
+- `app/requirements.txt` - Python dependencies
+- `disaffected-ui/package.json` - Node.js dependencies
+- `app/database.py` - Database connection configuration
+- `disaffected-ui/src/plugins/vuetify.js` - Vuetify theme configuration
+
+## File Compatibility
+
+The system maintains **complete Obsidian compatibility**:
+- Same markdown file format
+- Identical YAML frontmatter structure
+- Same directory organization
+- No data migration required
+
+## Common Development Tasks
+
+### Adding New API Endpoints
+1. Create router in `app/{feature}_router.py`
+2. Include in `app/main.py` with appropriate prefix
+3. Add authentication dependencies if needed
+
+### Adding Frontend Components
+1. Create component in `src/components/`
+2. Register in router if it's a view
+3. Follow Vue 3 Composition API patterns
+4. Use Vuetify components for consistency
+
+### Database Changes
+1. Modify models in `app/models*.py`
+2. Create migration: `alembic revision --autogenerate -m "description"`
+3. Apply migration: `alembic upgrade head`
+
+### Asset Processing
+- Video files go to `/shared_media/preproc/working/{id}/`
+- Images go to `/shared_media/images/{id}/`
+- MQTT used for processing job coordination
+
+## Environment Variables
+
+Key environment variables (see `docker-compose.yml`):
+- `JWT_SECRET_KEY` - JWT signing key
+- `DATABASE_URL` - PostgreSQL connection string
+- `MEDIA_ROOT` - Media files base path (`/home`)
+
+## Troubleshooting
+
+### Common Issues
+- **Database connection**: Check PostgreSQL container status
+- **File permissions**: Ensure Docker user (1000:1001) can access mounted volumes
+- **Frontend build**: Clear `node_modules` and reinstall if build fails
+- **MQTT issues**: Check mosquitto broker container
+
+### Episode Data Loading Issues
+- **Race Condition Logic**: Avoid implementing race condition prevention logic in `ContentEditor.vue` that blocks duplicate calls. This can prevent legitimate episode loading. The component should handle loading states naturally without blocking subsequent calls.
+- **Field Name Consistency**: Frontend expects `duration` field from episode info.md files, not `total_runtime`. Ensure all components use `duration` consistently.
+- **Loading State Management**: Initialize `loadingRundown: false` in ContentEditor.vue data to prevent blocking initial episode loads.
+
+### Logs
+- Backend: `docker logs show-build-server`
+- Frontend: Browser console and network tab
+- Database: `docker logs show-build-postgres`

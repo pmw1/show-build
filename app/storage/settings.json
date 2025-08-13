@@ -1,0 +1,52 @@
+{
+  "media_paths": {
+    "show_root": "/mnt/sync/disaffected",
+    "episodes_folder": null,
+    "media_assets": null,
+    "uploads": null,
+    "process": null,
+    "archive_enabled": false,
+    "archive_type": "s3"
+  },
+  "interface": {
+    "theme": "dark",
+    "editorFontSize": 14,
+    "editorFontFamily": "monospace",
+    "editorLineNumbers": true,
+    "editorWordWrap": true,
+    "editorAutoSave": true,
+    "sidebarWidth": 300,
+    "compactMode": false,
+    "showToolbarLabels": true,
+    "highContrast": false,
+    "reducedMotion": false,
+    "keyboardShortcuts": true
+  },
+  "rundown": {
+    "default_segment_duration": "00:05:00",
+    "enable_timecode": true,
+    "timecode_format": "HH:MM:SS",
+    "show_cumulative_time": true,
+    "enable_drag_drop": true,
+    "auto_calculate_duration": true,
+    "warn_on_delete": true,
+    "show_item_numbers": true
+  },
+  "system": {
+    "enable_websockets": true,
+    "max_upload_size_mb": 100,
+    "allowed_file_types": [
+      ".mp4",
+      ".mov",
+      ".mp3",
+      ".wav",
+      ".jpg",
+      ".png",
+      ".pdf"
+    ],
+    "enable_transcoding": true,
+    "backup_enabled": true,
+    "backup_interval_hours": 24,
+    "log_level": "INFO"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "admin": {
+    "username": "admin",
+    "hashed_password": "$2b$12$8ZmshvReFn9wKfHHB2pJJeRr.esKtrU9VT0O65cW/nkNujd2SK92W",
+    "access_level": "admin",
+    "first_name": "Admin",
+    "last_name": "User",
+    "email": "admin@showbuild.local",
+    "phone": "555-0000",
+    "profile_picture": "/static/avatars/admin.png"
+  },
+  "kevin": {
+    "username": "kevin",
+    "hashed_password": "$2b$12$JI29yV..ujdk3Usw./7soObHr9aicR8stRZMplxxtln8Mm5yoB1Ia",
+    "access_level": "admin",
+    "first_name": "Kevin",
+    "last_name": "Manager",
+    "email": "kevin@showbuild.local",
+    "phone": "555-0001",
+    "profile_picture": "/static/avatars/kevin.png"
+  },
+  "josh": {
+    "username": "josh",
+    "hashed_password": "$2b$12$dFUesjNb83YYL0gDHrDMheiI7QVzgqkfQIBhJqkNWmzl44HFSjtlO",
+    "access_level": "user",
+    "first_name": "Josh",
+    "last_name": "Producer",
+    "email": "josh@showbuild.local",
+    "phone": "555-0002",
+    "profile_picture": "/static/avatars/josh.png"
+  }
+}

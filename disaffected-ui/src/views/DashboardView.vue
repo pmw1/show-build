@@ -15,7 +15,7 @@
                     :key="n"
                     :title="`Episode ${n}`"
                     link
-                    :to="`/rundown/${n}`"
+                    :to="`/stack/${n}`"
                   ></v-list-item>
                 </v-list>
               </v-card-text>

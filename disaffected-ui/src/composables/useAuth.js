@@ -12,11 +12,17 @@ export function useAuth() {
     
     if (token && expiry && userData) {
       const currentTime = Date.now()
-      const expiryTime = parseInt(expiry)
+      const expiryTime = parseInt(expiry, 10)
       
       if (currentTime < expiryTime) {
         isAuthenticated.value = true
-        currentUser.value = JSON.parse(userData)
+        try {
+          currentUser.value = JSON.parse(userData)
+        } catch (err) {
+          console.error('Failed to parse user data:', err)
+          clearAuthData()
+          return false
+        }
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
         return true
       } else {

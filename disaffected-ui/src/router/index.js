@@ -1,19 +1,42 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import RundownManager from '@/components/RundownManager.vue'
+import StackOrganizer from '@/components/StackOrganizer.vue'
 import ContentEditor from '@/components/ContentEditor.vue'
 import DashboardView from '@/views/DashboardView.vue'
+import SetupView from '@/views/SetupView.vue'
 import { useAuth } from '@/composables/useAuth';
 
 // Authentication check function
 function isAuthenticated() {
-  const { isAuthenticated: isAuth } = useAuth();
-  return isAuth.value;
+  const { checkAuthStatus } = useAuth();
+  return checkAuthStatus();
+}
+
+// Check if database configuration exists
+async function checkDatabaseConfig() {
+  try {
+    const response = await fetch('/api/setup/status')
+    if (response.ok) {
+      const status = await response.json()
+      return status.configured
+    }
+  } catch (error) {
+    console.log('Setup status check failed:', error)
+  }
+  return false
 }
 
 const routes = [
   {
     path: '/',
-    redirect: '/dashboard'
+    redirect: async () => {
+      const configured = await checkDatabaseConfig()
+      return configured ? '/dashboard' : '/setup'
+    }
+  },
+  {
+    path: '/setup',
+    name: 'setup',
+    component: SetupView
   },
   {
     path: '/dashboard',
@@ -21,16 +44,21 @@ const routes = [
     component: DashboardView
   },
   {
-    // Keep existing RundownManager route with episode parameter
-    path: '/rundown/:episode?',
-    name: 'rundown',
-    component: RundownManager,
+    path: '/episodes',
+    name: 'episodes',
+    component: () => import('@/views/EpisodesView.vue')
+  },
+  {
+    // Keep existing RundownManager route with episode parameter - renamed to Stack Manager
+    path: '/stack/:episode?',
+    name: 'stack',
+    component: StackOrganizer,
     props: true
   },
   {
     path: '/rundown-manager/:episode?',
     redirect: to => {
-      return { path: `/rundown/${to.params.episode || ''}` }
+      return { path: `/stack/${to.params.episode || ''}` }
     }
   },
   {
@@ -51,14 +79,36 @@ const routes = [
     component: () => import('@/views/TemplatesView.vue')
   },
   {
+    path: '/tools',
+    name: 'tools',
+    component: () => import('@/views/ToolsView.vue')
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue')
   },
   {
+    path: '/item-types',
+    name: 'item-types',
+    component: () => import('@/views/ItemTypesView.vue')
+  },
+  {
     path: '/profile',
     name: 'profile',
     component: () => import('@/views/ProfileView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/organization',
+    name: 'organization',
+    component: () => import('@/components/OrganizationEdit.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/show',
+    name: 'show',
+    component: () => import('@/components/ShowEdit.vue'),
     meta: { requiresAuth: true }
   }
 ]
@@ -68,8 +118,22 @@ const router = createRouter({
   routes
 })
 
-// Navigation guard to check authentication
-router.beforeEach((to, from, next) => {
+// Navigation guard to check setup and authentication
+router.beforeEach(async (to, from, next) => {
+  // Skip setup check for setup page itself
+  if (to.name === 'setup') {
+    next()
+    return
+  }
+  
+  // Check if system is configured
+  const configured = await checkDatabaseConfig()
+  if (!configured) {
+    next('/setup')
+    return
+  }
+  
+  // Check authentication for protected routes
   if (to.meta.requiresAuth && !isAuthenticated()) {
     // Redirect to dashboard if not authenticated
     next('/dashboard')

@@ -1,0 +1,45 @@
+FROM tiangolo/uvicorn-gunicorn-fastapi:python3.11
+WORKDIR /app
+
+# Install system dependencies for PostgreSQL, Redis, and image processing
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    redis-tools \
+    libpq-dev \
+    gcc \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install Python requirements with database dependencies
+COPY ./app/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install -r /app/requirements.txt
+
+# Copy application code
+COPY ./app /app/
+
+# Create necessary directories
+RUN mkdir -p /app/storage /app/logs && \
+    mkdir -p /home/episodes /shared_media
+
+# Set up user and permissions (matching existing setup)
+RUN groupadd -g 1001 disaffected || true && \
+    useradd -m -u 1001 -g disaffected -G disaffected insider && \
+    chown -R insider:disaffected /app && \
+    chown -R insider:disaffected /home/episodes && \
+    chown -R insider:disaffected /shared_media && \
+    chmod -R 755 /app
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV REDIS_URL=redis://redis:6379/0
+ENV DATABASE_URL=postgresql://showbuild:showbuild@postgres:5432/showbuild
+
+USER insider
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s \
+    CMD curl -f http://localhost:80/health || exit 1
+
+# Default command (can be overridden in docker-compose)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]

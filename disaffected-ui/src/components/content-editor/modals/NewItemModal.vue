@@ -218,13 +218,14 @@ export default {
   },
   methods: {
     getItemTypeColor(type) {
+      // Use fallback color mapping - should use centralized system in the future
       const colorMap = {
         opening: 'green',
-        segment: 'blue',
-        ad: 'orange',
+        segment: 'info',  // Updated to match database
+        ad: 'primary',    // Updated to match database
         interview: 'purple',
         music: 'teal',
-        cta: 'red',
+        cta: 'accent',    // Updated to match database
         closing: 'indigo',
         outro: 'brown'
       }

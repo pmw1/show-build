@@ -1,0 +1,1444 @@
+kevin@whisperbox:/mnt/sync/disaffected$ tree
+.
+├── docker
+│   ├── frees.sh
+│   ├── proc-server
+│   │   ├── app
+│   │   │   ├── main.py
+│   │   │   ├── mqttcurl.sh
+│   │   │   ├── preproc_delegate.py
+│   │   │   ├── preproc_mqtt_listen.py
+│   │   │   ├── preproc_mqtt_pub.py
+│   │   │   ├── preproc-queue-sots.json
+│   │   │   ├── services
+│   │   │   │   ├── sot_processor.py
+│   │   │   │   └── testboot.mqtt.py
+│   │   │   └── testup.sh
+│   │   ├── backups
+│   │   │   ├── main.py.bak
+│   │   │   └── main.pyBAK.py
+│   │   ├── docker-compose.yml
+│   │   ├── Dockerfile
+│   │   └── requirements.txt
+│   ├── scripts
+│   │   ├── EXTRAhousekeeping.py
+│   │   └── load_env_vars_example.py
+│   ├── show-servers-up.sh
+│   ├── syncthing
+│   │   ├── docker-compose.yml
+│   │   └── Dockerfile
+│   └── trees.sh
+├── docs
+│   ├── Cue Manager Project.md
+│   ├── Modify Cue Block.md
+│   ├── obsidian_plugin_refactoring_postmortem.md
+│   ├── Omny Studio Uploader.md
+│   ├── Server Preprocessing.md
+│   ├── show-build-rehydrate.md
+│   ├── social media stuff
+│   │   └── Vertical Video Text Pipeline.md
+│   └── To do.md
+├── episodes
+│   ├── 0001
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── graphics
+│   │   │   │   └── donald-trump-in-trouble-with-africans-americans.jpg
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   ├── thumbnails
+│   │   │   └── video
+│   │   ├── captures
+│   │   ├── exports
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   └── preshow notes.md
+│   │   └── rundown
+│   │       └── segment-segment_20250808_019.md
+│   ├── 0222
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── graphics
+│   │   │   │   ├── aoc-for-penut-butter.png
+│   │   │   │   ├── clipboard_temp.png
+│   │   │   │   ├── jsut-that-thing.png
+│   │   │   │   ├── thifyuv-yhgh.png
+│   │   │   │   └── this-is-the-thing.png
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   ├── thumbnails
+│   │   │   └── video
+│   │   ├── captures
+│   │   ├── exports
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   ├── profiles
+│   │   └── rundown
+│   ├── 0223
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── graphics
+│   │   │   │   └── this-is-a-graphic.png
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   ├── thumbnails
+│   │   │   └── video
+│   │   │       ├── 101.mp4
+│   │   │       ├── 103.mp4
+│   │   │       ├── 106.mp4
+│   │   │       ├── charges-against-shiloh.mp4
+│   │   │       ├── chris-kolker-trans.mp4
+│   │   │       ├── frontier-air.mp4
+│   │   │       ├── head-heald-high.mp4
+│   │   │       ├── jayapal-v-rubio.mp4
+│   │   │       ├── jayapal-v-rudio.mp4
+│   │   │       ├── josh ar 15.mp4
+│   │   │       ├── marc-lamont-hill-nword.mp4
+│   │   │       ├── original-shiloh-vid.mp4
+│   │   │       ├── racist-ass-baby.mp4
+│   │   │       ├── reclaiming-my-time.mp4
+│   │   │       └── send.sh
+│   │   ├── captures
+│   │   ├── exports
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   └── preshow notes.md
+│   │   └── rundown
+│   │       └── segment-0000.md
+│   ├── 0224
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── generated_quotes
+│   │   │   │   ├── the-ftc-an-agency.png
+│   │   │   │   └── the-purpose-of.png
+│   │   │   ├── graphics
+│   │   │   │   ├── abc-2-headline.png
+│   │   │   │   ├── abc-headline.png
+│   │   │   │   ├── ai-jemima-prompt.png
+│   │   │   │   ├── ap-headline.png
+│   │   │   │   ├── aunt-jemima-box.png
+│   │   │   │   ├── autopen.png
+│   │   │   │   ├── axios-headline.png
+│   │   │   │   ├── bbc-headline.png
+│   │   │   │   ├── cnn-2-headline.png
+│   │   │   │   ├── cnn-headline.png
+│   │   │   │   ├── guardian-headline.png
+│   │   │   │   ├── kamala-autopen.png
+│   │   │   │   ├── nbc-headline.png
+│   │   │   │   ├── pbs-headline.png
+│   │   │   │   ├── the-hill-headline.png
+│   │   │   │   ├── triggernometry-glasses.png
+│   │   │   │   ├── usa-today-headline.png
+│   │   │   │   └── vista-cruiser.png
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   └── video
+│   │   │       ├── borderline-screamer-cops.mp4
+│   │   │       ├── charles blow cnn whites violence.mp4
+│   │   │       ├── jayapal-and-rubio.mp4
+│   │   │       ├── MONTAGE Karine Jean-Pierre defends Biden's fitness for office, says no 'cover-up'.mp4
+│   │   │       ├── sa president on land stealing.mp4
+│   │   │       ├── screaming woman police.mp4
+│   │   │       ├── trans-flag-yosemite.mp4
+│   │   │       ├── trans national park.mp4
+│   │   │       ├── triggernometry feminist.mp4
+│   │   │       ├── triggernometry-feminist.mp4
+│   │   │       ├── trump clip concerned 1.mp4
+│   │   │       ├── trump clip concerned 3.mp4
+│   │   │       └── trump clip press 2.mp4
+│   │   ├── captures
+│   │   ├── exports
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── BREAKING NEWS Karoline Leavitt Holds White House Press Briefing After House Passes GOP Budget Bill.mp4
+│   │   │   ├── BREAKING NEWS Trump, South Africa President Have Shocking Argument About White Farmer Death Claims.mp4
+│   │   │   └── preshow notes.md
+│   │   └── rundown
+│   │       ├── 1A Trump Confronts South African President.md
+│   │       ├── 2A Biltong.md
+│   │       ├── 2B  FTC to Go After Gender Doctors.md
+│   │       ├── 3B The Elder Abuse of Joe Biden.md
+│   │       ├── 3B The Elder Abuse of Joe Biden.sync-conflict-20250611-081936-CPK7LWO.md
+│   │       ├── 3B The Elder Abuse of Joe Biden.sync-conflict-20250611-081951-CPK7LWO.md
+│   │       ├── 3B The Elder Abuse of Joe Biden.sync-conflict-20250611-090312-CPK7LWO.md
+│   │       ├── 3B The Elder Abuse of Joe Biden.sync-conflict-20250611-092212-CPK7LWO.md
+│   │       ├── 3B The Elder Abuse of Joe Biden.sync-conflict-20250611-121916-CPK7LWO.md
+│   │       ├── 4B royal family.md
+│   │       ├── 4B royal family.sync-conflict-20250611-081941-CPK7LWO.md
+│   │       ├── 4B royal family.sync-conflict-20250611-081944-CPK7LWO.md
+│   │       ├── 4B royal family.sync-conflict-20250611-092226-CPK7LWO.md
+│   │       ├── 4B royal family.sync-conflict-20250611-100409-CPK7LWO.md
+│   │       ├── 4B royal family.sync-conflict-20250611-121916-CPK7LWO.md
+│   │       ├── 5B Slocum Consulting.md
+│   │       ├── 6B Support Us.md
+│   │       ├── 7C Judging Human Books by Their Covers.md
+│   │       ├── 8C Potpourri Du Moquerie.md
+│   │       ├── compiled_script.html
+│   │       ├── promo.md
+│   │       └── trans.md
+│   ├── 0225
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── generated_quotes
+│   │   │   │   ├── antifa-and-left.png
+│   │   │   │   ├── josh-madonna-1.png
+│   │   │   │   ├── josh-madonna-2.png
+│   │   │   │   ├── josh-madonna-3.png
+│   │   │   │   ├── josh-madonna-4.png
+│   │   │   │   ├── r-you-excited.png
+│   │   │   │   ├── seattle-is-proud.png
+│   │   │   │   ├── when-the-humanity.png
+│   │   │   │   └── while-there-are.png
+│   │   │   ├── graphics
+│   │   │   │   ├── betty-white.png
+│   │   │   │   ├── but-yet-the.png
+│   │   │   │   ├── changemakers.png
+│   │   │   │   ├── dfkjd.jpg
+│   │   │   │   ├── drf.png
+│   │   │   │   ├── equal-rights-kamala.png
+│   │   │   │   ├── explore.png
+│   │   │   │   ├── harry-styles.png
+│   │   │   │   ├── he-wont-admit.png
+│   │   │   │   ├── if-your-kid.png
+│   │   │   │   ├── i-had-of-people.png
+│   │   │   │   ├── like-she-gives.png
+│   │   │   │   ├── little-engine.png
+│   │   │   │   ├── madonna-tee-shirt.png
+│   │   │   │   ├── mayor-harrell-statement.png
+│   │   │   │   ├── more-changemakers.png
+│   │   │   │   ├── ok-psycho.png
+│   │   │   │   ├── omg-you-sad.png
+│   │   │   │   ├── other-changemakers.png
+│   │   │   │   ├── poky-puppy.png
+│   │   │   │   ├── regardless-its-not.png
+│   │   │   │   ├── ruth-bader.png
+│   │   │   │   ├── scariest-man.png
+│   │   │   │   ├── scuffy.png
+│   │   │   │   ├── seinfeld.png
+│   │   │   │   ├── she-earned-a-law-kamala.png
+│   │   │   │   ├── she-was-the-first-woman-kamala.png
+│   │   │   │   ├── snl.png
+│   │   │   │   ├── taylor-swift.png
+│   │   │   │   ├── the-difference-is.png
+│   │   │   │   ├── the-main-reason.png
+│   │   │   │   ├── this-is-exactly.png
+│   │   │   │   ├── we-will-not.png
+│   │   │   │   ├── wow-calling.png
+│   │   │   │   ├── you-never-understood.png
+│   │   │   │   ├── you-really-are.png
+│   │   │   │   └── zendaya.png
+│   │   │   ├── images
+│   │   │   │   ├── green tweet 1.JPG
+│   │   │   │   ├── green tweet 2.JPG
+│   │   │   │   ├── green tweet 3.JPG
+│   │   │   │   ├── green tweet 4.JPG
+│   │   │   │   └── green tweet 5.JPG
+│   │   │   ├── quotes
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   └── video
+│   │   │       ├── albino-woman.mp4
+│   │   │       ├── king charles.mp4
+│   │   │       ├── king-charles.mp4
+│   │   │       ├── oliva-claps-back.mp4
+│   │   │       ├── olivia julianna 1.mp4
+│   │   │       ├── olivia julianna 2 pussies.mp4
+│   │   │       ├── olivia-julianna-podcast.mp4
+│   │   │       ├── seattle rally leave.mp4
+│   │   │       ├── seattle-rally-leave.mp4
+│   │   │       ├── teacher tells truth.mp4
+│   │   │       └── teacher-tells-truth.mp4
+│   │   ├── captures
+│   │   ├── exports
+│   │   │   └── storytime_1.2.1.jpg
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── BLOCK B Ryan Rogers Conversation.pdf
+│   │   │   ├── green haired albino black woman.mp4
+│   │   │   ├── green tweet 1.JPG
+│   │   │   ├── green tweet 2.JPG
+│   │   │   ├── green tweet 3.JPG
+│   │   │   ├── green tweet 4.JPG
+│   │   │   ├── green tweet 5.JPG
+│   │   │   ├── Notes 225.md
+│   │   │   ├── notes Little Golden books notes.md
+│   │   │   ├── Notes olivia julianna.md
+│   │   │   └── preshow notes.md
+│   │   ├── publish
+│   │   │   ├── madonna2.jpg
+│   │   │   └── madonna.jpg
+│   │   ├── rundown
+│   │   │   ├── 10 Little Fool's Gold Books BLOCK A.md
+│   │   │   ├── 11 BILTONG.md
+│   │   │   ├── 20 Madonna and Idolatrous Gay Men BLOCK B.md
+│   │   │   ├── 21 Monstering Yourself on Purpose BLOCK B.md
+│   │   │   ├── 22 King Charles Abdicates His Responsibility BLOCK B.md
+│   │   │   ├── 23 SLOCUM CONSULTING.md
+│   │   │   ├── 30 seattle chaz christians.md
+│   │   │   ├── 31 Democrats Hire Hambeast to Trap Men.md
+│   │   │   ├── compiled_script.html
+│   │   │   └── SUPPORT US.md
+│   │   ├── storytime_1.2.1.drx
+│   │   └── vmix.vmix
+│   ├── 0226
+│   │   ├── 0226.vmix
+│   │   ├── 30 Cluster B Women In the Mental Health Field -INTERVIEW HANNAH SPIER BLOCK B.pdf
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── generated_quotes
+│   │   │   │   ├── many-of-us.png
+│   │   │   │   ├── that-would-ordinarily.png
+│   │   │   │   ├── the-immediate-question.png
+│   │   │   │   ├── the-point-is.png
+│   │   │   │   ├── the-sixth-circuits.png
+│   │   │   │   └── we-don't-have.png
+│   │   │   ├── graphics
+│   │   │   │   ├── greenwald-1.png
+│   │   │   │   ├── greenwald-miniskirt.png
+│   │   │   │   ├── greenwald-retweet.png
+│   │   │   │   ├── megyn-tweet.png
+│   │   │   │   ├── taibbi-tweet.png
+│   │   │   │   └── test.png
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   └── video
+│   │   │       ├── cluster b therapists hannah.mp4
+│   │   │       └── cluster-b-therapists-hannah.mp4
+│   │   ├── compiled_script.html
+│   │   ├── exports
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── 50 preshow notes.md
+│   │   │   └── SLOCUM CONSULTING.md
+│   │   └── rundown
+│   │       ├── 10 Supreme Court Affirms Discrimination Laws Protect Whites.md
+│   │       ├── 20 SUPPORT US.md
+│   │       ├── 30 Cluster B Women In the Mental Health Field -INTERVIEW HANNAH SPIER BLOCK B.md
+│   │       ├── 30 Cluster B Women In the Mental Health Field -INTERVIEW HANNAH SPIER BLOCK B.pdf
+│   │       ├── 40 BILTONG.md
+│   │       └── 50 The Perversion of Glenn Greenwald.md
+│   ├── 0227
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── graphics
+│   │   │   │   └── dlkfdkl-dlkjfd-.jpg
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   └── video
+│   │   ├── captures
+│   │   ├── exports
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   └── preshow notes.md
+│   │   └── rundown
+│   │       └── segment-03101.md
+│   ├── 0228
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── graphics
+│   │   │   │   ├── gavin-partner.png
+│   │   │   │   └── hannah-audio-promo.png
+│   │   │   ├── guest
+│   │   │   │   ├── Guest Teaser OUTPUT_1.mp4
+│   │   │   │   └── up_next.mp4
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   │   ├── another-time-i.png
+│   │   │   │   ├── my-professor-for.png
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   ├── video
+│   │   │   │   ├── ai-gorillas.mp4
+│   │   │   │   ├── hegseth-oh-my-god.mp4
+│   │   │   │   ├── jazz-jennings-dilate.mp4
+│   │   │   │   ├── kelly-hegseth.mp4
+│   │   │   │   ├── lolita-bus.mp4
+│   │   │   │   ├── maternal-son-abuse.mp4
+│   │   │   │   └── sara-jacobs-hegseth.mp4
+│   │   │   └── vmix
+│   │   │       └── 228.vmix
+│   │   ├── captures
+│   │   ├── exports
+│   │   │   ├── 0228-dc-whisper.mp3
+│   │   │   ├── 0228-dc-whisper.srt
+│   │   │   ├── 0228-dc-whisper.txt
+│   │   │   └── Poster-16x9.jpg
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── 30 Ryan Rogers Conversation.md
+│   │   │   ├── ai gorillas.mp4
+│   │   │   ├── hegseth oh my god.mp4
+│   │   │   ├── jazz jennings dilate.mp4
+│   │   │   ├── kelly hegseth.mp4
+│   │   │   ├── lolita bus.mp4
+│   │   │   ├── maternal son abuse.mp4
+│   │   │   ├── Notes and cues for 228.md
+│   │   │   ├── Outline 228.md
+│   │   │   ├── preshow notes.md
+│   │   │   ├── sara jacobs hegseth.mp4
+│   │   │   └── whoopi not black.mov
+│   │   └── rundown
+│   │       ├── 10 SCOTUS Upholds State Ban on Transing Kids.md
+│   │       ├── 20 BILTONG.md
+│   │       ├── 30 Conversation with Ryan Rogers.md
+│   │       ├── 40 SUPPORT US.md
+│   │       ├── 50 Slocum Consulting.md
+│   │       ├── 60 Hags against Hegseth.md
+│   │       └── checklist.txt
+│   ├── 0229
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── generated_quotes
+│   │   │   │   ├── in-describing-the.png
+│   │   │   │   ├── new-york-city's.png
+│   │   │   │   └── the-congress-shall.png
+│   │   │   ├── graphics
+│   │   │   │   ├── harmeet-dillon-respond.jpg
+│   │   │   │   ├── mamdani-mother.jpg
+│   │   │   │   ├── mamdani-narc-smile.jpg
+│   │   │   │   ├── mamdani-surprised-narc.jpg
+│   │   │   │   ├── mamdani-white-ny-post.jpg
+│   │   │   │   ├── new-york-times-mamdani.jpg
+│   │   │   │   ├── ogle-letter-page-1.jpg
+│   │   │   │   ├── queer-liberation.png
+│   │   │   │   └── wanda-rock-your-world.png
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   └── video
+│   │   │       ├── braindead-ny-voter.mp4
+│   │   │       ├── mamdani-accents.mp4
+│   │   │       ├── mamdani-ad.mp4
+│   │   │       ├── mamdani-free-palestine.mp4
+│   │   │       ├── mamdani-hate-crime.mp4
+│   │   │       ├── mamdani-immigration.mp4
+│   │   │       ├── mamdani-trans.mp4
+│   │   │       ├── mamdani-violence.mp4
+│   │   │       ├── rep-brittany-peterson.mp4
+│   │   │       └── rep-lateefah-simon.mp4
+│   │   ├── captures
+│   │   ├── exports
+│   │   │   └── poster16x9.jpg
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── braindead ny mandami voter.mp4
+│   │   │   ├── davids bridello divine 2.jpg
+│   │   │   ├── davids bridello sanchez 1.mp4
+│   │   │   ├── harmeet dillon respond mandami racist.JPG
+│   │   │   ├── maine weather drag.mp4
+│   │   │   ├── mamdani ad foreign sot.mp4
+│   │   │   ├── mamdani ad foreign tweet.JPG
+│   │   │   ├── mamdani fake accents nbc.mp4
+│   │   │   ├── mamdani hate crime.mp4
+│   │   │   ├── mamdani hate crime tweet image.JPG
+│   │   │   ├── mamdani immigration scream.JPG
+│   │   │   ├── mamdani immigration scream.mp4
+│   │   │   ├── mamdani white neighborhood.jpg
+│   │   │   ├── mandami free palestine.mp4
+│   │   │   ├── mandami mother desi.jpg
+│   │   │   ├── mandami narc smile.jpg
+│   │   │   ├── mandami ny post.jpg
+│   │   │   ├── mandami suprised narc new york cover smile.jpg
+│   │   │   ├── mandami trans care funding.mp4
+│   │   │   ├── mandami violence artificial.JPG
+│   │   │   ├── mandami violence artificial sot.mp4
+│   │   │   ├── ny times mamdani.jpg
+│   │   │   ├── ogle letter page 1.jpg
+│   │   │   ├── ogle letter page 2.jpg
+│   │   │   ├── preshow notes.md
+│   │   │   ├── rep brittany petersen baby.mp4
+│   │   │   └── rep lateefah simon out your mouth.mp4
+│   │   └── rundown
+│   │       ├── 100 Enhanced UI Demo.md
+│   │       ├── 10 Zohran Mandami Will Fuck New York.md
+│   │       ├── 20 BILTONG.md
+│   │       ├── 30 SLOCUM CONSULTING.md
+│   │       ├── 40 Jews, this is your ticket to freedom.md
+│   │       ├── 50 SUPPORT US MEMBER MEETUP.md
+│   │       ├── 60 Welcome to Episode 229.md
+│   │       ├── 70 Welcome to Episode 229.md
+│   │       ├── 80 Enhanced Modal Demo Item.md
+│   │       ├── 90 Enhanced Modal Demo Item.md
+│   │       ├── checklist.txt
+│   │       ├── list
+│   │       │   ├── 100_mamdani-mother.jpg
+│   │       │   ├── 10_mamdani-hate-crime.mp4
+│   │       │   ├── 110_mamdani-ad.mp4
+│   │       │   ├── 120_mamdani-accents.mp4
+│   │       │   ├── 130_mamdani-narc-smile.jpg
+│   │       │   ├── 140_mamdani-surprised-narc.jpg
+│   │       │   ├── 150_new-york-times-mamdani.jpg
+│   │       │   ├── 160_braindead-ny-voter.mp4
+│   │       │   ├── 170_rep-brittany-peterson.mp4
+│   │       │   ├── 180_rep-lateefah-simon.mp4
+│   │       │   ├── 190_wanda-rock-your-world.png
+│   │       │   ├── 20_mamdani-white-ny-post.jpg
+│   │       │   ├── 30_harmeet-dillon-respond.jpg
+│   │       │   ├── 40_ogle-letter-page-1.jpg
+│   │       │   ├── 50_queer-liberation.png
+│   │       │   ├── 60_mamdani-trans.mp4
+│   │       │   ├── 70_mamdani-violence.mp4
+│   │       │   ├── 80_mamdani-free-palestine.mp4
+│   │       │   └── 90_mamdani-immigration.mp4
+│   │       └── media-list.m3u
+│   ├── 0230
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── graphics
+│   │   │   │   ├── 4th-july-karen.png
+│   │   │   │   ├── beckinsdale-1.png
+│   │   │   │   ├── beckinsdale-2.png
+│   │   │   │   ├── beckinsdale-anorexia.png
+│   │   │   │   ├── crawford-eye-cross.png
+│   │   │   │   ├── cynthia-nixon-abortion.png
+│   │   │   │   ├── cynthia-nixon.png
+│   │   │   │   ├── free-bleeding.png
+│   │   │   │   ├── high-school-girls.png
+│   │   │   │   ├── josh-at-16.png
+│   │   │   │   ├── kade-elliott-therapy.png
+│   │   │   │   ├── petersen-1.png
+│   │   │   │   ├── petersen-2.png
+│   │   │   │   ├── petersen-3.png
+│   │   │   │   ├── petersen-4.png
+│   │   │   │   ├── vermont-parade.png
+│   │   │   │   └── vodoo-dolls.png
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   │   ├── Lifestyle Brand Logo - Female Trouble
+│   │   │   │   │   ├── 1.png
+│   │   │   │   │   └── Female Trouble.png
+│   │   │   │   ├── Lifestyle Brand Logo - Female Trouble.zip
+│   │   │   │   ├── Still 2025-07-06 073312_1.1.1.drx
+│   │   │   │   ├── Still 2025-07-06 073312_1.1.1.jpg
+│   │   │   │   ├── Still 2025-07-06 073416_1.1.2.drx
+│   │   │   │   ├── Still 2025-07-06 073416_1.1.2.jpg
+│   │   │   │   ├── Still 2025-07-06 074428_1.2.1.drx
+│   │   │   │   ├── Still 2025-07-06 074428_1.2.1.jpg
+│   │   │   │   ├── Still 2025-07-06 074545_1.4.1.drx
+│   │   │   │   └── Still 2025-07-06 074545_1.4.1.jpg
+│   │   │   └── video
+│   │   │       ├── 4th-july-karen.mp4
+│   │   │       ├── aoc-big-beautiful-bill.mp4
+│   │   │       ├── brittany-pettersen-fake-tears.mp4
+│   │   │       ├── cold-open-screaming-blue-hair.mp4
+│   │   │       ├── ear-gauge-karen.mp4
+│   │   │       ├── free-bleeding.mp4
+│   │   │       ├── good-morning-fuck-you.mp4
+│   │   │       ├── gyrate-subway.mp4
+│   │   │       ├── i-better-not.mp4
+│   │   │       ├── potpourri-black-woman.mp4
+│   │   │       └── thanks-magas.mp4
+│   │   ├── captures
+│   │   ├── exports
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── 4th july karen.mp4
+│   │   │   ├── aoc big beautiful bill.mp4
+│   │   │   ├── brittany pettersen fake tears.mp4
+│   │   │   ├── cold open screaming blue hair.mp4
+│   │   │   ├── ear gauge karen.mp4
+│   │   │   ├── female josh.jpg
+│   │   │   ├── free bleeding.mp4
+│   │   │   ├── good morning fuck you.mp4
+│   │   │   ├── gyrate subway.mp4
+│   │   │   ├── i better not.mp4
+│   │   │   ├── josh16bitchy.jpg
+│   │   │   ├── josh at 16.jpg
+│   │   │   ├── media-list.m3u
+│   │   │   ├── NOTES NOT A REAL SEGMENT.md
+│   │   │   ├── PDM From Starnick on Discord.jpg
+│   │   │   ├── potpourri black woman.mp4
+│   │   │   ├── preshow notes.md
+│   │   │   ├── thanks magas.mp4
+│   │   │   ├── vermont parade.mp4
+│   │   │   └── voodoo dolls.mp4
+│   │   └── rundown
+│   │       ├── 10 Crazy Bitches.md
+│   │       ├── 20 BILTONG.md
+│   │       ├── 30 Slocum consulting.md
+│   │       ├── 40 4TH OF JULY BLOCK B.md
+│   │       ├── 50 The real misogyny BLOCK B.md
+│   │       ├── 60 SUPPORT US ADVERT.md
+│   │       ├── 70 POTPOURRI BLOCK C.md
+│   │       ├── list
+│   │       │   ├── 100_petersen-1.png
+│   │       │   ├── 10_cold-open-screaming-blue-hair.mp4
+│   │       │   ├── 110_petersen-3.png
+│   │       │   ├── 120_petersen-4.png
+│   │       │   ├── 130_brittany-pettersen-fake-tears.mp4
+│   │       │   ├── 140_crawford-eye-cross.png
+│   │       │   ├── 150_thanks-magas.mp4
+│   │       │   ├── 160_vermont-parade.png
+│   │       │   ├── 170_beckinsdale-1.png
+│   │       │   ├── 180_beckinsdale-2.png
+│   │       │   ├── 190_beckinsdale-anorexia.png
+│   │       │   ├── 200_kade-elliott-therapy.png
+│   │       │   ├── 20_vodoo-dolls.png
+│   │       │   ├── 210_josh-at-16.png
+│   │       │   ├── 220_high-school-girls.png
+│   │       │   ├── 230_potpourri-black-woman.mp4
+│   │       │   ├── 240_kade-elliott-therapy.png
+│   │       │   ├── 250_josh-at-16.png
+│   │       │   ├── 260_high-school-girls.png
+│   │       │   ├── 30_free-bleeding.mp4
+│   │       │   ├── 40_cynthia-nixon.png
+│   │       │   ├── 50_good-morning-fuck-you.mp4
+│   │       │   ├── 60_gyrate-subway.mp4
+│   │       │   ├── 70_ear-gauge-karen.mp4
+│   │       │   ├── 80_i-better-not.mp4
+│   │       │   └── 90_aoc-big-beautiful-bill.mp4
+│   │       ├── media-list.m3u
+│   │       ├── script-07-06-25-unknown-1.html
+│   │       ├── script-07-06-25-unknown-2.html
+│   │       ├── script--unknown-1.html
+│   │       └── script--unknown-2.html
+│   ├── 0231
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── generated_quotes
+│   │   │   │   └── handheld-clack.png
+│   │   │   ├── graphics
+│   │   │   │   ├── all-of-carnival.png
+│   │   │   │   ├── a&w-menu.png
+│   │   │   │   ├── a&w-picture.png
+│   │   │   │   ├── female-trouble-thumb.jpg
+│   │   │   │   ├── german-swimming.png
+│   │   │   │   ├── in-your-opinion.png
+│   │   │   │   ├── lena-dunham-still.png
+│   │   │   │   ├── lizzo-update.png
+│   │   │   │   ├── paxton-1.png
+│   │   │   │   ├── reuters-state.png
+│   │   │   │   ├── state-dept-history.png
+│   │   │   │   ├── state-dept-posters.png
+│   │   │   │   ├── state-dept-privilege.png
+│   │   │   │   ├── state-dept-saved-lives.png
+│   │   │   │   ├── state-dept-signs-1.png
+│   │   │   │   └── ugly-lezzer.png
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   └── video
+│   │   │       ├── april-chapman-cruise.mp4
+│   │   │       ├── blue-control-water.mp4
+│   │   │       ├── brit-lady-cop.mp4
+│   │   │       ├── cop-unmask.mp4
+│   │   │       ├── cruise-fan-clack.mp4
+│   │   │       ├── dinner-for-stepkids.mp4
+│   │   │       ├── in-your-opinion.mp4
+│   │   │       ├── lena-dunham-closet.mp4
+│   │   │       ├── potpourri-beautiful.mp4
+│   │   │       ├── potpourri-palestine-brit.mp4
+│   │   │       ├── reute.mp4
+│   │   │       ├── sadistic-er-nurse.mp4
+│   │   │       └── serial-mom-baby-jane.mp4
+│   │   ├── backup
+│   │   │   └── 20 State Dept. BLOCK A.md
+│   │   ├── captures
+│   │   ├── exports
+│   │   │   └── Poster-16x9.jpg
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── april chapman cruise.mp4
+│   │   │   ├── blue control water.mp4
+│   │   │   ├── brit lady cop.mp4
+│   │   │   ├── CONTENT DUMP NOT A REAL SEGMENT.md
+│   │   │   ├── COPS UNMASK.mp4
+│   │   │   ├── dinner for stepkids.mp4
+│   │   │   ├── lena dunham closet.mp4
+│   │   │   ├── potpourri beautiful.mp4
+│   │   │   ├── potpourri in your opinion.mp4
+│   │   │   ├── potpourri palestine brit.mp4
+│   │   │   ├── preshow notes.md
+│   │   │   ├── reuters layoffs.mp4
+│   │   │   └── sadistic er nurse.mp4
+│   │   └── rundown
+│   │       ├── 10 Viewer Comments BLOCK A.md
+│   │       ├── 20 State Dept. BLOCK A_1.md
+│   │       ├── 30 BILTONG AD JOSH ADLIB.md
+│   │       ├── 40 SLOCUM CONSULTING JOSH ADLIB.md
+│   │       ├── 50 Miscellaneous Bits BLOCK B.md
+│   │       ├── 60 A&W Potpourri.md
+│   │       ├── list
+│   │       │   ├── 100_lena-dunham-closet.mp4
+│   │       │   ├── 10_female-trouble-thumb.jpg
+│   │       │   ├── 110_lizzo-update.png
+│   │       │   ├── 120_cop-unmask.mp4
+│   │       │   ├── 130_all-of-carnival.png
+│   │       │   ├── 140_cruise-fan-clack.mp4
+│   │       │   ├── 150_april-chapman-cruise.mp4
+│   │       │   ├── 160_a&w-picture.png
+│   │       │   ├── 170_potpourri-beautiful.mp4
+│   │       │   ├── 180_in-your-opinion.png
+│   │       │   ├── 190_in-your-opinion.mp4
+│   │       │   ├── 200_potpourri-palestine-brit.mp4
+│   │       │   ├── 20_reuters-state.png
+│   │       │   ├── 210_german-swimming.png
+│   │       │   ├── 220_ugly-lezzer.png
+│   │       │   ├── 230_serial-mom-baby-jane.mp4
+│   │       │   ├── 30_reute.mp4
+│   │       │   ├── 40_brit-lady-cop.mp4
+│   │       │   ├── 50_blue-control-water.mp4
+│   │       │   ├── 60_sadistic-er-nurse.mp4
+│   │       │   ├── 70_dinner-for-stepkids.mp4
+│   │       │   ├── 80_paxton-1.png
+│   │       │   └── 90_lena-dunham-still.png
+│   │       ├── media-list.m3u
+│   │       ├── script--unknown-1.html
+│   │       ├── script--unknown-2.html
+│   │       ├── script--unknown-3.html
+│   │       └── script--unknown-4.html
+│   ├── 0232
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── generated_quotes
+│   │   │   ├── graphics
+│   │   │   │   ├── after.png
+│   │   │   │   ├── before.png
+│   │   │   │   ├── big-fish-grok.png
+│   │   │   │   ├── cecoupe-grok.png
+│   │   │   │   ├── colin-wright-tweet.png
+│   │   │   │   ├── desean.png
+│   │   │   │   ├── glenn-schott-grok-1.png
+│   │   │   │   ├── graphic-test.png
+│   │   │   │   ├── grok-answer.png
+│   │   │   │   ├── hilaria-baldwin.png
+│   │   │   │   ├── john-jackson-grok.png
+│   │   │   │   ├── lucy-ethel.png
+│   │   │   │   ├── madonna-fan.png
+│   │   │   │   ├── markos-grok.png
+│   │   │   │   ├── michelle-barack.png
+│   │   │   │   ├── mrs-roper-still.png
+│   │   │   │   ├── pretty-pretty.png
+│   │   │   │   ├── steve-salerno.png
+│   │   │   │   ├── unfuckables.png
+│   │   │   │   └── xe-xem-xyr-still-image.png
+│   │   │   ├── Guest TONGIHT.mp4
+│   │   │   ├── Guest Twitter OUTPUT.mp4
+│   │   │   ├── Guest UP NEXT.mp4
+│   │   │   ├── images
+│   │   │   ├── isaiha.png
+│   │   │   ├── Poster-16x9-(1).jpg
+│   │   │   ├── quotes
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   ├── transcripts
+│   │   │   └── video
+│   │   │       ├── 1-brad-polumbo-cnn.mp4
+│   │   │       ├── 2-brad-polumbo-cnn.mp4
+│   │   │       ├── alec-baldwin-baby.mp4
+│   │   │       ├── black-women-riley-gaines.mp4
+│   │   │       ├── faggots-with-fans.mp4
+│   │   │       ├── pedro-pascal.mp4
+│   │   │       ├── pronouns-he-him.mp4
+│   │   │       └── xey-xem-sot.mp4
+│   │   ├── captures
+│   │   │   ├── Block B-dc-whisper.mp3
+│   │   │   ├── Block B-dc-whisper.srt
+│   │   │   ├── Block B-dc-whisper.txt
+│   │   │   ├── Jake Freeman.jpg
+│   │   │   └── Jake Freeman Transparent.psd
+│   │   ├── exports
+│   │   │   ├── Poster-16x9-(1).jpg
+│   │   │   └── script-07-20-25-production-7.html
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── 1 brad palumbo cnn.mp4
+│   │   │   ├── 2 brad polumbo cnn.mp4
+│   │   │   ├── alec baldwin.mp4
+│   │   │   ├── black women riley gaines.mp4
+│   │   │   ├── faggots with fans.mp4
+│   │   │   ├── NOTES NOT A REAL SEGMENT.md
+│   │   │   ├── pedro pascal.mp4
+│   │   │   ├── preshow notes.md
+│   │   │   ├── pronouns he him.mp4
+│   │   │   ├── sot xey xem sot.mp4
+│   │   │   └── xey xem sot.mp4
+│   │   └── rundown
+│   │       ├── 10 The Revenge of the Uglies.md
+│   │       ├── 20 Discipline is Not Abuse.md
+│   │       ├── 30 Black Women Can't Be Racist.md
+│   │       ├── 31 Slocum Consulting.md
+│   │       ├── 40 Grok Won't Create Pix of White People.md
+│   │       ├── 50 CNN's Racist Ana Navarro.md
+│   │       ├── 60 Interview with Jake Freeman, Therapist, on Cluster B in Mormonism.md
+│   │       ├── 61 Biltong.md
+│   │       ├── 70 Potpourri du Moquerie.md
+│   │       ├── 71 PROMO SUBSTACK SUBSCRIBESTAR DISAFFECTED.COM.md
+│   │       ├── list
+│   │       └── media-list.m3u
+│   ├── 0233
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── generated_quotes
+│   │   │   │   └── scruton-beauty.png
+│   │   │   ├── graphics
+│   │   │   │   ├── 2-brutalist-mcdonalds-2.png
+│   │   │   │   ├── brutalist-mcdonalds-1.png
+│   │   │   │   ├── druzhba-sanatorium.png
+│   │   │   │   ├── dunkin-logo.png
+│   │   │   │   ├── froggy-girl-1.png
+│   │   │   │   ├── froggy-girl-2.png
+│   │   │   │   ├── froggy-girl-3.png
+│   │   │   │   ├── froggy-girl-cover.png
+│   │   │   │   ├── hubert-humphrey-building.png
+│   │   │   │   ├── jermaine-matthews.png
+│   │   │   │   ├── kaloyan.png
+│   │   │   │   ├── maxine-waters-reclaiming.png
+│   │   │   │   ├── mcdonalds-1.png
+│   │   │   │   ├── mcdonalds-brown.png
+│   │   │   │   ├── mordor.png
+│   │   │   │   ├── obama-library-construction.png
+│   │   │   │   ├── obama-library-finished.png
+│   │   │   │   ├── road-and-track.png
+│   │   │   │   ├── star-laswell.png
+│   │   │   │   ├── the-milgram.png
+│   │   │   │   ├── vasiliki.png
+│   │   │   │   └── wnba.png
+│   │   │   ├── images
+│   │   │   ├── pamela.png
+│   │   │   ├── quotes
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   └── video
+│   │   │       ├── cincy-chief-social-media.mp4
+│   │   │       ├── cincy-woman-beaten.mp4
+│   │   │       ├── pecking-beak-hands-josh.mp4
+│   │   │       ├── slap-a-faggot.mp4
+│   │   │       ├── tim-mcbride-.mp4
+│   │   │       ├── whites-only-community.mp4
+│   │   │       └── yvette-clark.mp4
+│   │   ├── captures
+│   │   ├── exports
+│   │   │   ├── 0233-dc-whisper.mp3
+│   │   │   ├── 0233-dc-whisper.srt
+│   │   │   ├── 0233-dc-whisper.txt
+│   │   │   ├── 2Quote.png
+│   │   │   ├── 40 Pamela Garfield's Book Froggy Girl.pdf
+│   │   │   ├── makeup.mp4
+│   │   │   ├── Poster-16x9-(1).jpg
+│   │   │   ├── sample test.mp4
+│   │   │   ├── script-07-27-25-production-1.html
+│   │   │   ├── script-07-27-25-production-2.html
+│   │   │   └── young people.mp4
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── Froggy Girl Complete Book.pdf
+│   │   │   ├── pecking beak hands josh.mp4
+│   │   │   ├── preshow notes.md
+│   │   │   ├── slap a faggot.mp4
+│   │   │   ├── tim mcbride.mp4
+│   │   │   └── yvette clarke.mp4
+│   │   └── rundown
+│   │       ├── 10 Why Kids Don't Know Anything.md
+│   │       ├── 20 Whites Only Community SEGMENT.md
+│   │       ├── 30 BILTONG.md
+│   │       ├── 40 Pamela Garfield's Book Froggy Girl.md
+│   │       ├── 50 SLOCUM CONSULTING.md
+│   │       ├── 51 SUPPORT US.md
+│   │       ├── 60 brutalism.md
+│   │       ├── 61 potpourri du moquerie.md
+│   │       ├── list
+│   │       │   ├── 20_01_whites-only-community.mp4
+│   │       │   ├── 40_02_froggy-girl-cover.png
+│   │       │   ├── 40_03_froggy-girl-1.png
+│   │       │   ├── 40_04_froggy-girl-2.png
+│   │       │   ├── 40_05_froggy-girl-3.png
+│   │       │   ├── 60_06_obama-library-construction.png
+│   │       │   ├── 60_07_obama-library-finished.png
+│   │       │   ├── 60_08_mordor.png
+│   │       │   ├── 60_09_druzhba-sanatorium.png
+│   │       │   ├── 60_10_hubert-humphrey-building.png
+│   │       │   ├── 60_11_kaloyan.png
+│   │       │   ├── 60_12_the-milgram.png
+│   │       │   ├── 60_13_star-laswell.png
+│   │       │   ├── 60_14_vasiliki.png
+│   │       │   ├── 60_15_road-and-track.png
+│   │       │   ├── 60_16_dunkin-logo.png
+│   │       │   ├── 60_17_mcdonalds-1.png
+│   │       │   ├── 60_18_mcdonalds-brown.png
+│   │       │   ├── 60_19_brutalist-mcdonalds-1.png
+│   │       │   ├── 60_20_2-brutalist-mcdonalds-2.png
+│   │       │   ├── 61_21_slap-a-faggot.mp4
+│   │       │   ├── 61_22_tim-mcbride-.mp4
+│   │       │   ├── 61_23_yvette-clark.mp4
+│   │       │   ├── 61_24_maxine-waters-reclaiming.png
+│   │       │   ├── 61_25_wnba.png
+│   │       │   └── 61_26_pecking-beak-hands-josh.mp4
+│   │       └── media-list.m3u
+│   ├── 0234
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── graphics
+│   │   │   │   ├── alien-invation-takes-hostages.png
+│   │   │   │   ├── aunt-ida.png
+│   │   │   │   ├── louise-brooks.png
+│   │   │   │   ├── mount-mccuntley.png
+│   │   │   │   ├── priscilla-queen.png
+│   │   │   │   ├── sample-picture.png
+│   │   │   │   ├── this-is-aa-test-slug.png
+│   │   │   │   └── three-cincy-perps.png
+│   │   │   ├── images
+│   │   │   ├── quotes
+│   │   │   │   └── quotes.json
+│   │   │   ├── thumbnails
+│   │   │   │   └── cincy-beat-down-thumbnail.png
+│   │   │   └── video
+│   │   │       ├── charlene-never-been-to-me.mp3.mp3
+│   │   │       ├── cincy-beat-down.mp4
+│   │   │       ├── cincy-overserved.mp4
+│   │   │       ├── fire-lady.mkv
+│   │   │       ├── lady-cop-gets-a-taste-of-doing-the-job.mp4
+│   │   │       ├── sweeney-ad-1.mp4
+│   │   │       ├── sweeney-asian.mp4
+│   │   │       ├── sweeney-eugenics.mp4
+│   │   │       ├── sweeney-trauma-surgeon.mp4
+│   │   │       └── wnba-wig-fall-off.mp4
+│   │   ├── captures
+│   │   ├── distribute
+│   │   │   ├── omnystudio
+│   │   │   │   └── 0234.m4a
+│   │   │   └── youtube
+│   │   │       └── 0234.mp4
+│   │   ├── exports
+│   │   │   ├── 0234-dc-whisper.mp3
+│   │   │   ├── 0234-dc-whisper.srt
+│   │   │   ├── 0234-dc-whisper.txt
+│   │   │   ├── 0234.mov
+│   │   │   ├── Poster-16x9.jpg
+│   │   │   └── script--production-4.html
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── 2025-08-01 23-26-36.mkv
+│   │   │   ├── black woman statue.jpg
+│   │   │   ├── Charlene - I've Never Been To Me • TopPop.mp3
+│   │   │   ├── cincy beatdown.mp4
+│   │   │   ├── cincy police chief overserved.mp4
+│   │   │   ├── cincy police chief social media.mp4
+│   │   │   ├── histrionic bpd screaming.mp4
+│   │   │   ├── NOTES ONLY NOT SEGMENT.md
+│   │   │   ├── preshow notes.md
+│   │   │   ├── sweeney ad 1.mp4
+│   │   │   ├── sweeney asian.mp4
+│   │   │   ├── sweeney eugenics.mp4
+│   │   │   ├── sweeney trauma surgeon.mp4
+│   │   │   └── wnba wig fall off.mp4
+│   │   └── rundown
+│   │       ├── 0234.vmix
+│   │       ├── 10 CINCINATTI BLACK BRAWL.md
+│   │       ├── 20 BILTONG.md
+│   │       ├── 30 POTPOURRI DU MOQUERIE.md
+│   │       ├── 40 SUPPORT US.md
+│   │       ├── 50 SLOCUM CONSULTING.md
+│   │       ├── 60 Bitter From the Sweet.md
+│   │       ├── list
+│   │       │   ├── 10_01_cincy-beat-down.mp4
+│   │       │   ├── 10_02_three-cincy-perps.png
+│   │       │   ├── 10_03_cincy-overserved.mp4
+│   │       │   ├── 30_04_sweeney-ad-1.mp4
+│   │       │   ├── 30_05_sweeney-asian.mp4
+│   │       │   ├── 30_06_sweeney-eugenics.mp4
+│   │       │   ├── 30_07_sweeney-trauma-surgeon.mp4
+│   │       │   ├── 30_08_wnba-wig-fall-off.mp4
+│   │       │   ├── 30_09_histrionic-bpd-screaming.mp4
+│   │       │   ├── 30_10_mount-mccuntley.png
+│   │       │   ├── 60_11_priscilla-queen.png
+│   │       │   ├── 60_12_louise-brooks.png
+│   │       │   ├── 60_13_fire-lady.mkv
+│   │       │   ├── 60_14_aunt-ida.png
+│   │       │   ├── fire-lady-audio.aac
+│   │       │   ├── one-of-three.png
+│   │       │   ├── output
+│   │       │   │   ├── 10_01_cincy-beat-down.mp4
+│   │       │   │   ├── 10_03_cincy-overserved.mp4
+│   │       │   │   ├── 30_04_sweeney-ad-1.mp4
+│   │       │   │   ├── 30_05_sweeney-asian.mp4
+│   │       │   │   ├── 30_06_sweeney-eugenics.mp4
+│   │       │   │   ├── 30_07_sweeney-trauma-surgeon.mp4
+│   │       │   │   ├── 30_08_wnba-wig-fall-off.mp4
+│   │       │   │   └── 30_09_histrionic-bpd-screaming.mp4
+│   │       │   └── police-said-mathews.png
+│   │       ├── media-list.m3u
+│   │       ├── media-list.txt
+│   │       └── Obsidian Refactor Failure.md
+│   ├── 0235
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── graphics
+│   │   │   │   ├── bodycam-boon.png
+│   │   │   │   ├── nancy-mace.png
+│   │   │   │   ├── pacifiers.png
+│   │   │   │   ├── solo-poly.png
+│   │   │   │   └── vagina-biscuits.png
+│   │   │   ├── images
+│   │   │   │   └── guest
+│   │   │   ├── quotes
+│   │   │   └── video
+│   │   │       ├── banana-guy.mp4
+│   │   │       └── physiognomy-real.mp4
+│   │   ├── captures
+│   │   ├── distribute
+│   │   ├── exports
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   ├── banana guy.mp4
+│   │   │   ├── bodycam boon.png
+│   │   │   ├── borderline-cutdown
+│   │   │   │   ├── 100_throw_license.mp4
+│   │   │   │   ├── 110_because_dude.mp4
+│   │   │   │   ├── 120_am_i_not_the_one.mp4
+│   │   │   │   ├── 130_have_i_not_been.mp4
+│   │   │   │   ├── 140_give_me_my_phone.mp4
+│   │   │   │   ├── 150_stupid_five_foot.mp4
+│   │   │   │   ├── 160_let_me_explain.mp4
+│   │   │   │   ├── 170_give_me_my_phone_2nd.mp4
+│   │   │   │   ├── 180_how_are_they_going.mp4
+│   │   │   │   ├── 190_bet_you_have.mp4
+│   │   │   │   ├── 80_whats_going_on.mp4
+│   │   │   │   ├── 90_can_we.mp4
+│   │   │   │   ├── consolidated-whisper-transcriptions.txt
+│   │   │   │   └── whisper
+│   │   │   │       ├── 100_throw_license.mp3
+│   │   │   │       ├── 100_throw_license.srt
+│   │   │   │       ├── 100_throw_license.txt
+│   │   │   │       ├── 110_because_dude.mp3
+│   │   │   │       ├── 110_because_dude.srt
+│   │   │   │       ├── 110_because_dude.txt
+│   │   │   │       ├── 120_am_i_not_the_one.mp3
+│   │   │   │       ├── 120_am_i_not_the_one.srt
+│   │   │   │       ├── 120_am_i_not_the_one.txt
+│   │   │   │       ├── 130_have_i_not_been.mp3
+│   │   │   │       ├── 130_have_i_not_been.srt
+│   │   │   │       ├── 130_have_i_not_been.txt
+│   │   │   │       ├── 140_give_me_my_phone.mp3
+│   │   │   │       ├── 140_give_me_my_phone.srt
+│   │   │   │       ├── 140_give_me_my_phone.txt
+│   │   │   │       ├── 150_stupid_five_foot.mp3
+│   │   │   │       ├── 150_stupid_five_foot.srt
+│   │   │   │       ├── 150_stupid_five_foot.txt
+│   │   │   │       ├── 160_let_me_explain.mp3
+│   │   │   │       ├── 160_let_me_explain.srt
+│   │   │   │       ├── 160_let_me_explain.txt
+│   │   │   │       ├── 170_give_me_my_phone_2nd.mp3
+│   │   │   │       ├── 170_give_me_my_phone_2nd.srt
+│   │   │   │       ├── 170_give_me_my_phone_2nd.txt
+│   │   │   │       ├── 180_how_are_they_going.mp3
+│   │   │   │       ├── 180_how_are_they_going.srt
+│   │   │   │       ├── 180_how_are_they_going.txt
+│   │   │   │       ├── 190_bet_you_have.mp3
+│   │   │   │       ├── 190_bet_you_have.srt
+│   │   │   │       ├── 190_bet_you_have.txt
+│   │   │   │       ├── 80_whats_going_on.mp3
+│   │   │   │       ├── 80_whats_going_on.srt
+│   │   │   │       ├── 80_whats_going_on.txt
+│   │   │   │       ├── 90_can_we.mp3
+│   │   │   │       ├── 90_can_we.srt
+│   │   │   │       └── 90_can_we.txt
+│   │   │   ├── borderline-cutdown-2
+│   │   │   │   ├── 100_throw_license.mp4
+│   │   │   │   ├── 110_because_dude.mp4
+│   │   │   │   ├── 120_am_i_not_the_one.mp4
+│   │   │   │   ├── 130_have_i_not_been.mp4
+│   │   │   │   ├── 140_give_me_my_phone.mp4
+│   │   │   │   ├── 150_stupid_five_foot.mp4
+│   │   │   │   ├── 160_let_me_explain.mp4
+│   │   │   │   ├── 170_give_me_my_phone_2nd.mp4
+│   │   │   │   ├── 180_how_are_they_going.mp4
+│   │   │   │   ├── 190_bet_you_have.mp4
+│   │   │   │   ├── 80_whats_going_on.mp4
+│   │   │   │   ├── 90_can_we.mp4
+│   │   │   │   ├── consolidated-whisper-transcriptions.txt
+│   │   │   │   └── whisper
+│   │   │   │       ├── 100_throw_license.mp3
+│   │   │   │       ├── 100_throw_license.srt
+│   │   │   │       ├── 100_throw_license.txt
+│   │   │   │       ├── 110_because_dude.mp3
+│   │   │   │       ├── 110_because_dude.srt
+│   │   │   │       ├── 110_because_dude.txt
+│   │   │   │       ├── 120_am_i_not_the_one.mp3
+│   │   │   │       ├── 120_am_i_not_the_one.srt
+│   │   │   │       ├── 120_am_i_not_the_one.txt
+│   │   │   │       ├── 130_have_i_not_been.mp3
+│   │   │   │       ├── 130_have_i_not_been.srt
+│   │   │   │       ├── 130_have_i_not_been.txt
+│   │   │   │       ├── 140_give_me_my_phone.mp3
+│   │   │   │       ├── 140_give_me_my_phone.srt
+│   │   │   │       ├── 140_give_me_my_phone.txt
+│   │   │   │       ├── 150_stupid_five_foot.mp3
+│   │   │   │       ├── 150_stupid_five_foot.srt
+│   │   │   │       ├── 150_stupid_five_foot.txt
+│   │   │   │       ├── 160_let_me_explain.mp3
+│   │   │   │       ├── 160_let_me_explain.srt
+│   │   │   │       ├── 160_let_me_explain.txt
+│   │   │   │       ├── 170_give_me_my_phone_2nd.mp3
+│   │   │   │       ├── 170_give_me_my_phone_2nd.srt
+│   │   │   │       ├── 170_give_me_my_phone_2nd.txt
+│   │   │   │       ├── 180_how_are_they_going.mp3
+│   │   │   │       ├── 180_how_are_they_going.srt
+│   │   │   │       ├── 180_how_are_they_going.txt
+│   │   │   │       ├── 190_bet_you_have.mp3
+│   │   │   │       ├── 190_bet_you_have.srt
+│   │   │   │       ├── 190_bet_you_have.txt
+│   │   │   │       ├── 80_whats_going_on.mp3
+│   │   │   │       ├── 80_whats_going_on.srt
+│   │   │   │       ├── 80_whats_going_on.txt
+│   │   │   │       ├── 90_can_we.mp3
+│   │   │   │       ├── 90_can_we.srt
+│   │   │   │       └── 90_can_we.txt
+│   │   │   ├── borderline-cutdown3
+│   │   │   │   ├── 100_throw_license.mp4
+│   │   │   │   ├── 110_because_dude.mp4
+│   │   │   │   ├── 120_am_i_not_the_one.mp4
+│   │   │   │   ├── 130_have_i_not_been.mp4
+│   │   │   │   ├── 140_give_me_my_phone.mp4
+│   │   │   │   ├── 150_stupid_five_foot.mp4
+│   │   │   │   ├── 160_let_me_explain.mp4
+│   │   │   │   ├── 170_give_me_my_phone_2nd.mp4
+│   │   │   │   ├── 180_how_are_they_going.mp4
+│   │   │   │   ├── 190_bet_you_have.mp4
+│   │   │   │   ├── 80_whats_going_on.mp4
+│   │   │   │   ├── 90_can_we.mp4
+│   │   │   │   ├── consolidated-whisper-transcriptions.txt
+│   │   │   │   └── whisper
+│   │   │   │       ├── 100_throw_license.mp3
+│   │   │   │       ├── 100_throw_license.srt
+│   │   │   │       ├── 100_throw_license.txt
+│   │   │   │       ├── 110_because_dude.mp3
+│   │   │   │       ├── 110_because_dude.srt
+│   │   │   │       ├── 110_because_dude.txt
+│   │   │   │       ├── 120_am_i_not_the_one.mp3
+│   │   │   │       ├── 120_am_i_not_the_one.srt
+│   │   │   │       ├── 120_am_i_not_the_one.txt
+│   │   │   │       ├── 130_have_i_not_been.mp3
+│   │   │   │       ├── 130_have_i_not_been.srt
+│   │   │   │       ├── 130_have_i_not_been.txt
+│   │   │   │       ├── 140_give_me_my_phone.mp3
+│   │   │   │       ├── 140_give_me_my_phone.srt
+│   │   │   │       ├── 140_give_me_my_phone.txt
+│   │   │   │       ├── 150_stupid_five_foot.mp3
+│   │   │   │       ├── 150_stupid_five_foot.srt
+│   │   │   │       ├── 150_stupid_five_foot.txt
+│   │   │   │       ├── 160_let_me_explain.mp3
+│   │   │   │       ├── 160_let_me_explain.srt
+│   │   │   │       ├── 160_let_me_explain.txt
+│   │   │   │       ├── 170_give_me_my_phone_2nd.mp3
+│   │   │   │       ├── 170_give_me_my_phone_2nd.srt
+│   │   │   │       ├── 170_give_me_my_phone_2nd.txt
+│   │   │   │       ├── 180_how_are_they_going.mp3
+│   │   │   │       ├── 180_how_are_they_going.srt
+│   │   │   │       ├── 180_how_are_they_going.txt
+│   │   │   │       ├── 190_bet_you_have.mp3
+│   │   │   │       ├── 190_bet_you_have.srt
+│   │   │   │       ├── 190_bet_you_have.txt
+│   │   │   │       ├── 80_whats_going_on.mp3
+│   │   │   │       ├── 80_whats_going_on.srt
+│   │   │   │       ├── 80_whats_going_on.txt
+│   │   │   │       ├── 90_can_we.mp3
+│   │   │   │       ├── 90_can_we.srt
+│   │   │   │       └── 90_can_we.txt
+│   │   │   ├── Boston Children’s affirms commitment to gender-affirming care for youth _ Boston Spirit Magazine.html
+│   │   │   ├── cutvideo2.sh
+│   │   │   ├── cutvideo3.sh
+│   │   │   ├── cutvideo.sh
+│   │   │   ├── defending inca child sacrifice.mp4
+│   │   │   ├── FULL UNCUT Cop Video 1 girl psychopaths.mp4
+│   │   │   ├── FULL_UNCUT_Cop_Video_1_girl_psychopaths_RESTRIPED.mp4
+│   │   │   ├── holly pictures.png
+│   │   │   ├── holly video.mp4
+│   │   │   ├── Hunter Biden Interview.html
+│   │   │   ├── men on train.mp4
+│   │   │   ├── nancy mace.png
+│   │   │   ├── new
+│   │   │   │   ├── 100-segment_throw_license.mp4
+│   │   │   │   ├── 110-segment_because_dude.mp4
+│   │   │   │   ├── 120-segment_am_i_not_the_one.mp4
+│   │   │   │   ├── 130-segment_have_i_not_been.mp4
+│   │   │   │   ├── 140-segment_give_me_my_phone.mp4
+│   │   │   │   ├── 150-segment_stupid_five_foot.mp4
+│   │   │   │   ├── 160-segment_let_me_explain.mp4
+│   │   │   │   ├── 170-segment_give_me_my_phone_2nd_quote.mp4
+│   │   │   │   ├── 180-segment_how_are_they_going.mp4
+│   │   │   │   ├── 190-segment_bet_you_have.mp4
+│   │   │   │   ├── 80-segment_whats_going_on.mp4
+│   │   │   │   ├── 90-segment_can_we.mp4
+│   │   │   │   ├── cutvideo-grok.sh
+│   │   │   │   ├── enumerate.sh
+│   │   │   │   └── input.mp4
+│   │   │   ├── NOTES ONLY.md
+│   │   │   ├── pacifiers.png
+│   │   │   ├── physiognomy real.mp4
+│   │   │   ├── preshow notes.md
+│   │   │   ├── solo poly.png
+│   │   │   └── vagina biscuits.png
+│   │   ├── rundown
+│   │   │   └── segment-LOCAL-me4eduwb-47d3j.md
+│   │   └── vmix
+│   │       ├── 0235.vmix
+│   │       └── list1
+│   ├── 0236
+│   │   ├── assets
+│   │   │   ├── audio
+│   │   │   ├── graphics
+│   │   │   ├── images
+│   │   │   │   └── guest
+│   │   │   ├── quotes
+│   │   │   └── video
+│   │   ├── captures
+│   │   ├── distribute
+│   │   ├── exports
+│   │   ├── info.md
+│   │   ├── preshow
+│   │   │   └── preshow notes.md
+│   │   ├── rundown
+│   │   └── vmix
+│   │       └── list1
+│   └── 0237
+│       ├── assets
+│       │   ├── audio
+│       │   ├── graphics
+│       │   ├── images
+│       │   │   └── guest
+│       │   ├── quotes
+│       │   │   ├── fresh-long-quote-test-part1.png
+│       │   │   ├── fresh-long-quote-test-part2.png
+│       │   │   ├── fresh-long-quote-test-part3.png
+│       │   │   ├── fresh-short-quote-test.png
+│       │   │   ├── line-break.png
+│       │   │   ├── long-quote-test-part1.png
+│       │   │   ├── long-quote-test-part2.png
+│       │   │   ├── long-quote-test-part3.png
+│       │   │   ├── mixed-breaks.png
+│       │   │   ├── paragraph-break.png
+│       │   │   ├── quote_001.png
+│       │   │   ├── quote_002.png
+│       │   │   ├── quote_003.png
+│       │   │   ├── quote_004.png
+│       │   │   ├── quote_005.png
+│       │   │   ├── quotes.json
+│       │   │   ├── short-quote-test.png
+│       │   │   └── single-line.png
+│       │   └── video
+│       ├── captures
+│       ├── distribute
+│       ├── exports
+│       ├── info.md
+│       ├── preshow
+│       │   └── preshow notes.md
+│       ├── rundown
+│       │   ├── assets
+│       │   │   └── quotes
+│       │   │       └── quotes.json
+│       │   ├── test-linebreaks.md
+│       │   ├── test-modal-buttons.md
+│       │   ├── test-modal-fix.md
+│       │   ├── test-quotes-fresh.md
+│       │   └── test-quotes.md
+│       └── vmix
+│           └── list1
+├── lib
+│   ├── ads
+│   │   ├── Biltong USA
+│   │   │   └── info.md.md
+│   │   └── Slocum Consulting
+│   │       └── info.md.md
+│   ├── ctas
+│   └── promos
+├── logs
+│   ├── asset-id.log
+│   ├── housekeeping.log
+│   ├── last.id
+│   ├── orch-distribute.log
+│   ├── sot_processor.log
+│   └── transbend.log
+├── services
+│   ├── cold-storage
+│   │   ├── housekeeping-debug.py
+│   │   ├── housekeepingDEBUG.py
+│   │   ├── sot_processor.py
+│   │   └── testboot.mqtt.py
+│   ├── housekeepingBAK.py
+│   ├── housekeepingGROK.py
+│   ├── housekeeping.log
+│   ├── housekeeping.py
+│   ├── main.py -> ../docker/id-server-api/main.py
+│   ├── requirements.txt -> ../docker/id-server-api/requirements.txt
+│   ├── scan_markdown_files.py
+│   └── sot_processor.py
+├── software
+├── tools
+│   ├── blueprints
+│   │   ├── episode
+│   │   │   ├── assets
+│   │   │   │   ├── audio
+│   │   │   │   ├── graphics
+│   │   │   │   ├── images
+│   │   │   │   │   └── guest
+│   │   │   │   ├── quotes
+│   │   │   │   ├── unlinked
+│   │   │   │   └── video
+│   │   │   ├── captures
+│   │   │   ├── distribute
+│   │   │   ├── exports
+│   │   │   ├── info.md
+│   │   │   ├── preshow
+│   │   │   │   └── preshow notes.md
+│   │   │   ├── rundown
+│   │   │   │   ├── advert.md
+│   │   │   │   ├── cta.md
+│   │   │   │   ├── promo.md
+│   │   │   │   ├── segment.md
+│   │   │   │   └── trans.md
+│   │   │   └── vmix
+│   │   │       └── list1
+│   │   ├── printing
+│   │   │   └── script_cover.md
+│   │   └── vmix
+│   │       ├── list.m3u
+│   │       └── second_list.m3u
+│   ├── javascript
+│   ├── kb
+│   │   ├── Hotkeys.md
+│   │   ├── Josh setup sync.md.md
+│   │   ├── OmnyStudio API Reference.md
+│   │   ├── orch-distribute.py.md
+│   │   ├── Orch-Distribute.py Rehydration Document.md
+│   │   ├── README-add_rundown_item.md
+│   │   ├── README-housekeeping.md
+│   │   ├── Setting the Environment Variable in Linux.md
+│   │   └── Setting the Environment Variable in Windows.md
+│   ├── profiles
+│   │   └── bitfocus companion
+│   │       └── Montpelier-1_2025-08-05-0847.companionconfig
+│   ├── python
+│   │   ├── adapters
+│   │   │   └── omnystudio-adapter.py
+│   │   ├── add_rundown_item.py
+│   │   ├── backup.md
+│   │   ├── collect.py
+│   │   ├── compile-list.py
+│   │   ├── configs
+│   │   │   ├── adapters
+│   │   │   │   └── omnystudio.conf
+│   │   │   ├── distribute
+│   │   │   │   └── distribute.conf
+│   │   │   └── transbend
+│   │   │       └── transbend.conf
+│   │   ├── cookies
+│   │   │   └── all_cookies.txt
+│   │   ├── cuefixer.py
+│   │   ├── debug_quotes.py
+│   │   ├── diagnose_quotes.py
+│   │   ├── downconvert.py
+│   │   ├── episode-media-prep.py
+│   │   ├── episode_scaffold.py
+│   │   ├── eta_estimator.py
+│   │   ├── extract-quotes.py
+│   │   ├── file_utils.py
+│   │   ├── fix-form.py
+│   │   ├── generate_quotes.py
+│   │   ├── insert_cue_gfx.py
+│   │   ├── insert_generic_cue.py
+│   │   ├── old
+│   │   │   ├── compile-script-dev.bkup
+│   │   │   ├── compile-script-dev.bkup7-20-2025
+│   │   │   ├── compile-script-dev.py
+│   │   │   ├── compile-script-dev.sync-conflict-20250714-113045-GFSAUP5.py
+│   │   │   ├── detect_legacy_cues.py
+│   │   │   ├── enforce_cue_spacing.py
+│   │   │   ├── episode_selector.py
+│   │   │   ├── episode.txt
+│   │   │   ├── folder-gen-episode.py
+│   │   │   ├── folder-gen-episode-updated.py
+│   │   │   ├── generate_quotesBAK.py
+│   │   │   ├── generate_quotes.py
+│   │   │   ├── generate_quotes.pyBACK
+│   │   │   ├── insert_cue_gfx.py
+│   │   │   ├── insert_cue_sot-old.py
+│   │   │   ├── insert_cue_sot_old.py
+│   │   │   ├── insert_cue_sot.py
+│   │   │   ├── modify_cue_block.py
+│   │   │   ├── rename_cue_asset.py
+│   │   │   ├── render-list.py
+│   │   │   ├── sot_log.txt
+│   │   │   └── XXXcompile-media-list.py
+│   │   ├── orch-distribute_backup.py
+│   │   ├── orch-distribute_fixed.py
+│   │   ├── orch-distribute.py
+│   │   ├── orderfixer.py
+│   │   ├── paths.py
+│   │   ├── preproc-video.log
+│   │   ├── preproc-video.py
+│   │   ├── process_image.py
+│   │   ├── profiles
+│   │   │   ├── distribute
+│   │   │   │   └── weekly.profile
+│   │   │   └── transbend
+│   │   │       ├── omnystudio.profile
+│   │   │       └── youtube.profile
+│   │   ├── __pycache__
+│   │   │   ├── file_utils.cpython-310.pyc
+│   │   │   ├── orch-distribute.cpython-310.pyc
+│   │   │   ├── paths.cpython-310.pyc
+│   │   │   ├── paths.cpython-312.pyc
+│   │   │   └── transbend-dev.cpython-310.pyc
+│   │   ├── README.md
+│   │   ├── remove_links.py
+│   │   ├── render-list.py
+│   │   ├── render-script-host.py
+│   │   ├── slug_rename_item.py
+│   │   ├── sum-segment.py
+│   │   ├── tempfiles
+│   │   │   ├── all-cookies.txt
+│   │   │   ├── cue_mod_data.json
+│   │   │   ├── embed_output.txt
+│   │   │   ├── gfx_cue_data.json
+│   │   │   ├── modify_cue_block.json
+│   │   │   ├── rename_data.json
+│   │   │   ├── runtime_output.txt
+│   │   │   ├── spacing_target.json
+│   │   │   ├── temp_data.json
+│   │   │   └── temp_slug.txt
+│   │   ├── testdate.py
+│   │   ├── test_environment.py
+│   │   ├── test_quotes.py
+│   │   ├── test_scripts.py
+│   │   ├── test_workflow.py
+│   │   ├── transbend-dev.py
+│   │   ├── units_parser.py
+│   │   └── whisper-transcribe.py
+│   ├── templater_scripts
+│   │   ├── insert_cue_gfx.md
+│   │   ├── insert_cue_gfxOLD.md
+│   │   ├── testScript.js
+│   │   └── TestTemplate.md
+│   ├── templates
+│   │   ├── New Episode.md
+│   │   └── old
+│   │       ├── create_segment.md
+│   │       ├── cursor_data.md
+│   │       ├── enforce_cue_spacing.md
+│   │       ├── episode_selector.md
+│   │       ├── insert_cue_fsq.md
+│   │       ├── insert_cue_gfx.md
+│   │       ├── insert_cue_sot.md
+│   │       ├── modify_cue_block.md
+│   │       ├── modify_cue_block.py
+│   │       ├── rename_cue_slug.md
+│   │       ├── run_legacy_cue_check.md
+│   │       └── segment_template.md.md
+│   └── tmp
+│       ├── cue_block_output.md
+│       └── gfx_cue_data.json
+└── vault
+    ├── episodes
+    ├── services
+    └── tools

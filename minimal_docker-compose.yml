@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: showbuild-minimal-postgres
+    environment:
+      POSTGRES_DB: showbuild_minimal
+      POSTGRES_USER: showbuild
+      POSTGRES_PASSWORD: showbuild_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - showbuild
+
+  redis:
+    image: redis:7-alpine
+    container_name: showbuild-minimal-redis
+    ports:
+      - "6380:6379"
+    networks:
+      - showbuild
+
+  backend:
+    build: .
+    container_name: showbuild-minimal-backend
+    ports:
+      - "8889:8000"
+    environment:
+      DATABASE_URL: "postgresql://showbuild:showbuild_dev@postgres:5432/showbuild_minimal"
+      REDIS_URL: "redis://redis:6379"
+    volumes:
+      - /mnt/sync/disaffected/episodes:/episodes:ro
+      - ./tools:/tools:ro
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - showbuild
+
+  celery:
+    build: .
+    container_name: showbuild-minimal-celery
+    command: celery -A minimal_celery worker --loglevel=info
+    environment:
+      DATABASE_URL: "postgresql://showbuild:showbuild_dev@postgres:5432/showbuild_minimal"
+      REDIS_URL: "redis://redis:6379"
+    volumes:
+      - /mnt/sync/disaffected/episodes:/episodes:ro
+      - ./tools:/tools:ro
+    depends_on:
+      - postgres
+      - redis
+      - backend
+    networks:
+      - showbuild
+
+volumes:
+  postgres_data:
+
+networks:
+  showbuild:
+    driver: bridge

@@ -30,7 +30,7 @@
         <v-card-title>Create Template</v-card-title>
         <v-card-text>
           <v-text-field v-model="newTemplate.name" label="Name" required></v-text-field>
-          <v-select v-model="newTemplate.type" :items="['segment', 'ad', 'promo', 'cta', 'trans']" label="Type" required></v-select>
+          <v-select v-model="newTemplate.type" :items="itemTypeOptions" label="Type" required></v-select>
           <v-textarea v-model="newTemplate.content" label="Content" rows="4"></v-textarea>
         </v-card-text>
         <v-card-actions>
@@ -45,6 +45,7 @@
 
 <script>
 import axios from 'axios';
+import { getItemTypesForDropdown } from '@/config/itemTypes';
 export default {
   name: 'TemplatesView',
   data: () => ({
@@ -59,6 +60,11 @@ export default {
     ],
     templates: []
   }),
+  computed: {
+    itemTypeOptions() {
+      return getItemTypesForDropdown();
+    }
+  },
   methods: {
     async createTemplate() {
       this.loading = true;

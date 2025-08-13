@@ -31,14 +31,14 @@ export interface ThemeColorMap {
   }
 }
 
-// RundownManager Types  
-export interface RundownManagerProps {
+// StackOrganizer Types  
+export interface StackOrganizerProps {
   episode: string
   showRundownPanel?: boolean
   rundownPanelWidth?: 'narrow' | 'wide'
 }
 
-export interface RundownManagerEmits {
+export interface StackOrganizerEmits {
   (event: 'select-item', index: number): void
   (event: 'edit-item', index: number): void
   (event: 'drag-start', index: number): void

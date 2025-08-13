@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: show-build-postgres-primary
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: showbuild
+      POSTGRES_USER: showbuild
+      POSTGRES_PASSWORD: showbuild_primary_2025
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: replicator_secure_2025
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./postgres-config/primary:/docker-entrypoint-initdb.d
+      - ./postgres-config/primary/postgresql.conf:/etc/postgresql/postgresql.conf
+      - ./postgres-config/primary/pg_hba.conf:/etc/postgresql/pg_hba.conf
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    networks:
+      - postgres-replication
+      - video-post
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U showbuild -d showbuild"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: show-build-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@showbuild.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - postgres-replication
+      - video-post
+    depends_on:
+      - postgres-primary
+
+volumes:
+  postgres_primary_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  postgres-replication:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+  video-post:
+    external: true
