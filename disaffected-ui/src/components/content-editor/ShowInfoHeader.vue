@@ -21,7 +21,7 @@
             density="comfortable"
             class="showinfo-field"
             hide-details
-            @update:model-value="$emit('update:episodeNumber', $event)"
+            @update:model-value="() => {}"
             :item-props="episode => ({
               title: (typeof episode.title === 'string')
                 ? episode.title.split(':')[0] + (episode.title.includes(':') ? ':' : '') + ' ' + (episode.title.split(':')[1] ? episode.title.split(':')[1].trim() : '')
@@ -51,8 +51,8 @@
           ></v-select>
 
           <v-text-field
-            label="Total Runtime"
-            :model-value="totalRuntime"
+            label="Duration"
+            :model-value="duration"
             variant="outlined"
             density="comfortable"
             class="showinfo-field"
@@ -96,7 +96,7 @@ export default {
       type: String,
       default: 'Pre-Production'
     },
-    totalRuntime: {
+    duration: {
       type: String,
       default: '00:00:00'
     },
@@ -191,12 +191,23 @@ export default {
 /* Deep selectors for Vuetify component styling */
 :deep(.v-select .v-field__input),
 :deep(.v-text-field .v-field__input) {
-  padding-top: 4px !important;
+  padding-top: 8px !important;
   padding-bottom: 4px !important;
   min-height: 40px !important;
 }
 
 :deep(.v-field__field) {
   height: 40px !important;
+}
+
+:deep(.v-label) {
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+}
+
+:deep(.v-field--focused .v-label),
+:deep(.v-field--dirty .v-label) {
+  top: 0 !important;
+  transform: translateY(-50%) scale(0.75) !important;
 }
 </style>

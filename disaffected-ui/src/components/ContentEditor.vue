@@ -16,10 +16,9 @@
       :episode-number="currentEpisodeNumber"
       :air-date="currentAirDate"
       :production-status="currentProductionStatus"
-      :total-runtime="totalRuntime"
+      :duration="duration"
       :episodes="episodes"
       :production-statuses="productionStatuses"
-      @update:episodeNumber="handleEpisodeChange"
       @update:airDate="val => currentAirDate = val"
       @update:productionStatus="val => currentProductionStatus = val"
     />
@@ -27,85 +26,14 @@
     <!-- Main Content Area -->
     <div class="main-content-area">
       <!-- Rundown Panel -->
-      <v-card class="rundown-panel" flat
-             :style="{ border: '2px solid ' + statusBarColor, borderRadius: '0' }">
-        <div class="script-status-horizontal-bar"
-             :style="{ backgroundColor: statusBarColor, color: statusBarTextColor }">
-          <span class="status-text">{{ currentProductionStatus }}</span>
-        </div>
-        <div class="rundown-header-row">
-          <span class="rundown-header-title">Rundown ({{ rundownItems.length }} items)</span>
-          <div style="flex:1"></div>
-          <v-btn icon x-small class="rundown-header-btn" @click="showNewItemModal = true"><v-icon size="18">mdi-plus</v-icon></v-btn>
-          <v-btn icon x-small class="rundown-header-btn"><v-icon size="18">mdi-dots-vertical</v-icon></v-btn>
-        </div>
-        <div>
-          <div class="rundown-table-header">
-            <div class="index-container">Index</div>
-            <div class="item-type-cell">Type</div>
-            <div class="item-details">Slug</div>
-            <div class="item-duration">Duration</div>
-          </div>
-          <!-- Debug: Show rundown items count -->
-          <div v-if="!rundownItems || rundownItems.length === 0" style="padding: 10px; color: #999;">
-            No rundown items loaded. {{ loadingRundown ? 'Loading...' : 'Select an episode.' }}
-          </div>
-          <div
-            v-else
-            class="rundown-list"
-            style="height: 400px; overflow-y: auto; position: relative;"
-          >
-            <template v-for="(item, index) in rundownItems" :key="item.id || index">
-              <!-- Drag drop indicator footprint above item -->
-              <div 
-                v-if="isDragging && dragOverIndex === index && dropZonePosition === 'above'"
-                class="drag-drop-indicator"
-              >
-                <span class="drag-indicator-text">{{ draggedItem ? (draggedItem.slug || draggedItem.title || 'Item') : '' }}</span>
-              </div>
-              
-              <div
-                class="rundown-item"
-                :class="{
-                  'selected-item': selectedItemIndex === index,
-                  'ghost-class': isDragging && draggedIndex === index,
-                  'dragging': isDragging && draggedIndex === index,
-                  'drag-over-above': dragOverIndex === index && dropZonePosition === 'above',
-                  'drag-over-below': dragOverIndex === index && dropZonePosition === 'below'
-                }"
-                :style="resolveItemStyle(item, index)"
-                draggable="true"
-                @click="selectRundownItem(index)"
-                @dragstart="dragStart($event, item, index)"
-                @dragend="dragEnd($event, item, index)"
-                @dragover.prevent="dragOver($event, index)"
-                @drop.prevent="dragDrop($event, index)"
-              >
-                <div class="item-content">
-                  <div class="index-container">
-                    <span class="item-index">{{ (index + 1) * 10 }}</span>
-                  </div>
-                  <div class="item-type-cell">
-                    <span class="item-type">{{ (item.type || 'segment').toUpperCase() }}</span>
-                  </div>
-                  <div class="item-details">
-                    <span class="item-slug">{{ (item.slug || '').toLowerCase() }}</span>
-                  </div>
-                  <span class="item-duration">{{ item.duration || '00:00:00' }}</span>
-                </div>
-              </div>
-              
-              <!-- Drag drop indicator footprint below item -->
-              <div 
-                v-if="isDragging && dragOverIndex === index && dropZonePosition === 'below'"
-                class="drag-drop-indicator"
-              >
-                <span class="drag-indicator-text">{{ draggedItem ? (draggedItem.slug || draggedItem.title || 'Item') : '' }}</span>
-              </div>
-            </template>
-          </div>
-        </div>
-      </v-card>
+      <RundownPanel
+        :items="rundownItems"
+        :selected-item-index="selectedItemIndex"
+        :loading="loadingRundown"
+        panel-width="wide"
+        @select-item="selectRundownItem"
+        @new-item="showNewItemModal = true"
+      />
 
       <!-- Editor Panel -->
       <div class="editor-panel">
@@ -189,6 +117,7 @@
 import axios from 'axios';
 // import { API_BASE_URL } from '@/config.js'; // Temporarily remove to simplify
 import EditorPanel from './EditorPanel.vue';
+import RundownPanel from './content-editor/RundownPanel.vue';
 import AssetBrowserModal from './modals/AssetBrowserModal.vue';
 import TemplateManagerModal from './modals/TemplateManagerModal.vue';
 import GfxModal from './modals/GfxModal.vue';
@@ -204,12 +133,34 @@ import NewItemModal from './modals/NewItemModal.vue';
 import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
 import { getColorValue, resolveVuetifyColor, loadColorsFromDatabase } from '../utils/themeColorMap';
 import { debounce } from 'lodash-es';
+import { getItemTypesForDropdown } from '../config/itemTypes';
 
 export default {
   name: 'ContentEditor',
+  components: {
+    EditorPanel,
+    RundownPanel,
+    AssetBrowserModal,
+    TemplateManagerModal,
+    GfxModal,
+    FsqModal,
+    SotModal,
+    VoModal,
+    NatModal,
+    LiveModal,
+    MusModal,
+    VoxModal,
+    PkgModal,
+    ShowInfoHeader,
+    NewItemModal
+  },
   
   async mounted() {
     console.log('ContentEditor mounted');
+    
+    // Load item types from single source of truth
+    this.rundownItemTypes = getItemTypesForDropdown();
+    console.log('Loaded item types from config:', this.rundownItemTypes.length, 'types');
     
     // Clear all old localStorage data that might interfere with colors
     console.log('Clearing old localStorage colors and related data');
@@ -237,14 +188,7 @@ export default {
     console.log('Episodes loaded:', this.episodes.length, 'episodes');
     console.log('Current episode from prop:', this.episode);
     console.log('Current episode from data:', this.currentEpisodeNumber);
-    
-    // For now, always use episode 0237 for testing (has rundown data)
-    const testEpisode = '0237';
-    this.currentEpisodeNumber = testEpisode;
-    console.log('Using test episode:', this.currentEpisodeNumber);
-    await this.handleEpisodeChange(this.currentEpisodeNumber);
-    
-    console.log('Mounted complete, rundownItems:', this.rundownItems);
+    console.log('Mounted complete, episode loading handled by fetchEpisodes()');
   },
 
   created() {
@@ -273,29 +217,8 @@ export default {
       },
       deep: true
     },
-    currentEpisodeNumber: {
-      handler(newVal, oldVal) {
-        console.log('currentEpisodeNumber changed from', oldVal, 'to', newVal);
-        console.trace('Episode number change stack:');
-      }
-    }
-  },
-
-  components: {
-    EditorPanel,
-    AssetBrowserModal,
-    TemplateManagerModal,
-    GfxModal,
-    FsqModal,
-    SotModal,
-    VoModal,
-    NatModal,
-    PkgModal,
-    VoxModal,
-    MusModal,
-    LiveModal,
-    NewItemModal,
-    ShowInfoHeader,
+    // Removed currentEpisodeNumber watcher to prevent race conditions
+    // Episode changes should only be handled explicitly via handleEpisodeChange
   },
   props: {
     episode: {
@@ -314,7 +237,8 @@ export default {
       selectedItemIndex: -1, // Start with no selection
       editingItemIndex: -1, // Index of item being edited (grows by 2%)
       hasUnsavedChanges: false,
-      loadingRundown: true, // Start in loading state
+      loadingRundown: false, // Start ready to load
+      loadingEpisode: false, // Prevent duplicate episode loading
       rundownError: null,
       
       // Show Information
@@ -335,19 +259,12 @@ export default {
       loading: false,
       saving: false,
       
-      // Drag state
-      isDragging: false,
-      draggedIndex: -1,
-      draggedItem: null,
-      dragOverIndex: -1, // Index of the item being dragged over
-      dropZonePosition: null, // 'above' or 'below'
-      dragFootprintColor: '#2196F3', // Color for the drop indicator (from settings)
-      
       // Auto-save tracking
       itemContentBackup: {},
       autoSaveOnSwitch: true, // Auto-save when switching items instead of prompting
       autoSaveTimeout: null,
       hoveredItemIndex: -1, // Index of the item being hovered
+      dragStartIndex: -1, // Index of the item being dragged
       
       // Content
       scriptContent: '',
@@ -634,14 +551,8 @@ Good night!
       newItemLink: '',
       creatingNewItem: false,
       
-      // Available rundown item types
-      rundownItemTypes: [
-        { title: 'Segment', value: 'segment' },
-        { title: 'Advertisement', value: 'ad' },
-        { title: 'Promo', value: 'promo' },
-        { title: 'Call to Action', value: 'cta' },
-        { title: 'Transition', value: 'trans' }
-      ],
+      // Available rundown item types - imported from single source of truth
+      rundownItemTypes: [],
       
       graphicDetails: {
         url: '',
@@ -652,8 +563,8 @@ Good night!
       graphicPreview: null,
       graphicFile: null,
       
-      // Total runtime for the episode
-      totalRuntime: '00:00:00',
+      // Duration for the episode
+      duration: '00:00:00',
 
       // Show title for the current episode
       showTitle: 'Disaffected',
@@ -831,60 +742,34 @@ Try dropping an image or video file here!`
           
           if (resolvedColor && resolvedColor !== '#9E9E9E') {
             style.backgroundColor = resolvedColor;
-            
-            // Determine text color based on background luminance
-            if (resolvedColor.startsWith('#')) {
-              const hex = resolvedColor.replace('#', '');
-              if (hex.length === 6) {
-                const r = parseInt(hex.substr(0, 2), 16);
-                const g = parseInt(hex.substr(2, 2), 16);
-                const b = parseInt(hex.substr(4, 2), 16);
-                const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-                style.color = luminance > 0.5 ? '#000000' : '#ffffff';
-              } else {
-                style.color = '#000000';
-              }
-            } else {
-              style.color = '#000000';
-            }
+            style.color = '#ffffff'; // Always use white text for better contrast
           } else {
             // Fallback color
             style.backgroundColor = '#9E9E9E';
-            style.color = '#000000';
+            style.color = '#ffffff';
           }
         } else {
           // Fallback for unknown types
           style.backgroundColor = '#9E9E9E';
-          style.color = '#000000';
+          style.color = '#ffffff';
         }
 
-        // Override for selected item
+        // Override for selected item - enhance the existing color instead of replacing it
         if (this.selectedItemIndex === index) {
-          const selectionColorName = getColorValue('selection');
-          console.log('Selection color name from settings:', selectionColorName);
-          const selectionColor = resolveVuetifyColor(selectionColorName, this.$vuetify);
-          console.log('Resolved selection color:', selectionColor);
-          if (selectionColor) {
-            style.backgroundColor = selectionColor;
-            // Simple luminance check for text color
-            if (selectionColor.startsWith('#')) {
-              const hex = selectionColor.replace('#', '');
-              if (hex.length === 6) {
-                const r = parseInt(hex.substr(0,2), 16);
-                const g = parseInt(hex.substr(2,2), 16);
-                const b = parseInt(hex.substr(4,2), 16);
-                style.color = (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5 ? '#FFFFFF' : '#000000';
-              } else {
-                style.color = '#000000';
-              }
-            } else {
-              style.color = '#000000';
-            }
+          // Keep the item's type color but add visual emphasis
+          style.border = '3px solid #ffffff';
+          style.boxShadow = '0 0 8px rgba(255,255,255,0.8), inset 0 0 0 2px rgba(0,0,0,0.2)';
+          style.transform = 'scale(1.02)';
+          style.zIndex = '10';
+          // Make the color slightly brighter for selection
+          if (style.backgroundColor && style.backgroundColor !== '#9E9E9E') {
+            // Keep the existing color but make it slightly brighter/more saturated
+            style.filter = 'brightness(1.1) saturate(1.2)';
           }
         }
         // Override for hovered item (but not if it's the selected item)
         else if (this.hoveredItemIndex === index) {
-           const hoverColorName = getColorValue('hover');
+           const hoverColorName = getColorValue('hover-interface') || getColorValue('hover') || 'blue-lighten-4';
            const hoverColor = resolveVuetifyColor(hoverColorName, this.$vuetify);
            if (hoverColor) {
              // Add a subtle border instead of changing the whole background
@@ -892,10 +777,11 @@ Try dropping an image or video file here!`
            }
         }
 
+        console.log(`Final style for ${itemType} at index ${index}:`, style);
         return style;
       } catch (error) {
-        // console.error('Error in resolveItemStyle:', error);
-        return {}; // Return empty object on error
+        console.error('Error in resolveItemStyle:', error);
+        return { backgroundColor: '#9E9E9E', color: '#ffffff' }; // Return fallback style on error
       }
     },
 
@@ -940,29 +826,32 @@ Try dropping an image or video file here!`
           this.episodes = [];
         }
         
-        // Don't auto-load an episode if one was provided via props
-        if (!this.episode) {
-          // Restore last selected episode from session storage
+        // Load initial episode if needed
+        let episodeToLoad = null;
+        
+        // Priority 1: Episode from props
+        if (this.episode && this.episodes.some(e => e.value === this.episode.padStart(4, '0'))) {
+          episodeToLoad = this.episode.padStart(4, '0');
+        }
+        // Priority 2: Current episode number if still valid
+        else if (this.currentEpisodeNumber && this.episodes.some(e => e.value === this.currentEpisodeNumber)) {
+          episodeToLoad = this.currentEpisodeNumber;
+        }
+        // Priority 3: Last selected episode from session storage
+        else if (!this.episode) {
           const lastEpisode = sessionStorage.getItem('selectedEpisode');
-          let episodeToLoad = null;
-
-          if (lastEpisode && this.episodes.some(e => e.value == lastEpisode)) {
+          if (lastEpisode && this.episodes.some(e => e.value === lastEpisode)) {
             episodeToLoad = lastEpisode;
           } else if (this.episodes.length > 0) {
-            // Default to the latest episode (assuming they are sorted by episode_number)
+            // Default to the latest episode
             const sortedEpisodes = [...this.episodes].sort((a, b) => b.value - a.value);
             episodeToLoad = sortedEpisodes[0].value;
           }
-          
-          if (episodeToLoad) {
-            this.handleEpisodeChange(episodeToLoad, true);
-          }
         }
-        // Ensure currentEpisodeNumber matches a value in the episodes list
-        // But don't change it if an episode was provided via props
-        if (!this.episode && !this.episodes.some(e => e.value === this.currentEpisodeNumber) && this.episodes.length > 0) {
-          console.log('Changing episode from', this.currentEpisodeNumber, 'to', this.episodes[0].value);
-          this.currentEpisodeNumber = this.episodes[0].value;
+        
+        if (episodeToLoad) {
+          console.log('Loading initial episode:', episodeToLoad);
+          await this.loadEpisode(episodeToLoad, true);
         }
         
       } catch (error) {
@@ -979,94 +868,111 @@ Try dropping an image or video file here!`
       if (typeof num === 'number') num = String(num);
       return num ? num.padStart(4, '0') : '';
     },
-    async fetchRundown(episodeId) {
-      const paddedId = this.padEpisodeNumber(episodeId);
-      console.log('fetchRundown called with:', episodeId, 'padded to:', paddedId);
-      if (!paddedId) {
-        console.log('No paddedId, clearing rundownItems');
-        this.rundownItems = [];
+
+    async loadEpisode(episodeNumber, skipSessionUpdate = false) {
+      const paddedNumber = this.padEpisodeNumber(episodeNumber);
+      if (!paddedNumber) return;
+
+      // Skip if already loaded with content
+      if (this.currentEpisodeNumber === paddedNumber && this.rundownItems.length > 0) {
+        console.log('Episode already loaded with items');
         return;
       }
+
+      console.log('Starting episode load for:', paddedNumber);
+      this.loadingEpisode = true;
       this.loadingRundown = true;
-      this.rundownError = null;
+
       try {
-        const url = `/api/episodes/${paddedId}/rundown`;
-        console.log('Fetching from URL:', url);
-        const response = await axios.get(url);
-        console.log('API Response:', response.data);
-        console.log('Loaded', response.data.items?.length || 0, 'rundown items');
-        this.rundownItems = response.data.items || [];
-        console.log('rundownItems set to:', this.rundownItems);
-        this.selectedItemIndex = this.rundownItems.length > 0 ? 0 : -1;
-        if (this.selectedItemIndex !== -1) {
-          this.loadItemContent(this.rundownItems[this.selectedItemIndex]);
+        // Set episode number
+        this.currentEpisodeNumber = paddedNumber;
+        if (!skipSessionUpdate) {
+          sessionStorage.setItem('selectedEpisode', paddedNumber);
         }
+
+        // Load episode info and rundown in parallel
+        const [infoResponse, rundownResponse] = await Promise.allSettled([
+          axios.get(`/api/episodes/${paddedNumber}/info`),
+          axios.get(`/api/episodes/${paddedNumber}/rundown`)
+        ]);
+
+        // Handle episode info
+        if (infoResponse.status === 'fulfilled') {
+          const info = infoResponse.value.data.info || {};
+          console.log('API Response - Episode Info:', info);
+          this.currentAirDate = info.airdate || '';
+          this.currentProductionStatus = info.status || 'draft';
+          this.duration = info.duration || '01:00:00';
+          this.showTitle = info.title || 'Untitled';
+          this.currentShowSubtitle = info.subtitle || 'No Subtitle';
+          console.log('After setting - Air Date:', this.currentAirDate, 'Status:', this.currentProductionStatus, 'Duration:', this.duration);
+        }
+
+        // Handle rundown
+        if (rundownResponse.status === 'fulfilled') {
+          const items = rundownResponse.value.data.items || [];
+          this.rundownItems = items;
+          this.selectedItemIndex = items.length > 0 ? 0 : -1;
+          if (this.selectedItemIndex !== -1 && items[0]) {
+            this.loadItemContent(items[0]);
+          }
+          console.log('Loaded episode', paddedNumber, 'with', items.length, 'items');
+        } else {
+          console.error('Failed to load rundown:', rundownResponse.reason);
+          this.rundownError = `Failed to load rundown for episode ${paddedNumber}`;
+        }
+
+        // Handle episode info errors
+        if (infoResponse.status === 'rejected') {
+          console.error('Failed to load episode info:', infoResponse.reason);
+        }
+
       } catch (error) {
-        console.error('Failed to load rundown - Full error:', error);
-        console.error('Error response:', error.response);
-        this.rundownError = `Failed to load rundown for episode ${paddedId}.`;
-        this.rundownItems = [];
+        console.error('Failed to load episode:', error);
+        this.rundownError = `Failed to load episode ${paddedNumber}`;
       } finally {
+        console.log('Clearing loading flags for episode:', paddedNumber);
+        this.loadingEpisode = false;
         this.loadingRundown = false;
       }
     },
     async saveAllContent() {
       const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
-      this.hasUnsavedChanges = false;
+      if (!paddedId || this.selectedItemIndex < 0 || !this.currentRundownItem) {
+        console.log('Cannot save - no valid item selected');
+        return;
+      }
+      
       this.saving = true;
       try {
+        const item = this.currentRundownItem;
         const payload = {
-          // ... construct payload
+          slug: item.slug,
+          script: this.scriptContent,
+          scratch: this.scratchContent,
+          metadata: item.metadata || {}
         };
-        await axios.post(`/api/episodes/${paddedId}/rundown`, payload);
+        
+        console.log('Saving content for item:', item.slug, 'in episode:', paddedId);
+        
+        // Save to the specific item endpoint
+        await axios.put(`/api/episodes/${paddedId}/items/${item.id}`, payload);
+        
         this.hasUnsavedChanges = false;
+        console.log('Content saved successfully');
+        
+        // Show success message briefly
+        window.showUrgentFlash?.("Saved!", "green", 1000);
+        
       } catch (error) {
-        // Handle save error
+        console.error('Failed to save content:', error);
+        this.hasUnsavedChanges = true;
+        
+        // Show error message
+        window.showUrgentFlash?.("Save Failed", "red", 3000);
       } finally {
         this.saving = false;
       }
-    },
-    async handleEpisodeChange(episodeNumber, skipSessionUpdate = false) {
-      console.log('handleEpisodeChange called with:', episodeNumber);
-      const paddedNumber = this.padEpisodeNumber(episodeNumber);
-      if (!paddedNumber) {
-        console.log('No padded number, returning');
-        return;
-      }
-
-      // Set the current episode number and update session storage
-      this.currentEpisodeNumber = paddedNumber;
-      console.log('Set currentEpisodeNumber to:', this.currentEpisodeNumber);
-      
-      if (!skipSessionUpdate) {
-        sessionStorage.setItem('selectedEpisode', paddedNumber);
-      }
-
-      try {
-        // Fetch new episode data, but do not reset the episode number here.
-        console.log('Fetching episode info for:', paddedNumber);
-        const infoRes = await axios.get(`/api/episodes/${paddedNumber}/info`);
-        const info = infoRes.data.info || {};
-        this.currentAirDate = info.airdate || '';
-        this.currentProductionStatus = info.status || 'draft';
-        this.totalRuntime = info.total_runtime || '01:00:00';
-        this.showTitle = info.title || 'Untitled';
-        this.currentShowSubtitle = info.subtitle || 'No Subtitle';
-        console.log('Episode info loaded successfully');
-      } catch (err) {
-        console.error('Failed to load episode info:', err);
-        // Clear out old data on failure
-        this.currentAirDate = '';
-        this.currentProductionStatus = 'draft';
-        this.totalRuntime = '00:00:00';
-        this.showTitle = 'Untitled';
-        this.currentShowSubtitle = 'No Subtitle';
-      }
-
-      // Fetch the rundown with the correct, verified episode number
-      console.log('About to call fetchRundown with:', this.currentEpisodeNumber);
-      await this.fetchRundown(this.currentEpisodeNumber);
-      console.log('fetchRundown completed');
     },
     getStatusLabel(status) {
       // TODO: Implement actual logic for status label
@@ -1089,145 +995,7 @@ Try dropping an image or video file here!`
       
       console.log('Loaded script content:', this.scriptContent.substring(0, 100) + '...');
     },
-    dragStart(event, item, index) {
-      console.log('Drag started:', index, item);
-      if (!item) return;
-      this.isDragging = true;
-      this.draggedIndex = index;
-      this.draggedItem = item;
-      event.dataTransfer.setData('text/plain', index.toString());
-      event.dataTransfer.effectAllowed = 'move';
-      
-      // Add dragging class to the element
-      event.target.classList.add('dragging');
-    },
     
-    dragEnd(event) {
-      console.log('Drag ended');
-      this.isDragging = false;
-      this.draggedIndex = -1;
-      this.draggedItem = null;
-      this.dragOverIndex = -1;
-      this.dropZonePosition = null;
-      
-      // Remove dragging class
-      event.target.classList.remove('dragging');
-    },
-    
-    dragOver(event, index) {
-      event.preventDefault(); // Critical for allowing drop!
-      
-      if (!this.isDragging || index === this.draggedIndex || !this.rundownItems[index]) return;
-      
-      const rect = event.currentTarget.getBoundingClientRect();
-      const midpoint = rect.top + rect.height / 2;
-      const isAbove = event.clientY < midpoint;
-      
-      this.dragOverIndex = index;
-      this.dropZonePosition = isAbove ? 'above' : 'below';
-      
-      console.log('Drag over:', index, this.dropZonePosition);
-    },
-    
-    
-    dragEnter(event, index) {
-      event.preventDefault();
-      event.stopPropagation();
-      
-      if (!this.isDragging) return;
-      
-      // Don't update if we're dragging over the same item
-      if (index === this.draggedIndex) {
-        return;
-      }
-      
-      // Determine drop zone position
-      const rect = event.currentTarget.getBoundingClientRect();
-      const midpoint = rect.top + rect.height / 2;
-      const isAbove = event.clientY < midpoint;
-      
-      this.dragOverIndex = index;
-      this.dropZonePosition = isAbove ? 'above' : 'below';
-    },
-    
-    dragLeave(event) {
-      // Only clear drag state if leaving the entire rundown area
-      const rundownList = document.querySelector('.rundown-list');
-      if (rundownList && event.relatedTarget && !rundownList.contains(event.relatedTarget)) {
-        this.dragOverIndex = -1;
-        this.dropZonePosition = null;
-      }
-    },
-    
-    dragDrop(event, targetIndex) {
-      event.preventDefault();
-      event.stopPropagation();
-      
-      console.log('Drop at index:', targetIndex, 'from index:', this.draggedIndex);
-      
-      if (!this.isDragging || !this.draggedItem) return;
-
-      const sourceIndex = this.draggedIndex;
-      
-      // If dropped on the same item, just reset the drag state
-      if (sourceIndex === targetIndex) {
-        console.log('Dropped on same item, resetting');
-        this.isDragging = false;
-        this.draggedIndex = -1;
-        this.draggedItem = null;
-        this.dragOverIndex = -1;
-        this.dropZonePosition = null;
-        return;
-      }
-      
-      // Get the drop position based on mouse position
-      const rect = event.currentTarget.getBoundingClientRect();
-      const midpoint = rect.top + rect.height / 2;
-      const dropBelow = event.clientY >= midpoint;
-      
-      let finalTargetIndex = targetIndex;
-      if (dropBelow) {
-        finalTargetIndex = targetIndex + 1;
-      }
-      if (sourceIndex < finalTargetIndex) {
-        finalTargetIndex--;
-      }
-
-      // Create a new array and perform the reordering
-      const items = [...this.rundownItems];
-      const [movedItem] = items.splice(sourceIndex, 1);
-      items.splice(finalTargetIndex, 0, movedItem);
-      
-      console.log('Reordered from', sourceIndex, 'to', finalTargetIndex);
-      
-      // Update the order field for each item to match their new positions
-      items.forEach((item, index) => {
-        item.order = (index + 1) * 10;
-      });
-      
-      // Use Vue's reactive assignment to update the array
-      this.rundownItems = items;
-      this.hasUnsavedChanges = true;
-      
-      // Save the reordered rundown
-      this.saveRundownOrder();
-      
-      // Update selected index if necessary
-      if (this.selectedItemIndex === sourceIndex) {
-        this.selectedItemIndex = finalTargetIndex;
-      } else if (this.selectedItemIndex > sourceIndex && this.selectedItemIndex <= finalTargetIndex) {
-        this.selectedItemIndex--;
-      } else if (this.selectedItemIndex < sourceIndex && this.selectedItemIndex >= finalTargetIndex) {
-        this.selectedItemIndex++;
-      }
-      
-      // Clear all drag state
-      this.isDragging = false;
-      this.draggedIndex = -1;
-      this.draggedItem = null;
-      this.dragOverIndex = -1;
-      this.dropZonePosition = null;
-    },
     async saveRundownOrder() {
       const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
       if (!paddedId) return;
@@ -1272,6 +1040,34 @@ Try dropping an image or video file here!`
         // Clear content if no valid item selected
         this.loadItemContent(null);
       }
+    },
+
+    // Vue.Draggable event handlers for drag and drop
+    onDragStart(event) {
+      console.log('Drag started:', event.oldIndex);
+      this.dragStartIndex = event.oldIndex;
+    },
+
+    onDragEnd(event) {
+      console.log('Drag ended:', event.oldIndex, '->', event.newIndex);
+      
+      // Only process if the position actually changed
+      if (event.oldIndex !== event.newIndex) {
+        console.log('Position changed, saving rundown order');
+        this.hasUnsavedChanges = true;
+        this.saveRundownOrder();
+        
+        // Update selected index if necessary
+        if (this.selectedItemIndex === event.oldIndex) {
+          this.selectedItemIndex = event.newIndex;
+        } else if (this.selectedItemIndex > event.oldIndex && this.selectedItemIndex <= event.newIndex) {
+          this.selectedItemIndex--;
+        } else if (this.selectedItemIndex < event.oldIndex && this.selectedItemIndex >= event.newIndex) {
+          this.selectedItemIndex++;
+        }
+      }
+      
+      this.dragStartIndex = -1;
     },
     
     // Missing stub methods to prevent Vue warnings
@@ -1481,6 +1277,7 @@ Try dropping an image or video file here!`
 .rundown-list {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 0;
   margin: 0;
   min-height: 0; /* Allow flexbox to shrink */
@@ -1530,15 +1327,31 @@ Try dropping an image or video file here!`
 }
 
 .rundown-item.ghost-class {
-  opacity: 0.3;
+  opacity: 0.5;
   background: #e3f2fd;
   transform: scale(0.98);
 }
 
-.rundown-item.dragging {
-  opacity: 0.4;
-  transform: scale(0.95);
+/* SortableJS classes for drag feedback */
+.rundown-item.chosen-class {
+  opacity: 0.8;
+  background: #fff3cd;
+  transform: scale(1.02);
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.rundown-item.drag-class {
+  opacity: 0.7;
+  background: #d1ecf1;
+  transform: rotate(2deg);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+  z-index: 2000;
+}
+
+.rundown-item.dragging {
+  opacity: 0.8;
+  transform: translateZ(0);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
   z-index: 1000;
   cursor: grabbing;
 }
@@ -1704,12 +1517,7 @@ Try dropping an image or video file here!`
   background: rgba(255, 193, 7, 0.1) !important;
 }
 
-.dragging {
-  opacity: 0.8;
-  transform: rotate(1deg);
-  z-index: 1000;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
+/* Removed duplicate .dragging rule - conflicts with .rundown-item.dragging */
 
 .drag-over-above::before {
   content: '';
@@ -1783,9 +1591,7 @@ Try dropping an image or video file here!`
 }
 
 /* When dragging, shift subsequent items down */
-.drag-drop-indicator ~ .rundown-item {
-  transform: translateY(calc(var(--base-row-height) * 2.5 + 8px));
-}
+/* Removed problematic transform rule that caused items to jump */
 
 
 
@@ -1833,6 +1639,34 @@ Try dropping an image or video file here!`
 
 .rundown-item:not(.ghost-class):not(.dragging) {
   transform: translateZ(0);
+}
+
+/* Vue.Draggable CSS classes for visual feedback */
+/* Placeholder shown in drop position */
+.rundown-item.ghost-class {
+  opacity: 0.5;
+  background: #e3f2fd !important;
+  transform: scale(0.98);
+  border: 2px dashed #2196F3 !important;
+}
+
+/* Applied when item is selected for dragging */
+.rundown-item.chosen-class {
+  opacity: 0.8;
+  background: #fff3cd !important;
+  transform: scale(1.02);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  border: 2px solid #ffc107 !important;
+}
+
+/* Applied to the item being dragged */
+.rundown-item.drag-class {
+  opacity: 0.7;
+  background: #d1ecf1 !important;
+  transform: rotate(2deg) scale(1.05);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+  z-index: 2000;
+  border: 2px solid #17a2b8 !important;
 }
 </style>
 
