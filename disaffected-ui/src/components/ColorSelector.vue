@@ -625,7 +625,7 @@ export default {
   },
   watch: {
     baseColor: {
-      handler(_newVal, _oldVal) {
+      handler() {
         if (this.isInitializing) {
           return;
         }
@@ -634,7 +634,7 @@ export default {
       deep: true
     },
     variant: {
-      handler(_newVal, _oldVal) {
+      handler() {
         if (this.isInitializing) {
           return;
         }

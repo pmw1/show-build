@@ -207,6 +207,12 @@ Key environment variables (see `docker-compose.yml`):
 - **Frontend build**: Clear `node_modules` and reinstall if build fails
 - **MQTT issues**: Check mosquitto broker container
 
+### Vue App Mounting Issues ⚠️
+**CRITICAL**: If experiencing unexplainable errors, duplications, or old app versions flashing, immediately check Vue app mounting logic:
+- See `/docs/VUE_APP_MOUNTING_WARNING.md` for comprehensive diagnosis
+- Look for duplicate Vue app instances in console and browser DevTools
+- Check for missing `unmount()` calls in main.js during hot module reload
+
 ### Episode Data Loading Issues
 - **Race Condition Logic**: Avoid implementing race condition prevention logic in `ContentEditor.vue` that blocks duplicate calls. This can prevent legitimate episode loading. The component should handle loading states naturally without blocking subsequent calls.
 - **Field Name Consistency**: Frontend expects `duration` field from episode info.md files, not `total_runtime`. Ensure all components use `duration` consistently.
