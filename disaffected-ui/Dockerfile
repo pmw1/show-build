@@ -1,4 +1,27 @@
 # Frontend Dockerfile for Vue.js application
+
+# Development stage
+FROM node:18-alpine as development
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install --legacy-peer-deps
+
+# Copy source code (this will be overridden by volume mounts in dev)
+COPY . .
+
+# Expose port 8080 for Vue dev server
+EXPOSE 8080
+
+# Start Vue development server
+CMD ["npm", "run", "serve", "--", "--host", "0.0.0.0", "--port", "8080"]
+
+# Build stage for production
 FROM node:18-alpine as build-stage
 
 # Set working directory

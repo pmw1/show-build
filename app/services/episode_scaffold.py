@@ -10,8 +10,7 @@ from sqlalchemy import desc
 from fastapi import HTTPException
 
 from models_episode import BlueprintTemplate, BlueprintNode
-from models_episode import EpisodeTemplate
-from models_episode import EpisodeTemplateCreate, EpisodeTemplateResponse, BlueprintTemplateResponse
+from models_episode import BlueprintCreate, BlueprintResponse, BlueprintTemplateResponse
 from core.media_paths import MediaPathManager
 import logging
 
@@ -27,14 +26,15 @@ class EpisodeScaffoldService:
     async def get_next_episode_number(self) -> str:
         """Generate next available episode number"""
         try:
-            # Get highest episode number from database
-            latest_episode = self.db.query(EpisodeTemplate).order_by(desc(EpisodeTemplate.episode_number)).first()
-            
+            # Get highest episode number from main episodes table
+            from models_v2 import Episode
+            latest_episode = self.db.query(Episode).order_by(desc(Episode.episode_number)).first()
+
             if latest_episode:
                 try:
                     latest_num = int(latest_episode.episode_number)
                     next_num = latest_num + 1
-                except ValueError:
+                except (ValueError, TypeError):
                     # Handle non-numeric episode numbers
                     logger.warning(f"Non-numeric episode number found: {latest_episode.episode_number}")
                     next_num = 1
@@ -75,19 +75,44 @@ class EpisodeScaffoldService:
     async def validate_episode_number(self, episode_number: str) -> bool:
         """Validate that episode number is available"""
         # Check database
-        existing_episode = self.db.query(EpisodeTemplate).filter(
-            EpisodeTemplate.episode_number == episode_number
+        from models_v2 import Episode
+        existing_episode = self.db.query(Episode).filter(
+            Episode.episode_number == int(episode_number)
         ).first()
-        
+
         if existing_episode:
             return False
-        
+
         # Check filesystem
         episode_path = self.media_paths.get_episode_path(episode_number)
         if episode_path.exists():
             return False
-        
+
         return True
+    
+    async def get_episode_conflicts(self, episode_number: str) -> Dict[str, Any]:
+        """Get detailed information about episode conflicts"""
+        from models_v2 import Episode
+        conflicts = []
+
+        # Check episodes table
+        existing_episode = self.db.query(Episode).filter(
+            Episode.episode_number == int(episode_number)
+        ).first()
+        if existing_episode:
+            conflicts.append(f"episodes database table (id: {existing_episode.id})")
+
+        
+        # Check filesystem
+        episode_path = self.media_paths.get_episode_path(episode_number)
+        if episode_path.exists():
+            conflicts.append(f"filesystem directory: {episode_path}")
+        
+        return {
+            "has_conflicts": len(conflicts) > 0,
+            "conflicts": conflicts,
+            "episode_number": episode_number
+        }
     
     async def create_directory_structure(self, template: BlueprintTemplate, episode_path: Path) -> None:
         """Create directory structure from blueprint template"""
@@ -145,7 +170,8 @@ class EpisodeScaffoldService:
         
         # Set episode-specific fields
         info_metadata["episode_number"] = episode_number
-        info_metadata["id"] = "0"  # Placeholder, will be updated by other systems
+        # Use AssetID if provided in metadata, otherwise use placeholder
+        info_metadata["id"] = metadata.get("asset_id", "0") if metadata else "0"
         
         # Generate YAML frontmatter
         frontmatter_lines = ["---"]
@@ -166,18 +192,23 @@ class EpisodeScaffoldService:
         
         return "\n".join(frontmatter_lines)
     
-    async def create_episode(self, request: EpisodeTemplateCreate, user_id: Optional[int] = None, 
-                           organization_id: Optional[int] = None) -> EpisodeTemplateResponse:
-        """Create a new episode from blueprint template"""
+    async def create_episode(self, request: BlueprintCreate, user_id: Optional[int] = None,
+                           organization_id: Optional[int] = None) -> BlueprintResponse:
+        """Create a new episode from blueprint template with AssetID generation"""
         try:
             # Generate episode number if not provided
             episode_number = request.episode_number
             if not episode_number:
                 episode_number = await self.get_next_episode_number()
             
-            # Validate episode number
-            if not await self.validate_episode_number(episode_number):
-                raise HTTPException(status_code=409, detail=f"Episode {episode_number} already exists")
+            # Validate episode number with detailed conflict reporting
+            conflict_info = await self.get_episode_conflicts(episode_number)
+            if conflict_info["has_conflicts"]:
+                conflicts_text = ", ".join(conflict_info["conflicts"])
+                raise HTTPException(
+                    status_code=409, 
+                    detail=f"Episode {episode_number} already exists in: {conflicts_text}"
+                )
             
             # Get template
             template = None
@@ -193,35 +224,83 @@ class EpisodeScaffoldService:
                 if not template:
                     raise HTTPException(status_code=404, detail="No default blueprint template found")
             
+            # Generate AssetID via the unified endpoint (CRITICAL: all AssetIDs must be logged)
+            from services.asset_id import AssetIDService
+            user_identifier = str(user_id) if user_id else "episode_scaffold_service"
+            
+            asset_id = AssetIDService.request_asset_id(
+                db=self.db,
+                entity_type="episode",
+                reason="episode_scaffold_create",
+                requested_by=user_identifier,
+                linked_to=[],
+                context={
+                    "episode_number": episode_number,
+                    "template_id": template.id,
+                    "template_name": template.name,
+                    "title": request.title,
+                    "source": "episode_scaffold_service",
+                    "blueprint_template_type": template.template_type
+                }
+            )
+            
             # Create episode directory structure
             episode_path = self.media_paths.get_episode_path(episode_number)
             await self.create_directory_structure(template, episode_path)
             
-            # Generate and write info.md
-            info_content = await self.generate_info_md(template, episode_number, request.episode_metadata)
+            # Prepare enhanced metadata with AssetID
+            enhanced_metadata = request.episode_metadata.copy() if request.episode_metadata else {}
+            enhanced_metadata.update({
+                "asset_id": asset_id,
+                "episode_number": episode_number,
+                "template_id": template.id,
+                "template_name": template.name
+            })
+            
+            # Generate and write info.md with AssetID included
+            info_content = await self.generate_info_md(template, episode_number, enhanced_metadata)
             info_file = episode_path / "info.md"
             info_file.write_text(info_content, encoding='utf-8')
             
-            # Create database record
-            episode = EpisodeTemplate(
-                episode_number=episode_number,
-                title=request.title,
-                description=request.description,
-                episode_metadata=request.episode_metadata,
-                template_id=template.id,
+            # Create record in main episodes table
+            from models_v2 import Episode
+            from datetime import datetime
+
+            episodes_record = Episode(
+                asset_id=asset_id,
+                season_id=1,  # Default season
+                episode_number=int(episode_number),
+                title=request.title.strip() if request.title and request.title.strip() else f"Episode {episode_number}",  # Provide default title if None/empty
+                slug=f"episode-{episode_number}",
                 status="draft",
+                template_type=template.template_type,
+                template_name=template.name,
+                # Store airdate if provided
+                air_date=datetime.fromisoformat(enhanced_metadata['airdate']) if enhanced_metadata.get('airdate') else None,
+                duration_formatted=enhanced_metadata.get('duration', '01:00:00')
+            )
+
+            self.db.add(episodes_record)
+            self.db.commit()
+            self.db.refresh(episodes_record)
+
+            logger.info(f"Created episode {episode_number} with AssetID {asset_id} using template {template.name} in episodes table")
+
+            # Return response based on the episodes record
+            return BlueprintResponse(
+                id=episodes_record.id,
+                episode_number=episode_number,
+                title=episodes_record.title,
+                description="",
+                template_id=template.id,
+                status=episodes_record.status,
                 created_by=user_id,
                 organization_id=organization_id,
-                file_path=str(episode_path)
+                file_path=str(episode_path),
+                episode_metadata=enhanced_metadata,
+                created_at=episodes_record.created_at,
+                updated_at=episodes_record.updated_at
             )
-            
-            self.db.add(episode)
-            self.db.commit()
-            self.db.refresh(episode)
-            
-            logger.info(f"Created episode {episode_number} using template {template.name}")
-            
-            return EpisodeTemplateResponse.from_orm(episode)
             
         except HTTPException:
             self.db.rollback()
@@ -231,20 +310,54 @@ class EpisodeScaffoldService:
             logger.error(f"Error creating episode: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to create episode: {e}")
     
-    async def get_episode_by_number(self, episode_number: str) -> Optional[EpisodeTemplateResponse]:
+    async def get_episode_by_number(self, episode_number: str) -> Optional[BlueprintResponse]:
         """Get episode information by number"""
-        episode = self.db.query(EpisodeTemplate).filter(
-            EpisodeTemplate.episode_number == episode_number
+        from models_v2 import Episode
+        episode = self.db.query(Episode).filter(
+            Episode.episode_number == int(episode_number)
         ).first()
-        
+
         if episode:
-            return EpisodeTemplateResponse.from_orm(episode)
+            # Convert Episode to BlueprintResponse format
+            episode_path = self.media_paths.get_episode_path(episode_number)
+            return BlueprintResponse(
+                id=episode.id,
+                episode_number=str(episode.episode_number).zfill(4),
+                title=episode.title,
+                description="",
+                template_id=None,
+                status=episode.status,
+                created_by=None,
+                organization_id=None,
+                file_path=str(episode_path),
+                episode_metadata={},
+                created_at=episode.created_at,
+                updated_at=episode.updated_at
+            )
         return None
     
-    async def list_episodes(self, skip: int = 0, limit: int = 100) -> List[EpisodeTemplateResponse]:
+    async def list_episodes(self, skip: int = 0, limit: int = 100) -> List[BlueprintResponse]:
         """List all episodes"""
-        episodes = self.db.query(EpisodeTemplate).order_by(
-            desc(EpisodeTemplate.episode_number)
+        from models_v2 import Episode
+        episodes = self.db.query(Episode).order_by(
+            desc(Episode.episode_number)
         ).offset(skip).limit(limit).all()
-        
-        return [EpisodeTemplateResponse.from_orm(episode) for episode in episodes]
+
+        results = []
+        for episode in episodes:
+            episode_path = self.media_paths.get_episode_path(str(episode.episode_number).zfill(4))
+            results.append(BlueprintResponse(
+                id=episode.id,
+                episode_number=str(episode.episode_number).zfill(4),
+                title=episode.title,
+                description="",
+                template_id=None,
+                status=episode.status,
+                created_by=None,
+                organization_id=None,
+                file_path=str(episode_path),
+                episode_metadata={},
+                created_at=episode.created_at,
+                updated_at=episode.updated_at
+            ))
+        return results

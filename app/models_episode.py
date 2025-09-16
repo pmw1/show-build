@@ -25,7 +25,7 @@ class BlueprintTemplate(Base):
 
     # Relationships
     nodes = relationship("BlueprintNode", back_populates="template", cascade="all, delete-orphan")
-    episodes = relationship("EpisodeTemplate", back_populates="template")
+    episodes = relationship("Blueprint", back_populates="template")
 
 class BlueprintNode(Base):
     """Hierarchical structure for blueprint templates"""
@@ -45,9 +45,9 @@ class BlueprintNode(Base):
     parent = relationship("BlueprintNode", remote_side=[id], back_populates="children")
     children = relationship("BlueprintNode", back_populates="parent", cascade="all, delete-orphan")
 
-class EpisodeTemplate(Base):
-    """Episodes created through scaffolding"""
-    __tablename__ = "episode_templates"
+class Blueprint(Base):
+    """Episodes created through scaffolding (blueprint-based episodes)"""
+    __tablename__ = "blueprints"
 
     id = Column(Integer, primary_key=True, index=True)
     episode_number = Column(String(10), unique=True, nullable=False, index=True)
@@ -107,21 +107,21 @@ class BlueprintNodeResponse(BlueprintNodeBase):
     class Config:
         from_attributes = True
 
-class EpisodeTemplateBase(BaseModel):
+class BlueprintBase(BaseModel):
     episode_number: str
     title: Optional[str] = None
     description: Optional[str] = None
     episode_metadata: Optional[Dict[str, Any]] = None
     status: str = "draft"
 
-class EpisodeTemplateCreate(BaseModel):
+class BlueprintCreate(BaseModel):
     episode_number: Optional[str] = None  # Auto-generate if not provided
     template_id: Optional[int] = None     # Use default template if not provided
     title: Optional[str] = None
     description: Optional[str] = None
     episode_metadata: Optional[Dict[str, Any]] = None
 
-class EpisodeTemplateResponse(EpisodeTemplateBase):
+class BlueprintResponse(BlueprintBase):
     id: int
     template_id: Optional[int] = None
     created_by: Optional[int] = None
