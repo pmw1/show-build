@@ -5,7 +5,11 @@
       <v-toolbar-title>Content Editor</v-toolbar-title>
       <v-spacer></v-spacer>
       <v-toolbar-items>
-        <v-btn text @click="saveAllContent">Save</v-btn>
+        <v-btn text @click="reloadFromDatabase">
+          <v-icon start>mdi-refresh</v-icon>
+          Reload
+        </v-btn>
+        <v-btn text @click="saveEverything">Save</v-btn>
         <v-btn text>Publish</v-btn>
       </v-toolbar-items>
     </v-toolbar>
@@ -15,13 +19,21 @@
       :title="currentShowTitle"
       :episode-info="currentEpisodeInfoText"
       :episode-number="currentEpisodeNumber"
+      :episode-asset-id="currentEpisodeAssetId"
+      :slug="currentEpisodeSlug"
+      :subtitle="currentEpisodeSubtitle"
+      :description="currentEpisodeDescription"
       :air-date="currentAirDate"
       :production-status="currentProductionStatus"
       :duration="duration"
       :episodes="episodes"
       :production-statuses="productionStatuses"
-      @update:airDate="val => currentAirDate = val"
-      @update:productionStatus="val => currentProductionStatus = val"
+      @update:airDate="handleAirDateChange"
+      @update:productionStatus="handleProductionStatusChange"
+      @update:title="handleTitleChange"
+      @update:slug="handleSlugChange"
+      @update:subtitle="handleSubtitleChange"
+      @update:description="handleDescriptionChange"
       @episode-changed="handleEpisodeChange"
     />
 
@@ -30,14 +42,26 @@
       <!-- Rundown Panel -->
       <RundownPanel
         v-if="showRundownPanel"
+        :episode="currentEpisode"
         :items="rundownItems"
         :selected-item-index="selectedItemIndex"
         :loading="loadingRundown"
         :panel-width="rundownPanelWidth"
+        :collapse-break-regions="interfaceSettings.collapseBreakRegions"
+        :save-state="episodeSaveState"
         @select-item="selectRundownItem"
-        @new-item="showNewItemModal = true"
+        @new-item="handleNewItemClick"
+        @delete-selected="deleteSelectedItem"
+        @delete-item="handleDeleteItem"
+        @delete-region="handleDeleteRegion"
+        @rundown-cleared="handleRundownCleared"
         @toggle-width="toggleRundownWidth"
         @close="showRundownPanel = false"
+        @reorder-items="handleRundownReorder"
+        @sync-order="syncRundownOrder"
+        @create-region="handleCreateRegion"
+        @select-region="handleRegionSelection"
+        @save="saveEverything"
       />
       
       <!-- Reopen Rundown Button (when panel is closed) -->
@@ -61,16 +85,24 @@
       <div class="editor-panel">
         <EditorPanel
           :item="currentRundownItem"
+          :current-item-metadata="currentItemMetadata"
           v-model:script-content="scriptContent"
           v-model:scratch-content="scratchContent"
+          v-model:raw-markdown-content="rawMarkdownContent"
           v-model:editor-mode="editorMode"
           @update:editor-mode="editorMode = $event"
           :has-unsaved-changes="hasUnsavedChanges"
+          :has-unsaved-rundown-changes="hasUnsavedRundownChanges"
+          :save-state="episodeSaveState"
           :show-rundown-panel="showRundownPanel"
-          @save="saveAllContent"
+          :show-metadata-panel="showMetadataPanel"
+          @save="saveCurrentItem"
+          @save-all="saveEverything"
           @toggle-rundown-panel="showRundownPanel = !showRundownPanel"
+          @toggle-metadata-panel="showMetadataPanel = !showMetadataPanel"
           @show-asset-browser-modal="showAssetBrowserModal = true"
           @show-template-manager-modal="showTemplateManagerModal = true"
+          @show-img-modal="showImgCueModal = true"
           @show-gfx-modal="showGfxModal = true"
           @show-fsq-modal="showFsqModal = true"
           @show-sot-modal="showSotModal = true"
@@ -82,7 +114,40 @@
           @show-live-modal="showLiveModal = true"
           @content-change="onContentChange"
           @metadata-change="onMetadataChange"
+          @update:rawMarkdownContent="rawMarkdownContent = $event"
+          @update:slug="handleSlugChangeFromEditor"
+          @update:duration="handleDurationChangeFromEditor"
+          @insert-cue="handleInsertCue"
         />
+      </div>
+
+      <!-- Metadata Panel -->
+      <MetadataPanel
+        v-if="showMetadataPanel"
+        :item="currentRundownItem"
+        :panel-width="metadataPanelWidth"
+        :item-types="rundownItemTypes"
+        @update-field="handleMetadataFieldUpdate"
+        @toggle-width="toggleMetadataWidth"
+        @close="showMetadataPanel = false"
+        @reset-fields="resetMetadataFields"
+      />
+      
+      <!-- Reopen Metadata Button (when panel is closed) -->
+      <div v-else-if="currentRundownItem" class="metadata-reopen-button">
+        <v-btn
+          icon
+          color="secondary"
+          variant="elevated"
+          size="small"
+          @click="showMetadataPanel = true"
+          class="reopen-btn"
+        >
+          <v-icon>mdi-information-outline</v-icon>
+          <v-tooltip activator="parent" location="left">
+            Show Metadata Panel
+          </v-tooltip>
+        </v-btn>
       </div>
     </div>
 
@@ -120,17 +185,36 @@
     <LiveModal v-model:show="showLiveModal" @submit="submitLive" />
 
     <NewItemModal
+      v-if="showNewItemModal"
       v-model:show="showNewItemModal"
-      v-model:valid="newItemFormValid"
-      v-model:type="newItemType"
-      v-model:slug="newItemSlug"
-      v-model:duration="newItemDuration"
-      v-model:description="newItemDescription"
       :loading="creatingNewItem"
-      :item-types="rundownItemTypes"
-      :duration-rules="durationRules"
-      @create="createNewItem"
-      @cancel="cancelNewItem"
+      :rundownItemTypes="rundownItemTypes"
+      @submit="createNewItem"
+    />
+    
+    <NewGFXModal
+      v-model:show="showNewGFXModal"
+      @submit="createGFXItem"
+    />
+    
+    <NewSOTModal
+      v-model:show="showNewSOTModal"
+      @submit="createSOTItem"
+    />
+    
+    <DeleteCueModal
+      v-model:show="showDeleteCueModal"
+      :cue-data="selectedCueData"
+      :start-line="selectedCueStartLine"
+      :end-line="selectedCueEndLine"
+      @delete="deleteCue"
+      @cancel="cancelDeleteCue"
+    />
+
+    <ImgCueModal
+      v-model:show="showImgCueModal"
+      :current-episode="currentEpisodeNumber"
+      @submit="handleImgCueSubmit"
     />
   </div>
 </template>
@@ -138,8 +222,9 @@
 <script>
 import axios from 'axios';
 // import { API_BASE_URL } from '@/config.js'; // Temporarily remove to simplify
-import EditorPanel from './EditorPanel.vue';
+import EditorPanel from './content-editor/EditorPanel.vue';
 import RundownPanel from './content-editor/RundownPanel.vue';
+import MetadataPanel from './content-editor/MetadataPanel.vue';
 import AssetBrowserModal from './modals/AssetBrowserModal.vue';
 import TemplateManagerModal from './modals/TemplateManagerModal.vue';
 import GfxModal from './modals/GfxModal.vue';
@@ -152,6 +237,10 @@ import VoxModal from './modals/VoxModal.vue';
 import MusModal from './modals/MusModal.vue';
 import LiveModal from './modals/LiveModal.vue';
 import NewItemModal from './modals/NewItemModal.vue';
+import NewGFXModal from './modals/NewGFXModal.vue';
+import NewSOTModal from './modals/NewSOTModal.vue';
+import DeleteCueModal from './content-editor/modals/DeleteCueModal.vue';
+import ImgCueModal from './content-editor/modals/ImgCueModal.vue';
 import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
 import { getColorValue, resolveVuetifyColor, loadColorsFromDatabase } from '../utils/themeColorMap';
 import { debounce } from 'lodash-es';
@@ -162,6 +251,8 @@ export default {
   components: {
     EditorPanel,
     RundownPanel,
+    // eslint-disable-next-line vue/no-unused-components
+    MetadataPanel,
     AssetBrowserModal,
     TemplateManagerModal,
     GfxModal,
@@ -174,7 +265,11 @@ export default {
     VoxModal,
     PkgModal,
     ShowInfoHeader,
-    NewItemModal
+    NewItemModal,
+    NewGFXModal,
+    NewSOTModal,
+    DeleteCueModal,
+    ImgCueModal
   },
   
   async mounted() {
@@ -183,6 +278,9 @@ export default {
     // Load item types from single source of truth
     this.rundownItemTypes = getItemTypesForDropdown();
     console.log('Loaded item types from config:', this.rundownItemTypes.length, 'types');
+    
+    // Add keyboard event listener for delete functionality
+    document.addEventListener('keydown', this.handleKeydown);
     
     // Clear all old localStorage data that might interfere with colors
     console.log('Clearing old localStorage colors and related data');
@@ -203,7 +301,10 @@ export default {
     } catch (error) {
       console.warn('Failed to load colors from database:', error);
     }
-    
+
+    // Load interface settings
+    await this.loadInterfaceSettings();
+
     await this.fetchShowInfo();
     await this.fetchEpisodes();
     
@@ -211,6 +312,11 @@ export default {
     console.log('Current episode from prop:', this.episode);
     console.log('Current episode from data:', this.currentEpisodeNumber);
     console.log('Mounted complete, episode loading handled by fetchEpisodes()');
+  },
+
+  beforeUnmount() {
+    // Clean up keyboard event listener
+    document.removeEventListener('keydown', this.handleKeydown);
   },
 
   created() {
@@ -227,6 +333,16 @@ export default {
   },
   
   watch: {
+    showNewItemModal: {
+      handler(newVal, oldVal) {
+        console.log('showNewItemModal changed from', oldVal, 'to', newVal);
+        if (newVal) {
+          console.log('Modal is opening, rundownItemTypes:', this.rundownItemTypes);
+        }
+      },
+      immediate: true
+    },
+    
     rundownItems: {
       handler(newVal, oldVal) {
         console.log('rundownItems changed!');
@@ -253,10 +369,18 @@ export default {
       // Layout state
       showRundownPanel: true,
       rundownPanelWidth: 'wide', // 'narrow' or 'wide'
-      
+      showMetadataPanel: true,
+      metadataPanelWidth: 'wide', // 'narrow' or 'wide'
+
+      // Interface settings - will be loaded from database
+      interfaceSettings: {
+        collapseBreakRegions: true  // Default to true, will be overridden by database settings
+      },
+
       // Editor state
-      editorMode: 'script', // 'script', 'scratch', 'metadata', or 'code'
+      editorMode: 'script', // 'script', 'scratch', or 'code'
       selectedItemIndex: -1, // Start with no selection
+      selectedRegion: null, // Currently selected region for item placement
       editingItemIndex: -1, // Index of item being edited (grows by 2%)
       hasUnsavedChanges: false,
       loadingRundown: false, // Start ready to load
@@ -266,6 +390,9 @@ export default {
       // Show Information
       showInfo: {},
       currentEpisodeNumber: '', // This will be updated from session
+      currentEpisodeSlug: '',
+      currentEpisodeSubtitle: '',
+      currentEpisodeDescription: '',
       currentAirDate: '',
       currentProductionStatus: 'draft',
       productionStatuses: [
@@ -287,10 +414,12 @@ export default {
       autoSaveTimeout: null,
       hoveredItemIndex: -1, // Index of the item being hovered
       dragStartIndex: -1, // Index of the item being dragged
+      hasUnsavedRundownChanges: false, // Track if any items in rundown need saving
       
       // Content
       scriptContent: '',
       scratchContent: '',
+      rawMarkdownContent: '',
       
       // Asset management
       showAssetBrowserModal: false, // Standardized name
@@ -523,19 +652,31 @@ Good night!
       ],
       */
       
-      // Metadata editing
+      // Metadata editing - comprehensive frontmatter structure
       currentItemMetadata: {
+        // Core identification
+        AssetID: '',
         title: '',
         type: 'segment',
         slug: '',
-        duration: '00:05:30',
+        subtitle: '',
+        
+        // Production details
         description: '',
+        duration: '00:00:00:00',
+        status: 'draft',
+        order: 1,
+        airdate: '',
+        priority: '',
+        
+        // People and resources
         guests: '',
+        resources: '',
         tags: '',
-        sponsor: '',
-        campaign: '',
-        segment_number: 1,
-        live_status: 'live'
+        
+        // System information
+        server_message: '',
+        created_at: ''
       },
       customMetadataYaml: '',
       itemTypes: [
@@ -559,7 +700,18 @@ Good night!
       
       // Rundown management state
       showNewItemModal: false,
+      showNewGFXModal: false,
+      showNewSOTModal: false,
       showRundownOptions: false,
+
+      // Cue Modals
+      showImgCueModal: false,
+
+      // Delete Cue Modal
+      showDeleteCueModal: false,
+      selectedCueData: {},
+      selectedCueStartLine: 0,
+      selectedCueEndLine: 0,
       
       // New item form state
       newItemFormValid: false,
@@ -586,7 +738,7 @@ Good night!
       graphicFile: null,
       
       // Duration for the episode
-      duration: '00:00:00',
+      duration: '00:00:00:00',
 
       // Show title for the current episode
       showTitle: 'Disaffected',
@@ -648,6 +800,29 @@ Good night!
     currentEpisodeInfoText() {
       const info = this.currentEpisodeInfo;
       return `${info.title} • ${info.status}`;
+    },
+
+    currentEpisodeAssetId() {
+      // Get asset ID from current episode info or first rundown item
+      if (this.rundownItems && this.rundownItems.length > 0) {
+        // Try to get from first rundown item
+        const firstItem = this.rundownItems[0];
+        if (firstItem && (firstItem.AssetID || firstItem.asset_id)) {
+          // Extract show-level asset ID (remove item suffix if present)
+          const assetId = firstItem.AssetID || firstItem.asset_id;
+          // Show asset IDs typically look like "DIS-2024-0238" while items have "-001", "-002" etc.
+          // Return the base show asset ID
+          return assetId.includes('-') ? assetId.split('-').slice(0, 3).join('-') : assetId;
+        }
+      }
+      
+      // Fallback: generate from episode number if available
+      if (this.currentEpisodeNumber) {
+        const year = new Date().getFullYear();
+        return `DIS-${year}-${this.currentEpisodeNumber}`;
+      }
+      
+      return '';
     },
     
     // Layout width calculations for consistent sizing
@@ -727,11 +902,51 @@ Try dropping an image or video file here!`
     },
     durationRules() {
       return [
-        v => !v || /^\d{2}:\d{2}:\d{2}$/.test(v) || 'Duration must be in HH:MM:SS format'
+        v => !v || /^\d{2}:\d{2}:\d{2}:\d{2}$/.test(v) || 'Duration must be in HH:MM:SS:FF format'
       ]
+    },
+
+    // Unified save state for both save buttons
+    episodeSaveState() {
+      // Ensure we have safe defaults during initialization
+      const hasChanges = Boolean(this.hasUnsavedChanges || this.hasUnsavedRundownChanges)
+
+      return {
+        hasChanges,
+        buttonText: hasChanges ? 'Save Episode' : 'Synchronized',
+        buttonColor: hasChanges ? 'primary' : 'success',
+        buttonIcon: hasChanges ? 'mdi-content-save' : 'mdi-check-circle',
+        isDisabled: !hasChanges,
+        tooltip: hasChanges
+          ? 'Save Episode & Rundown (unsaved changes detected)'
+          : 'Episode is synchronized - no changes to save'
+      }
     }
   },
   methods: {
+    // Load interface settings from database
+    async loadInterfaceSettings() {
+      try {
+        const response = await fetch('/api/settings/', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
+
+        if (response.ok) {
+          const settings = await response.json()
+
+          // Load interface settings
+          if (settings.interface) {
+            this.interfaceSettings = { ...this.interfaceSettings, ...settings.interface }
+            console.log('Interface settings loaded:', this.interfaceSettings)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load interface settings:', error)
+      }
+    },
+
     async handleEpisodeChange(newEpisodeNumber) {
       console.log('Episode change requested to:', newEpisodeNumber);
       
@@ -755,6 +970,38 @@ Try dropping an image or video file here!`
       } catch (error) {
         console.error('Failed to change episode:', error);
         alert('Failed to load the selected episode. Please try again.');
+      }
+    },
+
+    async reloadFromDatabase() {
+      console.log('Reloading all content from database...');
+
+      try {
+        // Show loading state
+        this.loadingRundown = true;
+
+        // Clear current state
+        this.rundownItems = [];
+        this.selectedItemIndex = -1;
+        this.scriptContent = '';
+        this.scratchContent = '';
+        this.rawMarkdownContent = '';
+
+        // Reload episode data and rundown
+        if (this.currentEpisodeNumber) {
+          await this.loadEpisode(this.currentEpisodeNumber);
+          console.log('Successfully reloaded all content from database');
+
+          // Show success message
+          this.$emit('show-snackbar', 'Content reloaded from database', 'success');
+        } else {
+          console.warn('No current episode to reload');
+        }
+      } catch (error) {
+        console.error('Failed to reload from database:', error);
+        this.$emit('show-snackbar', 'Failed to reload content from database', 'error');
+      } finally {
+        this.loadingRundown = false;
       }
     },
 
@@ -917,12 +1164,12 @@ Try dropping an image or video file here!`
       return num ? num.padStart(4, '0') : '';
     },
 
-    async loadEpisode(episodeNumber, skipSessionUpdate = false) {
+    async loadEpisode(episodeNumber, skipSessionUpdate = false, forceReload = false) {
       const paddedNumber = this.padEpisodeNumber(episodeNumber);
       if (!paddedNumber) return;
 
-      // Skip if already loaded with content
-      if (this.currentEpisodeNumber === paddedNumber && this.rundownItems.length > 0) {
+      // Skip if already loaded with content (unless force reload is requested)
+      if (!forceReload && this.currentEpisodeNumber === paddedNumber && this.rundownItems.length > 0) {
         console.log('Episode already loaded with items');
         return;
       }
@@ -952,7 +1199,9 @@ Try dropping an image or video file here!`
           this.currentProductionStatus = info.status || 'draft';
           this.duration = info.duration || '01:00:00';
           this.showTitle = info.title || 'Untitled';
-          this.currentShowSubtitle = info.subtitle || 'No Subtitle';
+          this.currentEpisodeSlug = info.slug || '';
+          this.currentEpisodeSubtitle = info.subtitle || '';
+          this.currentEpisodeDescription = info.description || '';
           console.log('After setting - Air Date:', this.currentAirDate, 'Status:', this.currentProductionStatus, 'Duration:', this.duration);
         }
 
@@ -960,11 +1209,35 @@ Try dropping an image or video file here!`
         if (rundownResponse.status === 'fulfilled') {
           const items = rundownResponse.value.data.items || [];
           this.rundownItems = items;
-          this.selectedItemIndex = items.length > 0 ? 0 : -1;
-          if (this.selectedItemIndex !== -1 && items[0]) {
-            this.loadItemContent(items[0]);
+
+          // Restore selected item from sessionStorage or default to first item
+          let restoredIndex = -1;
+          if (items.length > 0) {
+            const sessionKey = `selectedItem_${paddedNumber}`;
+            const savedIndex = sessionStorage.getItem(sessionKey);
+
+            if (savedIndex !== null) {
+              const parsedIndex = parseInt(savedIndex);
+              // Validate that the saved index is still valid
+              if (parsedIndex >= 0 && parsedIndex < items.length) {
+                restoredIndex = parsedIndex;
+                console.log(`Restored selected item index ${restoredIndex} from session for episode ${paddedNumber}`);
+              } else {
+                console.log(`Saved index ${parsedIndex} is invalid for ${items.length} items, defaulting to first item`);
+                restoredIndex = 0;
+              }
+            } else {
+              // No saved selection, default to first item
+              restoredIndex = 0;
+              console.log('No saved selection found, defaulting to first item');
+            }
           }
-          console.log('Loaded episode', paddedNumber, 'with', items.length, 'items');
+
+          this.selectedItemIndex = restoredIndex;
+          if (this.selectedItemIndex !== -1 && items[this.selectedItemIndex]) {
+            this.loadItemContent(items[this.selectedItemIndex]);
+          }
+          console.log('Loaded episode', paddedNumber, 'with', items.length, 'items, selected index:', this.selectedItemIndex);
         } else {
           console.error('Failed to load rundown:', rundownResponse.reason);
           this.rundownError = `Failed to load rundown for episode ${paddedNumber}`;
@@ -984,36 +1257,54 @@ Try dropping an image or video file here!`
         this.loadingRundown = false;
       }
     },
-    async saveAllContent() {
-      const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
-      if (!paddedId || this.selectedItemIndex < 0 || !this.currentRundownItem) {
+    // Save just the current item
+    async saveCurrentItem() {
+      if (this.selectedItemIndex < 0 || !this.currentRundownItem) {
         console.log('Cannot save - no valid item selected');
         return;
       }
-      
+
       this.saving = true;
       try {
-        const item = this.currentRundownItem;
-        const payload = {
-          slug: item.slug,
-          script: this.scriptContent,
-          scratch: this.scratchContent,
-          metadata: item.metadata || {}
-        };
+        // Use centralized rundown save function with current editor content
+        const result = await this.saveRundownItems({
+          showSuccessMessage: true,
+          includCurrentEditorContent: true,
+          customMessage: 'Current item saved successfully'
+        });
+
+        if (result.success) {
+          this.hasUnsavedChanges = false;
+          console.log('✅ Current item saved via centralized function');
+        } else {
+          throw new Error(result.error);
+        }
         
-        console.log('Saving content for item:', item.slug, 'in episode:', paddedId);
+        // Update the rundown item with the latest data and current order
+        if (this.rundownItems && this.rundownItems[this.selectedItemIndex]) {
+          // Apply current index as order (1-based)
+          const currentOrder = this.selectedItemIndex + 1;
+          this.currentItemMetadata.order = currentOrder;
+          
+          this.rundownItems[this.selectedItemIndex] = {
+            ...this.rundownItems[this.selectedItemIndex],
+            script: this.scriptContent,
+            scratch: this.scratchContent,
+            order: currentOrder, // Update order to match current position
+            ...this.currentItemMetadata
+          };
+          
+          console.log(`Updated item order to ${currentOrder} based on current index ${this.selectedItemIndex}`);
+        }
         
-        // Save to the specific item endpoint
-        await axios.put(`/api/episodes/${paddedId}/items/${item.id}`, payload);
-        
-        this.hasUnsavedChanges = false;
-        console.log('Content saved successfully');
+        // Check if there are still unsaved items in the rundown
+        this.checkForUnsavedRundownChanges();
         
         // Show success message briefly
-        window.showUrgentFlash?.("Saved!", "green", 1000);
+        window.showUrgentFlash?.("Current item saved!", "green", 1000);
         
       } catch (error) {
-        console.error('Failed to save content:', error);
+        console.error('Failed to save current item:', error);
         this.hasUnsavedChanges = true;
         
         // Show error message
@@ -1021,6 +1312,235 @@ Try dropping an image or video file here!`
       } finally {
         this.saving = false;
       }
+    },
+
+    // Sync rundown order - update order values to match current positions
+    async syncRundownOrder() {
+      if (!this.rundownItems || this.rundownItems.length === 0) {
+        window.showUrgentFlash?.('No rundown items to sync', 'orange', 2000);
+        return;
+      }
+
+      try {
+        console.log('Starting rundown order sync...');
+        
+        // Check if any items need order updates
+        let needsUpdate = false;
+        this.rundownItems.forEach((item, index) => {
+          const expectedOrder = (index + 1) * 10;
+          if (item.order !== expectedOrder) {
+            needsUpdate = true;
+          }
+        });
+
+        if (!needsUpdate) {
+          window.showUrgentFlash?.('Order already matches positions', 'blue', 2000);
+          return;
+        }
+
+        // Mark as having unsaved changes and save all content
+        // The saveAllContent method will automatically update order values to match positions
+        this.hasUnsavedChanges = true;
+        
+        await this.saveAllContent();
+        
+        window.showUrgentFlash?.('Rundown order synchronized!', 'green', 2000);
+        
+      } catch (error) {
+        console.error('Error syncing rundown order:', error);
+        window.showUrgentFlash?.('Failed to sync rundown order', 'red', 3000);
+      }
+    },
+
+    // Save all rundown items - DATABASE FIRST approach
+    async saveAllContent() {
+      this.saving = true;
+      try {
+        const result = await this.saveRundownItems({
+          showSuccessMessage: true,
+          includCurrentEditorContent: true,
+          customMessage: 'All rundown items saved successfully'
+        });
+
+        if (!result.success) {
+          throw new Error(result.error);
+        }
+
+        console.log('✅ All content saved via centralized function');
+      } catch (error) {
+        console.error('❌ Save all content failed:', error);
+        throw error;
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    // CENTRALIZED RUNDOWN SAVE FUNCTION - handles index to order synchronization
+    async saveRundownItems(options = {}) {
+      const {
+        showSuccessMessage = true,
+        includCurrentEditorContent = true,
+        customMessage = null
+      } = options;
+
+      const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
+      if (!paddedId || !this.rundownItems || this.rundownItems.length === 0) {
+        console.log('Cannot save rundown - no valid episode or rundown items');
+        return { success: false, error: 'No valid episode or rundown items' };
+      }
+
+      try {
+        console.log('🔄 CENTRALIZED RUNDOWN SAVE - Starting...');
+        console.log(`Episode: ${paddedId}, Items: ${this.rundownItems.length}`);
+
+        // STEP 1: CRITICAL INDEX-TO-ORDER SYNCHRONIZATION
+        const processedItems = this.rundownItems.map((item, index) => {
+          const processedItem = { ...item };
+
+          // 🔥 CRITICAL: Override order field with current array index
+          processedItem.index = (index + 1) * 10;  // Frontend index (10, 20, 30, 40...)
+          processedItem.order = processedItem.index;  // Database order field
+
+          // Include current editor content if this is the selected item
+          if (includCurrentEditorContent && index === this.selectedItemIndex) {
+            processedItem.script = this.scriptContent;
+            processedItem.scratch = this.scratchContent;
+            processedItem.rawMarkdown = this.rawMarkdownContent;
+            console.log(`📝 Including editor content for selected item: ${item.title}`);
+          }
+
+          console.log(`🔢 Item ${index}: ${item.title} -> Index: ${processedItem.index}, Order: ${processedItem.order}`);
+          return processedItem;
+        });
+
+        // STEP 2: Send to database-first save endpoint
+        const headers = {
+          'Content-Type': 'application/json',
+          'X-API-Key': 'nSudN-zXynaRm04RXTJJBeZi0OZNGMf9dtxlm1fKLNY'
+        };
+
+        const rundownPayload = {
+          items: processedItems,
+          episode_number: paddedId
+        };
+
+        console.log('🚀 Sending to /save-rundown endpoint...');
+        const response = await axios.put(`/api/episodes/${paddedId}/save-rundown`, rundownPayload, { headers });
+
+        // STEP 3: Update local state with synchronized data
+        this.rundownItems = processedItems;
+        this.hasUnsavedChanges = false;
+        this.hasUnsavedRundownChanges = false;
+
+        console.log('✅ Centralized rundown save completed:', response.data);
+
+        if (showSuccessMessage) {
+          const message = customMessage || `Saved ${processedItems.length} rundown items`;
+          window.showUrgentFlash?.(message, 'green', 2000);
+        }
+
+        return {
+          success: true,
+          data: response.data,
+          itemsSaved: processedItems.length
+        };
+
+      } catch (error) {
+        console.error('❌ Centralized rundown save failed:', error);
+
+        if (showSuccessMessage) {
+          window.showUrgentFlash?.('Failed to save rundown items', 'red', 3000);
+        }
+
+        return {
+          success: false,
+          error: error.message,
+          details: error
+        };
+      }
+    },
+
+    // SINGLE SAVE FUNCTION - saves both episode and rundown
+    async saveEverything() {
+      this.saving = true;
+      try {
+        console.log('🚀 SAVING EVERYTHING - Episode + Rundown');
+
+        // 1. Save episode metadata first
+        await this.saveEpisodeMetadata();
+        console.log('✅ Episode metadata saved');
+
+        // 2. Save rundown items with index→order sync
+        const rundownResult = await this.saveRundownItems({
+          showSuccessMessage: false, // We'll show our own message
+          includCurrentEditorContent: true,
+          customMessage: null
+        });
+
+        if (!rundownResult.success) {
+          throw new Error(rundownResult.error);
+        }
+
+        console.log('✅ Rundown items saved');
+
+        // Show single success message
+        window.showUrgentFlash?.(`Episode and rundown saved successfully`, 'green', 2000);
+
+      } catch (error) {
+        console.error('❌ Save everything failed:', error);
+        window.showUrgentFlash?.('Save failed - see console for details', 'red', 3000);
+        throw error;
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    // Save episode metadata - DATABASE FIRST approach
+    async saveEpisodeMetadata() {
+      const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
+      if (!paddedId) {
+        console.log('Cannot save episode metadata - no valid episode');
+        return;
+      }
+
+      try {
+        const headers = {
+          'Content-Type': 'application/json',
+          'X-API-Key': 'nSudN-zXynaRm04RXTJJBeZi0OZNGMf9dtxlm1fKLNY'
+        };
+
+        const episodeData = {
+          title: this.currentEpisodeTitle,
+          slug: this.currentEpisodeSlug,
+          subtitle: this.currentEpisodeSubtitle,
+          description: this.currentEpisodeDescription,
+          air_date: this.currentAirDate,
+          duration_formatted: this.duration,
+          status: this.currentProductionStatus
+        };
+
+        console.log('💾 Saving episode metadata to database...', episodeData);
+
+        const response = await axios.put(`/api/episodes/${paddedId}/save-episode`, episodeData, { headers });
+        console.log('✅ Episode metadata saved:', response.data);
+
+        window.showUrgentFlash?.('Episode metadata saved', 'green', 1500);
+
+      } catch (error) {
+        console.error('❌ Episode metadata save failed:', error);
+        window.showUrgentFlash?.('Episode save failed', 'red', 2000);
+        throw error;
+      }
+    },
+
+    // Check if any rundown items need saving
+    checkForUnsavedRundownChanges() {
+      // For now, we'll use simple heuristics to determine if there are unsaved changes
+      // In a more sophisticated implementation, we'd track changes per item
+      this.hasUnsavedRundownChanges = this.hasUnsavedChanges || this.rundownItems.some(item => {
+        // Check if item has indicators of unsaved changes
+        return !item.lastSaved || (item.modified && item.modified > item.lastSaved);
+      });
     },
     getStatusLabel(status) {
       // TODO: Implement actual logic for status label
@@ -1030,10 +1550,13 @@ Try dropping an image or video file here!`
       if (!item) {
         this.scriptContent = '';
         this.scratchContent = '';
+        this.rawMarkdownContent = '';
+        this.currentItemMetadata = {};
         return;
       }
       
       console.log('Loading content for item:', item.slug || item.title);
+      console.log('Full item object:', JSON.stringify(item, null, 2));
       
       // Load the script content from the item
       this.scriptContent = item.script || '';
@@ -1041,7 +1564,103 @@ Try dropping an image or video file here!`
       // For now, set scratch content to empty or load from a separate field if available
       this.scratchContent = item.scratch || '';
       
-      console.log('Loaded script content:', this.scriptContent.substring(0, 100) + '...');
+      // Load raw markdown content - combine frontmatter and script content
+      this.loadRawMarkdownContent(item);
+      
+      // Load all frontmatter metadata from the item
+      this.currentItemMetadata = {
+        // Standard fields
+        AssetID: item.AssetID || item.asset_id || '',
+        title: item.title || '',
+        type: item.type || 'segment',
+        slug: item.slug || '',
+        subtitle: item.subtitle || '',
+        description: item.description || '',
+        duration: item.duration || '00:00:00',
+        status: item.status || 'draft',
+        order: item.order || 1,
+        airdate: item.airdate || '',
+        priority: item.priority || '',
+        guests: item.guests || '',
+        resources: item.resources || '',
+        tags: item.tags || '',
+        server_message: item.server_message || '',
+        created_at: item.created_at || '',
+        
+        // Include any additional custom fields from the item
+        ...Object.keys(item).reduce((acc, key) => {
+          // Skip standard fields and system fields
+          const standardFields = [
+            'AssetID', 'asset_id', 'title', 'type', 'slug', 'subtitle', 'description',
+            'duration', 'status', 'order', 'airdate', 'priority', 'guests', 'resources', 
+            'tags', 'server_message', 'created_at', 'script', 'scratch', 'filename', 'id'
+          ];
+          
+          if (!standardFields.includes(key) && item[key] !== null && item[key] !== undefined) {
+            acc[key] = item[key];
+          }
+          return acc;
+        }, {})
+      };
+      
+      console.log('Loaded metadata for item:', this.currentItemMetadata);
+      console.log('Loaded script content length:', this.scriptContent.length);
+    },
+    
+    loadRawMarkdownContent(item) {
+      // Build raw markdown content combining frontmatter and script
+      try {
+        const frontmatter = {
+          AssetID: item.AssetID || item.asset_id || '',
+          title: item.title || '',
+          type: item.type || 'segment',
+          slug: item.slug || '',
+          subtitle: item.subtitle || '',
+          description: item.description || '',
+          duration: item.duration || '00:00:00',
+          status: item.status || 'draft',
+          order: item.order || 1,
+          airdate: item.airdate || '',
+          priority: item.priority || '',
+          guests: item.guests || '',
+          resources: item.resources || '',
+          tags: item.tags || '',
+          server_message: item.server_message || '',
+          created_at: item.created_at || '',
+          // Include any additional custom fields
+          ...Object.keys(item).reduce((acc, key) => {
+            const standardFields = [
+              'AssetID', 'asset_id', 'title', 'type', 'slug', 'subtitle', 'description',
+              'duration', 'status', 'order', 'airdate', 'priority', 'guests', 'resources', 
+              'tags', 'server_message', 'created_at', 'script', 'scratch', 'filename', 'id'
+            ];
+            if (!standardFields.includes(key) && item[key] !== null && item[key] !== undefined && item[key] !== '') {
+              acc[key] = item[key];
+            }
+            return acc;
+          }, {})
+        };
+        
+        // Convert frontmatter to YAML
+        let yamlFrontmatter = '';
+        Object.keys(frontmatter).forEach(key => {
+          const value = frontmatter[key];
+          if (value !== null && value !== undefined && value !== '') {
+            if (typeof value === 'string' && (value.includes(':') || value.includes('\n'))) {
+              yamlFrontmatter += `${key}: "${value}"\n`;
+            } else {
+              yamlFrontmatter += `${key}: ${value}\n`;
+            }
+          }
+        });
+        
+        // Combine frontmatter and script content
+        this.rawMarkdownContent = `---\n${yamlFrontmatter}---\n\n${item.script || ''}`;
+        
+      } catch (error) {
+        console.error('Error building raw markdown content:', error);
+        this.rawMarkdownContent = item.script || '';
+      }
     },
     
     async saveRundownOrder() {
@@ -1051,19 +1670,25 @@ Try dropping an image or video file here!`
       try {
         // Prepare the reorder request with updated order fields
         const segments = this.rundownItems.map((item, index) => ({
-          filename: item.filename || `${item.order || ((index + 1) * 10)} ${item.slug || item.title}.md`,
+          filename: item.filename, // Use the actual filename from the rundown item
           order: (index + 1) * 10
         }));
         
         const payload = { segments };
         
-        // Call the reorder endpoint
-        await axios.post(`/api/rundown/${paddedId}/reorder`, payload);
+        // Call the reorder endpoint with authentication
+        const reorderHeaders = {
+          'Content-Type': 'application/json',
+          'X-API-Key': 'nSudN-zXynaRm04RXTJJBeZi0OZNGMf9dtxlm1fKLNY'
+        };
+        
+        await axios.post(`/rundown/${paddedId}/reorder`, payload, { headers: reorderHeaders });
         console.log('Rundown order saved successfully');
         this.hasUnsavedChanges = false;
+        window.showUrgentFlash?.("Rundown order saved", "green", 1500);
       } catch (error) {
         console.error('Failed to save rundown order:', error);
-        // Optionally show an error message to the user
+        window.showUrgentFlash?.("Save Failed", "red", 3000);
       }
     },
     getNextEpisodeNumber() {
@@ -1075,17 +1700,89 @@ Try dropping an image or video file here!`
       });
       return String(maxNum + 1).padStart(4, '0');
     },
+    
+    async handleRundownReorder(reorderData) {
+      // Handle both formats: object {oldIndex, newIndex, items} or simple array
+      let oldIndex, newIndex, items;
+
+      if (Array.isArray(reorderData)) {
+        // Simple array format from cross-region moves
+        items = reorderData;
+        oldIndex = undefined;
+        newIndex = undefined;
+        console.log(`Reordering: updating ${items.length} items from cross-region drag`);
+      } else {
+        // Object format from within-region moves
+        ({ oldIndex, newIndex, items } = reorderData);
+        console.log(`Reordering: moving item from index ${oldIndex} to ${newIndex}`);
+      }
+
+      // Safety check: ensure items is valid before updating
+      if (!items || !Array.isArray(items)) {
+        console.error('❌ Invalid items data in handleRundownReorder:', items);
+        return;
+      }
+
+      // Update the local rundownItems array
+      this.rundownItems = items;
+      
+      // Mark as having unsaved changes
+      this.hasUnsavedChanges = true;
+      
+      // Save the new order to the backend
+      try {
+        await this.saveRundownItems({
+          showSuccessMessage: true,
+          includCurrentEditorContent: false,
+          customMessage: 'Rundown reorder saved successfully'
+        });
+        console.log('Rundown reorder saved successfully');
+        
+        // Update selected item index if necessary (only for within-region moves)
+        if (oldIndex !== undefined && newIndex !== undefined) {
+          if (this.selectedItemIndex === oldIndex) {
+            this.selectedItemIndex = newIndex;
+          } else if (this.selectedItemIndex > oldIndex && this.selectedItemIndex <= newIndex) {
+            this.selectedItemIndex--;
+          } else if (this.selectedItemIndex < oldIndex && this.selectedItemIndex >= newIndex) {
+            this.selectedItemIndex++;
+          }
+        }
+        
+        // Show success feedback
+        window.showUrgentFlash?.("Rundown reordered", "green", 1500);
+        
+      } catch (error) {
+        console.error('Failed to save rundown reorder:', error);
+        window.showUrgentFlash?.("Failed to save reorder", "red", 3000);
+        
+        // Optionally revert the local changes
+        // this.fetchRundownItems();
+      }
+    },
+    
     selectRundownItem(index) {
       console.log('Selecting rundown item at index:', index);
+      console.log('Current selectedItemIndex before update:', this.selectedItemIndex);
       this.selectedItemIndex = index;
-      
-      // Load the content for the selected item
-      if (index >= 0 && index < this.rundownItems.length) {
-        const item = this.rundownItems[index];
-        console.log('Loading content for selected item:', item);
-        this.loadItemContent(item);
+      console.log('Updated selectedItemIndex to:', this.selectedItemIndex);
+      console.log('Total rundown items:', this.rundownItems.length);
+
+      // Save selected item index to sessionStorage for persistence
+      if (index >= 0) {
+        const sessionKey = `selectedItem_${this.currentEpisodeNumber}`;
+        sessionStorage.setItem(sessionKey, index.toString());
+        console.log(`Saved selected item index ${index} to session for episode ${this.currentEpisodeNumber}`);
       } else {
-        // Clear content if no valid item selected
+        // Clear selection from session if index is -1
+        const sessionKey = `selectedItem_${this.currentEpisodeNumber}`;
+        sessionStorage.removeItem(sessionKey);
+      }
+
+      // Load content for the newly selected item
+      if (index >= 0 && index < this.rundownItems.length) {
+        this.loadItemContent(this.rundownItems[index]);
+      } else {
         this.loadItemContent(null);
       }
     },
@@ -1093,6 +1790,510 @@ Try dropping an image or video file here!`
     toggleRundownWidth() {
       this.rundownPanelWidth = this.rundownPanelWidth === 'narrow' ? 'wide' : 'narrow';
       console.log('Rundown panel width toggled to:', this.rundownPanelWidth);
+    },
+
+    toggleMetadataWidth() {
+      this.metadataPanelWidth = this.metadataPanelWidth === 'narrow' ? 'wide' : 'narrow';
+      console.log('Metadata panel width toggled to:', this.metadataPanelWidth);
+    },
+
+    handleMetadataFieldUpdate({ field, value }) {
+      if (this.currentRundownItem) {
+        console.log(`Updating field ${field} to:`, value);
+        this.currentRundownItem[field] = value;
+        this.hasUnsavedChanges = true;
+        
+        // Update the rundown item in the array as well
+        if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
+          this.rundownItems[this.selectedItemIndex][field] = value;
+        }
+      }
+    },
+
+    resetMetadataFields() {
+      // Reload the current item from the server or reset to last saved state
+      if (this.selectedItemIndex >= 0) {
+        this.selectRundownItem(this.selectedItemIndex);
+        window.showUrgentFlash?.('Metadata fields reset', 'blue', 1500);
+      }
+    },
+    
+    handleKeydown(event) {
+      // Handle Ctrl+Shift+S for saving everything
+      if (event.ctrlKey && event.shiftKey && event.key === 'S' && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        this.saveEverything();
+        return;
+      }
+      // Handle Ctrl+Shift+I for new item
+      if (event.ctrlKey && event.shiftKey && event.key === 'I' && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        this.handleNewItemClick();
+        return;
+      }
+      // Handle Alt+D for deleting cue at cursor
+      if (event.altKey && event.key === 'd' && !event.ctrlKey && !event.metaKey) {
+        // Only trigger if in a textarea (text editor)
+        if (event.target.tagName === 'TEXTAREA') {
+          event.preventDefault();
+          this.deleteCueAtCursor(event.target);
+        }
+      }
+      // Handle Alt+G for creating new GFX item
+      else if (event.altKey && event.key === 'g' && !event.ctrlKey && !event.metaKey) {
+        // Only trigger if not in a text input/textarea
+        if (!['INPUT', 'TEXTAREA'].includes(event.target.tagName)) {
+          event.preventDefault();
+          this.openNewGFXModal();
+        }
+      }
+      // Handle Alt+S for SOT cue
+      else if (event.altKey && event.key === 's' && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        // If in textarea, insert cue directly, otherwise show modal
+        if (event.target.tagName === 'TEXTAREA') {
+          this.$refs.editorPanel?.insertCue('SOT');
+        } else {
+          this.openNewSOTModal();
+        }
+      }
+      // Handle Alt+Q for creating FSQ (Full Screen Quote) cue
+      else if (event.altKey && event.key === 'q' && !event.ctrlKey && !event.metaKey) {
+        // Only trigger if not in a text input/textarea
+        if (!['INPUT', 'TEXTAREA'].includes(event.target.tagName)) {
+          event.preventDefault();
+          this.showFsqModal = true;
+        }
+      }
+      // Handle Alt+I for IMG cue
+      else if (event.altKey && event.key === 'i' && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        // If in textarea, insert cue directly, otherwise show modal
+        if (event.target.tagName === 'TEXTAREA') {
+          this.$refs.editorPanel?.insertCue('IMG');
+        } else {
+          this.showImgCueModal = true;
+        }
+      }
+      // Handle Alt+V for VO (Voice Over) cue
+      else if (event.altKey && event.key === 'v' && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        // If in textarea, insert cue directly, otherwise show modal
+        if (event.target.tagName === 'TEXTAREA') {
+          this.$refs.editorPanel?.insertCue('VO');
+        } else {
+          this.showVoModal = true;
+        }
+      }
+      // Handle Alt+N for NAT (Natural Sound) cue
+      else if (event.altKey && event.key === 'n' && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        // If in textarea, insert cue directly, otherwise show modal
+        if (event.target.tagName === 'TEXTAREA') {
+          this.$refs.editorPanel?.insertCue('NAT');
+        } else {
+          this.showNatModal = true;
+        }
+      }
+      // Handle Alt+P for PKG (Package) cue
+      else if (event.altKey && event.key === 'p' && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        // If in textarea, insert cue directly, otherwise show modal
+        if (event.target.tagName === 'TEXTAREA') {
+          this.$refs.editorPanel?.insertCue('PKG');
+        } else {
+          this.showPkgModal = true;
+        }
+      }
+      // Handle Delete key for deleting selected rundown item
+      else if (event.key === 'Delete' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        // Only trigger if not in a text input/textarea
+        if (!['INPUT', 'TEXTAREA'].includes(event.target.tagName)) {
+          event.preventDefault();
+          this.deleteSelectedItem();
+        }
+      }
+    },
+    
+    async deleteSelectedItem() {
+      console.log('=== DELETE DEBUG START ===');
+      console.log('selectedItemIndex:', this.selectedItemIndex);
+      console.log('rundownItems length:', this.rundownItems.length);
+      console.log('currentRundownItem:', this.currentRundownItem);
+      
+      if (this.selectedItemIndex === -1 || !this.currentRundownItem) {
+        console.log('No item selected for deletion');
+        return;
+      }
+      
+      const item = this.currentRundownItem;
+      const episodeNumber = this.padEpisodeNumber(this.currentEpisodeNumber);
+      
+      console.log('Item to delete (selectedItemIndex=' + this.selectedItemIndex + '):', item);
+      
+      // Generate filename if it doesn't exist
+      let filename = item.filename;
+      if (!filename) {
+        // Fallback filename generation: "order slug~assetid.md"
+        const order = item.order || (this.selectedItemIndex + 1) * 10;
+        const slug = (item.slug || item.title || 'untitled').toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-');
+        const assetId = item.AssetID || item.id || 'unknown';
+        filename = `${order} ${slug}~${assetId}.md`;
+      }
+      
+      console.log('Attempting to delete item:', {
+        filename,
+        slug: item.slug,
+        title: item.title,
+        AssetID: item.AssetID,
+        order: item.order
+      });
+      
+      // Confirmation already handled by RundownPanel modal
+      
+      try {
+        // Debug: Check all available localStorage keys
+        console.log('All localStorage keys:', Object.keys(localStorage));
+        console.log('localStorage contents:', {
+          api_key: localStorage.getItem('api_key'),
+          auth_token: localStorage.getItem('auth_token'), 
+          token: localStorage.getItem('token'),
+          'auth-token': localStorage.getItem('auth-token'),
+          jwt: localStorage.getItem('jwt'),
+          authToken: localStorage.getItem('authToken')
+        });
+        
+        // Get authentication credentials
+        let token = null;
+        let apiKey = localStorage.getItem('api_key');
+        
+        // Try to get token from store if available
+        try {
+          if (this.$store && this.$store.state && this.$store.state.auth) {
+            token = this.$store.state.auth.token;
+            console.log('Found token in store:', token ? 'YES' : 'NO');
+          }
+        } catch (e) {
+          console.log('Store not available, using localStorage fallback');
+        }
+        
+        // Also try localStorage as fallback for token with multiple possible keys
+        if (!token) {
+          token = localStorage.getItem('auth_token') || 
+                   localStorage.getItem('token') || 
+                   localStorage.getItem('auth-token') || 
+                   localStorage.getItem('jwt') || 
+                   localStorage.getItem('authToken');
+          console.log('Token from localStorage:', token ? 'FOUND' : 'NOT FOUND');
+        }
+        
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+          console.log('Using JWT token for authentication');
+        } else if (apiKey) {
+          headers['X-API-Key'] = apiKey;
+          console.log('Using API key for authentication');
+        } else {
+          console.warn('No authentication credentials found');
+          console.log('Need to check how user is currently authenticated for other API calls');
+        }
+        
+        console.log('Delete request headers:', headers);
+        
+        // Delete from database and file system
+        const response = await fetch(`/api/episodes/${episodeNumber}/rundown/${filename}`, {
+          method: 'DELETE',
+          headers
+        });
+        
+        if (response.ok) {
+          const deletedIndex = this.selectedItemIndex;
+
+          // Remove from local rundownItems array
+          this.rundownItems.splice(this.selectedItemIndex, 1);
+
+          // Smart selection after deletion
+          if (this.rundownItems.length === 0) {
+            // No items left
+            this.selectedItemIndex = -1;
+            this.scriptContent = '';
+            this.scratchContent = '';
+            this.rawMarkdownContent = '';
+          } else {
+            // Select the next logical item
+            if (deletedIndex >= this.rundownItems.length) {
+              // Deleted the last item, select the new last item
+              this.selectedItemIndex = this.rundownItems.length - 1;
+            } else {
+              // Select the item that moved into the deleted position
+              this.selectedItemIndex = deletedIndex;
+            }
+
+            // Load content for the newly selected item
+            if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
+              this.loadItemContent(this.rundownItems[this.selectedItemIndex]);
+            }
+          }
+
+          console.log(`Deleted item: ${item.slug || item.title}`);
+        } else {
+          const error = await response.text();
+          console.error('Failed to delete item:', error);
+          alert('Failed to delete item. Please check the console for details.');
+        }
+      } catch (error) {
+        console.error('Error deleting item:', error);
+        alert('An error occurred while deleting the item.');
+      }
+    },
+
+    // Handle individual item deletion from RundownPanel
+    async handleDeleteItem(data) {
+      console.log('Delete item event received:', data);
+
+      // Set the selected item index to the item being deleted
+      if (data.itemIndex !== undefined && data.itemIndex >= 0) {
+        this.selectedItemIndex = data.itemIndex;
+      }
+
+      // Use the existing delete method
+      await this.deleteSelectedItem();
+    },
+
+    // Handle region deletion from RundownPanel
+    async handleDeleteRegion(data) {
+      console.log('Delete region event received:', data);
+
+      if (!data.items || !Array.isArray(data.items)) {
+        console.error('Invalid region data for deletion');
+        return;
+      }
+
+      // Confirmation already handled by RundownPanel modal
+
+      try {
+        // Delete items in reverse order to maintain proper indices
+        for (let i = data.items.length - 1; i >= 0; i--) {
+          const item = data.items[i];
+          this.selectedItemIndex = item.index || i;
+          await this.deleteSelectedItem();
+        }
+
+        window.showUrgentFlash?.(`Deleted region "${data.regionName}" with ${data.items.length} items`, 'green', 3000);
+      } catch (error) {
+        console.error('Error deleting region:', error);
+        window.showUrgentFlash?.('Failed to delete region', 'red', 3000);
+      }
+    },
+
+    // Handle rundown cleared event from RundownPanel
+    async handleRundownCleared() {
+      console.log('Rundown cleared event received');
+
+      try {
+        // Reload the episode data to reflect the cleared rundown
+        await this.loadEpisodeData();
+
+        // Clear any selected items
+        this.selectedItemIndex = null;
+
+        // Show success message
+        window.showUrgentFlash?.('Entire rundown cleared successfully', 'green', 3000);
+
+      } catch (error) {
+        console.error('Error reloading episode after rundown clear:', error);
+        window.showUrgentFlash?.('Rundown cleared but failed to reload data', 'orange', 3000);
+      }
+    },
+
+    // Delete cue at cursor position (Alt+D)
+    deleteCueAtCursor(textarea) {
+      const cursorPos = textarea.selectionStart;
+      const text = textarea.value;
+      const lines = text.split('\n');
+      
+      // Find the line where the cursor is
+      let currentLine = 0;
+      let charCount = 0;
+      
+      for (let i = 0; i < lines.length; i++) {
+        if (charCount + lines[i].length >= cursorPos) {
+          currentLine = i;
+          break;
+        }
+        charCount += lines[i].length + 1; // +1 for newline character
+      }
+      
+      console.log('Cursor at line:', currentLine, 'Line content:', lines[currentLine]);
+      
+      // Find cue boundaries from current line
+      const cueInfo = this.findCueBlockBoundaries(lines, currentLine);
+      if (!cueInfo) {
+        alert('No cue block found at cursor position');
+        return;
+      }
+      
+      console.log('Found cue block:', cueInfo);
+      
+      // Extract cue data for the confirmation modal
+      const cueData = this.parseCueData(lines, cueInfo.startLine, cueInfo.endLine);
+      
+      // Show confirmation modal
+      this.selectedCueData = cueData;
+      this.selectedCueStartLine = cueInfo.startLine;
+      this.selectedCueEndLine = cueInfo.endLine;
+      this.showDeleteCueModal = true;
+    },
+
+    // Find cue block boundaries starting from current line
+    findCueBlockBoundaries(lines, currentLine) {
+      let startLine = -1;
+      let endLine = -1;
+      
+      // Search upward from current line to find "<!-- Begin Cue -->"
+      for (let i = currentLine; i >= 0; i--) {
+        const line = lines[i].trim();
+        if (line === '<!-- Begin Cue -->') {
+          startLine = i;
+          break;
+        }
+        // If we hit "<!-- End Cue -->" first, we weren't in a cue block
+        if (line === '<!-- End Cue -->') {
+          console.log('Found End Cue before Begin Cue - cursor not in cue block');
+          return null;
+        }
+      }
+      
+      if (startLine === -1) {
+        console.log('No Begin Cue found - cursor not in cue block');
+        return null;
+      }
+      
+      // Search downward from start line to find "<!-- End Cue -->"
+      for (let i = startLine + 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line === '<!-- End Cue -->') {
+          endLine = i;
+          break;
+        }
+      }
+      
+      if (endLine === -1) {
+        console.log('No End Cue found - malformed cue block');
+        return null;
+      }
+      
+      return { startLine, endLine };
+    },
+
+    // Parse cue data from lines between start and end
+    parseCueData(lines, startLine, endLine) {
+      const cueData = {
+        type: '',
+        assetId: '',
+        slug: '',
+        description: '',
+        mediaUrl: '',
+        credit: '',
+        caption: ''
+      };
+      
+      // Parse each line for cue properties
+      for (let i = startLine + 1; i < endLine; i++) {
+        const line = lines[i].trim();
+        
+        // Match pattern [Property: Value]
+        const match = line.match(/^\[([^:]+):\s*(.+)\]$/);
+        if (match) {
+          const property = match[1].toLowerCase();
+          const value = match[2];
+          
+          switch (property) {
+            case 'type':
+              cueData.type = value;
+              break;
+            case 'assetid':
+              cueData.assetId = value;
+              break;
+            case 'slug':
+              cueData.slug = value;
+              break;
+            case 'description':
+              cueData.description = value;
+              break;
+            case 'mediaurl':
+              cueData.mediaUrl = value;
+              break;
+            case 'credit':
+              cueData.credit = value;
+              break;
+            case 'caption':
+              cueData.caption = value;
+              break;
+          }
+        }
+      }
+      
+      return cueData;
+    },
+
+    // Delete the confirmed cue block
+    deleteCue(deleteInfo) {
+      console.log('Deleting cue:', deleteInfo);
+      
+      // Find the textarea that was active
+      const textareas = document.querySelectorAll('textarea');
+      let activeTextarea = null;
+      
+      for (const textarea of textareas) {
+        if (document.activeElement === textarea || textarea.matches(':focus')) {
+          activeTextarea = textarea;
+          break;
+        }
+      }
+      
+      if (!activeTextarea) {
+        // If no active textarea, try to find the script or scratch textarea
+        const scriptTextarea = document.querySelector('.script-textarea textarea');
+        const scratchTextarea = document.querySelector('.scratch-mode textarea');
+        const codeTextarea = document.querySelector('.code-textarea textarea');
+        activeTextarea = scriptTextarea || scratchTextarea || codeTextarea;
+      }
+      
+      if (!activeTextarea) {
+        console.error('No textarea found for deletion');
+        return;
+      }
+      
+      const text = activeTextarea.value;
+      const lines = text.split('\n');
+      
+      // Remove lines from startLine to endLine (inclusive)
+      lines.splice(deleteInfo.startLine, deleteInfo.endLine - deleteInfo.startLine + 1);
+      
+      // Update the textarea content
+      activeTextarea.value = lines.join('\n');
+      
+      // Trigger change event to update the component's data
+      const event = new Event('input', { bubbles: true });
+      activeTextarea.dispatchEvent(event);
+      
+      // Mark as having unsaved changes
+      this.hasUnsavedChanges = true;
+      
+      console.log('Cue block deleted successfully');
+    },
+
+    // Cancel delete cue modal
+    cancelDeleteCue() {
+      this.showDeleteCueModal = false;
+      this.selectedCueData = {};
+      this.selectedCueStartLine = 0;
+      this.selectedCueEndLine = 0;
     },
 
     // Vue.Draggable event handlers for drag and drop
@@ -1108,7 +2309,11 @@ Try dropping an image or video file here!`
       if (event.oldIndex !== event.newIndex) {
         console.log('Position changed, saving rundown order');
         this.hasUnsavedChanges = true;
-        this.saveRundownOrder();
+        this.saveRundownItems({
+          showSuccessMessage: false,
+          includCurrentEditorContent: false,
+          customMessage: null
+        });
         
         // Update selected index if necessary
         if (this.selectedItemIndex === event.oldIndex) {
@@ -1126,10 +2331,113 @@ Try dropping an image or video file here!`
     // Missing stub methods to prevent Vue warnings
     onContentChange(/* content */) {
       this.hasUnsavedChanges = true;
+      this.checkForUnsavedRundownChanges();
     },
     
-    onMetadataChange(/* metadata */) {
+    onRawMarkdownChange(content) {
+      this.rawMarkdownContent = content;
       this.hasUnsavedChanges = true;
+      this.checkForUnsavedRundownChanges();
+      
+      // Optional: Parse the raw markdown to update other content fields
+      try {
+        if (content.includes('---')) {
+          const parts = content.split('---');
+          if (parts.length >= 3) {
+            // Extract frontmatter and script content
+            // const frontmatterYaml = parts[1].trim(); // TODO: Parse this for metadata sync
+            const scriptContent = parts.slice(2).join('---').trim();
+            
+            // Update script content if it changed
+            if (scriptContent !== this.scriptContent) {
+              this.scriptContent = scriptContent;
+            }
+            
+            // Optionally parse frontmatter to update metadata
+            // (Could be enhanced to sync metadata form with raw edits)
+          }
+        }
+      } catch (error) {
+        console.warn('Could not parse raw markdown:', error);
+      }
+    },
+    
+    onMetadataChange(changeData) {
+      console.log('Metadata change received:', changeData);
+      const { field, value } = changeData;
+      
+      // Update the metadata in the current item metadata
+      if (this.currentItemMetadata) {
+        this.currentItemMetadata[field] = value;
+        console.log(`Updated ${field} to:`, value);
+      }
+      
+      // Also update the rundown item directly if we have a selected item
+      if (this.selectedItemIndex >= 0 && this.selectedItemIndex < this.rundownItems.length) {
+        const currentItem = this.rundownItems[this.selectedItemIndex];
+        if (currentItem) {
+          currentItem[field] = value;
+          console.log(`Also updated field ${field} in rundown item:`, currentItem.slug || currentItem.title);
+        }
+      }
+      
+      this.hasUnsavedChanges = true;
+      this.checkForUnsavedRundownChanges();
+    },
+
+    // Handle cue insertion from EditorPanel or floating panel
+    handleInsertCue(cueTypeOrEvent) {
+      // Handle direct cue type string (from floating panel)
+      if (typeof cueTypeOrEvent === 'string') {
+        const cueType = cueTypeOrEvent;
+        
+        // Handle cues that require modals
+        if (cueType === 'IMG') {
+          this.showImgCueModal = true;
+          return;
+        }
+        
+        if (cueType === 'SOT') {
+          this.showSotModal = true;
+          return;
+        }
+        
+        // Handle other cue types with simple templates
+        const cueTemplates = {
+          'GFX': '[GFX: graphic-name]',
+          'FSQ': '[FSQ: "Quote text here" - Source Name]',
+        };
+        
+        const cueText = cueTemplates[cueType] || `[${cueType}]`;
+        
+        // Insert into current editor mode
+        if (this.editorMode === 'script') {
+          this.scriptContent += `\n${cueText}\n`;
+        } else if (this.editorMode === 'scratch') {
+          this.scratchContent += `\n${cueText}\n`;
+        } else if (this.editorMode === 'code') {
+          this.rawMarkdownContent += `\n${cueText}\n`;
+        }
+        
+        this.hasUnsavedChanges = true;
+        return;
+      }
+      
+      // Handle event object format (from EditorPanel)
+      const { cueType, cueText, editorMode } = cueTypeOrEvent;
+      console.log(`Inserting ${cueType} cue in ${editorMode} mode:`, cueText);
+      
+      // Insert cue text into the appropriate content field based on editor mode
+      if (editorMode === 'script') {
+        this.scriptContent += `\n${cueText}\n`;
+      } else if (editorMode === 'scratch') {
+        this.scratchContent += `\n${cueText}\n`;
+      } else if (editorMode === 'code') {
+        this.rawMarkdownContent += `\n${cueText}\n`;
+      }
+      
+      this.hasUnsavedChanges = true;
+      this.checkForUnsavedRundownChanges();
     },
     
     insertAssetReference(/* assetData */) {
@@ -1203,10 +2511,543 @@ Try dropping an image or video file here!`
       this.hasUnsavedChanges = true;
     },
 
-    createNewItem() {
+    async createNewItem(itemData) {
+      try {
+        this.creatingNewItem = true;
+        
+        console.log('Creating new rundown item:', itemData);
+        
+        // Calculate index based on business rules
+        let calculatedIndex = this.calculateNewItemIndex(itemData.type);
+        
+        // Add the calculated index to itemData
+        const itemDataWithIndex = {
+          ...itemData,
+          index: calculatedIndex
+        };
+        
+        console.log('Item data with calculated index:', itemDataWithIndex);
+        console.log('Calculated index value:', calculatedIndex);
+        console.log('Index field in request data:', itemDataWithIndex.index);
+        
+        // Get authentication credentials (using same approach as delete function)
+        console.log('All localStorage keys:', Object.keys(localStorage));
+        console.log('localStorage contents:', {
+          api_key: localStorage.getItem('api_key'),
+          auth_token: localStorage.getItem('auth_token'), 
+          token: localStorage.getItem('token'),
+          'auth-token': localStorage.getItem('auth-token'),
+          jwt: localStorage.getItem('jwt'),
+          authToken: localStorage.getItem('authToken'),
+          access_token: localStorage.getItem('access_token')
+        });
+        
+        let token = null;
+        let apiKey = localStorage.getItem('api_key');
+        
+        // Try multiple localStorage keys for token
+        token = localStorage.getItem('auth_token') || 
+                 localStorage.getItem('token') || 
+                 localStorage.getItem('auth-token') || 
+                 localStorage.getItem('jwt') || 
+                 localStorage.getItem('authToken') ||
+                 localStorage.getItem('access_token');
+        
+        console.log('Token found:', token ? 'YES' : 'NO');
+        console.log('API Key found:', apiKey ? 'YES' : 'NO');
+        
+        // Build authentication headers (but don't require them initially)
+        const authHeaders = {};
+        if (token) {
+          authHeaders['Authorization'] = `Bearer ${token}`;
+          console.log('Will use JWT token for authentication');
+        } else if (apiKey) {
+          authHeaders['X-API-Key'] = apiKey;
+          console.log('Will use API key for authentication');
+        } else {
+          console.log('No authentication credentials found - will try API call without auth first');
+        }
+        
+        // Create the rundown item using the correct API endpoint
+        console.log('Making API request to create rundown item...');
+        const paddedEpisodeNumber = this.padEpisodeNumber(this.currentEpisodeNumber);
+        
+        const response = await axios.post(
+          `/api/episodes/${paddedEpisodeNumber}/rundown/item`,
+          itemDataWithIndex,
+          { headers: { 'Content-Type': 'application/json', ...authHeaders } }
+        );
+        
+        console.log('API response received:', response);
+        console.log('Full response data:', response.data);
+        console.log('Response status:', response.status);
+        console.log('Response headers:', response.headers);
+        
+        if (response.data && response.data.success) {
+          // Close modal
+          this.showNewItemModal = false;
+          
+          // Instead of manually adding to array, reload rundown from database
+          // This ensures we get the fresh state without duplicates
+          await this.reloadFromDatabase();
+
+          // Find and select the newly created item by AssetID
+          console.log('Looking for newly created item...');
+          console.log('Response asset_id:', response.data.asset_id);
+          console.log('ItemData asset_id:', itemDataWithIndex.asset_id);
+          console.log('Current rundown items:', this.rundownItems.map(item => ({
+            asset_id: item.asset_id,
+            slug: item.slug,
+            title: item.title
+          })));
+
+          const searchId = response.data.asset_id;
+          const newItemIndex = this.rundownItems.findIndex(item =>
+            item.asset_id === searchId
+          );
+
+          console.log('Searching for asset_id:', searchId);
+          console.log('Found item at index:', newItemIndex);
+
+          if (newItemIndex !== -1) {
+            this.selectedItemIndex = newItemIndex;
+            this.selectRundownItem(newItemIndex);
+            console.log('Successfully selected newly created item at index:', newItemIndex);
+          } else {
+            console.warn('Could not find newly created item in rundown. Trying alternative search methods...');
+
+            // Try finding by slug as fallback
+            const slugIndex = this.rundownItems.findIndex(item =>
+              item.slug === itemData.slug
+            );
+
+            if (slugIndex !== -1) {
+              this.selectedItemIndex = slugIndex;
+              this.selectRundownItem(slugIndex);
+              console.log('Found and selected item by slug at index:', slugIndex);
+            } else {
+              console.error('Could not locate newly created item by asset_id or slug');
+            }
+          }
+
+          // Show success message
+          window.showUrgentFlash?.(`Created: ${itemData.title}`, "green", 2000);
+        } else {
+          throw new Error(response.data?.message || 'API request did not return success');
+        }
+      } catch (error) {
+        console.error('Error creating rundown item:', error);
+        let errorMessage = 'Failed to create rundown item';
+        
+        // Safely extract error message
+        if (error.response && error.response.data) {
+          if (error.response.data.detail) {
+            errorMessage = error.response.data.detail;
+          } else if (error.response.data.message) {
+            errorMessage = error.response.data.message;
+          } else if (typeof error.response.data === 'string') {
+            errorMessage = error.response.data;
+          }
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+        
+        // Show error message
+        window.showUrgentFlash?.(errorMessage, "red", 4000);
+      } finally {
+        this.creatingNewItem = false;
+      }
+    },
+    
+    handleNewItemClick() {
+      console.log('New Item button clicked!');
+      console.log('Current rundownItemTypes:', this.rundownItemTypes);
+      console.log('Setting showNewItemModal to true...');
+      this.showNewItemModal = true;
+      console.log('showNewItemModal is now:', this.showNewItemModal);
+    },
+
+    // Handle region selection from RundownPanel
+    handleRegionSelection(region) {
+      console.log('Region selection changed:', region);
+      this.selectedRegion = region;
+
+      // Clear item selection when selecting a region (region selection takes precedence)
+      if (region) {
+        this.selectedItemIndex = -1;
+      }
+    },
+
+    async handleCreateRegion(regionData) {
+      console.log('Create Region requested:', regionData);
+
+      try {
+        // Create a placeholder item to make the new region immediately visible
+        const placeholderItem = this.createRegionPlaceholderItem(regionData);
+
+        // Add the placeholder item to the end of the rundown
+        this.rundownItems.push(placeholderItem);
+
+        // Update the local UI immediately
+        this.forceRundownUpdate();
+
+        const message = `Created new ${regionData.type} region: ${regionData.name}`;
+        console.log(message);
+
+        // Use the flash message system if available
+        if (window.showUrgentFlash) {
+          window.showUrgentFlash(message, 'success', 2000);
+        } else {
+          alert(message);
+        }
+
+        // TODO: Later implement actual region creation API call
+        // await this.createRegionInDatabase(regionData, placeholderItem);
+
+      } catch (error) {
+        console.error('Error creating region:', error);
+        if (window.showUrgentFlash) {
+          window.showUrgentFlash('Failed to create region', 'error', 3000);
+        }
+      }
+    },
+
+    createRegionPlaceholderItem(regionData) {
+      // Create a placeholder item that will force the region to appear
+      const maxOrder = Math.max(...(this.rundownItems.map(item => item.order || 0)), 0);
+      const nextOrder = Math.ceil((maxOrder + 10) / 10) * 10; // Round up to next multiple of 10
+
+      // Determine the appropriate item type for the region
+      const itemType = regionData.type === 'break' ? 'ad' : 'segment';
+
+      const placeholderItem = {
+        id: `placeholder_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        slug: `new-${regionData.type}-placeholder`,
+        title: `New ${regionData.name} (Click to edit)`,
+        type: itemType,
+        order: nextOrder,
+        index: nextOrder,
+        duration: '00:01:00',
+        status: 'draft',
+        content: `# New ${regionData.name}\n\nThis is a placeholder item. Edit this content to start building your ${regionData.type} region.`,
+        isPlaceholder: true, // Flag to identify placeholder items
+        regionType: regionData.type // Store the intended region type
+      };
+
+      return placeholderItem;
+    },
+
+    forceRundownUpdate() {
+      // Force Vue to update the rundown display
+      this.$nextTick(() => {
+        // Trigger reactivity update
+        this.$forceUpdate();
+      });
     },
     
     cancelNewItem() {
+      this.showNewItemModal = false;
+    },
+    
+    calculateNewItemIndex(itemType) {
+      console.log('Calculating index for item type:', itemType);
+      console.log('Current rundown items:', this.rundownItems);
+      console.log('Currently selected item index:', this.selectedItemIndex);
+      console.log('Currently selected region:', this.selectedRegion);
+
+      // Rule 1: Cold Open always gets index = 1
+      if (itemType === 'coldopen') {
+        console.log('Cold open type - assigning index 1');
+        return 1;
+      }
+
+      // Get all existing indexes from rundown items
+      const existingIndexes = this.rundownItems
+        .map(item => {
+          // Extract index from filename (format: "123 Title.md")
+          const match = item.filename?.match(/^(\d+)\s/);
+          return match ? parseInt(match[1]) : null;
+        })
+        .filter(index => index !== null)
+        .sort((a, b) => a - b);
+
+      console.log('Existing indexes:', existingIndexes);
+
+      let targetIndex;
+
+      // Rule 2: Place after currently selected item (takes priority over region selection)
+      if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
+        const selectedItem = this.rundownItems[this.selectedItemIndex];
+        const selectedMatch = selectedItem.filename?.match(/^(\d+)\s/);
+        const selectedFileIndex = selectedMatch ? parseInt(selectedMatch[1]) : null;
+
+        if (selectedFileIndex) {
+          // Find the next available index after the selected item that keeps it in the same region
+          // Look for the next gap in the sequence or use +10 if no nearby items
+          const nextItems = existingIndexes.filter(idx => idx > selectedFileIndex).sort((a, b) => a - b);
+
+          if (nextItems.length > 0 && nextItems[0] - selectedFileIndex > 5) {
+            // There's a gap, place item with +5 increment to stay in same region
+            targetIndex = selectedFileIndex + 5;
+            console.log('Gap found after selected item - using +5:', selectedFileIndex, '-> target:', targetIndex);
+          } else if (nextItems.length > 0) {
+            // Items are close together, place right before the next item
+            targetIndex = nextItems[0] - 1;
+            if (targetIndex <= selectedFileIndex) {
+              targetIndex = selectedFileIndex + 1;
+            }
+            console.log('Items close together - placing before next item:', targetIndex);
+          } else {
+            // No items after this one, safe to use +10
+            targetIndex = selectedFileIndex + 10;
+            console.log('No items after selected - using +10:', selectedFileIndex, '-> target:', targetIndex);
+          }
+        }
+      }
+
+      // Rule 3: Place at end of selected region (if no item is selected)
+      if (!targetIndex && this.selectedRegion) {
+        console.log('No item selected, but region selected:', this.selectedRegion.name);
+
+        // For now, when a region is selected but no specific item, place after highest existing index
+        // This ensures items go into the rundown, and the backend/frontend region logic will handle
+        // the proper region assignment based on the item's position and type
+        const highestIndex = existingIndexes.length > 0 ? Math.max(...existingIndexes) : 0;
+        targetIndex = highestIndex + 10;
+        console.log('Region selected - placing after highest index:', highestIndex, '-> target:', targetIndex);
+      }
+
+      // Rule 4: If no selection, place after highest existing index
+      if (!targetIndex) {
+        const highestIndex = existingIndexes.length > 0 ? Math.max(...existingIndexes) : 0;
+        targetIndex = highestIndex + 10;
+        console.log('No selection - using highest existing index:', highestIndex, '-> target:', targetIndex);
+      }
+      
+      // Rule 4: Check for conflicts and adjust
+      if (existingIndexes.includes(targetIndex)) {
+        // If +10 position is taken, try +5 from selected item
+        if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
+          const selectedItem = this.rundownItems[this.selectedItemIndex];
+          const selectedMatch = selectedItem.filename?.match(/^(\d+)\s/);
+          const selectedFileIndex = selectedMatch ? parseInt(selectedMatch[1]) : null;
+          
+          if (selectedFileIndex) {
+            targetIndex = selectedFileIndex + 5;
+            console.log('Conflict detected - trying +5 from selected:', selectedFileIndex, '-> target:', targetIndex);
+            
+            // If +5 is also taken, find next available slot
+            while (existingIndexes.includes(targetIndex)) {
+              targetIndex++;
+              console.log('Index', (targetIndex-1), 'also taken - trying:', targetIndex);
+            }
+          }
+        } else {
+          // Find next available slot after target
+          while (existingIndexes.includes(targetIndex)) {
+            targetIndex++;
+            console.log('Index', (targetIndex-1), 'taken - trying:', targetIndex);
+          }
+        }
+      }
+      
+      console.log('Final calculated index:', targetIndex);
+      return targetIndex;
+    },
+    
+    // IMG Cue Modal Methods
+    handleImgCueSubmit(imgCueData) {
+      console.log('IMG cue submitted:', imgCueData);
+
+      // Insert the IMG cue into the current editor mode
+      this.handleInsertCue({
+        cueType: 'IMG',
+        cueText: imgCueData.cueText,
+        editorMode: this.editorMode,
+        imageFile: imgCueData.imageFile,
+        filename: imgCueData.filename
+      });
+
+      // Close the modal
+      this.showImgCueModal = false;
+    },
+
+    // GFX Modal Methods
+    openNewGFXModal() {
+      console.log('Opening New GFX Modal (Alt+G pressed)');
+      this.showNewGFXModal = true;
+    },
+    
+    async createGFXItem(gfxData) {
+      console.log('Creating GFX item:', gfxData);
+      
+      try {
+        this.creatingNewItem = true;
+        
+        // Handle image upload first if there's an image
+        let imagePath = '';
+        if (gfxData.imageBlob && gfxData.imageExtension) {
+          // Create form data for image upload
+          const formData = new FormData();
+          formData.append('image', gfxData.imageBlob, `${gfxData.slug}.${gfxData.imageExtension}`);
+          formData.append('type', 'gfx');
+          formData.append('slug', gfxData.slug);
+          
+          // Upload image to assets directory
+          const uploadResponse = await this.$http.post('/api/assets/upload', formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+          });
+          
+          if (uploadResponse.data && uploadResponse.data.path) {
+            imagePath = uploadResponse.data.path;
+            console.log('Image uploaded to:', imagePath);
+          }
+        }
+        
+        // Prepare GFX item data (similar to tease but for graphics)
+        const newItem = {
+          type: 'gfx',
+          title: gfxData.title || '',
+          subtitle: gfxData.subtitle || '',
+          slug: gfxData.slug,
+          duration: gfxData.duration || '00:00:00:00',
+          description: gfxData.description || '',
+          airdate: gfxData.airdate || '',
+          priority: gfxData.priority || '',
+          guests: gfxData.guests || '',
+          tags: gfxData.tags || '',
+          server_message: gfxData.server_message || '',
+          status: gfxData.status || 'draft',
+          image_path: imagePath, // Store the uploaded image path
+          customer: gfxData.customer || '',
+          link: gfxData.link || ''
+        };
+        
+        console.log('Submitting GFX item to API:', newItem);
+        
+        // Create the new GFX rundown item
+        const paddedId = String(this.currentEpisodeNumber).padStart(4, '0');
+        const response = await this.$http.post(`/api/episodes/${paddedId}/items`, newItem);
+        
+        if (response.data && response.data.success) {
+          console.log('GFX item created successfully:', response.data);
+          
+          // Close the modal
+          this.showNewGFXModal = false;
+          
+          // Reload episode rundown to show new item
+          await this.loadEpisode(this.currentEpisodeNumber, false, true);
+          
+          // Show success message
+          this.$toast.success(`GFX item "${gfxData.slug}" created successfully!`);
+        } else {
+          throw new Error(response.data?.error || 'Failed to create GFX item');
+        }
+      } catch (error) {
+        console.error('Error creating GFX item:', error);
+        this.$toast.error(`Failed to create GFX item: ${error.response?.data?.error || error.message}`);
+      } finally {
+        this.creatingNewItem = false;
+      }
+    },
+    
+    // SOT Modal Methods
+    openNewSOTModal() {
+      console.log('Opening New SOT Modal (Alt+S pressed)');
+      this.showNewSOTModal = true;
+    },
+    
+    async createSOTItem(sotData) {
+      console.log('Creating SOT item:', sotData);
+      
+      try {
+        this.creatingNewItem = true;
+        
+        // Handle video upload first if there's a video
+        let videoPath = '';
+        let thumbnailPath = '';
+        
+        if (sotData.videoBlob && sotData.videoFileName) {
+          // Create form data for video upload
+          const formData = new FormData();
+          formData.append('video', sotData.videoBlob, sotData.videoFileName);
+          formData.append('type', 'sot');
+          formData.append('slug', sotData.slug);
+          
+          // Upload video to assets directory
+          const uploadResponse = await this.$http.post('/api/assets/upload', formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+          });
+          
+          if (uploadResponse.data && uploadResponse.data.path) {
+            videoPath = uploadResponse.data.path;
+            console.log('Video uploaded to:', videoPath);
+            
+            // TODO: Generate thumbnail from video if needed
+            // thumbnailPath = uploadResponse.data.thumbnailPath;
+          }
+        }
+        
+        // Prepare SOT item data with comprehensive structure
+        const newItem = {
+          type: 'sot',
+          title: sotData.title || '',
+          subtitle: sotData.subtitle || '',
+          slug: sotData.slug,
+          duration: sotData.duration || '00:00:00:00',
+          description: sotData.description || '',
+          transcription: sotData.transcription || '',
+          airdate: sotData.airdate || '',
+          priority: sotData.priority || '',
+          guests: sotData.guests || '',
+          tags: sotData.tags || '',
+          server_message: sotData.server_message || '',
+          status: sotData.status || 'draft',
+          
+          // SOT-specific fields
+          video_path: videoPath,
+          thumbnail_path: thumbnailPath,
+          video_specs: JSON.stringify(sotData.videoSpecs || {}),
+          cuts: JSON.stringify(sotData.cuts || {}), // Dictionary of cut information
+          credits: JSON.stringify(sotData.credits || {}), // Dictionary of credits/lower thirds
+          
+          // Standard fields
+          customer: sotData.customer || '',
+          link: sotData.link || ''
+        };
+        
+        console.log('Submitting SOT item to API:', newItem);
+        console.log('Cut information:', sotData.cuts);
+        console.log('Credits information:', sotData.credits);
+        
+        // Create the new SOT rundown item
+        const paddedId = String(this.currentEpisodeNumber).padStart(4, '0');
+        const response = await this.$http.post(`/api/episodes/${paddedId}/items`, newItem);
+        
+        if (response.data && response.data.success) {
+          console.log('SOT item created successfully:', response.data);
+          
+          // Close the modal
+          this.showNewSOTModal = false;
+          
+          // Reload episode rundown to show new item
+          await this.loadEpisode(this.currentEpisodeNumber, false, true);
+          
+          // Show success message
+          this.$toast.success(`SOT item "${sotData.slug}" created successfully!`);
+        } else {
+          throw new Error(response.data?.error || 'Failed to create SOT item');
+        }
+      } catch (error) {
+        console.error('Error creating SOT item:', error);
+        this.$toast.error(`Failed to create SOT item: ${error.response?.data?.error || error.message}`);
+      } finally {
+        this.creatingNewItem = false;
+      }
     },
     
     isColorDark(rgbString) {
@@ -1232,6 +3073,70 @@ Try dropping an image or video file here!`
       
       // Default to false if we can't parse the color
       return false;
+    },
+
+    // Handle slug changes from ShowInfoHeader
+    handleSlugChange(newSlug) {
+      console.log('Slug change from header:', newSlug);
+      if (this.currentRundownItem) {
+        this.currentRundownItem.slug = newSlug;
+        this.onMetadataChange({ field: 'slug', value: newSlug });
+      }
+    },
+
+    // Handle slug changes from EditorPanel slug field
+    handleSlugChangeFromEditor(newSlug) {
+      console.log('Slug change from editor:', newSlug);
+      if (this.currentRundownItem) {
+        this.currentRundownItem.slug = newSlug;
+        this.onMetadataChange({ field: 'slug', value: newSlug });
+      }
+    },
+
+    // Handle duration changes from EditorPanel duration field
+    handleDurationChangeFromEditor(newDuration) {
+      console.log('Duration change from editor:', newDuration);
+      if (this.currentRundownItem) {
+        this.currentRundownItem.duration = newDuration;
+        this.onMetadataChange({ field: 'duration', value: newDuration });
+      }
+    },
+
+    // Handle other header field changes
+    handleTitleChange(newTitle) {
+      console.log('Title change from header:', newTitle);
+      if (this.currentRundownItem) {
+        this.currentRundownItem.title = newTitle;
+        this.onMetadataChange({ field: 'title', value: newTitle });
+      }
+    },
+
+    handleSubtitleChange(newSubtitle) {
+      console.log('Subtitle change from header:', newSubtitle);
+      if (this.currentRundownItem) {
+        this.currentRundownItem.subtitle = newSubtitle;
+        this.onMetadataChange({ field: 'subtitle', value: newSubtitle });
+      }
+    },
+
+    handleDescriptionChange(newDescription) {
+      console.log('Description change from header:', newDescription);
+      if (this.currentRundownItem) {
+        this.currentRundownItem.description = newDescription;
+        this.onMetadataChange({ field: 'description', value: newDescription });
+      }
+    },
+
+    handleAirDateChange(newAirDate) {
+      console.log('Air date change from header:', newAirDate);
+      this.currentAirDate = newAirDate;
+      this.hasUnsavedChanges = true;
+    },
+
+    handleProductionStatusChange(newStatus) {
+      console.log('Production status change from header:', newStatus);
+      this.currentProductionStatus = newStatus;
+      this.hasUnsavedChanges = true;
     }
   }
 }
@@ -1510,13 +3415,15 @@ Try dropping an image or video file here!`
   flex: 1;
   display: flex;
   flex-direction: column;
+  height: 100%; /* Ensure full height */
+  min-height: 0;
 }
 
 .main-content-area {
   flex: 1;
   display: flex;
-  overflow: hidden;
   min-height: 0; /* Allow flexbox to shrink properly */
+  /* Remove height constraints - let flex handle the sizing */
 }
 
 .rundown-table-header {
@@ -1731,6 +3638,15 @@ Try dropping an image or video file here!`
   z-index: 100;
 }
 
+/* Metadata Panel Reopen Button */
+.metadata-reopen-button {
+  position: fixed;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+}
+
 .reopen-btn {
   box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
 }
@@ -1739,5 +3655,6 @@ Try dropping an image or video file here!`
   transform: scale(1.1);
   box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
 }
+
 </style>
 
