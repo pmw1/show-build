@@ -12,14 +12,14 @@
         <v-tabs v-model="activeTab" color="primary" class="mb-4">
           <v-tab value="api">API Access</v-tab>
           <v-tab value="interface">Interface</v-tab>
-          <v-tab value="rundown">Rundown</v-tab>
+          <v-tab value="generation">Generation</v-tab>
           <v-tab value="system">System</v-tab>
         </v-tabs>
 
         <v-tabs-window v-model="activeTab">
           <!-- API Access Tab -->
           <v-tabs-window-item value="api">
-            <ApiAccessSettings 
+            <ApiAccessSettings
               v-model="apiConfigs"
               @save="handleApiSave"
             />
@@ -27,23 +27,23 @@
 
           <!-- Interface Tab -->
           <v-tabs-window-item value="interface">
-            <InterfaceSettings 
+            <InterfaceSettings
               v-model="interfaceSettings"
               @save="handleInterfaceSave"
             />
           </v-tabs-window-item>
 
-          <!-- Rundown Tab -->
-          <v-tabs-window-item value="rundown">
-            <RundownSettings 
-              v-model="rundownSettings"
-              @save="handleRundownSave"
+          <!-- Generation Tab -->
+          <v-tabs-window-item value="generation">
+            <GenerationSettings
+              v-model="generationSettings"
+              @save="handleGenerationSave"
             />
           </v-tabs-window-item>
 
           <!-- System Tab -->
           <v-tabs-window-item value="system">
-            <SystemSettings 
+            <SystemSettings
               v-model="systemSettings"
               @save="handleSystemSave"
             />
@@ -57,7 +57,7 @@
 <script>
 import InterfaceSettings from '@/components/settings/InterfaceSettings.vue'
 import ApiAccessSettings from '@/components/settings/ApiAccessSettings.vue'
-import RundownSettings from '@/components/settings/RundownSettings.vue'
+import GenerationSettings from '@/components/settings/GenerationSettings.vue'
 import SystemSettings from '@/components/settings/SystemSettings.vue'
 
 export default {
@@ -65,7 +65,7 @@ export default {
   components: {
     InterfaceSettings,
     ApiAccessSettings,
-    RundownSettings,
+    GenerationSettings,
     SystemSettings
   },
   data() {
@@ -75,11 +75,6 @@ export default {
         ollama: {
           host: '',
           apiKey: '',
-          enabled: false
-        },
-        whisper: {
-          host: '',
-          endpoint: '',
           enabled: false
         },
         openai: {
@@ -189,24 +184,11 @@ export default {
         reducedMotion: false,
         keyboardShortcuts: true
       },
-      // Rundown settings
-      rundownSettings: {
-        itemTypes: [
-          { id: 1, name: 'Segment', prefix: 'SEG', defaultDuration: 300, color: 'primary', enabled: true },
-          { id: 2, name: 'Break', prefix: 'BRK', defaultDuration: 120, color: 'warning', enabled: true },
-          { id: 3, name: 'Promo', prefix: 'PRO', defaultDuration: 30, color: 'info', enabled: true },
-          { id: 4, name: 'Teaser', prefix: 'TSR', defaultDuration: 15, color: 'secondary', enabled: true }
-        ],
-        defaultSegmentDuration: 300,
-        defaultBreakDuration: 120,
-        showBacktiming: true,
-        autoCalculateTiming: true,
-        autoNumber: true,
-        numberingStart: 10,
-        numberingStep: 10,
-        defaultExportFormat: 'Markdown',
-        includeTimingInExport: true,
-        includeNotesInExport: true
+      // Generation settings
+      generationSettings: {
+        fsqBackgroundVideo: '/assets/preview-background.mp4',
+        templateLibraryPath: '/mnt/sync/disaffected/templates',
+        mediaAssetsPath: '/mnt/sync/disaffected/media assets'
       }
     }
   },
@@ -221,25 +203,26 @@ export default {
     // Load settings for components
     async loadAllSettings() {
       try {
+        // Load general settings
         const response = await fetch('/api/settings/', {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
           }
         })
-        
+
         if (response.ok) {
           const settings = await response.json()
-          
+
           // Load interface settings
           if (settings.interface) {
             this.interfaceSettings = { ...this.interfaceSettings, ...settings.interface }
           }
-          
-          // Load rundown settings  
-          if (settings.rundown) {
-            this.rundownSettings = { ...this.rundownSettings, ...settings.rundown }
+
+          // Load generation settings
+          if (settings.generation) {
+            this.generationSettings = { ...this.generationSettings, ...settings.generation }
           }
-          
+
           // Load system settings (pass to SystemSettings component)
           if (settings.system || settings.media_paths) {
             this.systemSettings = {
@@ -256,6 +239,50 @@ export default {
               archiveType: settings.media_paths?.archive_type || 's3',
               archiveEndpoint: settings.media_paths?.archive_endpoint || ''
             }
+          }
+        }
+
+        // Load API configurations separately
+        const apiResponse = await fetch('/api/settings/api-configs', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
+
+        if (apiResponse.ok) {
+          const apiData = await apiResponse.json()
+          if (apiData.success && apiData.data) {
+            // Flatten the hierarchical API config structure for the frontend form
+            const config = apiData.data
+            const flattened = {}
+
+            // Flatten preproduction AI services
+            if (config.preproduction?.ai_services) {
+              Object.assign(flattened, config.preproduction.ai_services)
+            }
+
+            // Flatten preproduction storage
+            if (config.preproduction?.storage) {
+              Object.assign(flattened, config.preproduction.storage)
+            }
+
+            // Flatten preproduction communication
+            if (config.preproduction?.communication) {
+              Object.assign(flattened, config.preproduction.communication)
+            }
+
+            // Flatten promotion social media
+            if (config.promotion?.social_media) {
+              Object.assign(flattened, config.promotion.social_media)
+            }
+
+            // Flatten development
+            if (config.development) {
+              Object.assign(flattened, config.development)
+            }
+
+            // Update apiConfigs with loaded data, preserving defaults for missing fields
+            this.apiConfigs = { ...this.apiConfigs, ...flattened }
           }
         }
       } catch (error) {
@@ -275,17 +302,39 @@ export default {
       console.log('API configuration saved:', configs)
     },
     
-    handleRundownSave(settings) {
-      // Update local state
-      this.rundownSettings = settings
-      console.log('Rundown settings saved:', settings)
-    },
-    
     handleSystemSave(settings) {
       // Update local state
       this.systemSettings = settings
       console.log('System settings saved:', settings)
       // The actual saving is handled by the SystemSettings component
+    },
+
+    async handleGenerationSave(settings) {
+      // Update local state
+      this.generationSettings = settings
+      console.log('Generation settings saved:', settings)
+
+      // Persist to backend
+      try {
+        const response = await fetch('/api/settings/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          },
+          body: JSON.stringify({
+            generation: settings
+          })
+        })
+
+        if (response.ok) {
+          console.log('✅ Generation settings saved to database')
+        } else {
+          console.error('Failed to save generation settings:', await response.text())
+        }
+      } catch (error) {
+        console.error('Error saving generation settings:', error)
+      }
     },
   },
   async mounted() {

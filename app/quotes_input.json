@@ -1,0 +1,31 @@
+{
+  "quotes": [
+    {
+      "id": "westman_001",
+      "category": "FS Quote/to my mother",
+      "text": "To my mother and father, I am sorry I didn't turn out as you had hoped. You did not fail me, you gave me so much. I truly appreciate the love you have given me. I feel I was raised to be a good person. I've kept those traits of empahty, self-sacrifice, and good character",
+      "attribution": "Robert \"Robin\" Westman's suicide note",
+      "source_type": "suicide_note",
+      "tags": ["family", "apology", "character", "self-reflection"],
+      "content_warning": "suicide",
+      "priority": "high"
+    },
+    {
+      "id": "westman_002", 
+      "category": "FS Quote/I have wanted",
+      "text": "I have wanted this for so long. I am not well. I am not right. I am a sad person, hautned by those things that do not go away. I know this is wrong but I can't seem to stop myself. I am severely depressed and have been suicidal for years. Only recently have I lost all hope and decided to perform my fainal action against this world. I don't want to kneel down for the injustices of this world. I want to die. I'd rather die on my feet than live on my knees, constantly in pain.",
+      "attribution": "Robert \"Robin\" Westman's suicide note",
+      "source_type": "suicide_note",
+      "tags": ["depression", "suicide", "mental_health", "pain", "desperation"],
+      "content_warning": "suicide, mental_health",
+      "priority": "high"
+    }
+  ],
+  "metadata": {
+    "source": "westman_suicide_note",
+    "date_processed": "2025-08-30",
+    "content_type": "sensitive",
+    "requires_review": true,
+    "broadcast_ready": false
+  }
+}

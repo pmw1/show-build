@@ -8,7 +8,7 @@ import json
 import asyncio
 import logging
 from database import get_db
-from models import ProcessingJob, ProcessingStatus
+# from models import ProcessingJob, ProcessingStatus  # REMOVED - models.py deleted
 from auth.utils import get_current_user_or_key
 import redis
 import os

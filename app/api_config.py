@@ -112,6 +112,7 @@ class APIConfigManager:
                 "ai_services": {
                     "ollama": {"host": "", "apiKey": "", "enabled": False},
                     "whisper": {"host": "", "endpoint": "", "enabled": False},
+                    "xtts": {"host": "http://192.168.51.197:5001", "endpoint": "/v1/audio/speech", "language": "en", "speed": 1.0, "speaker": "", "enabled": False},
                     "openai": {"apiKey": "", "organization": "", "enabled": False},
                     "anthropic": {"apiKey": "", "enabled": False},
                     "gemini": {"apiKey": "", "enabled": False},
@@ -253,6 +254,7 @@ class APIConfigManager:
             'youtube': ['apiKey'],
             'slack': ['botToken'],
             'github': ['accessToken'],
+            'xtts': ['host'],  # XTTS requires at least a host URL
             # Add more as needed
         }
         

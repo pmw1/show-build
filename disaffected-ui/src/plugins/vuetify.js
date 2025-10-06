@@ -10,6 +10,20 @@ import * as directives from 'vuetify/directives'
 export const vuetify = createVuetify({
   components,
   directives,
+  defaults: {
+    VOverlay: {
+      zIndex: 2000
+    },
+    VDialog: {
+      zIndex: 2400
+    },
+    VMenu: {
+      zIndex: 10000 // Menus should appear above dialogs
+    },
+    VTooltip: {
+      zIndex: 10000 // Tooltips should appear above dialogs
+    }
+  },
   theme: {
     themes: {
       light: {

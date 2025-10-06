@@ -9,35 +9,35 @@
         <span class="text-h6">Rundown</span>
         <v-spacer></v-spacer>
         <v-btn
-          icon
           size="small"
+          variant="text"
           @click="$emit('toggle-width')"
         >
-          <v-icon>{{ panelWidth === 'narrow' ? 'mdi-arrow-expand-horizontal' : 'mdi-arrow-collapse-horizontal' }}</v-icon>
+          <v-icon size="small" class="mr-1">{{ panelWidth === 'narrow' ? 'mdi-arrow-expand-horizontal' : 'mdi-arrow-collapse-horizontal' }}</v-icon>
+          <span class="btn-text-tiny">{{ panelWidth === 'narrow' ? 'Expand' : 'Narrow' }}</span>
         </v-btn>
-        <v-btn icon size="small" @click="$emit('close')">
-          <v-icon>mdi-close</v-icon>
+        <v-btn size="small" variant="text" @click="$emit('close')">
+          <v-icon size="small" class="mr-1">mdi-close</v-icon>
+          <span class="btn-text-tiny">Close</span>
         </v-btn>
       </v-card-title>
       
       <v-divider style="border-width: 0.5px; opacity: 0.3;"></v-divider>
       
-      <!-- Rundown Toolbar - Responsive Layout -->
-      <div class="rundown-toolbar-responsive pa-2" style="background-color: rgb(var(--v-theme-surface));">
-        <!-- Primary Actions Row -->
-        <div class="d-flex flex-wrap align-center ga-1 mb-2">
+      <!-- Rundown Toolbar - Split Layout with Fixed Options Menu -->
+      <div class="rundown-toolbar-split pa-1" style="background-color: rgb(var(--v-theme-surface));">
+        <!-- Main Toolbar Grid (left side) -->
+        <div class="toolbar-main-grid">
           <!-- New Item Button -->
           <v-btn
-            size="small"
+            size="x-small"
             color="primary"
             variant="elevated"
             @click="$emit('new-item')"
-            :prepend-icon="panelWidth === 'wide' ? 'mdi-plus' : undefined"
-            :icon="panelWidth === 'narrow'"
-            class="flex-shrink-0"
+            class="toolbar-btn-tile"
           >
-            <v-icon v-if="panelWidth === 'narrow'">mdi-plus</v-icon>
-            <span v-else>New Item</span>
+            <v-icon size="small" class="mr-1">mdi-plus</v-icon>
+            <span class="btn-text-tiny">New</span>
             <v-tooltip activator="parent" location="bottom">
               Add New Rundown Item (Ctrl+Shift+N)
             </v-tooltip>
@@ -45,17 +45,15 @@
 
           <!-- Delete Selected Button -->
           <v-btn
-            size="small"
+            size="x-small"
             color="error"
             variant="elevated"
             @click="handleDeleteSelected"
-            :prepend-icon="panelWidth === 'wide' ? 'mdi-delete' : undefined"
-            :icon="panelWidth === 'narrow'"
             :disabled="!hasSelections"
-            class="flex-shrink-0"
+            class="toolbar-btn-tile"
           >
-            <v-icon v-if="panelWidth === 'narrow'">mdi-delete</v-icon>
-            <span v-else>Delete ({{ totalSelectionsCount }})</span>
+            <v-icon size="small" class="mr-1">mdi-delete</v-icon>
+            <span class="btn-text-tiny">Del ({{ totalSelectionsCount }})</span>
             <v-tooltip activator="parent" location="bottom">
               <div v-if="hasMultipleSelections">
                 Delete Selected: {{ selectionSummary }}
@@ -69,87 +67,100 @@
             </v-tooltip>
           </v-btn>
 
-          <!-- Sync Order Button -->
-          <v-btn
-            size="small"
-            color="secondary"
-            variant="elevated"
-            @click="$emit('sync-order')"
-            :prepend-icon="panelWidth === 'wide' ? 'mdi-order-numeric-ascending' : undefined"
-            :icon="panelWidth === 'narrow'"
-            class="flex-shrink-0"
-          >
-            <v-icon v-if="panelWidth === 'narrow'">mdi-order-numeric-ascending</v-icon>
-            <span v-else>Sync Order</span>
-            <v-tooltip activator="parent" location="bottom">
-              Update order values to match current positions
-            </v-tooltip>
-          </v-btn>
-        </div>
 
-        <!-- Secondary Actions Row -->
-        <div class="d-flex flex-wrap align-center justify-space-between ga-1">
           <!-- Save Button -->
           <v-btn
-            size="small"
+            size="x-small"
             :color="saveState?.buttonColor || 'success'"
             variant="elevated"
             @click="$emit('save')"
-            :prepend-icon="panelWidth === 'wide' ? (saveState?.buttonIcon || 'mdi-check-circle') : undefined"
-            :icon="panelWidth === 'narrow'"
             :disabled="saveState?.isDisabled ?? true"
-            class="flex-shrink-0"
+            class="toolbar-btn-tile"
           >
-            <v-icon v-if="panelWidth === 'narrow'">{{ saveState?.buttonIcon || 'mdi-check-circle' }}</v-icon>
-            <span v-else>{{ saveState?.buttonText || 'Synchronized' }}</span>
+            <v-icon size="small" class="mr-1">{{ saveState?.buttonIcon || 'mdi-check-circle' }}</v-icon>
+            <span class="btn-text-tiny">{{ saveState?.buttonText || 'Sync' }}</span>
             <v-tooltip activator="parent" location="bottom">
               {{ saveState?.tooltip || 'Episode is synchronized - no changes to save' }}
             </v-tooltip>
           </v-btn>
 
-          <!-- Utility Buttons Group -->
-          <div class="d-flex ga-1">
-            <!-- Export Button -->
-            <v-btn
-              size="small"
-              variant="outlined"
-              @click="$emit('export')"
-              :prepend-icon="panelWidth === 'wide' ? 'mdi-export' : undefined"
-              :icon="panelWidth === 'narrow'"
-              class="flex-shrink-0"
-            >
-              <v-icon v-if="panelWidth === 'narrow'">mdi-export</v-icon>
-              <span v-else>Export</span>
-              <v-tooltip activator="parent" location="bottom">Export Rundown (Ctrl+Shift+E)</v-tooltip>
-            </v-btn>
+          <!-- View Regions Toggle Button -->
+          <v-btn
+            size="x-small"
+            :color="showRegions ? 'primary' : 'grey'"
+            variant="elevated"
+            @click="toggleRegionsVisibility"
+            class="toolbar-btn-tile"
+          >
+            <v-icon size="small" class="mr-1">{{ showRegions ? 'mdi-view-grid' : 'mdi-view-list' }}</v-icon>
+            <span class="btn-text-tiny">Regions</span>
+            <v-tooltip activator="parent" location="bottom">
+              {{ showRegions ? 'Hide Regions (Ctrl+Shift+R)' : 'Show Regions (Ctrl+Shift+R)' }}
+            </v-tooltip>
+          </v-btn>
 
-            <!-- Refresh Button -->
-            <v-btn
-              icon
-              size="small"
-              variant="outlined"
-              @click="$emit('refresh')"
-              :loading="loading"
-              class="flex-shrink-0"
-            >
-              <v-icon>mdi-refresh</v-icon>
-              <v-tooltip activator="parent" location="bottom">Refresh Rundown (Ctrl+Shift+R)</v-tooltip>
-            </v-btn>
+          <!-- Refresh Button -->
+          <v-btn
+            size="x-small"
+            variant="outlined"
+            @click="$emit('refresh')"
+            :loading="loading"
+            class="toolbar-btn-tile"
+          >
+            <v-icon size="small" class="mr-1">mdi-refresh</v-icon>
+            <span class="btn-text-tiny">Refresh</span>
+            <v-tooltip activator="parent" location="bottom">Refresh Rundown (Ctrl+Shift+R)</v-tooltip>
+          </v-btn>
 
-            <!-- Options Button -->
-            <v-btn
-              v-if="panelWidth === 'wide'"
-              icon
-              size="small"
-              variant="outlined"
-              @click="$emit('toggle-options')"
-              class="flex-shrink-0"
-            >
-              <v-icon>mdi-dots-vertical</v-icon>
-              <v-tooltip activator="parent" location="bottom">Rundown Options</v-tooltip>
-            </v-btn>
-          </div>
+          <!-- Options Menu -->
+          <v-menu>
+            <template v-slot:activator="{ props }">
+              <v-btn
+                size="x-small"
+                color="orange-darken-2"
+                variant="elevated"
+                v-bind="props"
+                class="toolbar-btn-tile"
+              >
+                <v-icon size="small" class="mr-1">mdi-dots-vertical</v-icon>
+                <span class="btn-text-tiny">Options</span>
+                <v-tooltip activator="parent" location="bottom">Rundown Options</v-tooltip>
+              </v-btn>
+            </template>
+            <v-list density="compact">
+              <v-list-item @click="createNewRegion">
+                <template v-slot:prepend>
+                  <v-icon size="small">mdi-plus</v-icon>
+                </template>
+                <v-list-item-title>Add New Region</v-list-item-title>
+                <v-list-item-subtitle>Create a new region</v-list-item-subtitle>
+              </v-list-item>
+              <v-divider></v-divider>
+              <v-list-item @click="$emit('export')">
+                <template v-slot:prepend>
+                  <v-icon size="small">mdi-export</v-icon>
+                </template>
+                <v-list-item-title>Export Rundown</v-list-item-title>
+                <v-list-item-subtitle>Ctrl+Shift+E</v-list-item-subtitle>
+              </v-list-item>
+              <v-list-item @click="$emit('sync-order')">
+                <template v-slot:prepend>
+                  <v-icon size="small">mdi-order-numeric-ascending</v-icon>
+                </template>
+                <v-list-item-title>Sync Order</v-list-item-title>
+                <v-list-item-subtitle>Update order values</v-list-item-subtitle>
+              </v-list-item>
+              <v-list-item @click="toggleAllBreaksExpansion">
+                <template v-slot:prepend>
+                  <v-icon size="small">{{ allBreaksCollapsed ? 'mdi-arrow-expand-all' : 'mdi-arrow-collapse-all' }}</v-icon>
+                </template>
+                <v-list-item-title>{{ allBreaksCollapsed ? 'Expand Breaks' : 'Collapse Breaks' }}</v-list-item-title>
+                <v-list-item-subtitle>{{ allBreaksCollapsed ? 'Expand all break regions' : 'Collapse all break regions' }}</v-list-item-subtitle>
+              </v-list-item>
+            </v-list>
+          </v-menu>
         </div>
+
       </div>
       
       <v-card-text class="pa-1 rundown-content">
@@ -186,7 +197,8 @@
                 :class="{
                   'region-break': region.type === 'break',
                   'region-selected': selectedRegionId === region.id,
-                  'region-collapsed': shouldCollapseRegion(region)
+                  'region-collapsed': shouldCollapseRegion(region),
+                  'regions-hidden': !showRegions
                 }"
                 :style="{
                   '--region-color': resolveVuetifyColor(getRegionColor(region.type))
@@ -194,6 +206,7 @@
               >
                 <!-- Region Header -->
                 <div
+                  v-if="showRegions"
                   class="region-header"
                   :class="{
                     'break-region': region.type === 'break',
@@ -236,10 +249,10 @@
                           </template>
                         </v-list-item>
 
-                        <v-list-item @click="handleDuplicateRegion(region)">
-                          <v-list-item-title>Duplicate Region</v-list-item-title>
+                        <v-list-item @click="toggleRegionCollapse(region)">
+                          <v-list-item-title>{{ region.isCollapsed ? 'Expand Region' : 'Collapse Region' }}</v-list-item-title>
                           <template v-slot:prepend>
-                            <v-icon size="small">mdi-content-copy</v-icon>
+                            <v-icon size="small">{{ region.isCollapsed ? 'mdi-arrow-expand-all' : 'mdi-arrow-collapse-all' }}</v-icon>
                           </template>
                         </v-list-item>
 
@@ -257,22 +270,6 @@
                       </v-list>
                     </v-menu>
 
-                    <!-- Delete button when region is selected -->
-                    <v-btn
-                      v-if="selectedRegionId === region.id"
-                      icon
-                      size="small"
-                      variant="text"
-                      color="error"
-                      class="ml-auto"
-                      @click.stop="handleSelectedRegionDelete(region)"
-                      :style="{ color: 'red' }"
-                    >
-                      <v-icon size="default">mdi-delete</v-icon>
-                      <v-tooltip activator="parent" location="bottom">
-                        Delete Selected Region
-                      </v-tooltip>
-                    </v-btn>
                   </div>
                 </div>
 
@@ -334,30 +331,49 @@
                             <!-- Type -->
                             <div class="type-label">{{ (item?.type || 'UNKNOWN').toUpperCase() }}</div>
 
-                            <!-- Slug (Bold) -->
-                            <div class="slug-text">{{ (item?.slug || '').toLowerCase() }}</div>
+                            <!-- Slug (Bold) and AssetID for selected items -->
+                            <div class="slug-column">
+                              <div class="slug-text">{{ (item?.slug || '').toLowerCase() }}</div>
+                              <!-- AssetID under slug for selected items only -->
+                              <div v-if="getItemGlobalIndex(item) === selectedItemIndex" class="asset-id-text">
+                                {{ item?.asset_id || 'No AssetID' }}
+                              </div>
+                            </div>
 
                             <!-- Duration (Right side) -->
                             <div v-if="panelWidth === 'wide'" class="duration-display">
                               {{ formatDuration(item?.duration || '0:00') }}
                             </div>
 
-                            <!-- Delete button for selected item -->
-                            <v-btn
-                              v-if="getItemGlobalIndex(item) === selectedItemIndex"
-                              icon
-                              size="small"
-                              variant="text"
-                              color="error"
-                              class="item-delete-btn-right"
-                              @click.stop="handleItemDelete(item)"
-                              :style="{ color: 'red' }"
-                            >
-                              <v-icon size="default">mdi-delete</v-icon>
-                              <v-tooltip activator="parent" location="bottom">
-                                Delete Selected Item
-                              </v-tooltip>
-                            </v-btn>
+                            <!-- Hamburger menu for selected item -->
+                            <v-menu v-if="getItemGlobalIndex(item) === selectedItemIndex" location="bottom end">
+                              <template v-slot:activator="{ props }">
+                                <v-btn
+                                  icon
+                                  size="small"
+                                  variant="text"
+                                  class="item-menu-btn-right"
+                                  v-bind="props"
+                                  @click.stop
+                                >
+                                  <v-icon size="default">mdi-dots-vertical</v-icon>
+                                </v-btn>
+                              </template>
+                              <v-list>
+                                <v-list-item @click="handleItemDelete(item)">
+                                  <v-list-item-title>
+                                    <v-icon size="small" class="mr-2" color="error">mdi-delete</v-icon>
+                                    Delete Item
+                                  </v-list-item-title>
+                                </v-list-item>
+                                <v-list-item @click="requestNewItemAssetID(item)">
+                                  <v-list-item-title>
+                                    <v-icon size="small" class="mr-2" color="primary">mdi-refresh</v-icon>
+                                    Request New AssetID
+                                  </v-list-item-title>
+                                </v-list-item>
+                              </v-list>
+                            </v-menu>
                           </div>
                         </v-card>
                       </div>
@@ -368,19 +384,6 @@
             </template>
           </draggable>
 
-          <!-- Add New Region Button -->
-          <div class="new-region-button-container">
-            <v-btn
-              variant="outlined"
-              color="primary"
-              size="small"
-              @click="createNewRegion"
-              class="add-region-btn"
-            >
-              <v-icon left>mdi-plus</v-icon>
-              Add New Region
-            </v-btn>
-          </div>
         </div>
 
 
@@ -738,7 +741,10 @@ export default {
 
       // Clear entire rundown modal
       showClearRundownModal: false,
-      clearRundownInProgress: false
+      clearRundownInProgress: false,
+
+      // Region visibility toggle
+      showRegions: false  // Default to regions hidden
     }
   },
   setup() {
@@ -944,6 +950,13 @@ export default {
         details,
         count
       }
+    },
+
+    // Check if all break regions are collapsed
+    allBreaksCollapsed() {
+      const breakRegions = this.regions.filter(region => region.type === 'break')
+      if (breakRegions.length === 0) return false
+      return breakRegions.every(region => region.isCollapsed === true)
     }
 
   },
@@ -958,14 +971,21 @@ export default {
       console.warn('Failed to load colors in RundownPanel, using defaults:', error);
     }
 
-    // Add keyboard listener for clear rundown shortcut
-    document.addEventListener('keydown', this.handleKeydown);
+    // Add keyboard listener for clear rundown shortcut - use capture phase for higher priority
+    document.addEventListener('keydown', this.handleKeydown, true);
   },
   beforeUnmount() {
     // Clean up keyboard listener
-    document.removeEventListener('keydown', this.handleKeydown);
+    document.removeEventListener('keydown', this.handleKeydown, true);
   },
   methods: {
+    // Region visibility toggle
+    toggleRegionsVisibility() {
+      this.showRegions = !this.showRegions;
+      console.log(`Regions ${this.showRegions ? 'shown' : 'hidden'}`);
+    },
+
+
     // NEW: Methods for hierarchical structure (future use)
     calculateRegionDuration(region) {
       if (!region.items || region.items.length === 0) {
@@ -991,6 +1011,30 @@ export default {
       // All regions (including break regions) follow their isCollapsed state
       // Break regions stay expanded once opened until explicitly collapsed
       return region.isCollapsed
+    },
+
+    toggleAllBreaksExpansion() {
+      // Find all break regions
+      const breakRegions = this.regions.filter(region => region.type === 'break')
+      if (breakRegions.length === 0) return
+
+      // Determine target state - if all are collapsed, expand them; otherwise collapse all
+      const shouldExpand = this.allBreaksCollapsed
+
+      // Toggle all break regions to the target state
+      breakRegions.forEach(region => {
+        region.isCollapsed = !shouldExpand
+      })
+
+      console.log(`${shouldExpand ? 'Expanded' : 'Collapsed'} ${breakRegions.length} break regions`)
+    },
+
+    toggleRegionCollapse(region) {
+      // Toggle the collapse state of a specific region
+      const newState = !region.isCollapsed
+      region.isCollapsed = newState
+
+      console.log(`${newState ? 'Collapsed' : 'Expanded'} region: ${region.name}`)
     },
 
     getItemGlobalIndex(item) {
@@ -2032,6 +2076,39 @@ export default {
 
     // Keyboard event handler
     handleKeydown(event) {
+      // Ctrl+Shift+R - Toggle regions visibility
+      if (event.ctrlKey && event.shiftKey && event.key === 'R') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleRegionsVisibility();
+        return;
+      }
+
+      // Check for Esc key to cancel multi-selection
+      if (event.key === 'Escape') {
+        // Only handle Esc if we're in multi-select mode or have selections
+        if (this.isMultiSelectMode || this.hasMultipleSelections || this.selectedRegionId !== null || this.selectedItemIndex !== -1) {
+          console.log('🚫 Esc pressed: Cancelling all selections')
+          this.cancelAllSelections()
+
+          // Prevent ALL further processing of this Esc key event
+          event.preventDefault()
+          event.stopPropagation()
+          event.stopImmediatePropagation()
+
+          // Return early to ensure no other handlers run
+          return false
+        }
+
+        // If Esc is pressed but we don't have selections, still prevent default behavior
+        // to avoid unwanted navigation
+        console.log('🚫 Esc pressed: No selections to cancel, preventing default navigation')
+        event.preventDefault()
+        event.stopPropagation()
+        event.stopImmediatePropagation()
+        return false
+      }
+
       // Check for Ctrl+Alt+Shift+0 to clear entire rundown
       // Note: when Shift+0 is pressed, event.key is ')' but event.code is 'Digit0'
       if (event.ctrlKey && event.altKey && event.shiftKey && (event.key === ')' || event.code === 'Digit0')) {
@@ -2133,6 +2210,82 @@ export default {
     // Helper method to get region by ID
     getRegionById(regionId) {
       return this.regions.find(region => region.id === regionId)
+    },
+
+    // Request new AssetID for a rundown item
+    async requestNewItemAssetID(item) {
+      try {
+        console.log('Requesting new AssetID for rundown item:', item)
+
+        const response = await fetch('/assetid/regenerate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
+          },
+          body: JSON.stringify({
+            old_asset_id: item.asset_id,
+            entity_type: 'segment',
+            reason: 'user_requested_item_regeneration',
+            context: {
+              item_slug: item.slug,
+              item_type: item.type,
+              item_id: item.id
+            }
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status}`)
+        }
+
+        const result = await response.json()
+        console.log('✅ AssetID regenerated successfully:', result)
+
+        // Update the item with new AssetID
+        item.asset_id = result.new_asset_id
+
+        // Show success message
+        this.flashMessage = `AssetID regenerated: ${result.old_asset_id} → ${result.new_asset_id}`
+        this.showFlashMessage = true
+
+        // Emit event to parent to save the updated item
+        this.$emit('item-assetid-updated', {
+          item: item,
+          oldAssetId: result.old_asset_id,
+          newAssetId: result.new_asset_id
+        })
+
+        // Force reactive update of the rundown display
+        this.$forceUpdate()
+
+        // Emit global refresh event
+        this.$emit('assetid-regenerated', {
+          entityType: 'segment',
+          oldAssetId: result.old_asset_id,
+          newAssetId: result.new_asset_id,
+          affectedItem: item
+        })
+
+      } catch (error) {
+        console.error('❌ Failed to regenerate AssetID:', error)
+        this.flashMessage = `Failed to regenerate AssetID: ${error.message}`
+        this.showFlashMessage = true
+      }
+    },
+
+    // Cancel all selections and exit multi-select mode
+    cancelAllSelections() {
+      // Clear all multi-selections
+      this.selectedItemIndices.clear()
+      this.selectedRegionIds.clear()
+      this.isMultiSelectMode = false
+
+      // Clear single selections
+      this.selectedRegionId = null
+      this.$emit('select-item', -1)
+
+      console.log('✅ All selections cancelled - multi-select mode disabled')
     }
   }
 }
@@ -2155,22 +2308,16 @@ export default {
   border-radius: 0 !important; /* Remove border radius */
 }
 
-/* Break regions have reduced height and margins for entire region */
+/* Break regions have reduced height (margins handled by consistent spacing rules below) */
 .region-header-slim.break-region {
   height: 60%; /* 60% of normal height */
-  padding: 1px; /* Reduced padding to allow height reduction to be visible */
   overflow: hidden; /* Ensure content doesn't expand beyond reduced height */
-  margin-top: 1em; /* 1em margin above entire break region */
-  margin-bottom: 0 !important; /* No margin below break region headers */
+  /* Margins handled by consistent spacing rules below */
 }
 
 /* SIMPLIFIED APPROACH - work with existing flat structure */
 
-/* All region headers get consistent 1em spacing above them */
-.region-header-slim {
-  margin-top: 1em !important;
-  margin-bottom: 0 !important;
-}
+/* Removed - replaced by consistent spacing rules below */
 
 /* First region header has no top margin */
 .region-header-slim:first-child {
@@ -2343,9 +2490,11 @@ export default {
   /* Keep existing list view styles */
 }
 .rundown-panel {
-  height: 100vh; /* Full viewport height */
+  height: 100vh; /* Full viewport height - reach bottom no matter what */
   border-right: none; /* Remove border */
   overflow: hidden; /* Prevent any overflow issues */
+  display: flex;
+  flex-direction: column;
 }
 
 .rundown-title {
@@ -2358,9 +2507,10 @@ export default {
 }
 
 .rundown-content {
+  flex: 1; /* Take up remaining space */
   overflow-y: auto;
-  height: calc(100vh - 140px); /* Extend to fill more of the screen */
   overflow-x: hidden; /* Prevent horizontal scrolling during drag */
+  min-height: 0; /* Allow flex item to shrink */
 }
 
 .rundown-headers {
@@ -2374,6 +2524,7 @@ export default {
   color: var(--v-medium-emphasis-opacity);
   border-bottom: none; /* Remove border */
   position: relative;
+  transform: translateX(25px); /* Match data row positioning */
 }
 
 /* Position duration header absolutely too */
@@ -2389,6 +2540,7 @@ export default {
   padding: 6px 8px;
   font-size: 11px;
   gap: 6px;
+  transform: translateX(15px); /* Match narrow mode data row positioning */
 }
 
 .compact-rundown-row {
@@ -2462,14 +2614,30 @@ export default {
   height: 100%;
 }
 
+.slug-column {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  overflow: hidden;
+}
 .slug-text {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  display: flex;
-  align-items: center;
-  height: 100%;
+  line-height: 1.2;
+}
+.asset-id-text {
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.1;
+  margin-top: 1px;
+  font-family: 'Roboto Mono', monospace;
 }
 
 .duration-display {
@@ -2554,7 +2722,7 @@ export default {
 }
 
 .rundown-items-container {
-  height: calc(100vh - 200px); /* Fixed height instead of max-height */
+  height: calc(100vh - 120px); /* Account for panel header and other UI elements */
   overflow-y: auto;
   overflow-x: hidden; /* Prevent horizontal scrolling */
 }
@@ -2634,6 +2802,119 @@ export default {
   border-radius: 0 !important;
 }
 
+/* NEW: Split Toolbar Layout with Fixed Options Menu */
+.rundown-toolbar-split {
+  border-bottom: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-main-grid {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  align-items: stretch;
+}
+
+.toolbar-options-fixed {
+  flex-shrink: 0;
+  min-width: 70px;
+}
+
+.toolbar-btn-tile {
+  border-radius: 0 !important;
+  min-height: 28px !important; /* 25% smaller than standard 36px */
+  font-size: 10px !important; /* Smaller font size */
+  flex: 1;
+  width: 100% !important;
+  justify-self: stretch;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px !important;
+}
+
+.toolbar-btn-tile .btn-text-tiny {
+  font-size: 9px !important;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.options-btn-fixed {
+  border-radius: 0 !important;
+  min-height: 28px !important;
+  font-size: 10px !important;
+  width: 100% !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px !important;
+  box-shadow: 0 2px 4px rgba(255, 152, 0, 0.3) !important; /* Orange glow */
+}
+
+.options-btn-fixed .btn-text-tiny {
+  font-size: 9px !important;
+  line-height: 1.1;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* Responsive breakpoints for main grid */
+@media (max-width: 400px) {
+  .toolbar-main-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 401px) and (max-width: 600px) {
+  .toolbar-main-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 601px) and (max-width: 800px) {
+  .toolbar-main-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (min-width: 801px) {
+  .toolbar-main-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+/* Narrow panel adjustments */
+.rundown-panel.narrow .toolbar-main-grid {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+}
+
+.rundown-panel.narrow .toolbar-btn-tile {
+  min-height: 24px !important;
+  font-size: 8px !important;
+  padding: 0 2px !important;
+}
+
+.rundown-panel.narrow .toolbar-btn-tile .btn-text-tiny {
+  font-size: 7px !important;
+}
+
+.rundown-panel.narrow .options-btn-fixed {
+  min-height: 24px !important;
+  font-size: 8px !important;
+  padding: 0 2px !important;
+}
+
+.rundown-panel.narrow .options-btn-fixed .btn-text-tiny {
+  font-size: 7px !important;
+}
+
 /* Duration display positioning - restored */
 .duration-display {
   position: absolute;
@@ -2657,7 +2938,15 @@ export default {
   right: calc(12px + 25px) !important;
 }
 
-/* Delete button - positioned at far right edge */
+/* Hamburger menu button - positioned at far right edge */
+.item-menu-btn-right {
+  position: absolute;
+  right: 4px; /* All the way to the right edge */
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 15; /* Above duration */
+}
+/* Legacy delete button (backup) */
 .item-delete-btn-right {
   position: absolute;
   right: 4px; /* All the way to the right edge */
@@ -3018,6 +3307,27 @@ export default {
   margin-bottom: 0.5rem; /* Smaller margin for break regions */
 }
 
+/* Hidden regions styling - remove backgrounds and collapse whitespace */
+.region-container.regions-hidden {
+  background-color: transparent !important; /* Remove region background */
+  border-left: none !important; /* Remove region border */
+  margin-bottom: 1px !important; /* Minimal hairline spacing */
+  margin-top: 0 !important; /* Remove top margin */
+  padding: 0 !important; /* Remove all padding */
+}
+
+/* Remove region items background when regions are hidden */
+.region-container.regions-hidden .region-items {
+  background-color: transparent !important; /* Remove region items background */
+  padding: 0 !important; /* Remove padding */
+  margin: 0 !important; /* Remove margins */
+}
+
+/* Remove any region header styling when regions are hidden (backup) */
+.region-container.regions-hidden .region-header {
+  display: none !important; /* Force hide region headers */
+}
+
 /* Selected region styling - fill entire region container */
 .region-container.region-selected {
   background-color: v-bind('getSelectionColor()') !important;
@@ -3185,7 +3495,7 @@ export default {
 
 /* Consistent spacing between regions - achieved via region headers */
 .region-header-slim {
-  margin-top: 1.5rem !important; /* 1.5rem spacing above each region */
+  margin-top: 1.0rem !important; /* Consistent 1.0rem spacing above each region */
   margin-bottom: 0 !important; /* No space below headers */
 }
 
@@ -3194,16 +3504,18 @@ export default {
   margin-top: 0 !important;
 }
 
-/* Break regions get smaller spacing */
-.region-header-slim.break-region {
-  margin-top: 0.75rem !important; /* Smaller spacing for break regions */
+/* Collapsed regions get consistent spacing regardless of type */
+.region-header-slim.region-collapsed {
+  margin-top: 1.0rem !important; /* Same spacing for all collapsed regions */
   height: auto !important; /* Override any height restrictions */
-  padding: 0.5rem 1rem !important; /* Smaller padding */
+  padding: 0.3rem 1rem !important; /* Consistent small padding for collapsed regions */
 }
 
-/* Block regions get specific margin (except Block A) */
-.region-header-slim:not(.break-region):not(:first-child) {
-  margin-top: 0.75em !important; /* 0.75em spacing for BLOCK regions except first one */
+/* Ensure consistent spacing for all region types when not collapsed */
+.region-header-slim.break-region:not(.region-collapsed) {
+  margin-top: 1.0rem !important; /* Same as other regions when expanded */
+  height: auto !important; /* Override any height restrictions */
+  padding: 0.5rem 1rem !important; /* Normal padding when expanded */
 }
 
 /* All rundown items have zero margins */

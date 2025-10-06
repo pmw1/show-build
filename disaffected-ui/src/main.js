@@ -8,6 +8,7 @@ import { createPinia } from 'pinia'
 import Toast from 'vue-toastification'
 import 'vue-toastification/dist/index.css'
 import './styles/vuetify-fixes.css'
+import { initializeXtts } from '@/composables/useXtts'
 
 loadFonts()
 
@@ -38,3 +39,10 @@ app.config.globalProperties.$axios = axios.create({
 // Mount app and store reference for hot module reload
 app.mount('#app')
 appElement.__vue_app__ = app
+
+// Initialize XTTS configuration
+initializeXtts().then(() => {
+  console.log('XTTS configuration initialized')
+}).catch((error) => {
+  console.error('Failed to initialize XTTS:', error)
+})

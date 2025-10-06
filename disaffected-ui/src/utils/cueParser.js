@@ -1,0 +1,407 @@
+/**
+ * Cue Block Parser
+ * Parses markdown content containing cue blocks and converts them to card data
+ */
+
+export class CueParser {
+
+  /**
+   * Parse content and extract cue blocks along with text segments
+   * @param {string} content - Raw markdown content containing cue blocks
+   * @returns {Array} Array of content segments (text or cue card data)
+   */
+  static parseContent(content) {
+    if (!content || typeof content !== 'string') {
+      return [];
+    }
+
+    const segments = [];
+    const cueBlockPattern = /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = cueBlockPattern.exec(content)) !== null) {
+      // Add text content before this cue block
+      const textBefore = content.slice(lastIndex, match.index);
+      if (textBefore.trim()) {
+        const textSegments = this.parseTextSegments(textBefore);
+        segments.push(...textSegments);
+      }
+
+      // Parse the cue block
+      const cueContent = match[1];
+      const cueData = this.parseCueBlock(cueContent);
+      if (cueData) {
+        segments.push({
+          type: 'cue',
+          cueType: cueData.type,
+          data: cueData
+        });
+      }
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add any remaining text after the last cue block
+    const textAfter = content.slice(lastIndex);
+    if (textAfter.trim()) {
+      const textSegments = this.parseTextSegments(textAfter);
+      segments.push(...textSegments);
+    }
+
+    return segments;
+  }
+
+  /**
+   * Parse text content into paragraphs with speaker detection
+   * @param {string} textContent - Raw text content to parse
+   * @returns {Array} Array of text segments with speaker information
+   */
+  static parseTextSegments(textContent) {
+    if (!textContent || !textContent.trim()) {
+      return [];
+    }
+
+    const segments = [];
+
+    // Check if content already has <p> tags with speaker classes
+    const existingParagraphs = textContent.match(/<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/g);
+
+    if (existingParagraphs) {
+      // Parse each paragraph tag into individual speaker segments
+      existingParagraphs.forEach(paragraphHtml => {
+        const match = paragraphHtml.match(/<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/);
+        if (match) {
+          const speaker = match[1] || 'josh'; // Default to josh if no class
+          const content = match[2].trim();
+
+          // Always push segment, even if empty (allows editing empty paragraphs)
+          if (content) {
+            // Split content on line breaks to create separate paragraphs
+            const contentParagraphs = content.split(/\n\s*\n/).filter(p => p.trim());
+            if (contentParagraphs.length > 1) {
+              // Multiple paragraphs found - split them
+              contentParagraphs.forEach(paragraph => {
+                segments.push({
+                  type: 'text',
+                  content: paragraph.trim(),
+                  speaker: speaker,
+                  needsParagraphTags: true
+                });
+              });
+            } else {
+              // Single paragraph
+              segments.push({
+                type: 'text',
+                content: content,
+                speaker: speaker,
+                needsParagraphTags: true
+              });
+            }
+          } else {
+            // Empty paragraph - still create segment for editing
+            segments.push({
+              type: 'text',
+              content: '',
+              speaker: speaker,
+              needsParagraphTags: true
+            });
+          }
+        }
+      });
+    } else {
+      // Parse raw text into paragraphs and apply speaker detection
+      const paragraphs = textContent.split(/\n\s*\n/).filter(p => p.trim());
+
+      for (const paragraph of paragraphs) {
+        const cleanParagraph = paragraph.trim();
+        if (!cleanParagraph) continue;
+
+        // Detect speaker (default to 'josh' for now)
+        const speaker = this.detectSpeaker(cleanParagraph);
+
+        segments.push({
+          type: 'text',
+          content: cleanParagraph,
+          speaker: speaker,
+          needsParagraphTags: true
+        });
+      }
+    }
+
+    return segments;
+  }
+
+  /**
+   * Detect speaker from paragraph content
+   * @param {string} paragraph - Paragraph text
+   * @returns {string} Speaker identifier
+   */
+  // eslint-disable-next-line no-unused-vars
+  static detectSpeaker(paragraph) {
+    // For now, default to 'josh' but this can be enhanced with:
+    // - Pattern matching for speaker indicators
+    // - Context analysis
+    // - User preferences
+    // - AI-based speaker detection
+
+    // Example patterns that could indicate different speakers:
+    if (paragraph.match(/^(GUEST|CALLER|INTERVIEW)/i)) return 'guest';
+    if (paragraph.match(/^(ANNOUNCER|NARRATOR)/i)) return 'announcer';
+
+    return 'josh'; // Default speaker
+  }
+
+  /**
+   * Parse individual cue block content
+   * @param {string} cueContent - Content between Begin/End Cue markers
+   * @returns {Object|null} Parsed cue data object
+   */
+  static parseCueBlock(cueContent) {
+    if (!cueContent) return null;
+
+    const cueData = {};
+
+    // Parse field lines [Field: Value]
+    const fieldPattern = /\[([^:]+):\s*([^\]]*)\]/g;
+    let fieldMatch;
+
+    while ((fieldMatch = fieldPattern.exec(cueContent)) !== null) {
+      const fieldName = fieldMatch[1].trim();
+      const fieldValue = fieldMatch[2].trim();
+
+      // Convert field names to camelCase and store values
+      const camelFieldName = this.toCamelCase(fieldName);
+      cueData[camelFieldName] = fieldValue || '';
+    }
+
+    // Extract embedded image tag for GFX/IMG cues
+    const imgMatch = cueContent.match(/<img[^>]+src="([^"]+)"[^>]*>/);
+    if (imgMatch) {
+      cueData.imageTag = imgMatch[0];
+      cueData.imageSrc = imgMatch[1];
+    }
+
+    // Ensure we have at least a type
+    if (!cueData.type) {
+      return null;
+    }
+
+    return cueData;
+  }
+
+  /**
+   * Convert field name to camelCase
+   * @param {string} fieldName - Field name to convert
+   * @returns {string} camelCase field name
+   */
+  static toCamelCase(fieldName) {
+    return fieldName
+      .split(/[\s_-]+/)
+      .map((word, index) => {
+        if (index === 0) {
+          return word.toLowerCase();
+        }
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      })
+      .join('');
+  }
+
+  /**
+   * Check if content contains cue blocks
+   * @param {string} content - Content to check
+   * @returns {boolean} True if content contains cue blocks
+   */
+  static containsCueBlocks(content) {
+    if (!content) return false;
+    return /<!-- Begin Cue -->/.test(content);
+  }
+
+  /**
+   * Get cue types that should render as image cards
+   * @returns {Array} Array of cue types that display images
+   */
+  static getImageCueTypes() {
+    return ['IMG', 'GFX'];
+  }
+
+  /**
+   * Check if a cue type should render as an image card
+   * @param {string} cueType - Cue type to check
+   * @returns {boolean} True if should render as image card
+   */
+  static isImageCueType(cueType) {
+    return this.getImageCueTypes().includes(cueType?.toUpperCase());
+  }
+
+  /**
+   * Generate card title for cue
+   * @param {Object} cueData - Parsed cue data
+   * @returns {string} Card title
+   */
+  static generateCardTitle(cueData) {
+    if (!cueData) return 'Unknown Cue';
+
+    const type = cueData.type || 'Unknown';
+    const slug = cueData.slug || '';
+
+    if (slug) {
+      return `${type}: ${slug}`;
+    }
+
+    return type;
+  }
+
+  /**
+   * Generate card subtitle for cue
+   * @param {Object} cueData - Parsed cue data
+   * @returns {string} Card subtitle
+   */
+  static generateCardSubtitle(cueData) {
+    if (!cueData) return '';
+
+    const description = cueData.description;
+    const assetId = cueData.assetId;
+
+    if (description) {
+      return description;
+    }
+
+    if (assetId) {
+      return `AssetID: ${assetId}`;
+    }
+
+    return '';
+  }
+
+  /**
+   * Format cue data for display in script mode
+   * @param {Object} cueData - Parsed cue data
+   * @returns {Object} Formatted data for card display
+   */
+  static formatForCard(cueData) {
+    if (!cueData) return null;
+
+    return {
+      id: `cue-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: cueData.type,
+      title: this.generateCardTitle(cueData),
+      subtitle: this.generateCardSubtitle(cueData),
+      assetId: cueData.assetId,
+      slug: cueData.slug,
+      description: cueData.description,
+      mediaUrl: cueData.mediaUrl,
+      imageSrc: cueData.imageSrc,
+      imageTag: cueData.imageTag,
+      duration: cueData.duration,
+      isImageType: this.isImageCueType(cueData.type),
+      rawData: cueData
+    };
+  }
+
+  /**
+   * Convert text segments back to properly formatted content
+   * @param {Array} segments - Array of content segments
+   * @returns {string} Formatted content with proper paragraph tags
+   */
+  static reconstructContent(segments) {
+    const result = [];
+    let i = 0;
+
+    while (i < segments.length) {
+      const segment = segments[i];
+
+      if (segment.type === 'text' && segment.needsParagraphTags) {
+        // Create individual paragraph for each text segment
+        const speaker = segment.speaker;
+        result.push(`<p class="${speaker}">${segment.content}</p>`);
+        i++;
+      } else if (segment.type === 'text') {
+        if (segment.hasStructuredParagraphs) {
+          // Already has proper paragraph structure
+          result.push(segment.content);
+        } else {
+          // Fallback to plain text
+          result.push(segment.content);
+        }
+        i++;
+      } else if (segment.type === 'cue') {
+        // Convert cue data back to cue block format
+        result.push(this.formatCueToMarkdown(segment.data.rawData));
+        i++;
+      } else {
+        i++;
+      }
+    }
+
+    return result.join('\n\n');
+  }
+
+  /**
+   * Format cue data back to markdown cue block format
+   * @param {Object} cueData - Cue data to format
+   * @returns {string} Formatted cue block
+   */
+  static formatCueToMarkdown(cueData) {
+    if (!cueData) return '';
+
+    let cueBlock = '<!-- Begin Cue -->\n';
+
+    // Add all fields from the original cue data
+    Object.keys(cueData).forEach(key => {
+      if (key !== 'imageTag' && key !== 'imageSrc' && cueData[key]) {
+        const displayKey = this.formatFieldForDisplay(key);
+        cueBlock += `[${displayKey}: ${cueData[key]}]\n`;
+      }
+    });
+
+    // Add image tag if it exists
+    if (cueData.imageTag) {
+      cueBlock += `${cueData.imageTag}\n`;
+    }
+
+    cueBlock += '<!-- End Cue -->';
+    return cueBlock;
+  }
+
+  /**
+   * Convert camelCase field name back to display format
+   * @param {string} camelCaseField - Field name in camelCase
+   * @returns {string} Formatted field name for display
+   */
+  static formatFieldForDisplay(camelCaseField) {
+    return camelCaseField
+      .replace(/([A-Z])/g, ' $1')
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+
+  /**
+   * Get available speaker options
+   * @returns {Array} Array of speaker options
+   */
+  static getSpeakerOptions() {
+    return [
+      { value: 'josh', label: 'Josh', color: '#1976d2' },
+      { value: 'guest', label: 'Guest', color: '#388e3c' },
+      { value: 'caller', label: 'Caller', color: '#f57c00' },
+      { value: 'announcer', label: 'Announcer', color: '#7b1fa2' },
+      { value: 'narrator', label: 'Narrator', color: '#5d4037' },
+      { value: 'host', label: 'Host', color: '#1976d2' }
+    ];
+  }
+
+  /**
+   * Get speaker color for styling
+   * @param {string} speaker - Speaker identifier
+   * @returns {string} Color code for speaker
+   */
+  static getSpeakerColor(speaker) {
+    const options = this.getSpeakerOptions();
+    const option = options.find(opt => opt.value === speaker);
+    return option ? option.color : '#666666';
+  }
+}
+
+export default CueParser;

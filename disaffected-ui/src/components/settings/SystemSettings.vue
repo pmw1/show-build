@@ -30,6 +30,12 @@
           <v-tab value="archive" prepend-icon="mdi-archive">
             Archive
           </v-tab>
+          <v-tab value="voice" prepend-icon="mdi-microphone">
+            Voice Services
+          </v-tab>
+          <v-tab value="deployments" prepend-icon="mdi-cloud-upload">
+            Deployments
+          </v-tab>
         </v-tabs>
       </v-col>
 
@@ -904,6 +910,20 @@
             </v-btn>
           </v-tabs-window-item>
 
+          <!-- Voice Services Tab -->
+          <v-tabs-window-item value="voice">
+            <VoiceSettings
+              :model-value="voiceConfigs"
+              @update:model-value="voiceConfigs = $event"
+              @save="handleVoiceSave"
+            />
+          </v-tabs-window-item>
+
+          <!-- Deployments Tab -->
+          <v-tabs-window-item value="deployments">
+            <DeploymentSettings />
+          </v-tabs-window-item>
+
         </v-tabs-window>
       </v-col>
     </v-row>
@@ -911,7 +931,9 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import VoiceSettings from './VoiceSettings.vue'
+import DeploymentSettings from './DeploymentSettings.vue'
 
 // Define props
 const props = defineProps({
@@ -987,6 +1009,23 @@ const systemSettings = ref({
   archiveAutomatic: false,
   archiveKeepLocal: true,
   archiveCompression: false
+})
+
+// Voice configurations
+const voiceConfigs = ref({
+  whisper: {
+    host: '',
+    endpoint: '/v1/audio/transcriptions',
+    enabled: false
+  },
+  xtts: {
+    host: 'http://192.168.51.197:5001',
+    endpoint: '/v1/audio/speech',
+    language: 'en',
+    speed: 1.0,
+    speaker: '',
+    enabled: false
+  }
 })
 
 // Derived paths computed property
@@ -1079,7 +1118,38 @@ const updateDerivedPaths = () => {
 }
 
 const handleSave = () => {
+  // Manually emit update since watcher is disabled
+  emit('update:modelValue', { ...systemSettings.value })
   emit('save', { ...systemSettings.value })
+}
+
+const handleVoiceSave = async (configs) => {
+  try {
+    // Save voice configurations to API
+    const response = await fetch('/api/settings/api-configs', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('auth-token') || localStorage.getItem('token')}`
+      },
+      body: JSON.stringify({
+        config: {
+          preproduction: {
+            ai_services: configs
+          }
+        }
+      })
+    })
+
+    if (response.ok) {
+      voiceConfigs.value = configs
+      console.log('Voice settings saved successfully')
+    } else {
+      throw new Error('Failed to save voice settings')
+    }
+  } catch (error) {
+    console.error('Error saving voice settings:', error)
+  }
 }
 
 const testDatabaseConnection = async () => {
@@ -1315,17 +1385,23 @@ const cleanTempFiles = async () => {
 }
 
 // Watch for prop changes and update local state
-watch(() => props.modelValue, (newVal) => {
-  if (newVal) {
+// Watch for props changes but prevent recursive updates during initialization
+let initializing = false
+watch(() => props.modelValue, async (newVal) => {
+  if (newVal && !initializing) {
+    initializing = true
+    await nextTick()
     systemSettings.value = { ...systemSettings.value, ...newVal }
     updateDerivedPaths()
+    initializing = false
   }
 }, { immediate: true, deep: true })
 
-// Watch for local changes and emit to parent
-watch(systemSettings, (newVal) => {
-  emit('update:modelValue', newVal)
-}, { deep: true })
+// DISABLED: Problematic watcher causing infinite loops
+// Instead, we'll handle updates manually in specific methods when needed
+// watch(systemSettings, async (newVal) => {
+//   emit('update:modelValue', newVal)
+// }, { deep: true })
 
 // Watch for system sub-tab changes to load system info when on maintenance tab
 watch(systemSubTab, (newVal) => {
@@ -1334,9 +1410,37 @@ watch(systemSubTab, (newVal) => {
   }
 })
 
+// Load voice configurations from API
+const loadVoiceConfigs = async () => {
+  try {
+    const response = await fetch('/api/settings/api-configs', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token') || localStorage.getItem('token')}`
+      }
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success && data.data?.preproduction?.ai_services) {
+        const aiServices = data.data.preproduction.ai_services
+
+        // Update voice configs with loaded data
+        const loadedVoice = {}
+        if (aiServices.whisper) loadedVoice.whisper = aiServices.whisper
+        if (aiServices.xtts) loadedVoice.xtts = aiServices.xtts
+
+        voiceConfigs.value = { ...voiceConfigs.value, ...loadedVoice }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load voice configurations:', error)
+  }
+}
+
 // Initialize component
 onMounted(() => {
   updateDerivedPaths()
+  loadVoiceConfigs()
   if (systemSubTab.value === 'maintenance') {
     loadSystemInfo()
   }

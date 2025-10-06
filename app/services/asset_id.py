@@ -483,6 +483,184 @@ class AssetIDService:
         
         return query.all()
 
+    @classmethod
+    def retire_and_regenerate(cls, db: Session, old_asset_id: str, entity_type: str,
+                            reason: str = "user_requested_regeneration",
+                            requested_by: str = "user",
+                            context: Optional[Dict] = None) -> str:
+        """
+        Retire existing AssetID and generate a new one.
+
+        Args:
+            db: Database session
+            old_asset_id: AssetID to retire (if it exists)
+            entity_type: Type of entity (episode, segment, cue)
+            reason: Reason for regeneration
+            requested_by: User requesting the regeneration
+            context: Additional context
+
+        Returns:
+            New AssetID
+        """
+        from models_assetid import AssetIDRegistry
+
+        # Try to retire the old AssetID if it exists
+        old_registry = db.query(AssetIDRegistry).filter(
+            AssetIDRegistry.asset_id == old_asset_id
+        ).first()
+
+        if old_registry:
+            # Mark as retired
+            old_registry.is_active = "retired"
+            old_registry.meta_data = old_registry.meta_data or {}
+            old_registry.meta_data["retired_at"] = datetime.utcnow().isoformat()
+            old_registry.meta_data["retirement_reason"] = reason
+            old_registry.meta_data["retired_by"] = requested_by
+
+            # Add retirement message
+            cls.add_message(
+                db=db,
+                asset_id=old_asset_id,
+                message=f"AssetID retired and replaced. Reason: {reason}",
+                message_type="retirement",
+                user_id=requested_by
+            )
+
+        # Generate new AssetID with full tracking
+        new_context = context or {}
+        new_context.update({
+            "replaces_asset_id": old_asset_id,
+            "generation_reason": reason,
+            "original_retirement": old_registry is not None
+        })
+
+        new_asset_id = cls.request_asset_id(
+            db=db,
+            entity_type=entity_type,
+            reason=reason,
+            requested_by=requested_by,
+            context=new_context
+        )
+
+        # Create replacement link if old AssetID existed
+        if old_registry:
+            cls.link_assets(
+                db=db,
+                source_id=new_asset_id,
+                target_id=old_asset_id,
+                link_type="replaces",
+                metadata={
+                    "replacement_type": "user_regeneration",
+                    "replaced_at": datetime.utcnow().isoformat()
+                }
+            )
+
+        # IMPORTANT: Update child asset relationships when regenerating episode AssetID
+        if entity_type.lower() == "episode" and old_registry:
+            cls._update_child_asset_relationships(
+                db=db,
+                old_parent_id=old_asset_id,
+                new_parent_id=new_asset_id,
+                requested_by=requested_by
+            )
+
+        return new_asset_id
+
+    @classmethod
+    def _update_child_asset_relationships(cls, db: Session, old_parent_id: str,
+                                        new_parent_id: str, requested_by: str):
+        """
+        Update all child asset relationships when a parent AssetID is regenerated.
+
+        This method:
+        1. Finds all assets that have the old parent as their parent
+        2. Updates the asset_links table to point to the new parent
+        3. Updates any filesystem files that reference the old parent
+        4. Creates audit trail of the updates
+
+        Args:
+            db: Database session
+            old_parent_id: The old parent AssetID being replaced
+            new_parent_id: The new parent AssetID
+            requested_by: User performing the operation
+        """
+        from models_assetid import AssetIDRegistry, AssetIDRelationship
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            # 1. Find all child assets linked to the old parent
+            child_relationships = db.query(AssetIDRelationship).filter(
+                AssetIDRelationship.source_asset_id == old_parent_id,
+                AssetIDRelationship.link_type == "parent_child"
+            ).all()
+
+            updated_children = []
+
+            for relationship in child_relationships:
+                child_asset_id = relationship.target_asset_id
+
+                # Update the relationship to point to new parent
+                relationship.source_asset_id = new_parent_id
+                relationship.metadata = relationship.metadata or {}
+                relationship.metadata.update({
+                    "parent_updated_at": datetime.utcnow().isoformat(),
+                    "old_parent_id": old_parent_id,
+                    "updated_by": requested_by,
+                    "update_reason": "parent_regeneration"
+                })
+
+                updated_children.append(child_asset_id)
+
+                # Add message to child asset about parent change
+                cls.add_message(
+                    db=db,
+                    asset_id=child_asset_id,
+                    message=f"Parent AssetID updated from {old_parent_id} to {new_parent_id}",
+                    message_type="parent_update",
+                    user_id=requested_by
+                )
+
+            # 2. Also check asset_links table for any direct parent-child links
+            # This handles cases where assets might be linked via the asset_links table
+            try:
+                # Check if asset_links table exists and has the expected structure
+                result = db.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'asset_links'")
+                if result.fetchone():
+                    # Update asset_links table
+                    db.execute("""
+                        UPDATE asset_links
+                        SET source_asset_id = :new_parent_id
+                        WHERE source_asset_id = :old_parent_id
+                        AND link_type = 'parent_child'
+                    """, {
+                        "new_parent_id": new_parent_id,
+                        "old_parent_id": old_parent_id
+                    })
+            except Exception as e:
+                logger.warning(f"Could not update asset_links table: {e}")
+
+            # 3. Create audit record for the parent update operation
+            if updated_children:
+                cls.add_message(
+                    db=db,
+                    asset_id=new_parent_id,
+                    message=f"Updated {len(updated_children)} child asset relationships. Children: {', '.join(updated_children[:5])}{'...' if len(updated_children) > 5 else ''}",
+                    message_type="child_update_batch",
+                    user_id=requested_by
+                )
+
+            # Commit the changes
+            db.commit()
+
+            logger.info(f"Successfully updated {len(updated_children)} child asset relationships for parent {old_parent_id} -> {new_parent_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to update child asset relationships: {e}", exc_info=True)
+            db.rollback()
+            raise
+
 
 # Convenience function for FastAPI dependency injection
 def get_asset_id_service():

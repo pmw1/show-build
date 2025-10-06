@@ -131,6 +131,13 @@
         </v-card>
       </v-col>
     </v-row>
+
+    <!-- Voice Print Recording Section -->
+    <v-row class="ma-0 mt-4">
+      <v-col cols="12" class="pa-4">
+        <VoicePrintRecorder @voice-profile-updated="handleVoiceProfileUpdate" />
+      </v-col>
+    </v-row>
   </v-container>
 </template>
 
@@ -138,9 +145,13 @@
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
 import { onMounted } from 'vue'
+import VoicePrintRecorder from '@/components/VoicePrintRecorder.vue'
 
 export default {
   name: 'ProfileView',
+  components: {
+    VoicePrintRecorder
+  },
   setup() {
     const { currentUser, handleLogout } = useAuth()
     const router = useRouter()
@@ -177,18 +188,24 @@ export default {
       window.location.reload()
     }
     
+    const handleVoiceProfileUpdate = (data) => {
+      console.log('Voice profile updated:', data)
+      // You can add UI feedback here (toast notification, etc.)
+    }
+
     onMounted(() => {
       if (!currentUser.value || Object.keys(currentUser.value).length === 0) {
-        router.push('/')
+        router.push('/dashboard')
       }
     })
-    
+
     return {
       user: currentUser,
       getAccessLevelColor,
       getTokenExpiry,
       getBrowserInfo,
-      handleLogout: handleUserLogout
+      handleLogout: handleUserLogout,
+      handleVoiceProfileUpdate
     }
   }
 }

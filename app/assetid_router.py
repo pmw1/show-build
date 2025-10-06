@@ -387,6 +387,61 @@ async def get_assetid_stats(
             "system_status": "operational",
             "generated_at": datetime.utcnow()
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
+
+
+class AssetIDRegenerateRequest(BaseModel):
+    """Request model for AssetID regeneration."""
+    old_asset_id: str
+    entity_type: str
+    reason: Optional[str] = "user_requested_regeneration"
+    context: Optional[Dict[str, Any]] = None
+
+
+@router.post("/regenerate")
+async def regenerate_asset_id(
+    request: AssetIDRegenerateRequest,
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Retire existing AssetID and generate a new one.
+
+    **Use Cases:**
+    - User wants to refresh an AssetID for any reason
+    - Replace problematic or corrupted AssetIDs
+    - Generate new AssetID when data integrity issues occur
+
+    **Process:**
+    1. Mark old AssetID as "retired" (if it exists in registry)
+    2. Generate new AssetID with full tracking
+    3. Create replacement link between old and new
+    4. Return new AssetID for immediate use
+    """
+    try:
+        user_id = current_user.get("username", current_user.get("client_name", "api_user"))
+
+        new_asset_id = AssetIDService.retire_and_regenerate(
+            db=db,
+            old_asset_id=request.old_asset_id,
+            entity_type=request.entity_type,
+            reason=request.reason,
+            requested_by=user_id,
+            context=request.context
+        )
+
+        return {
+            "success": True,
+            "old_asset_id": request.old_asset_id,
+            "new_asset_id": new_asset_id,
+            "entity_type": request.entity_type,
+            "reason": request.reason,
+            "regenerated_by": user_id,
+            "regenerated_at": datetime.utcnow(),
+            "message": f"AssetID regenerated successfully: {request.old_asset_id} → {new_asset_id}"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to regenerate AssetID: {str(e)}")

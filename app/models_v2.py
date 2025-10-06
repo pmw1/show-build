@@ -14,8 +14,9 @@ import enum
 class RundownItemType(str, enum.Enum):
     """Types of items that can appear in a rundown."""
     SEGMENT = "segment"
-    OPENING = "opening"
-    TEASER = "teaser"
+    OPEN = "open"
+    COLDOPEN = "coldopen"
+    TEASE = "tease"
     ADVERTISEMENT = "advertisement"
     PROMO = "promo"
     INTERVIEW = "interview"
@@ -54,6 +55,9 @@ class Organization(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     asset_id = Column(String(50), unique=True, nullable=False, index=True)
+    
+    # Test data flag
+    is_test_data = Column(Boolean, default=False, nullable=False)  # True for test organizations
     
     # Name fields
     name = Column(String(255), nullable=True)  # Display name or primary name
@@ -98,6 +102,7 @@ class Organization(Base):
     
     # Relationships
     shows = relationship("Show", back_populates="organization", cascade="all, delete-orphan")
+    speakers = relationship("Speaker", back_populates="organization", cascade="all, delete-orphan")
 
 
 class Show(Base):
@@ -106,6 +111,9 @@ class Show(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     asset_id = Column(String(50), unique=True, nullable=False, index=True)
+    
+    # Test data flag
+    is_test_data = Column(Boolean, default=False, nullable=False)  # True for test shows
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
     
     # Basic info
@@ -120,6 +128,7 @@ class Show(Base):
     # Relationships
     organization = relationship("Organization", back_populates="shows")
     seasons = relationship("Season", back_populates="show", cascade="all, delete-orphan")
+    speakers = relationship("Speaker", back_populates="show", cascade="all, delete-orphan")
 
 
 class Season(Base):
@@ -150,6 +159,11 @@ class Episode(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     asset_id = Column(String(50), unique=True, nullable=False, index=True)
+    
+    # Test data flag
+    is_test_data = Column(Boolean, default=False, nullable=False)  # True for test episodes
+    # Dummy episode flag
+    is_dummy = Column(Boolean, default=False, nullable=False)  # True for dummy/placeholder episodes
     season_id = Column(Integer, ForeignKey("seasons.id"), nullable=False)
     
     # Flexible identification
@@ -169,7 +183,20 @@ class Episode(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     status = Column(String(50), default="draft")  # draft, scheduled, live, archived
-    
+
+    # Guest information
+    guest_name = Column(String(255), nullable=True)  # Primary guest name
+    guest_bio = Column(Text, nullable=True)  # Guest biography/description
+    guest_website = Column(String(500), nullable=True)  # Guest website URL
+
+    # Template tracking (for episodes created from templates)
+    template_type = Column(String(50), nullable=True)  # e.g., "sunday_show"
+    template_id = Column(String(50), nullable=True)  # Reference to template used
+    template_name = Column(String(100), nullable=True)  # Name of template used
+
+    # Duration in original format (preserves "00:00:00" format from filesystem)
+    duration_formatted = Column(String(10), nullable=True)  # "HH:MM:SS" format
+
     # Relationships
     season = relationship("Season", back_populates="episodes")
     breaks = relationship("Break", back_populates="episode", cascade="all, delete-orphan")
@@ -237,8 +264,52 @@ class Rundown(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    episode = relationship("Episode", back_populates="rundowns") 
+    episode = relationship("Episode", back_populates="rundowns")
+    regions = relationship("Region", back_populates="rundown")
     rundown_items = relationship("RundownItem", back_populates="rundown")
+
+
+class Region(Base):
+    """Organizational containers within rundowns (breaks, blocks, segments, etc.)."""
+    __tablename__ = "regions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(String(50), unique=True, nullable=False, index=True)
+
+    # Test data flag
+    is_test_data = Column(Boolean, default=False, nullable=False)
+
+    # Parent relationship
+    rundown_id = Column(Integer, ForeignKey("rundowns.id"), nullable=False)
+
+    # Region metadata
+    region_type = Column(String(50), nullable=False)  # 'break', 'block', 'segment_group'
+    name = Column(String(100), nullable=False)  # "Commercial Break 1", "Block A", etc.
+    description = Column(Text, nullable=True)
+
+    # Positioning and timing
+    order_in_rundown = Column(Integer, nullable=False)  # Order within the rundown
+    estimated_duration = Column(String(20), nullable=True)  # "00:05:30"
+    actual_duration = Column(String(20), nullable=True)
+
+    # Region behavior settings
+    is_collapsible = Column(Boolean, default=True)  # Can be collapsed in UI
+    is_collapsed = Column(Boolean, default=False)   # Current collapsed state
+    allow_reorder = Column(Boolean, default=True)   # Allow items to be reordered within
+
+    # Visual settings
+    color_theme = Column(String(50), nullable=True)  # Theme color for UI display
+
+    # Status and workflow
+    status = Column(String(50), default="active")  # active, disabled, completed
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    rundown = relationship("Rundown", back_populates="regions")
+    # rundown_items = relationship("RundownItem", back_populates="region")  # DISABLED: regions calculated dynamically on frontend
 
 
 class RundownItem(Base):
@@ -247,6 +318,9 @@ class RundownItem(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     asset_id = Column(String(50), unique=True, nullable=False, index=True)
+    
+    # Test data flag
+    is_test_data = Column(Boolean, default=False, nullable=False)  # True for test rundown items
     
     # Parent relationships
     rundown_id = Column(Integer, ForeignKey("rundowns.id"), nullable=False)
@@ -263,7 +337,8 @@ class RundownItem(Base):
     
     # Segment-specific fields (nullable for other types)
     subtitle = Column(String(255), nullable=True)
-    description = Column(Text, nullable=True)  
+    description = Column(Text, nullable=True)  # Metadata description only
+    script_content = Column(Text, nullable=True)  # Actual script content (separate from description)
     airdate = Column(DateTime, nullable=True)
     guests = Column(String(500), nullable=True)
     resources = Column(Text, nullable=True)
@@ -274,17 +349,22 @@ class RundownItem(Base):
     link = Column(String(500), nullable=True)
     priority = Column(String(50), nullable=True)
     message = Column(Text, nullable=True)
-    
+
+    # Speaker assignment
+    speaker_id = Column(Integer, ForeignKey("speakers.id"), nullable=True)
+
     # Status and workflow
     status = Column(String(50), default="draft")  # draft, ready, live, completed
-    
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     # Relationships
     rundown = relationship("Rundown", back_populates="rundown_items")
+    # region = relationship("Region", back_populates="rundown_items")  # DISABLED: regions calculated dynamically on frontend
     segment = relationship("Segment", back_populates="rundown_items")
+    speaker = relationship("Speaker")
 
 
 class Segment(Base):
@@ -446,3 +526,17 @@ class AssetMessage(Base):
     content = Column(Text, nullable=False)
     user_id = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Settings(Base):
+    """Application settings storage."""
+    __tablename__ = "settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(JSON, nullable=False)
+    category = Column(String(50), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

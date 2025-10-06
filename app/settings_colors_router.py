@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from database import get_db
-from models import Settings
+from models_v2 import Settings
 from auth.utils import get_current_user_or_key
 import json
 import logging
@@ -66,21 +66,55 @@ async def get_color_settings(
         else:
             # Return default colors if profile not found
             default_colors = {
-                'segment': 'info',
-                'ad': 'primary', 
-                'promo': 'success',
-                'cta': 'accent',
+                # Rundown Item Colors
+                'segment': 'blue',
+                'ad': 'indigo',
+                'promo': 'green',
+                'cta': 'cyan',
+                'live': 'red',
+                'tease': 'pink',
+                'tag': 'indigo',
+
+                # Rundown Regions
+                'block': 'grey',
+                'block-a': 'blue',
+                'block-b': 'green',
+                'block-c': 'purple',
+                'block-d': 'red',
+                'block-e': 'orange',
+                'block-f': 'cyan',
+                'block-g': 'pink',
+                'block-h': 'yellow',
+
+                # Elements and Cues
                 'trans': 'secondary',
-                'unknown': 'grey',
-                'Selection-interface': 'warning',
-                'Hover-interface': 'blue-lighten-4',
-                'Highlight-interface': 'yellow-lighten-3',
-                'Dropline-interface': 'green-lighten-4',
-                'DragLight-interface': 'cyan-lighten-4',
-                'Draft-script': 'grey-darken-2',
-                'Approved-script': 'green-accent',
-                'Production-script': 'blue-accent',
-                'Completed-script': 'yellow-accent'
+                'pkg': 'purple',
+                'vo': 'deep-orange',
+                'sot': 'amber',
+                'interview': 'teal',
+                'music': 'orange',
+                'reader': 'amber',
+                'gfx': 'cyan',
+                'fsq': 'lime',
+                'nat': 'light-green',
+                'img': 'purple',
+
+                # Interface Colors
+                'Selection-interface': 'orange',
+                'Hover-interface': 'blue',
+                'Highlight-interface': 'yellow',
+                'Dropline-interface': 'green',
+                'DragLight-interface': 'cyan',
+
+                # Status Colors
+                'Draft-script': 'grey',
+                'Approved-script': 'green',
+                'Production-script': 'blue',
+                'Promotion-script': 'deep-orange',
+                'Completed-script': 'amber',
+
+                # Fallback
+                'unknown': 'grey'
             }
             return {
                 "success": True,

@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 import os
 import json
+from datetime import datetime
 from auth.utils import get_current_user_or_key
 import logging
 
@@ -55,6 +56,8 @@ class RundownSettings(BaseModel):
     auto_calculate_duration: bool = Field(True, description="Auto-calculate total duration")
     warn_on_delete: bool = Field(True, description="Warn before deleting items")
     show_item_numbers: bool = Field(True, description="Display item numbers")
+    auto_number_rundown_items: bool = Field(True, description="Auto-number rundown items")
+    enumerate_rundown_markdown_files: bool = Field(True, description="Enumerate Rundown Item markdown files with order number")
 
 class SystemSettings(BaseModel):
     """System configuration"""
@@ -69,12 +72,25 @@ class SystemSettings(BaseModel):
     backup_interval_hours: int = Field(24, description="Backup interval in hours")
     log_level: str = Field("INFO", description="Logging level")
 
+class GenerationSettings(BaseModel):
+    """Generation/FSQ Quote Generator configuration"""
+    preview_background_video: str = Field("/assets/preview-background.mp4", description="Path to preview background video")
+    background_video_path: str = Field("/assets/preview-background.mp4", description="Background video path for FSQ")
+    default_fsq_style: str = Field("left", description="Default FSQ alignment style")
+    default_text_alignment: str = Field("left", description="Default text alignment")
+    default_font_family: str = Field("sans-serif", description="Default font family")
+    default_font_size: str = Field("19px", description="Default font size")
+    include_attribution_default: bool = Field(True, description="Include attribution by default")
+    fsq_max_lines: int = Field(4, description="Maximum lines per FSQ quote slide")
+    fsq_chars_per_line: int = Field(70, description="Average characters per line at default font size")
+
 class SettingsUpdate(BaseModel):
     """Complete settings update model"""
     media_paths: Optional[MediaPathSettings] = None
     interface: Optional[InterfaceSettings] = None
     rundown: Optional[RundownSettings] = None
     system: Optional[SystemSettings] = None
+    generation: Optional[GenerationSettings] = None
 
 def load_settings() -> Dict[str, Any]:
     """Load settings from file or return defaults"""
@@ -256,17 +272,53 @@ async def update_rundown_settings(
     current_user: dict = Depends(get_current_user_or_key)
 ) -> Dict[str, Any]:
     """Update rundown settings"""
-    settings = load_settings()
-    settings["rundown"] = rundown.dict()
-    
-    if save_settings(settings):
-        return {
-            "success": True,
-            "message": "Rundown settings updated successfully",
-            "settings": rundown.dict()
-        }
-    else:
-        raise HTTPException(status_code=500, detail="Failed to save settings")
+    try:
+        # from models import Settings
+        from database import get_db
+        from sqlalchemy.orm import Session
+        
+        # Get database session
+        db_gen = get_db()
+        db: Session = next(db_gen)
+        
+        try:
+            # Update or create settings in database
+            rundown_data = rundown.dict()
+            
+            for key, value in rundown_data.items():
+                setting = db.query(Settings).filter(Settings.key == key).first()
+                
+                if setting:
+                    setting.value = value
+                    setting.updated_at = datetime.utcnow()
+                else:
+                    setting = Settings(
+                        key=key,
+                        value=value,
+                        category="rundown",
+                        description=f"Rundown setting: {key}"
+                    )
+                    db.add(setting)
+            
+            db.commit()
+            
+            # Also update JSON file for backward compatibility
+            settings = load_settings()
+            settings["rundown"] = rundown_data
+            save_settings(settings)
+            
+            return {
+                "success": True,
+                "message": "Rundown settings updated successfully",
+                "settings": rundown_data
+            }
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        logger.error(f"Failed to update rundown settings: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update rundown settings: {str(e)}")
 
 @router.put("/system")
 async def update_system_settings(
@@ -276,12 +328,12 @@ async def update_system_settings(
     """Update system settings"""
     settings = load_settings()
     settings["system"] = system.dict()
-    
+
     if save_settings(settings):
         # Apply system settings changes
         if system.log_level:
             logging.getLogger().setLevel(getattr(logging, system.log_level))
-        
+
         return {
             "success": True,
             "message": "System settings updated successfully",
@@ -289,6 +341,37 @@ async def update_system_settings(
         }
     else:
         raise HTTPException(status_code=500, detail="Failed to save settings")
+
+@router.post("/")
+async def save_general_settings(
+    request: Request,
+    current_user: Optional[dict] = None
+) -> Dict[str, Any]:
+    """Save general settings (POST endpoint for generation and other settings)"""
+    try:
+        body = await request.json()
+        settings = load_settings()
+
+        # Handle generation settings
+        if "generation" in body:
+            settings["generation"] = body["generation"]
+
+        # Handle other top-level settings
+        for key in ["interface", "rundown", "system", "media_paths"]:
+            if key in body:
+                settings[key] = body[key]
+
+        if save_settings(settings):
+            return {
+                "success": True,
+                "message": "Settings saved successfully",
+                "settings": settings
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save settings")
+    except Exception as e:
+        logger.error(f"Error saving settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/")
 async def update_all_settings(
@@ -316,7 +399,10 @@ async def update_all_settings(
         # Apply system settings
         if settings_update.system.log_level:
             logging.getLogger().setLevel(getattr(logging, settings_update.system.log_level))
-    
+
+    if settings_update.generation:
+        settings["generation"] = settings_update.generation.dict()
+
     if save_settings(settings):
         return {
             "success": True,

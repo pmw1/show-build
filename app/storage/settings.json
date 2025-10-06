@@ -20,7 +20,21 @@
     "showToolbarLabels": true,
     "highContrast": false,
     "reducedMotion": false,
-    "keyboardShortcuts": true
+    "keyboardShortcuts": true,
+    "collapseBreakRegions": true,
+    "scriptFontSize": 12,
+    "scriptFontFamily": "sans-serif",
+    "scrapFontSize": 14,
+    "scrapFontFamily": "serif",
+    "codeFontSize": 10,
+    "codeFontFamily": "monospace",
+    "scriptWordWrap": true,
+    "scriptLineNumbers": true,
+    "scrapLineNumbers": true,
+    "scrapWordWrap": true,
+    "codeLineNumbers": true,
+    "codeWordWrap": true,
+    "autoSaveSeconds": 30
   },
   "rundown": {
     "default_segment_duration": "00:05:00",
@@ -30,7 +44,9 @@
     "enable_drag_drop": true,
     "auto_calculate_duration": true,
     "warn_on_delete": true,
-    "show_item_numbers": true
+    "show_item_numbers": true,
+    "auto_number_rundown_items": true,
+    "enumerate_rundown_markdown_files": true
   },
   "system": {
     "enable_websockets": true,
@@ -48,5 +64,16 @@
     "backup_enabled": true,
     "backup_interval_hours": 24,
     "log_level": "INFO"
+  },
+  "generation": {
+    "fsqBackgroundVideo": "/assets/preview-background.mp4",
+    "templateLibraryPath": "/mnt/sync/disaffected/templates",
+    "mediaAssetsPath": "/mnt/sync/disaffected/media assets",
+    "fsqDefaultAlignment": "left",
+    "fsqDefaultFont": "sans-serif",
+    "fsqMaxLines": 3,
+    "fsqCharsPerLine": 50,
+    "fsqIncludeAttributionByDefault": true,
+    "fsqDefaultFontSize": 10
   }
 }

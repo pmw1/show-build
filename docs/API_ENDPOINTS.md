@@ -67,6 +67,12 @@ Complete reference for all API endpoints in the Show-Build broadcast content man
 - `GET /episodes/{episode_id}/assets/{asset_type}` - List episode assets 🔒📁
 
 ### Rundown Management (File-Based)
+- `POST /rundown/{episode}/normalize` - **Normalize rundown order/index numbers** 🔒📁
+  - Rounds non-multiple-of-10 indexes to next multiple of 10
+  - Handles conflicts with cascading bumps (+10 increments)  
+  - Syncs order field with index field
+  - Renames files based on enumeration settings
+  - Returns detailed changes made
 - `POST /rundown/{episode_number}/reorder` - Reorder segments (updates YAML) 📁
 - `POST /rundown/{episode_number}/item` - Create new rundown item 📁
 
@@ -197,5 +203,25 @@ The Show-Build system operates with two parallel architectures:
 
 ---
 
-*Last updated: 2025-08-10*
-*Show-Build Version: Enhanced Database Integration*
+## SETTINGS MANAGEMENT
+
+### Settings Management (`settings_router.py`)
+- `GET /settings/` - Get all current settings 
+- `PUT /settings/rundown` - **Update rundown settings** 🔒
+  - `auto_number_rundown_items`: Enable auto-numbering
+  - `enumerate_rundown_markdown_files`: Control filename enumeration
+  - `show_cumulative_time`: Show backtiming in rundown
+  - `auto_calculate_duration`: Auto-calculate segment timing
+- `PUT /settings/media-paths` - Update media path settings 🔒
+- `PUT /settings/interface` - Update interface settings 🔒  
+- `PUT /settings/system` - Update system settings 🔒
+- `POST /settings/reset` - Reset settings to defaults 🔒
+- `GET /settings/validate-paths` - Validate configured paths 🔒
+- `GET /settings/system-info` - Get system usage information
+- `POST /settings/backup` - Create system backup 🔒
+- `DELETE /settings/cache` - Clear application cache 🔒
+
+---
+
+*Last updated: 2025-09-02*
+*Show-Build Version: Enhanced Database Integration + Rundown Management*

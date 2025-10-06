@@ -442,7 +442,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { showUrgentFlash } from '@/composables/useUrgentFlash'
+import { notifyUserStandard, NOTIFICATION_COLORS } from '@/composables/useStandardNotification'
 
 const router = useRouter()
 
@@ -601,10 +601,10 @@ async function testDatabaseConnection() {
     }
     
     if (!result.success) {
-      showUrgentFlash("LOSER", "red")
+      notifyUserStandard("Setup incomplete", NOTIFICATION_COLORS.ERROR, 2000)
       connectionState.value = 'failed'
     } else {
-      showUrgentFlash("WINNER!", "green")
+      notifyUserStandard("Setup successful!", NOTIFICATION_COLORS.SUCCESS, 2000)
       connectionState.value = 'success'
     }
   } catch (error) {
@@ -612,7 +612,7 @@ async function testDatabaseConnection() {
       success: false,
       message: 'Network error: ' + error.message
     }
-    showUrgentFlash("LOSER", "red")
+    notifyUserStandard("Connection failed", NOTIFICATION_COLORS.ERROR, 2000)
     connectionState.value = 'failed'
   } finally {
     testingConnection.value = false

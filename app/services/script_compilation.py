@@ -5,7 +5,8 @@ Migrated from tools/compile-script-dev.py to run as Celery background tasks.
 from celery import current_task
 from celery_app import celery_app
 from database import SessionLocal
-from models import EpisodeLegacy as Episode, RundownItemLegacy as RundownItem, CueBlock, ProcessingJob, ProcessingStatus
+from models_v2 import Episode, RundownItem
+# from models import CueBlock, ProcessingJob, ProcessingStatus  # REMOVED - models.py deleted
 from core.paths import paths
 import logging
 import re

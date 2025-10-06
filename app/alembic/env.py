@@ -10,8 +10,10 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # Import our models and database configuration
 from database import Base, DATABASE_URL
-# Import specific models for user authentication
+# Import all models to register them with Base
 import models_user  # Import user models to register them with Base
+import models_v2    # Import v2 models for organization hierarchy  
+import models_rbac  # Import RBAC models
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

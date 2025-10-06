@@ -6,8 +6,95 @@
       </div>
       <div class="header-container">
         <div class="show-title-area">
-          <h2 class="show-title-fit text-h5 mb-1">{{ title || 'Disaffected' }}</h2>
-          <p class="text-caption text-medium-emphasis mb-0">{{ episodeInfo || 'Episode Production Workspace' }}</p>
+          <!-- Editable Show Title -->
+          <div class="show-title-container">
+            <v-text-field
+              :model-value="title || 'Disaffected'"
+              @update:model-value="$emit('update:title', $event)"
+              variant="plain"
+              density="compact"
+              class="show-title-input"
+              hide-details
+              single-line
+              @blur="saveShowTitle"
+              placeholder="Show Title"
+            />
+            <span v-if="isDummy" class="dummy-indicator"> (DUMMY)</span>
+          </div>
+          
+          <p class="text-caption text-medium-emphasis mb-0">{{ displayEpisodeInfo }}</p>
+          <p v-if="episodeAssetId" class="text-caption text-medium-emphasis mb-0 asset-id-display">{{ episodeAssetId }}</p>
+          
+          <!-- Editable Slug -->
+          <v-text-field
+            :model-value="slug"
+            @update:model-value="$emit('update:slug', $event)"
+            variant="plain"
+            density="compact"
+            class="slug-input"
+            hide-details
+            single-line
+            @blur="saveSlug"
+            placeholder="episode-slug"
+            prepend-inner-icon="mdi-link-variant"
+          />
+          
+          <!-- Editable Episode Title -->
+          <v-text-field
+            :model-value="episodeTitle"
+            @update:model-value="$emit('update:episodeTitle', $event)"
+            variant="plain"
+            density="compact"
+            class="episode-title-input"
+            hide-details
+            single-line
+            @blur="saveEpisodeTitle"
+            placeholder="Episode title"
+            prepend-inner-icon="mdi-television-classic"
+          />
+
+          <!-- Editable Subtitle -->
+          <v-text-field
+            :model-value="subtitle"
+            @update:model-value="$emit('update:subtitle', $event)"
+            variant="plain"
+            density="compact"
+            class="subtitle-input"
+            hide-details
+            single-line
+            @blur="saveSubtitle"
+            placeholder="Episode subtitle"
+            prepend-inner-icon="mdi-text"
+          />
+
+          <!-- Editable Guest(s) -->
+          <v-text-field
+            :model-value="guest"
+            @update:model-value="$emit('update:guest', $event)"
+            variant="plain"
+            density="compact"
+            class="guest-input"
+            hide-details
+            single-line
+            @blur="saveGuest"
+            placeholder="Guest(s)"
+            prepend-inner-icon="mdi-account-multiple"
+          />
+
+          <!-- Editable Description -->
+          <v-textarea
+            :model-value="description"
+            @update:model-value="$emit('update:description', $event)"
+            variant="plain"
+            density="compact"
+            class="description-input"
+            hide-details
+            rows="2"
+            auto-grow
+            @blur="saveDescription"
+            placeholder="Episode description"
+            prepend-inner-icon="mdi-text-long"
+          />
         </div>
 
         <div class="fields-area">
@@ -65,16 +152,14 @@
             hide-details
             readonly
           ></v-text-field>
+          
+          <!-- Status indicator directly below duration field -->
+          <div class="status-indicator" :style="statusFieldStyle">
+            {{ productionStatus ? productionStatus.toUpperCase() : 'DRAFT' }}
+          </div>
         </div>
       </div>
     </v-card-text>
-    
-    <!-- Status indicator bar at bottom of header -->
-    <div class="status-indicator-bar" :style="statusFieldStyle">
-      <div class="status-indicator">
-        {{ productionStatus ? productionStatus.toUpperCase() : 'DRAFT' }}
-      </div>
-    </div>
   </v-card>
 </template>
 
@@ -83,7 +168,7 @@ import { getColorValue, resolveVuetifyColor } from '../../utils/themeColorMap';
 
 export default {
   name: 'ShowInfoHeader',
-  emits: ['update:episodeNumber', 'update:airDate', 'update:productionStatus', 'episode-changed'],
+  emits: ['update:episodeNumber', 'update:airDate', 'update:productionStatus', 'episode-changed', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description'],
   props: {
     title: {
       type: String,
@@ -92,6 +177,30 @@ export default {
     episodeInfo: {
       type: String,
       default: 'Episode Production Workspace'
+    },
+    episodeAssetId: {
+      type: String,
+      default: ''
+    },
+    slug: {
+      type: String,
+      default: ''
+    },
+    episodeTitle: {
+      type: String,
+      default: ''
+    },
+    subtitle: {
+      type: String,
+      default: ''
+    },
+    guest: {
+      type: String,
+      default: ''
+    },
+    description: {
+      type: String,
+      default: ''
     },
     episodeNumber: {
       type: [String, Number],
@@ -125,9 +234,23 @@ export default {
     loadingRundown: {
       type: Boolean,
       default: false
+    },
+    isDummy: {
+      type: Boolean,
+      default: false
     }
   },
   computed: {
+    displayEpisodeInfo() {
+      // Show episode title if available, otherwise fall back to episode number info
+      if (this.episodeTitle && this.episodeTitle.trim()) {
+        return this.episodeTitle;
+      } else if (this.episodeNumber) {
+        return `Episode ${String(this.episodeNumber).padStart(4, '0')}`;
+      } else {
+        return this.episodeInfo || 'Episode Production Workspace';
+      }
+    },
     statusColor() {
       // Status values now directly match color keys ('draft', 'approved', 'production', 'completed')
       const status = (this.productionStatus || '').toLowerCase();
@@ -173,6 +296,25 @@ export default {
         console.warn('Error getting status color:', error);
         return 'transparent';
       }
+    },
+    saveShowTitle() {
+      // Emit save event or handle save logic
+      console.log('Saving show title');
+    },
+    saveSlug() {
+      console.log('Saving slug');
+    },
+    saveEpisodeTitle() {
+      console.log('Saving episode title');
+    },
+    saveSubtitle() {
+      console.log('Saving subtitle');
+    },
+    saveGuest() {
+      console.log('Saving guest');
+    },
+    saveDescription() {
+      console.log('Saving description');
     },
     darkenColor(hexColor, factor) {
       // Remove # if present
@@ -333,16 +475,9 @@ export default {
   font-weight: 500 !important;
 }
 
-/* Status indicator bar at bottom of header */
-.status-indicator-bar {
-  width: 100%;
-  display: flex;
-  justify-content: flex-end;
-  padding: 0 16px 8px 0;
-}
-
+/* Status indicator directly below duration field */
 .status-indicator {
-  width: 200px; /* Same width as text fields */
+  width: 200px !important; /* Same width as text fields */
   height: 32px;
   background-color: var(--status-base-color, #ccc);
   color: #ffffff;
@@ -355,6 +490,8 @@ export default {
   letter-spacing: 0.5px;
   text-shadow: 0 1px 2px rgba(0,0,0,0.2);
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  margin-top: 4px; /* Small gap between duration field and status */
+  grid-column: 2; /* Place in same column as other fields */
 }
 
 :deep(.v-label) {
@@ -366,5 +503,135 @@ export default {
 :deep(.v-field--dirty .v-label) {
   top: 0 !important;
   transform: translateY(-50%) scale(0.75) !important;
+}
+
+.asset-id-display {
+  font-family: 'Courier New', monospace !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
+  margin-top: 2px !important;
+}
+
+.show-title-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  line-height: 1;
+}
+
+.dummy-indicator {
+  color: #ff0000 !important;
+  font-weight: bold !important;
+  font-size: clamp(0.94rem, 2.1vw, 1.7rem) !important;
+  text-transform: uppercase !important;
+  margin-left: 4px;
+  align-self: center;
+  line-height: 1;
+}
+
+/* Editable field styling */
+.show-title-input {
+  width: 100% !important;
+  margin-bottom: 4px !important;
+}
+
+.show-title-input :deep(.v-field__input) {
+  font-size: clamp(0.94rem, 2.1vw, 1.7rem) !important;
+  font-weight: bold !important;
+  text-transform: uppercase !important;
+  padding: 0 !important;
+  min-height: auto !important;
+  width: 100% !important;
+  line-height: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.show-title-input :deep(.v-field__field) {
+  padding: 0 !important;
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  min-height: auto !important;
+}
+
+.slug-input,
+.episode-title-input,
+.subtitle-input,
+.guest-input,
+.description-input {
+  width: 100% !important;
+  margin-bottom: 4px !important;
+}
+
+.slug-input :deep(.v-field__input),
+.episode-title-input :deep(.v-field__input),
+.subtitle-input :deep(.v-field__input),
+.guest-input :deep(.v-field__input) {
+  font-size: 0.875rem !important;
+  padding: 2px 0 !important;
+  min-height: auto !important;
+  width: 100% !important;
+}
+
+.description-input :deep(.v-field__input) {
+  font-size: 0.875rem !important;
+  padding: 2px 0 !important;
+  min-height: auto !important;
+  width: 100% !important;
+}
+
+.slug-input :deep(.v-field__field),
+.episode-title-input :deep(.v-field__field),
+.subtitle-input :deep(.v-field__field),
+.guest-input :deep(.v-field__field),
+.description-input :deep(.v-field__field) {
+  width: 100% !important;
+}
+
+.show-title-input :deep(.v-field__outline),
+.slug-input :deep(.v-field__outline),
+.episode-title-input :deep(.v-field__outline),
+.subtitle-input :deep(.v-field__outline),
+.guest-input :deep(.v-field__outline),
+.description-input :deep(.v-field__outline) {
+  display: none !important;
+}
+
+/* Show subtle underline on hover/focus */
+.show-title-input:hover :deep(.v-field__field),
+.slug-input:hover :deep(.v-field__field),
+.episode-title-input:hover :deep(.v-field__field),
+.subtitle-input:hover :deep(.v-field__field),
+.guest-input:hover :deep(.v-field__field),
+.description-input:hover :deep(.v-field__field) {
+  border-bottom: 1px solid rgba(0,0,0,0.2) !important;
+}
+
+.show-title-input:focus-within :deep(.v-field__field),
+.slug-input:focus-within :deep(.v-field__field),
+.episode-title-input:focus-within :deep(.v-field__field),
+.subtitle-input:focus-within :deep(.v-field__field),
+.guest-input:focus-within :deep(.v-field__field),
+.description-input:focus-within :deep(.v-field__field) {
+  border-bottom: 2px solid var(--v-theme-primary) !important;
+}
+
+/* Icon styling for all editable fields with icons */
+.slug-input :deep(.v-field__prepend-inner),
+.episode-title-input :deep(.v-field__prepend-inner),
+.subtitle-input :deep(.v-field__prepend-inner),
+.guest-input :deep(.v-field__prepend-inner),
+.description-input :deep(.v-field__prepend-inner) {
+  padding-right: 4px !important;
+  opacity: 0.6;
+}
+
+.slug-input :deep(.v-field__prepend-inner .v-icon),
+.episode-title-input :deep(.v-field__prepend-inner .v-icon),
+.subtitle-input :deep(.v-field__prepend-inner .v-icon),
+.guest-input :deep(.v-field__prepend-inner .v-icon),
+.description-input :deep(.v-field__prepend-inner .v-icon) {
+  font-size: 14px !important;
 }
 </style>

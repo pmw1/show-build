@@ -70,8 +70,168 @@
                 <div 
                   class="preview-box-fill" 
                   :style="{
-                    backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(getFullColor(type)), $vuetify),
-                    color: getTextColor(resolveVuetifyColor(vuetifyColorNameToThemeKey(getFullColor(type)), $vuetify))
+                    backgroundColor: resolveVuetifyColor(getFullColor(type), $vuetify),
+                    color: getTextColor(resolveVuetifyColor(getFullColor(type), $vuetify))
+                  }"
+                >
+                  {{ type }}
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Rundown Regions Table -->
+      <div class="color-table-section">
+        <h2 v-if="!compact" class="section-title">Rundown Regions</h2>
+        <h3 v-else class="text-subtitle-2 mb-2">Rundown Regions</h3>
+        <table class="color-config-table">
+          <thead>
+            <tr>
+              <th class="type-header">Type</th>
+              <th class="color-header">Base Color</th>
+              <th class="color-header">Variant</th>
+              <th class="preview-header">Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="type in rundownRegionsTypes" :key="type">
+              <td class="type-cell">{{ type }}</td>
+              <td class="color-cell">
+                <v-select
+                  v-model="baseColor[type]"
+                  :items="baseColorOptions"
+                  dense
+                  outlined
+                  hide-details
+                  class="cell-fill-select"
+                  @change="onBaseChange(type)"
+                  item-title="title"
+                  item-value="value"
+                >
+                  <template #item="{ item, props }">
+                    <v-list-item v-if="item && item.value" v-bind="props">
+                      <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                      <span>{{ item.title }}</span>
+                    </v-list-item>
+                  </template>
+                  <template #selection="{ item }">
+                    <div class="color-swatch-container" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '100%', height: '28px', display: 'inline-block', borderRadius: '2px', position: 'relative' }">
+                      <span class="color-label-overlay" :style="{ color: getTextColor(resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify)) }">{{ item.title }}</span>
+                    </div>
+                  </template>
+                </v-select>
+              </td>
+              <td class="color-cell">
+                <v-select
+                  v-model="variant[type]"
+                  :items="variantOptions(baseColor[type])"
+                  dense
+                  outlined
+                  hide-details
+                  class="cell-fill-select"
+                  :disabled="!baseColor[type]"
+                >
+                  <template #item="{ item, props }">
+                    <v-list-item v-if="item" v-bind="props">
+                      <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor((baseColor[type] || '') + (item.value ? '-' + item.value : ''), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                      <span>{{ item.title }}</span>
+                    </v-list-item>
+                  </template>
+                  <template #selection="{ item }">
+                    <div class="color-swatch-container" :style="{ backgroundColor: resolveVuetifyColor((baseColor[type] || '') + (item.value ? '-' + item.value : ''), $vuetify), width: '100%', height: '28px', display: 'inline-block', borderRadius: '2px', position: 'relative' }">
+                      <span class="color-label-overlay" :style="{ color: getTextColor(resolveVuetifyColor((baseColor[type] || '') + (item.value ? '-' + item.value : ''), $vuetify)) }">{{ item.title }}</span>
+                    </div>
+                  </template>
+                </v-select>
+              </td>
+              <td class="preview-cell">
+                <div
+                  class="preview-box-fill"
+                  :style="{
+                    backgroundColor: resolveVuetifyColor(getFullColor(type), $vuetify),
+                    color: getTextColor(resolveVuetifyColor(getFullColor(type), $vuetify))
+                  }"
+                >
+                  {{ type }}
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Elements and Cues Table -->
+      <div class="color-table-section">
+        <h2 v-if="!compact" class="section-title">Elements and Cues</h2>
+        <h3 v-else class="text-subtitle-2 mb-2">Elements and Cues</h3>
+        <table class="color-config-table">
+          <thead>
+            <tr>
+              <th class="type-header">Type</th>
+              <th class="color-header">Base Color</th>
+              <th class="color-header">Variant</th>
+              <th class="preview-header">Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="type in elementsCuesTypes" :key="type">
+              <td class="type-cell">{{ type }}</td>
+              <td class="color-cell">
+                <v-select
+                  v-model="baseColor[type]"
+                  :items="baseColorOptions"
+                  dense
+                  outlined
+                  hide-details
+                  class="cell-fill-select"
+                  @change="onBaseChange(type)"
+                  item-title="title"
+                  item-value="value"
+                >
+                  <template #item="{ item, props }">
+                    <v-list-item v-if="item && item.value" v-bind="props">
+                      <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                      <span>{{ item.title }}</span>
+                    </v-list-item>
+                  </template>
+                  <template #selection="{ item }">
+                    <div class="color-swatch-container" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '100%', height: '28px', display: 'inline-block', borderRadius: '2px', position: 'relative' }">
+                      <span class="color-label-overlay" :style="{ color: getTextColor(resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify)) }">{{ item.title }}</span>
+                    </div>
+                  </template>
+                </v-select>
+              </td>
+              <td class="color-cell">
+                <v-select
+                  v-model="variant[type]"
+                  :items="variantOptions(baseColor[type])"
+                  dense
+                  outlined
+                  hide-details
+                  class="cell-fill-select"
+                  :disabled="!baseColor[type]"
+                >
+                  <template #item="{ item, props }">
+                    <v-list-item v-if="item" v-bind="props">
+                      <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor((baseColor[type] || '') + (item.value ? '-' + item.value : ''), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                      <span>{{ item.title }}</span>
+                    </v-list-item>
+                  </template>
+                  <template #selection="{ item }">
+                    <div class="color-swatch-container" :style="{ backgroundColor: resolveVuetifyColor(getFullColor(type), $vuetify), width: '100%', height: '28px', display: 'inline-block', borderRadius: '2px', position: 'relative' }">
+                      <span class="color-label-overlay" :style="{ color: getTextColor(resolveVuetifyColor(getFullColor(type), $vuetify)) }">{{ item.title }}</span>
+                    </div>
+                  </template>
+                </v-select>
+              </td>
+              <td class="preview-cell">
+                <div
+                  class="preview-box-fill"
+                  :style="{
+                    backgroundColor: resolveVuetifyColor(getFullColor(type), $vuetify),
+                    color: getTextColor(resolveVuetifyColor(getFullColor(type), $vuetify))
                   }"
                 >
                   {{ type }}
@@ -147,11 +307,11 @@
                 </v-select>
               </td>
               <td class="preview-cell">
-                <div 
-                  class="preview-box-fill" 
+                <div
+                  class="preview-box-fill"
                   :style="{
-                    backgroundColor: resolveVuetifyColor((baseColor[type + '-interface'] || '') + (variant[type + '-interface'] ? '-' + variant[type + '-interface'] : ''), $vuetify),
-                    color: getTextColor(resolveVuetifyColor((baseColor[type + '-interface'] || '') + (variant[type + '-interface'] ? '-' + variant[type + '-interface'] : ''), $vuetify))
+                    backgroundColor: resolveVuetifyColor(getFullColor(type + '-interface'), $vuetify),
+                    color: getTextColor(resolveVuetifyColor(getFullColor(type + '-interface'), $vuetify))
                   }"
                 >
                   {{ type }}
@@ -227,11 +387,11 @@
                 </v-select>
               </td>
               <td class="preview-cell">
-                <div 
-                  class="preview-box-fill" 
+                <div
+                  class="preview-box-fill"
                   :style="{
-                    backgroundColor: resolveVuetifyColor((baseColor[type + '-script'] || '') + (variant[type + '-script'] ? '-' + variant[type + '-script'] : ''), $vuetify),
-                    color: getTextColor(resolveVuetifyColor((baseColor[type + '-script'] || '') + (variant[type + '-script'] ? '-' + variant[type + '-script'] : ''), $vuetify))
+                    backgroundColor: resolveVuetifyColor(getFullColor(type + '-script'), $vuetify),
+                    color: getTextColor(resolveVuetifyColor(getFullColor(type + '-script'), $vuetify))
                   }"
                 >
                   {{ type }}
@@ -282,7 +442,7 @@
 </template>
 
 <script>
-import { resolveVuetifyColor, updateColor, getColorValue } from '../utils/themeColorMap';
+import { resolveVuetifyColor, updateColor, getColorValue, getTextColorForBackground } from '../utils/themeColorMap';
 import { debounce } from 'lodash-es';
 
 export default {
@@ -301,8 +461,9 @@ export default {
     // Initialize with all possible types for reactivity
     const allTypes = [
       'segment', 'ad', 'promo', 'cta', 'trans',
-      'Selection-interface', 'Hover-interface', 'Highlight-interface', 
-      'Dropline-interface', 'DragLight-interface',
+      'break', 'block', 'block-a', 'block-b', 'block-c', 'block-d', 'block-e', 'block-f', 'block-g', 'block-h',
+      'Selection-interface', 'Hover-interface', 'Highlight-interface',
+      'Dropline-interface', 'DragLight-interface', 'LocatorFlash-interface',
       'Draft-script', 'Approved-script', 'Production-script', 'Completed-script'
     ];
     
@@ -316,9 +477,11 @@ export default {
     });
     
     return {
-      rundownTypes: ['segment', 'ad', 'promo', 'cta', 'trans', 'pkg', 'vo', 'sot', 'interview', 'live', 'break', 'tease', 'tag', 'bump', 'music', 'reader'],
-      interfaceTypes: ['Selection', 'Hover', 'Highlight', 'Dropline', 'DragLight'],
-      scriptStatusTypes: ['Draft', 'Approved', 'Production', 'Completed'],
+      rundownTypes: ['segment', 'ad', 'promo', 'cta', 'live', 'tease', 'tag'],
+      rundownRegionsTypes: ['break', 'block', 'block-a', 'block-b', 'block-c', 'block-d', 'block-e', 'block-f', 'block-g', 'block-h'],
+      elementsCuesTypes: ['trans', 'pkg', 'vo', 'sot', 'interview', 'music', 'reader', 'gfx', 'fsq', 'nat', 'img'],
+      interfaceTypes: ['Selection', 'Hover', 'Highlight', 'Dropline', 'DragLight', 'LocatorFlash'],
+      scriptStatusTypes: ['Draft', 'Approved', 'Production', 'Promotion', 'Completed'],
       typeColors: {},
       showConfirmation: false,
       isSaving: false,
@@ -333,15 +496,21 @@ export default {
       return theme ? Object.keys(theme.colors || {}) : [];
     },
     baseColorOptions() {
-      // Official Vuetify Material Design color palette
+      // Official Vuetify Material Design color palette + theme colors
       const materialColors = [
-        'red', 'pink', 'purple', 'deep-purple', 'indigo', 'blue', 
+        'red', 'pink', 'purple', 'deep-purple', 'indigo', 'blue',
         'light-blue', 'cyan', 'teal', 'green', 'light-green', 'lime',
-        'yellow', 'amber', 'orange', 'deep-orange', 'brown', 
+        'yellow', 'amber', 'orange', 'deep-orange', 'brown',
         'blue-grey', 'grey', 'black', 'white'
       ];
-      
-      return materialColors.map(color => ({
+
+      const themeColors = [
+        'primary', 'secondary', 'accent', 'error', 'info', 'success', 'warning'
+      ];
+
+      const allColors = [...materialColors, ...themeColors];
+
+      return allColors.map(color => ({
         title: color.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
         value: color,
       }));
@@ -350,32 +519,70 @@ export default {
       // Returns a function to get variant options for a base color
       return (baseColor) => {
         if (!baseColor) return [{ title: 'Base', value: '' }];
-        
+
         const variants = [
           { title: 'Base', value: '' }
         ];
-        
-        // Add lighten variants (lighten-5 to lighten-1)
-        for (let i = 5; i >= 1; i--) {
-          variants.push({ title: `Lighten ${i}`, value: `lighten-${i}` });
-        }
-        
-        // Add darken variants (darken-1 to darken-4)  
-        for (let i = 1; i <= 4; i++) {
-          variants.push({ title: `Darken ${i}`, value: `darken-${i}` });
-        }
-        
-        // Add accent variants (accent-1 to accent-4) - not available for all colors
-        const accentColors = ['red', 'pink', 'purple', 'deep-purple', 'indigo', 'blue', 
-                             'light-blue', 'cyan', 'teal', 'green', 'light-green', 'lime',
-                             'yellow', 'amber', 'orange', 'deep-orange'];
-        
-        if (accentColors.includes(baseColor)) {
+
+        // Theme colors have limited variants
+        const themeColors = ['primary', 'secondary', 'accent', 'error', 'info', 'success', 'warning'];
+        const specialColors = ['black', 'white'];
+
+        if (themeColors.includes(baseColor)) {
+          // Theme colors typically have lighten/darken variants
+          for (let i = 4; i >= 1; i--) {
+            variants.push({ title: `Lighten ${i}`, value: `lighten-${i}` });
+          }
           for (let i = 1; i <= 4; i++) {
-            variants.push({ title: `Accent ${i}`, value: `accent-${i}` });
+            variants.push({ title: `Darken ${i}`, value: `darken-${i}` });
+          }
+        } else if (specialColors.includes(baseColor)) {
+          // Black and white don't have variants
+          return variants;
+        } else {
+          // Material colors - check what variants actually exist
+
+          // Define color-specific variant availability
+          const colorVariants = {
+            'red': { lighten: 4, darken: 4, accent: false },
+            'pink': { lighten: 4, darken: 4, accent: false },
+            'purple': { lighten: 5, darken: 4, accent: false },
+            'deep-purple': { lighten: 5, darken: 4, accent: false },
+            'indigo': { lighten: 5, darken: 4, accent: false },
+            'blue': { lighten: 5, darken: 4, accent: false },
+            'light-blue': { lighten: 5, darken: 4, accent: false },
+            'cyan': { lighten: 4, darken: 4, accent: false },
+            'teal': { lighten: 5, darken: 4, accent: false },
+            'green': { lighten: 4, darken: 4, accent: true },
+            'light-green': { lighten: 5, darken: 4, accent: false },
+            'lime': { lighten: 5, darken: 4, accent: false },
+            'yellow': { lighten: 4, darken: 4, accent: true },
+            'amber': { lighten: 4, darken: 4, accent: false },
+            'orange': { lighten: 5, darken: 4, accent: false },
+            'deep-orange': { lighten: 5, darken: 4, accent: false },
+            'brown': { lighten: 5, darken: 4, accent: false },
+            'blue-grey': { lighten: 5, darken: 4, accent: false },
+            'grey': { lighten: 4, darken: 4, accent: false }
+          };
+
+          const colorConfig = colorVariants[baseColor] || { lighten: 4, darken: 4, accent: false };
+
+          // Add lighten variants
+          for (let i = colorConfig.lighten; i >= 1; i--) {
+            variants.push({ title: `Lighten ${i}`, value: `lighten-${i}` });
+          }
+
+          // Add darken variants
+          for (let i = 1; i <= colorConfig.darken; i++) {
+            variants.push({ title: `Darken ${i}`, value: `darken-${i}` });
+          }
+
+          // Add accent variant only if available
+          if (colorConfig.accent) {
+            variants.push({ title: `Accent`, value: `accent` });
           }
         }
-        
+
         return variants;
       };
     },
@@ -383,7 +590,7 @@ export default {
   methods: {
     getRundownTypeValues() {
       // Hardcoded rundown types to avoid circular import issues
-      return ['segment', 'ad', 'promo', 'cta', 'trans', 'pkg', 'vo', 'sot', 'interview', 'live', 'break', 'tease', 'tag', 'bump', 'music', 'reader'];
+      return ['segment', 'ad', 'promo', 'cta', 'trans', 'pkg', 'vo', 'sot', 'interview', 'live', 'tease', 'tag', 'music', 'reader'];
     },
     resolveVuetifyColor,
     parseColorValue(colorValue) {
@@ -426,17 +633,15 @@ export default {
       return variant ? `${base}-${variant}` : base;
     },
     getTextColor(bgColor) {
-      // Basic logic to determine if text should be black or white
+      // Use the enhanced contrast logic from themeColorMap
       if (!bgColor) return '#000000';
-      const color = (bgColor.charAt(0) === '#') ? bgColor.substring(1, 7) : bgColor;
-      const r = parseInt(color.substring(0, 2), 16);
-      const g = parseInt(color.substring(2, 4), 16);
-      const b = parseInt(color.substring(4, 6), 16);
-      return (((r * 0.299) + (g * 0.587) + (b * 0.114)) > 186) ? '#000000' : '#FFFFFF';
+      return getTextColorForBackground(bgColor);
     },
     async initializeColors() {
       const allTypes = [
         ...this.rundownTypes,
+        ...this.rundownRegionsTypes,
+        ...this.elementsCuesTypes,
         ...this.interfaceTypes.map(t => t + '-interface'),
         ...this.scriptStatusTypes.map(t => t + '-script'),
       ];
@@ -464,10 +669,11 @@ export default {
                 // Map interface types to their base colors
                 const interfaceMapping = {
                   'selection': 'selection',
-                  'hover': 'hover', 
+                  'hover': 'hover',
                   'highlight': 'highlight',
                   'dropline': 'dropline',
-                  'draglight': 'draglight'
+                  'draglight': 'draglight',
+                  'locatorflash': 'locatorflash'
                 };
                 lookupKey = interfaceMapping[baseType] || baseType;
               } else if (type.endsWith('-script')) {
@@ -514,10 +720,11 @@ export default {
             const baseType = type.replace('-interface', '').toLowerCase();
             const interfaceMapping = {
               'selection': 'selection',
-              'hover': 'hover', 
+              'hover': 'hover',
               'highlight': 'highlight',
               'dropline': 'dropline',
-              'draglight': 'draglight'
+              'draglight': 'draglight',
+              'locatorflash': 'locatorflash'
             };
             lookupKey = interfaceMapping[baseType] || baseType;
           } else if (type.endsWith('-script')) {
@@ -561,6 +768,8 @@ export default {
       this.isSaving = true;
       const allTypes = [
         ...this.rundownTypes,
+        ...this.rundownRegionsTypes,
+        ...this.elementsCuesTypes,
         ...this.interfaceTypes.map(t => t + '-interface'),
         ...this.scriptStatusTypes.map(t => t + '-script'),
       ];
@@ -579,6 +788,23 @@ export default {
             colors[baseKey] = fullColor;
             updateColor(baseKey, fullColor);
           }
+          
+          // For interface types, also save base keys for content editor
+          if (type.endsWith('-interface')) {
+            const baseType = type.replace('-interface', '').toLowerCase();
+            // Map interface types to their base colors
+            const interfaceMapping = {
+              'selection': 'selection',
+              'hover': 'hover',
+              'highlight': 'highlight',
+              'dropline': 'dropline',
+              'draglight': 'draglight',
+              'locatorflash': 'locatorflash'
+            };
+            const baseKey = interfaceMapping[baseType] || baseType;
+            colors[baseKey] = fullColor;
+            updateColor(baseKey, fullColor);
+          }
         }
       });
 
@@ -586,12 +812,21 @@ export default {
       try {
         const token = localStorage.getItem('auth-token');
         
+        // Build headers - only add Authorization if token exists
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        
+        console.log('Saving colors to database:', colors);
+        console.log('Using headers:', headers);
+        
         const response = await fetch('/api/settings/colors', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
+          headers,
           body: JSON.stringify({ 
             colors, 
             category: 'colors', 
@@ -600,14 +835,20 @@ export default {
         });
 
         if (response.ok) {
-          await response.json();
+          const result = await response.json();
+          console.log('Colors saved successfully:', result);
           this.isSaving = false;
           this.showConfirmation = true;
           this.$emit('colors-saved');
         } else {
           const errorText = await response.text();
-          console.error('Failed to save colors to database. Response:', response.status, errorText);
-          alert(`Failed to save colors: ${response.status} - ${errorText}`);
+          console.error('Failed to save colors to database. Response:', response.status, response.statusText, errorText);
+          console.error('Request body was:', JSON.stringify({ 
+            colors, 
+            category: 'colors', 
+            profile: 'default' 
+          }));
+          alert(`Failed to save colors: ${response.status} ${response.statusText} - ${errorText}`);
           this.isSaving = false;
         }
       } catch (error) {
@@ -653,18 +894,19 @@ export default {
   color: #333;
 }
 
-/* Container for three-column layout */
+/* Container for masonry layout */
 .color-tables-container {
-  display: flex;
-  gap: 15px;
-  flex-wrap: nowrap; /* Prevent wrapping to ensure inline layout */
+  column-count: 3;
+  column-gap: 15px;
 }
 
-/* Each table section takes up ~32% width for three columns */
+/* Each table section - masonry item */
 .color-table-section {
-  flex: 1;
-  min-width: 30%;
-  max-width: 32%;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  margin-bottom: 15px;
+  display: inline-block;
+  width: 100%;
 }
 
 /* Remove script status section styling since it's now inline */
@@ -685,6 +927,12 @@ export default {
   border-collapse: collapse;
   background: white;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  margin-bottom: 20px; /* Add space after each table */
+}
+
+/* Add padding to the bottom row of each table */
+.color-config-table tbody tr:last-child td {
+  padding-bottom: 8px;
 }
 
 /* Table headers - increased 20% from 0.6rem and left aligned */

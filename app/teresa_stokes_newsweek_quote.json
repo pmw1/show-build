@@ -1,0 +1,22 @@
+{
+  "quotes": [
+    {
+      "id": "stokes_magistrate_judge",
+      "category": "FS Quote/stokes is a magistrate",
+      "text": "Stokes is a magistrate judge for the Charlotte District in Mecklenburg County Court, North Carolina. She has also been linked to a charity that provides mental health and addiction support by social media users, though Newsweek was unable to verify these claims.",
+      "attribution": "Newsweek",
+      "source_type": "news_article",
+      "tags": ["Teresa_Stokes", "magistrate_judge", "Charlotte", "mental_health_charity", "unverified_claims"],
+      "content_warning": null,
+      "priority": "medium"
+    }
+  ],
+  "metadata": {
+    "source": "newsweek_teresa_stokes_article",
+    "date_processed": "2025-09-14",
+    "content_type": "news_citation",
+    "requires_review": false,
+    "broadcast_ready": true,
+    "episode": "0240"
+  }
+}

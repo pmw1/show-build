@@ -191,6 +191,14 @@ Navigate to http://192.168.51.210:8080/ to access the main dashboard.
 
 The system supports two complementary content management approaches, each with detailed specifications:
 
+#### **[AssetID System Guide](./docs/ASSETID_SYSTEM_GUIDE.md)**
+Comprehensive guide to Show-Build's centralized asset identification and tracking system:
+- **AssetID Types**: Server vs local AssetIDs, format specifications, and database integration
+- **Assignment Process**: Automatic, manual, and bulk AssetID generation workflows
+- **API Endpoints**: Complete reference for generation, conversion, scanning, and removal
+- **File Integration**: Frontmatter and cue block AssetID embedding with parent-child relationships
+- **Obsidian Plugin**: Hotkey commands and context detection for seamless AssetID management
+
 #### **[Rundown Item Types Reference](./docs/RUNDOWN_ITEM_TYPES_REFERENCE.md)**
 Complete specification for the five primary structural elements of broadcast rundowns:
 - **ad** - Advertisement blocks with customer and sponsor metadata

@@ -7,82 +7,6 @@
     <v-card-text>
       <p class="text-body-2 mb-4">Configure rundown behavior, defaults, and item types.</p>
       
-      <!-- Default Rundown Item Types -->
-      <v-row class="mb-6">
-        <v-col cols="12">
-          <h3 class="text-subtitle-1 mb-3">Rundown Item Types</h3>
-          <p class="text-body-2 mb-3">Configure available rundown item types and their default settings.</p>
-          
-          <v-list>
-            <v-list-item
-              v-for="itemType in settings.itemTypes"
-              :key="itemType.id"
-              class="px-0"
-            >
-              <v-row align="center">
-                <v-col cols="3">
-                  <v-text-field
-                    v-model="itemType.name"
-                    label="Type Name"
-                    dense
-                  />
-                </v-col>
-                <v-col cols="2">
-                  <v-select
-                    v-model="itemType.color"
-                    :items="['primary', 'secondary', 'success', 'warning', 'error', 'info']"
-                    label="Color"
-                    dense
-                  />
-                </v-col>
-                <v-col cols="2">
-                  <v-text-field
-                    v-model="itemType.prefix"
-                    label="Prefix"
-                    dense
-                    placeholder="SEG"
-                  />
-                </v-col>
-                <v-col cols="2">
-                  <v-text-field
-                    v-model="itemType.defaultDuration"
-                    label="Duration (sec)"
-                    type="number"
-                    dense
-                  />
-                </v-col>
-                <v-col cols="2">
-                  <v-switch
-                    v-model="itemType.enabled"
-                    label="Enabled"
-                    dense
-                  />
-                </v-col>
-                <v-col cols="1">
-                  <v-btn
-                    @click="removeItemType(itemType.id)"
-                    color="error"
-                    variant="text"
-                    size="small"
-                  >
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </v-col>
-              </v-row>
-            </v-list-item>
-          </v-list>
-          
-          <v-btn
-            @click="addItemType"
-            color="primary"
-            variant="outlined"
-            class="mt-2"
-          >
-            <v-icon left>mdi-plus</v-icon>
-            Add Item Type
-          </v-btn>
-        </v-col>
-      </v-row>
 
       <!-- Timing Settings -->
       <v-row class="mb-6">
@@ -128,6 +52,15 @@
             label="Auto-number rundown items"
             color="primary"
           />
+          <v-switch
+            v-model="settings.enumerateMarkdownFiles"
+            label="Enumerate rundown item markdown files with order number"
+            color="primary"
+            class="mt-2"
+          />
+          <div class="text-caption text-grey ml-8 mt-1 mb-3">
+            When enabled: "010-coldopen-show-cold-open.md", when disabled: "coldopen-show-cold-open.md"
+          </div>
           <v-row v-if="settings.autoNumber">
             <v-col cols="12" md="6">
               <v-text-field
@@ -187,23 +120,18 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 const props = defineProps({
   modelValue: {
     type: Object,
     default: () => ({
-      itemTypes: [
-        { id: 1, name: 'Segment', prefix: 'SEG', defaultDuration: 300, color: 'primary', enabled: true },
-        { id: 2, name: 'Break', prefix: 'BRK', defaultDuration: 120, color: 'warning', enabled: true },
-        { id: 3, name: 'Package', prefix: 'PKG', defaultDuration: 180, color: 'info', enabled: true },
-        { id: 4, name: 'Interview', prefix: 'INT', defaultDuration: 240, color: 'success', enabled: true }
-      ],
       defaultSegmentDuration: 300,
       defaultBreakDuration: 120,
       showBacktiming: true,
       autoCalculateTiming: true,
       autoNumber: true,
+      enumerateMarkdownFiles: true,
       numberingStart: 1,
       numberingStep: 1,
       defaultExportFormat: 'Markdown',
@@ -221,42 +149,71 @@ const settings = computed({
 })
 
 const saving = ref(false)
-let nextItemId = ref(Math.max(...props.modelValue.itemTypes.map(t => t.id)) + 1)
 
-function removeItemType(id) {
-  const index = settings.value.itemTypes.findIndex(t => t.id === id)
-  if (index > -1) {
-    settings.value.itemTypes.splice(index, 1)
+async function loadSettings() {
+  try {
+    const response = await fetch('/api/settings/', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        'X-API-Key': localStorage.getItem('api_key')
+      }
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      const rundownData = data.rundown || {}
+      
+      // Map backend settings to frontend format
+      if (Object.keys(rundownData).length > 0) {
+        settings.value = {
+          ...settings.value,
+          showBacktiming: rundownData.show_cumulative_time ?? settings.value.showBacktiming,
+          autoCalculateTiming: rundownData.auto_calculate_duration ?? settings.value.autoCalculateTiming,
+          autoNumber: rundownData.auto_number_rundown_items ?? settings.value.autoNumber,
+          enumerateMarkdownFiles: rundownData.enumerate_rundown_markdown_files ?? settings.value.enumerateMarkdownFiles
+        }
+      }
+    } else {
+      console.warn('Could not load settings, using defaults')
+    }
+  } catch (error) {
+    console.error('Error loading rundown settings:', error)
   }
-}
-
-function addItemType() {
-  settings.value.itemTypes.push({
-    id: nextItemId.value++,
-    name: 'New Type',
-    prefix: 'NEW',
-    defaultDuration: 180,
-    color: 'secondary',
-    enabled: true
-  })
 }
 
 async function saveSettings() {
   saving.value = true
   try {
+    // Map frontend settings to backend API format
+    const backendSettings = {
+      default_segment_duration: "00:05:00", // Convert to time format
+      enable_timecode: true,
+      timecode_format: "HH:MM:SS", 
+      show_cumulative_time: settings.value.showBacktiming || true,
+      enable_drag_drop: true,
+      auto_calculate_duration: settings.value.autoCalculateTiming || true,
+      warn_on_delete: true,
+      show_item_numbers: true,
+      auto_number_rundown_items: settings.value.autoNumber || true,
+      enumerate_rundown_markdown_files: settings.value.enumerateMarkdownFiles || true
+    }
+
     const response = await fetch('/api/settings/rundown', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        'X-API-Key': localStorage.getItem('api_key')
       },
-      body: JSON.stringify(settings.value)
+      body: JSON.stringify(backendSettings)
     })
 
     if (response.ok) {
       emit('save', settings.value)
       alert('Rundown settings saved successfully')
     } else {
+      const errorData = await response.text()
+      console.error('Save failed:', errorData)
       throw new Error('Failed to save settings')
     }
   } catch (error) {
@@ -266,6 +223,10 @@ async function saveSettings() {
     saving.value = false
   }
 }
+
+onMounted(() => {
+  loadSettings()
+})
 </script>
 
 <style scoped>

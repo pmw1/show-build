@@ -2,9 +2,121 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🚨 **DEBUGGING FRONTEND ISSUES?** 🚨
+**→ [`DEBUG_FIRST.md`](DEBUG_FIRST.md) ← START HERE IMMEDIATELY**
+
+Run: `./scripts/debug-frontend.sh` (saves 10+ minutes of debugging)
+
+## 🤖 CLAUDE-TO-CLAUDE COMMUNICATION SYSTEM
+
+**⚠️ MIGRATED TO CLAUDESPAWN**: Legacy CLAUDECOM.txt system replaced by ClaudeSpawn satellite network
+
+**New Communication Channel**: ClaudeSpawn HTTP API at `/mnt/process/claudespawn/`
+
+### Sending Communications to pmw-rm4 Claude
+
+**Method**: Create and send `CLAUDECOM.txt` file to remote Claude instance
+
+```bash
+# Create communication file
+echo "Your message to pmw-rm4 Claude here" > CLAUDECOM.txt
+
+# Send to remote Claude
+scp CLAUDECOM.txt pmw@pmw-rm4:~/
+
+# Clean up local copy
+rm CLAUDECOM.txt
+```
+
+**SSH Configuration** (already set up in `/home/kevin/.ssh/config`):
+```
+Host pmw-rm4
+    Hostname 173.14.175.162
+    User pmw
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519
+    ForwardAgent yes
+    Compression yes
+```
+
+### Receiving Responses from pmw-rm4 Claude
+
+**Method**: pmw-rm4 Claude can append responses to CLAUDECOM.txt, retrieve via scp
+
+```bash
+# Retrieve responses from remote Claude
+scp pmw@pmw-rm4:~/CLAUDECOM.txt ./CLAUDECOM_response.txt
+
+# Read the response
+cat CLAUDECOM_response.txt
+```
+
+### Communication Protocol
+
+1. **Sending Instructions**: Create CLAUDECOM.txt with clear, specific instructions
+2. **File Monitoring**: pmw-rm4 Claude checks for CLAUDECOM.txt periodically
+3. **Response Method**: Remote Claude appends responses to same file
+4. **Retrieval**: Use scp to pull responses back for review
+5. **File Management**: Clean up communication files after processing
+
+**Example Communication:**
+```bash
+echo "Please set up the Show-Build database using DATABASE_SETUP_INSTRUCTIONS.md and report status" > CLAUDECOM.txt
+scp CLAUDECOM.txt pmw@pmw-rm4:~/
+# Wait for response processing
+scp pmw@pmw-rm4:~/CLAUDECOM.txt ./response.txt
+cat response.txt
+```
+
+**⚠️ Important**: This is an experimental Claude-to-Claude communication method. Both instances should check for and respond to CLAUDECOM.txt files appropriately.
+
+### ClaudeSpawn: Multi-LLM Coordination System
+
+**Primary Communication Protocol**: All Claude coordination now handled by ClaudeSpawn
+
+**Location**: `/mnt/process/claudespawn/`
+
+```bash
+# Start ClaudeSpawn home base
+cd /mnt/process/claudespawn
+python claudespawn.py --mode local --port 47291
+
+# Launch monitoring interface
+./scripts/launch_claudespawn_interface.sh
+
+# Deploy satellite to remote machine
+./scripts/deploy.sh
+```
+
+**Architecture:**
+- **Home Base**: Central coordination hub (port 47291)
+- **Local Satellite**: Controls local Claude instance (port 8890)
+- **Remote Satellites**: pmw-rm4 and other machines
+
+**Key Features:**
+- **Structured Reminders**: Persistent memory buffers with file references
+- **Automatic Response Processing**: Cross-Claude communication without keyboard input
+- **Self-Updating Satellites**: Remote instances update and relaunch automatically
+- **Firewall-Friendly**: Outbound-only polling works behind any firewall
+- **Multi-LLM Ready**: Universal protocol for Claude, ChatGPT, Grok, local LLMs
+- **7-Pane Monitoring Interface**: Comprehensive tmux dashboard
+- **Hierarchical Organization**: Coordinator/worker LLM relationships
+
+**Show-Build Integration:**
+```bash
+# Use ClaudeSpawn from Show-Build directory
+./scripts/claudespawn.sh interface    # Launch monitoring
+./scripts/claudespawn.sh start       # Start persistent Claude
+./scripts/claudespawn.sh status      # Check system status
+```
+
+**📖 Complete Documentation**: See [`/mnt/process/claudespawn/README.md`](../claudespawn/README.md) for full usage guide.
+
 ## Project Overview
 
 Show-Build is a full-stack broadcast rundown management system designed for the Disaffected media ecosystem. It serves as a drop-in replacement for Obsidian-based workflows while maintaining complete file format compatibility. The system operates on the same markdown files and organizational structure as Obsidian.
+
+**📋 Key Documentation**: See [`docs/ASSETID_SYSTEM_GUIDE.md`](docs/ASSETID_SYSTEM_GUIDE.md) for comprehensive AssetID system reference including generation, conversion, scanning, and integration workflows.
 
 ## Architecture
 
@@ -76,12 +188,33 @@ id: '12345'
 slug: segment-title
 type: segment
 order: 10
+index: 10    # New index field for placement logic
 duration: "00:03:30"
 status: draft
 title: "Segment Title"
 ---
 # Content here
 ```
+
+### Rundown Item Placement System
+**Index-Based Placement Logic** (replaces hardcoded order assignment):
+
+1. **Cold Open Rule**: Always gets `index: 1` regardless of placement
+2. **Default Placement**: New items placed after selected item `+10`
+3. **Conflict Resolution**: If index exists, use `+5` fallback  
+4. **Filename Enumeration**: Database setting controls filename format:
+   - Enabled: `001-Cold-Open.md`, `010-Segment-Title.md`
+   - Disabled: `Cold-Open.md`, `Segment-Title.md`
+
+### Rundown Normalization System
+**API Endpoint**: `POST /rundown/{episode}/normalize`
+
+**Normalization Rules**:
+- Round non-multiple-of-10 indexes up to next multiple of 10
+- Handle conflicts with cascading bumps (+10 increments)
+- Sync `order` field with `index` field
+- Rename files based on enumeration setting
+- Preserve existing multiple-of-10 indexes
 
 ### Content Types
 - **Segments**: Main content blocks (interviews, discussions)
@@ -117,6 +250,51 @@ The system supports dual authentication:
 
 Use `get_current_user_or_key` dependency for endpoints that accept both auth methods.
 
+## RBAC (Role-Based Access Control) System
+
+**📖 Complete Reference**: See [`docs/RBAC_AUTHENTICATION_GUIDE.md`](docs/RBAC_AUTHENTICATION_GUIDE.md) for comprehensive documentation.
+
+Show-Build implements enterprise-grade RBAC with 11 database tables providing:
+
+### Core Features
+- **Hierarchical Roles**: 5 built-in levels (Super Admin → Viewer)  
+- **Granular Permissions**: 25+ permissions with resource.action naming
+- **User Groups**: Organization-scoped user collections
+- **Permission Overrides**: Direct user permission grants/denials
+- **Audit Trail**: Complete logging of all RBAC changes
+
+### Key Files
+- **Models**: `app/models_rbac.py` - RBAC database models
+- **Service**: `app/rbac_service.py` - Permission checking and management
+- **API**: `app/rbac_router.py` - RBAC REST endpoints (/api/rbac/*)
+- **Migration**: Applied via Alembic (0e73074190a2_add_rbac_system.py)
+
+### Quick Start
+```bash
+# Seed default permissions and roles
+docker exec show-build-server python /app/seed_rbac.py
+
+# Create admin API key  
+docker exec show-build-server python /app/create_test_api_key.py
+
+# Check system status
+curl -H "X-API-Key: YOUR_KEY" http://localhost:8888/api/rbac/system-status
+```
+
+### Permission Hierarchy
+1. **Super Admin** (`admin.all`) - Full system access
+2. **Organization Admin** - Full organization control
+3. **Content Manager** - Show/episode management  
+4. **Content Editor** - Content editing only
+5. **Viewer** - Read-only access
+
+### Database Tables
+- `permissions`, `roles`, `groups`, `users` (core entities)
+- `user_roles`, `user_groups`, `group_roles`, `role_permissions` (relationships)
+- `user_permission_overrides`, `rbac_audit_log`, `api_keys` (overrides/audit)
+
+**⚠️ Important**: Always use the RBAC API endpoints for permission management. Direct database manipulation can break permission inheritance and audit trails.
+
 ## Database Models
 
 ### Core Models
@@ -124,6 +302,14 @@ Use `get_current_user_or_key` dependency for endpoints that accept both auth met
 - **Organization/Show/Episode**: Content hierarchy (`app/models_v2.py`)
 - **AssetIDRegistry**: Asset tracking system (`app/models_assetid.py`)
 - **ProcessingJob**: Background job tracking (`app/models.py`)
+
+### Test Data Management
+**🧪 ALL CONTENT TABLES** include `is_test_data` boolean field to separate test/dummy data from production:
+- Use `is_test_data=True` for test episodes, users, content
+- Production queries should filter `WHERE is_test_data = FALSE`
+- Test data uses naming: episodes `900X`, titles `TEST: ...`, users `test*`
+
+**📖 Complete Guide**: See [`docs/TEST_DATA_MANAGEMENT.md`](docs/TEST_DATA_MANAGEMENT.md) for usage examples, API filtering, and bulk operations.
 
 ## Testing and Development
 
@@ -150,7 +336,7 @@ cd app && python -m pytest
 
 Colors are centralized in `disaffected-ui/src/utils/themeColorMap.js`:
 - **Segment Types**: Each type (segment, ad, promo, etc.) has dedicated colors
-- **Status Colors**: draft, approved, production, completed states
+- **Status Colors**: draft, approved, production, promotion, completed states
 - **Implementation**: Uses Vuetify theme colors with fallbacks
 
 ## Key Configuration Files
@@ -185,7 +371,11 @@ The system maintains **complete Obsidian compatibility**:
 ### Database Changes
 1. Modify models in `app/models*.py`
 2. Create migration: `alembic revision --autogenerate -m "description"`
-3. Apply migration: `alembic upgrade head`
+3. **⚠️ CRITICAL RULE**: Before any migration that deletes/drops colors, users, or content (unless flagged 'dev'), you MUST:
+   - Ask user permission with specific details of what will be deleted
+   - Explain consequences clearly
+   - Create backup using: `./scripts/backup_before_migration.sh`
+4. Apply migration: `alembic upgrade head`
 
 ### Asset Processing
 - Video files go to `/shared_media/preproc/working/{id}/`
@@ -201,6 +391,25 @@ Key environment variables (see `docker-compose.yml`):
 
 ## Troubleshooting
 
+### 🚨 **START HERE FOR ANY FRONTEND ISSUE** 🚨
+
+**⚠️ PRIORITY REFERENCE**: [`DEBUG_FIRST.md`](DEBUG_FIRST.md) - **READ THIS FIRST**
+
+**Quick Debug Command** (run immediately for any unexplained frontend issue):
+```bash
+./scripts/debug-frontend.sh
+```
+
+This catches 99% of common frontend issues in 30 seconds, including:
+- ⭐ **Template ref naming conflicts** (most common cause of form resets)  
+- ⭐ **API connectivity issues**
+- ⭐ **Vue mounting problems**
+- ⭐ **Backend service status**
+
+**📋 Complete Debugging Standards**: [`docs/DEBUGGING_STANDARDS.md`](docs/DEBUGGING_STANDARDS.md)
+
+---
+
 ### Common Issues
 - **Database connection**: Check PostgreSQL container status
 - **File permissions**: Ensure Docker user (1000:1001) can access mounted volumes
@@ -213,6 +422,60 @@ Key environment variables (see `docker-compose.yml`):
 - Look for duplicate Vue app instances in console and browser DevTools
 - Check for missing `unmount()` calls in main.js during hot module reload
 
+### Vue Template Ref vs Reactive Variable Naming Conflicts ⚠️
+**CRITICAL BUG - CAUSES 80% OF VUE ISSUES**: Template `ref` names conflicting with Composition API reactive variables cause component mounting failures, modal issues, and reactivity breakdowns.
+
+**📖 COMPLETE DEBUGGING GUIDE**: [`docs/VUE_TEMPLATE_REF_CONFLICTS.md`](docs/VUE_TEMPLATE_REF_CONFLICTS.md)
+
+**Problem Pattern:**
+```vue
+<template>
+  <v-form ref="episodeForm">  <!-- ❌ Conflicts with reactive var -->
+    <v-text-field v-model="episodeForm.title" />
+  </v-form>
+</template>
+
+<script>
+const episodeForm = ref({title: ''})  // ❌ Same name as template ref
+</script>
+```
+
+**Solution:**
+```vue
+<template>
+  <v-form ref="episodeFormRef">  <!-- ✅ Different name -->
+    <v-text-field v-model="episodeForm.title" />
+  </v-form>
+</template>
+
+<script>
+const episodeForm = ref({title: ''})  // ✅ Clear separation
+</script>
+```
+
+**Symptoms:**
+- Form values mysteriously reset to initial state
+- Reactivity breaks without obvious cause  
+- Data appears to load correctly but then disappears
+- Vue DevTools shows conflicting reactive sources
+
+**Prevention:**
+- Use `Ref` suffix for all template refs: `formRef`, `dialogRef`, `tableRef`
+- Use descriptive names for reactive variables: `formData`, `modalData`
+- Scan for conflicts: `grep -n 'ref="' *.vue` then check for matching variable names
+
+**Quick Conflict Scan:**
+```bash
+# In Vue component directory - shows duplicate ref names
+cd disaffected-ui/src
+grep -rn 'ref="[^"]*"' . | sed 's/.*ref="\([^"]*\)".*/\1/' | sort | uniq -d
+
+# Comprehensive debugging scan (recommended for all frontend issues)
+./scripts/debug-frontend.sh
+```
+
+**📖 Complete Debugging Guide**: See [`docs/DEBUGGING_STANDARDS.md`](docs/DEBUGGING_STANDARDS.md) for systematic debugging checklist and standards.
+
 ### Episode Data Loading Issues
 - **Race Condition Logic**: Avoid implementing race condition prevention logic in `ContentEditor.vue` that blocks duplicate calls. This can prevent legitimate episode loading. The component should handle loading states naturally without blocking subsequent calls.
 - **Field Name Consistency**: Frontend expects `duration` field from episode info.md files, not `total_runtime`. Ensure all components use `duration` consistently.
@@ -222,3 +485,7 @@ Key environment variables (see `docker-compose.yml`):
 - Backend: `docker logs show-build-server`
 - Frontend: Browser console and network tab
 - Database: `docker logs show-build-postgres`
+- debugging front end look at ./scripts/debug-frontend.sh
+- provide all urls using lan-accessible ip.  never localhost.
+- cache clearing requests can run scripts/clean-npm-servers.sh for a thorough job.
+- xtts requests made from anywhere in the show-build environment should use xtts settings in the database which were defined in the settings.

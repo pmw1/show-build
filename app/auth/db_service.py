@@ -42,7 +42,9 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
-    settings = Column(JSON, default=dict)
+    preferences = Column(JSON, default=dict)
+    organization_id = Column(Integer, nullable=True)
+    is_test_data = Column(Boolean, nullable=False, default=False)
 
 
 class APIKey(Base):
@@ -159,7 +161,9 @@ class AuthService:
                 profile_picture=kwargs.get('profile_picture', ''),
                 is_active=kwargs.get('is_active', True),
                 is_verified=kwargs.get('is_verified', False),
-                settings=kwargs.get('settings', {})
+                preferences=kwargs.get('preferences', {}),
+                organization_id=kwargs.get('organization_id', None),
+                is_test_data=kwargs.get('is_test_data', False)
             )
             
             db.add(user)
@@ -244,5 +248,71 @@ class AuthService:
                 logger.info(f"Updated last login for user: {username}")
         except Exception as e:
             logger.error(f"Error updating last login for {username}: {e}")
+        finally:
+            db.close()
+
+    @classmethod
+    def update_user(cls, username: str, **kwargs) -> Optional[User]:
+        """Update user information"""
+        db = cls.get_db()
+        try:
+            user = db.query(User).filter(User.username == username).first()
+            if not user:
+                logger.warning(f"User {username} not found for update")
+                return None
+
+            # Update allowed fields
+            if 'first_name' in kwargs:
+                user.first_name = kwargs['first_name']
+            if 'last_name' in kwargs:
+                user.last_name = kwargs['last_name']
+            if 'email' in kwargs:
+                user.email = kwargs['email']
+            if 'phone' in kwargs:
+                user.phone = kwargs['phone']
+            if 'access_level' in kwargs:
+                user.access_level = kwargs['access_level']
+            if 'is_active' in kwargs:
+                user.is_active = kwargs['is_active']
+            if 'profile_picture' in kwargs:
+                user.profile_picture = kwargs['profile_picture']
+            if 'password' in kwargs:
+                # Hash new password if provided
+                user.hashed_password = pwd_context.hash(kwargs['password'])
+
+            user.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(user)
+
+            logger.info(f"Updated user: {username}")
+            return user
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error updating user {username}: {e}")
+            return None
+        finally:
+            db.close()
+
+    @classmethod
+    def delete_user(cls, username: str) -> bool:
+        """Delete a user"""
+        db = cls.get_db()
+        try:
+            user = db.query(User).filter(User.username == username).first()
+            if not user:
+                logger.warning(f"User {username} not found for deletion")
+                return False
+
+            db.delete(user)
+            db.commit()
+
+            logger.info(f"Deleted user: {username}")
+            return True
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error deleting user {username}: {e}")
+            return False
         finally:
             db.close()

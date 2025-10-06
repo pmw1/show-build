@@ -57,7 +57,7 @@
     </div>
 
     <!-- Edit Form -->
-    <v-form v-else-if="show" ref="form" v-model="formValid" @submit.prevent="saveShow">
+    <v-form v-else-if="show" ref="showFormRef" v-model="formValid" @submit.prevent="saveShow">
       <v-row>
         <!-- Basic Information -->
         <v-col cols="12" md="6">

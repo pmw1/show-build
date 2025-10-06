@@ -50,6 +50,15 @@ export const ITEM_TYPES = [
     icon: 'mdi-arrow-right',
     sortOrder: 5
   },
+  { 
+    title: 'Cold Open', 
+    value: 'coldopen', 
+    category: 'Core', 
+    description: 'Opening segment before title sequence',
+    color: 'blue',
+    icon: 'mdi-play-circle-outline',
+    sortOrder: 6
+  },
   
   // Broadcast production types
   { 
@@ -98,15 +107,6 @@ export const ITEM_TYPES = [
     sortOrder: 14
   },
   { 
-    title: 'Break', 
-    value: 'break', 
-    category: 'Production', 
-    description: 'Commercial or station breaks',
-    color: 'brown',
-    icon: 'mdi-pause',
-    sortOrder: 15
-  },
-  { 
     title: 'Tease', 
     value: 'tease', 
     category: 'Production', 
@@ -123,15 +123,6 @@ export const ITEM_TYPES = [
     color: 'indigo',
     icon: 'mdi-tag',
     sortOrder: 17
-  },
-  { 
-    title: 'Bump', 
-    value: 'bump', 
-    category: 'Production', 
-    description: 'Short transition elements',
-    color: 'deep-purple',
-    icon: 'mdi-arrow-decision',
-    sortOrder: 18
   },
   
   // Technical elements
@@ -227,15 +218,6 @@ export const ITEM_TYPES = [
     icon: 'mdi-script-text',
     sortOrder: 33
   },
-  { 
-    title: 'Open/Close', 
-    value: 'openclose', 
-    category: 'Content', 
-    description: 'Show opening and closing segments',
-    color: 'purple-darken-2',
-    icon: 'mdi-television-play',
-    sortOrder: 34
-  }
 ];
 
 // Helper functions to work with item types

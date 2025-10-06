@@ -1,0 +1,116 @@
+{
+  "preproduction": {
+    "ai_services": {
+      "ollama": {
+        "host": "http://192.168.51.197:11434",
+        "model": "llama3:latest",
+        "enabled": true
+      },
+      "openai": {
+        "apiKey": "gAAAAABo39Z7r-BUTW5qi24raITX5c911bpo8vss3UVgDCf-K0i5tIdsrbQSc7f5Gum1YpyBAuCeTzcAthOFVQ2RIbdWv4DtRFDQVqwjDCrdL4Uqt3yvsy1NSkRlkd-AvAjrdSuA_r2J6Jgg7vvgWQ6L_mOPS99Bz693bt-jPOFQ7Rvp31dNKJj4BXyF-GxOHNXn-9JZnir2frSIh466GQthFRerlnfYYEnPhGOr7FZLSue9PZjRieepAkcTKWp4IQODV0yY2sFaQogkKcgafPlbif2r34CkcZB8Z0OKUzQJm2vhPGhLpFw=",
+        "organization": "",
+        "model": "gpt-4",
+        "enabled": true
+      },
+      "anthropic": {
+        "apiKey": "gAAAAABo39Z7ADdqlsz75tGXF86kNSHYWABhCcA6DAGp8HscaKyaIcNUlh6MHezCKT3mr2biPQV3O6f3qQxPDzEICIiAEgKu1dAMM4AAfiuAY_RBCN2NgPlJU3WusmDrP0ujudURejlge1PoAn6lbfqtbMT66prAGtJrxmkPosoB9x5hQaZVaNbtdV4A9BjdPH-KiWPUg0ALopdNu7KmhwhYvMai1MYEvw==",
+        "model": "claude-3-5-sonnet-20241022",
+        "enabled": true
+      },
+      "gemini": {
+        "apiKey": "gAAAAABo39Z7cmV-A-PDGw__7XGyHFmTZW77rlfHZxaoFi8DhNtqah0Z9JeTEDAp1sGB9b1Rq3K3yCyhpPRasJqXWx2yDDcAmrd2_OBklDsCyfq_ywfZsU6RnuBq4y8lp6fI4_L10BM9",
+        "model": "gemini-pro",
+        "enabled": true
+      },
+      "grok": {
+        "apiKey": "gAAAAABo39Z7v8D5pqW40YaNop7b4-7OT8-yEisE5fs3C_uuNtQKiIUA7HgFjLrhY_3mUk2teUKM8a1jr6my-tsHRxoZcGy20oatQ9KpTsKO8lK-2pO3T9RM-H-jB8Bx85qO8W06U19AycibuLGzapaZ85ssC-m882-kDfy0bI8VX3ToqA3cZgNnqa_Kds6IvpRDIO9Iq-Q3",
+        "model": "grok-3",
+        "enabled": true
+      },
+      "stabilityAi": {
+        "apiKey": "",
+        "enabled": false
+      },
+      "elevenLabs": {
+        "apiKey": "",
+        "enabled": false
+      },
+      "xtts": {
+        "host": "http://192.168.51.197:5001",
+        "endpoint": "/v1/audio/speech",
+        "language": "en",
+        "speed": 1.0,
+        "speaker": "",
+        "enabled": true
+      }
+    },
+    "storage": {
+      "google": {
+        "clientId": "",
+        "clientSecret": "",
+        "serviceAccount": "",
+        "driveEnabled": false,
+        "calendarEnabled": false
+      },
+      "aws": {
+        "accessKeyId": "",
+        "secretAccessKey": "",
+        "region": "",
+        "bucket": "",
+        "enabled": false
+      }
+    },
+    "communication": {
+      "slack": {
+        "botToken": "",
+        "webhookUrl": "",
+        "enabled": false
+      },
+      "discord": {
+        "botToken": "",
+        "webhookUrl": "",
+        "enabled": false
+      },
+      "twilio": {
+        "accountSid": "",
+        "authToken": "",
+        "phoneNumber": "",
+        "enabled": false
+      },
+      "email": {
+        "provider": "",
+        "apiKey": "",
+        "fromEmail": "",
+        "enabled": false
+      }
+    }
+  },
+  "promotion": {
+    "social_media": {
+      "youtube": {
+        "apiKey": "",
+        "clientId": "",
+        "enabled": false
+      },
+      "vimeo": {
+        "accessToken": "",
+        "enabled": false
+      }
+    }
+  },
+  "development": {
+    "github": {
+      "accessToken": "",
+      "organization": "",
+      "enabled": false
+    },
+    "webhooks": {
+      "endpoint": "",
+      "secret": "",
+      "enabled": false
+    }
+  },
+  "metadata": {
+    "last_saved": "2025-10-03T13:58:19.691436"
+  }
+}

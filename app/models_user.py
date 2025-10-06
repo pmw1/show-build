@@ -28,6 +28,9 @@ class User(Base):
     phone = Column(String(20), nullable=True, default="")
     profile_picture = Column(String(500), nullable=True, default="")
     
+    # Test data flag
+    is_test_data = Column(Boolean, default=False, nullable=False)  # True for test/dummy user accounts
+    
     # Account status
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
@@ -43,6 +46,13 @@ class User(Base):
     # Additional settings and preferences
     preferences = Column(JSON, default=dict)  # User-specific preferences (renamed from settings to avoid conflict)
     
+    # RBAC Relationships - imported from models_rbac.py association tables
+    roles = relationship("Role", secondary="user_roles", back_populates="users")
+    groups = relationship("Group", secondary="user_groups", back_populates="users")
+
+    # Speaker profile relationship
+    speaker_profile = relationship("Speaker", back_populates="user", uselist=False, cascade="all, delete-orphan")
+
     # Relationships (Settings model is in models.py)
     # settings = relationship("Settings", back_populates="user", cascade="all, delete-orphan")  # Commented out to avoid circular import
     

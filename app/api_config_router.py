@@ -3,7 +3,7 @@ API Configuration Router
 FastAPI endpoints for managing API configurations
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
 import logging
@@ -120,6 +120,53 @@ async def update_service_config(service_update: ServiceConfigUpdate, token_data=
         logger.error(f"Error updating service config: {e}")
         raise HTTPException(status_code=500, detail="Failed to update service configuration")
 
+async def test_xtts_connection(service_config: dict):
+    """
+    Test connection to XTTS service by checking health and speakers endpoints.
+    """
+    host = service_config.get("host")
+    if not host:
+        raise HTTPException(status_code=400, detail="XTTS host not configured")
+
+    try:
+        import requests
+
+        # Test basic connectivity by trying to fetch speakers
+        speakers_url = f"{host}/speakers"
+        response = requests.get(speakers_url, timeout=5)
+        response.raise_for_status()
+
+        speakers_data = response.json()
+
+        # Validate response format
+        if isinstance(speakers_data, dict) and "speakers" in speakers_data:
+            speaker_count = len(speakers_data["speakers"])
+        elif isinstance(speakers_data, list):
+            speaker_count = len(speakers_data)
+        else:
+            speaker_count = 0
+
+        return {
+            "success": True,
+            "message": f"XTTS connection successful - {speaker_count} speakers available",
+            "service": "xtts",
+            "status": "connected",
+            "details": {
+                "host": host,
+                "speaker_count": speaker_count,
+                "response_time_ms": response.elapsed.total_seconds() * 1000
+            }
+        }
+
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=408, detail="XTTS service timeout - check if service is running")
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail=f"Cannot connect to XTTS service at {host}")
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"XTTS service error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"XTTS connection test failed: {str(e)}")
+
 @router.post("/test/{service}")
 async def test_api_connection(service: str, token_data=Depends(get_current_user_or_key)):
     """
@@ -161,28 +208,254 @@ async def test_api_connection(service: str, token_data=Depends(get_current_user_
         if not has_credentials:
             raise HTTPException(status_code=400, detail=f"Missing required credentials for '{service}'")
         
-        # TODO: Implement actual API testing logic for each service
-        # For now, simulate testing
-        import asyncio
-        await asyncio.sleep(1)  # Simulate network delay
-        
-        # Random success/failure for demonstration
-        import random
-        if random.random() > 0.2:  # 80% success rate
-            return {
-                "success": True,
-                "message": f"Connection to {service} successful",
-                "service": service,
-                "status": "connected"
-            }
+        # Implement actual API testing logic for specific services
+        if service == "xtts":
+            return await test_xtts_connection(service_config)
         else:
-            raise HTTPException(status_code=400, detail=f"Connection to {service} failed")
+            # For other services, simulate testing for now
+            import asyncio
+            await asyncio.sleep(1)  # Simulate network delay
+
+            # Random success/failure for demonstration
+            import random
+            if random.random() > 0.2:  # 80% success rate
+                return {
+                    "success": True,
+                    "message": f"Connection to {service} successful",
+                    "service": service,
+                    "status": "connected"
+                }
+            else:
+                raise HTTPException(status_code=400, detail=f"Connection to {service} failed")
     
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error testing {service} connection: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to test {service} connection")
+
+@router.get("/xtts/speakers")
+async def get_xtts_speakers(token_data=Depends(get_current_user_or_key)):
+    """
+    Proxy endpoint to fetch XTTS speakers without CORS issues.
+    Gets the XTTS host from configuration and fetches available speakers.
+    """
+    try:
+        # Load current configuration to get XTTS host
+        config = api_config_manager.load_config()
+        xtts_config = config.get("preproduction", {}).get("ai_services", {}).get("xtts", {})
+
+        xtts_host = xtts_config.get("host")
+        if not xtts_host:
+            # Return helpful message instead of error to allow graceful handling
+            return {
+                "success": False,
+                "speakers": [],
+                "count": 0,
+                "message": "XTTS host not configured. Please configure the XTTS host URL first.",
+                "xtts_host": None
+            }
+
+        # Make request to XTTS speakers endpoint
+        import requests
+        speakers_url = f"{xtts_host}/speakers"
+
+        response = requests.get(speakers_url, timeout=10)
+        response.raise_for_status()
+
+        speakers_data = response.json()
+
+        # Normalize the response format
+        if isinstance(speakers_data, dict) and "speakers" in speakers_data:
+            speakers_list = speakers_data["speakers"]
+        elif isinstance(speakers_data, list):
+            speakers_list = speakers_data
+        else:
+            speakers_list = []
+
+        # Add OpenAI standard voices for compatibility
+        openai_voices = [
+            {"id": "alloy", "name": "Alloy (OpenAI Standard)"},
+            {"id": "echo", "name": "Echo (OpenAI Standard)"},
+            {"id": "fable", "name": "Fable (OpenAI Standard)"},
+            {"id": "nova", "name": "Nova (OpenAI Standard)"},
+            {"id": "onyx", "name": "Onyx (OpenAI Standard)"},
+            {"id": "shimmer", "name": "Shimmer (OpenAI Standard)"}
+        ]
+
+        # Format XTTS speakers for frontend consumption
+        formatted_speakers = []
+
+        # Add OpenAI standard voices first
+        formatted_speakers.extend(openai_voices)
+
+        # Add separator
+        formatted_speakers.append({
+            "id": "---separator---",
+            "name": "── XTTS Speakers ──"
+        })
+
+        # Add XTTS speakers
+        for speaker in speakers_list:
+            if isinstance(speaker, str):
+                formatted_speakers.append({
+                    "id": speaker,
+                    "name": speaker
+                })
+            elif isinstance(speaker, dict):
+                formatted_speakers.append({
+                    "id": speaker.get("id", speaker.get("name", "")),
+                    "name": speaker.get("name", speaker.get("id", ""))
+                })
+
+        return {
+            "success": True,
+            "speakers": formatted_speakers,
+            "count": len(formatted_speakers),
+            "xtts_host": xtts_host,
+            "openai_voices_included": True
+        }
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching XTTS speakers: {e}")
+        raise HTTPException(status_code=503, detail=f"Failed to connect to XTTS service: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error in XTTS speakers endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch speakers")
+
+@router.post("/xtts/synthesize")
+async def synthesize_speech(
+    request: dict = Body(...),
+    token_data=Depends(get_current_user_or_key)
+):
+    """
+    Proxy endpoint for XTTS text-to-speech synthesis.
+    Accepts text and TTS parameters, returns audio data.
+    """
+    try:
+        # Load current configuration to get XTTS settings
+        config = api_config_manager.load_config()
+        xtts_config = config.get("preproduction", {}).get("ai_services", {}).get("xtts", {})
+
+        xtts_host = xtts_config.get("host")
+        xtts_endpoint = xtts_config.get("endpoint", "/synthesize")
+
+        if not xtts_host:
+            raise HTTPException(status_code=400, detail="XTTS host not configured")
+
+        if not xtts_config.get("enabled", False):
+            raise HTTPException(status_code=400, detail="XTTS is not enabled")
+
+        # Use OpenAI endpoint for compatibility
+        xtts_url = f"{xtts_host}{xtts_endpoint}"
+
+        tts_json_data = {
+            "model": "tts-1",
+            "input": request.get("text", ""),
+            "voice": request.get("speaker", xtts_config.get("speaker", "alloy")),
+            "speed": request.get("speed", xtts_config.get("speed", 1.0))
+        }
+
+        if not tts_json_data["input"]:
+            raise HTTPException(status_code=400, detail="Text is required for synthesis")
+
+        # Debug logging
+        logger.info(f"XTTS OpenAI Request URL: {xtts_url}")
+        logger.info(f"XTTS JSON Data: {tts_json_data}")
+
+        import httpx
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                xtts_url,
+                json=tts_json_data,  # Use JSON for OpenAI endpoint
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Better error handling with response details
+        if response.status_code != 200:
+            try:
+                error_detail = response.json()
+                logger.error(f"XTTS service error {response.status_code}: {error_detail}")
+                raise HTTPException(status_code=response.status_code, detail=f"XTTS service error: {error_detail}")
+            except ValueError:
+                # Response is not JSON
+                error_text = response.text
+                logger.error(f"XTTS service error {response.status_code}: {error_text}")
+                raise HTTPException(status_code=response.status_code, detail=f"XTTS service error: {error_text}")
+
+        response.raise_for_status()
+
+        # Check if response is audio
+        content_type = response.headers.get('content-type', '')
+        if 'audio' not in content_type and 'octet-stream' not in content_type:
+            # If not audio, try to parse as JSON error
+            try:
+                error_data = response.json()
+                raise HTTPException(status_code=400, detail=f"TTS error: {error_data}")
+            except:
+                raise HTTPException(status_code=400, detail="Invalid response from XTTS service")
+
+        # Return audio data directly
+        from fastapi.responses import Response
+        audio_data = response.content
+
+        return Response(
+            content=audio_data,
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": "attachment; filename=xtts_output.wav",
+                "Content-Length": str(len(audio_data))
+            }
+        )
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=408, detail="XTTS synthesis timeout")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Cannot connect to XTTS service")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"XTTS service error: {e}")
+    except Exception as e:
+        logger.error(f"Error in XTTS synthesis: {e}")
+        raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
+
+@router.get("/current-episode")
+async def get_current_episode_info(token_data=Depends(get_current_user_or_key)):
+    """
+    Get current episode information for TTS test messages.
+    """
+    try:
+        # Import here to avoid circular imports
+        from episodes_router import get_next_episode_number
+        from sqlalchemy.orm import Session
+        from database import get_db
+
+        # TODO: Implement proper episode number detection
+        # For now, return a reasonable default
+        current_episode = "0241"  # Current working episode
+
+        return {
+            "success": True,
+            "current_episode": current_episode,
+            "server_info": {
+                "name": "Ravena 1",
+                "ip": "192.168.51.197"
+            },
+            "show_name": "Disaffected"
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting current episode info: {e}")
+        # Return fallback data even on error
+        return {
+            "success": False,
+            "current_episode": "0000",
+            "server_info": {
+                "name": "Ravena 1",
+                "ip": "192.168.51.197"
+            },
+            "show_name": "Disaffected",
+            "error": str(e)
+        }
 
 @router.delete("/api-configs")
 async def reset_api_configs(token_data=Depends(get_current_user_or_key)):
@@ -195,26 +468,26 @@ async def reset_api_configs(token_data=Depends(get_current_user_or_key)):
         import shutil
         import os
         from datetime import datetime
-        
+
         backup_name = f"api_configs_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         backup_path = os.path.join("app/storage", backup_name)
-        
+
         if os.path.exists(api_config_manager.config_file):
             shutil.copy2(api_config_manager.config_file, backup_path)
-        
+
         # Remove current config file to trigger default creation
         if os.path.exists(api_config_manager.config_file):
             os.remove(api_config_manager.config_file)
-        
+
         # Load (which will create defaults)
         api_config_manager.load_config()
-        
+
         return {
             "success": True,
             "message": "API configurations reset to defaults",
             "backup_created": backup_name
         }
-    
+
     except Exception as e:
         logger.error(f"Error resetting API configs: {e}")
         raise HTTPException(status_code=500, detail="Failed to reset API configurations")

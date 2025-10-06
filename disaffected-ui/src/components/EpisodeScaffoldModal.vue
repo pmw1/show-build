@@ -26,7 +26,7 @@
       </v-card-title>
 
       <v-card-text>
-        <v-form ref="form" v-model="formValid" @submit.prevent="createEpisode">
+        <v-form ref="episodeFormRef" v-model="formValid" @submit.prevent="createEpisode">
           <!-- Episode Number -->
           <v-row>
             <v-col cols="12" md="6">
@@ -124,6 +124,19 @@
                 hint="Optional - brief description"
                 persistent-hint
               ></v-textarea>
+            </v-col>
+          </v-row>
+
+          <!-- Episode Settings -->
+          <v-row>
+            <v-col cols="12">
+              <v-checkbox
+                v-model="isDummy"
+                label="Dummy Episode"
+                hint="Mark this episode as a dummy/placeholder episode"
+                persistent-hint
+                color="warning"
+              ></v-checkbox>
             </v-col>
           </v-row>
 
@@ -246,6 +259,7 @@ const episodeTitle = ref('')
 const episodeDescription = ref('')
 const episodeDuration = ref('01:00:00')
 const airDate = ref('')
+const isDummy = ref(false)
 const numberAvailable = ref(null)
 
 // Templates data
@@ -317,7 +331,8 @@ const getNextNumber = async () => {
   try {
     loadingNextNumber.value = true
     const response = await axios.get('/api/episodes/next-number')
-    episodeNumber.value = response.data.next_episode_number
+    // API returns 'next_number', translate to 'next_episode_number' for form context
+    episodeNumber.value = response.data.next_number
     numberAvailable.value = true
   } catch (error) {
     console.error('Error getting next episode number:', error)
@@ -357,7 +372,8 @@ const createEpisode = async () => {
       description: episodeDescription.value || undefined,
       episode_metadata: {
         duration: episodeDuration.value,
-        air_date: airDate.value || undefined
+        air_date: airDate.value || undefined,
+        is_dummy: isDummy.value
       }
     }
     
@@ -397,6 +413,7 @@ const closeDialog = () => {
   episodeDescription.value = ''
   episodeDuration.value = '01:00:00'
   airDate.value = ''
+  isDummy.value = false
   numberAvailable.value = null
 }
 

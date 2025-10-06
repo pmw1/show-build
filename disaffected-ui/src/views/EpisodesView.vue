@@ -87,7 +87,15 @@
         <!-- Title Column -->
         <template v-slot:[`item.title`]="{ item }">
           <div>
-            <div class="font-weight-medium">{{ item.title || `Episode ${formatEpisodeNumber(item.episode_number)}` }}</div>
+            <div
+              class="font-weight-medium episode-title-link"
+              @click="openRundown(item)"
+              :title="`Open content editor for episode ${item.episode_number}`"
+            >
+              <span v-if="item.is_dummy" class="dummy-text">(DUMMY)</span>
+              {{ item.title || `Episode ${formatEpisodeNumber(item.episode_number)}` }}
+              <span v-if="item.is_dummy" class="dummy-text">(DUMMY)</span>
+            </div>
             <div v-if="item.subtitle" class="text-caption text-grey">{{ item.subtitle }}</div>
           </div>
         </template>
@@ -127,14 +135,15 @@
           <span v-else class="text-grey">--:--:--</span>
         </template>
 
-        <!-- Guest Column -->
-        <template v-slot:[`item.guest`]="{ item }">
-          <span v-if="item.guest">{{ item.guest }}</span>
-          <span v-else class="text-grey">No guests</span>
+        <!-- AssetID Column -->
+        <template v-slot:[`item.asset_id`]="{ item }">
+          <span v-if="item.asset_id" class="text-caption font-mono">{{ item.asset_id }}</span>
+          <span v-else class="text-grey-lighten-1">No AssetID</span>
         </template>
 
         <!-- Actions Column -->
         <template v-slot:[`item.actions`]="{ item }">
+          <!-- Primary Actions (always visible) -->
           <v-btn
             icon="mdi-pencil"
             size="small"
@@ -149,34 +158,7 @@
             @click="openRundown(item)"
             title="Edit rundown"
           />
-          
-          <!-- Production Tools -->
-          <v-divider vertical class="mx-1" />
-          <v-btn
-            icon="mdi-calculator"
-            size="small"
-            variant="text"
-            @click="calculateDuration(item)"
-            title="Calculate Duration"
-            :loading="item.calculatingDuration"
-          />
-          <v-btn
-            icon="mdi-script-text"
-            size="small"
-            variant="text"
-            @click="generateScript(item)"
-            title="Generate Script"
-            :loading="item.generatingScript"
-          />
-          <v-btn
-            icon="mdi-folder-multiple"
-            size="small"
-            variant="text"
-            @click="collectMedia(item)"
-            title="Collect Media for vMix"
-            :loading="item.collectingMedia"
-          />
-          
+
           <!-- Other Actions -->
           <v-divider vertical class="mx-1" />
           <v-btn
@@ -186,14 +168,68 @@
             @click="duplicateEpisode(item)"
             title="Duplicate episode"
           />
-          <v-btn
-            icon="mdi-delete"
-            size="small"
-            variant="text"
-            color="error"
-            @click="deleteEpisode(item)"
-            title="Delete episode"
-          />
+
+          <!-- Episode Menu (hamburger) -->
+          <v-menu>
+            <template v-slot:activator="{ props }">
+              <v-btn
+                icon="mdi-dots-vertical"
+                size="small"
+                variant="text"
+                v-bind="props"
+                title="Episode options"
+              />
+            </template>
+            <v-list density="compact">
+              <!-- Production Tools -->
+              <v-list-subheader>Production Tools</v-list-subheader>
+              <v-list-item @click="calculateDuration(item)" :loading="item.calculatingDuration">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2">mdi-calculator</v-icon>
+                  Calculate Duration
+                </v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="generateScript(item)" :loading="item.generatingScript">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2">mdi-script-text</v-icon>
+                  Generate Scripts
+                </v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="collectMedia(item)" :loading="item.collectingMedia">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2">mdi-folder-multiple</v-icon>
+                  Collect Media for vMix
+                </v-list-item-title>
+              </v-list-item>
+
+              <v-divider class="my-1" />
+
+              <!-- AssetID Management -->
+              <v-list-subheader>AssetID Management</v-list-subheader>
+              <v-list-item @click="requestNewEpisodeAssetID(item)">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2">mdi-key-variant</v-icon>
+                  Request New Episode AssetID
+                </v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="showEpisodeAssetIDInfo(item)">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2">mdi-information-outline</v-icon>
+                  Show AssetID Info
+                </v-list-item-title>
+              </v-list-item>
+
+              <v-divider class="my-1" />
+
+              <!-- Destructive Actions -->
+              <v-list-item @click="deleteEpisode(item)" class="text-error">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2">mdi-delete</v-icon>
+                  Delete Episode
+                </v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
         </template>
 
         <!-- Loading slot -->
@@ -368,6 +404,62 @@
                 rows="3"
                 class="mb-3"
               />
+
+              <!-- Episode Settings -->
+              <v-checkbox
+                v-model="episodeForm.is_dummy"
+                label="Dummy Episode"
+                hint="Mark this episode as a dummy/placeholder episode"
+                persistent-hint
+                color="warning"
+                class="mb-3"
+              />
+
+              <!-- AssetID Management Section -->
+              <v-card variant="outlined" class="mt-4 mb-3">
+                <v-card-title class="py-2">
+                  <v-icon class="mr-2">mdi-key-variant</v-icon>
+                  AssetID Management
+                </v-card-title>
+                <v-card-text class="pt-2">
+                  <div v-if="episodeForm.AssetID || episodeForm.asset_id" class="mb-3">
+                    <v-text-field
+                      :model-value="episodeForm.AssetID || episodeForm.asset_id"
+                      label="Current AssetID"
+                      variant="outlined"
+                      density="comfortable"
+                      readonly
+                      class="mb-2"
+                    />
+                  </div>
+                  <div v-else class="mb-3">
+                    <v-alert type="warning" variant="tonal" class="mb-2">
+                      No AssetID found for this episode
+                    </v-alert>
+                  </div>
+
+                  <div class="d-flex gap-2">
+                    <v-btn
+                      color="primary"
+                      variant="outlined"
+                      size="small"
+                      @click="requestNewEpisodeAssetIDModal"
+                      prepend-icon="mdi-key-variant"
+                    >
+                      Request New AssetID
+                    </v-btn>
+                    <v-btn
+                      color="info"
+                      variant="outlined"
+                      size="small"
+                      @click="showEpisodeAssetIDInfoModal"
+                      prepend-icon="mdi-information-outline"
+                    >
+                      Show Info
+                    </v-btn>
+                  </div>
+                </v-card-text>
+              </v-card>
             </div>
 
             <!-- Creation Info (show only for new episodes) -->
@@ -459,6 +551,135 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- AssetID Info Modal -->
+    <v-dialog
+      v-model="assetIdInfoDialog"
+      max-width="600"
+    >
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2" color="primary">mdi-key-variant</v-icon>
+          AssetID Information
+        </v-card-title>
+        <v-card-text class="pa-6">
+          <div v-if="selectedEpisodeForAssetId">
+            <!-- AssetID Display -->
+            <v-card
+              variant="outlined"
+              :color="selectedEpisodeForAssetId.AssetID || selectedEpisodeForAssetId.asset_id ? 'success' : 'warning'"
+              class="mb-4"
+            >
+              <v-card-text>
+                <div class="text-h6 mb-2">
+                  <v-icon class="mr-2">mdi-identifier</v-icon>
+                  AssetID Status
+                </div>
+                <div v-if="selectedEpisodeForAssetId.AssetID || selectedEpisodeForAssetId.asset_id">
+                  <div class="text-subtitle-1 font-weight-bold mb-2">
+                    {{ selectedEpisodeForAssetId.AssetID || selectedEpisodeForAssetId.asset_id }}
+                  </div>
+                  <v-chip color="success" size="small" prepend-icon="mdi-check">
+                    Valid AssetID
+                  </v-chip>
+                </div>
+                <div v-else>
+                  <div class="text-subtitle-1 text-warning mb-2">
+                    No AssetID Found
+                  </div>
+                  <v-chip color="warning" size="small" prepend-icon="mdi-alert">
+                    Missing AssetID
+                  </v-chip>
+                </div>
+              </v-card-text>
+            </v-card>
+
+            <!-- Episode Details -->
+            <v-card variant="outlined" class="mb-4">
+              <v-card-text>
+                <div class="text-h6 mb-3">
+                  <v-icon class="mr-2">mdi-television-classic</v-icon>
+                  Episode Details
+                </div>
+                <v-row dense>
+                  <v-col cols="6">
+                    <div class="text-caption text-medium-emphasis">Episode Number</div>
+                    <div class="text-body-1 font-weight-medium">{{ selectedEpisodeForAssetId.episode_number }}</div>
+                  </v-col>
+                  <v-col cols="6">
+                    <div class="text-caption text-medium-emphasis">Status</div>
+                    <div class="text-body-1">
+                      <v-chip
+                        :color="getStatusColor(selectedEpisodeForAssetId.status)"
+                        size="small"
+                        variant="flat"
+                      >
+                        {{ selectedEpisodeForAssetId.status || 'Unknown' }}
+                      </v-chip>
+                    </div>
+                  </v-col>
+                  <v-col cols="12">
+                    <div class="text-caption text-medium-emphasis">Title</div>
+                    <div class="text-body-1">{{ selectedEpisodeForAssetId.title || 'No title set' }}</div>
+                  </v-col>
+                  <v-col cols="6" v-if="selectedEpisodeForAssetId.airdate">
+                    <div class="text-caption text-medium-emphasis">Air Date</div>
+                    <div class="text-body-1">{{ formatDate(selectedEpisodeForAssetId.airdate) }}</div>
+                  </v-col>
+                  <v-col cols="6" v-if="selectedEpisodeForAssetId.duration">
+                    <div class="text-caption text-medium-emphasis">Duration</div>
+                    <div class="text-body-1">{{ selectedEpisodeForAssetId.duration }}</div>
+                  </v-col>
+                  <v-col cols="12" v-if="selectedEpisodeForAssetId.guest">
+                    <div class="text-caption text-medium-emphasis">Guest(s)</div>
+                    <div class="text-body-1">{{ selectedEpisodeForAssetId.guest }}</div>
+                  </v-col>
+                </v-row>
+              </v-card-text>
+            </v-card>
+
+            <!-- AssetID Actions -->
+            <v-card variant="outlined">
+              <v-card-text>
+                <div class="text-h6 mb-3">
+                  <v-icon class="mr-2">mdi-cog</v-icon>
+                  AssetID Actions
+                </div>
+                <div class="d-flex gap-2">
+                  <v-btn
+                    color="primary"
+                    variant="elevated"
+                    @click="requestNewEpisodeAssetIDFromModal"
+                    prepend-icon="mdi-key-variant"
+                    :disabled="!selectedEpisodeForAssetId.AssetID && !selectedEpisodeForAssetId.asset_id"
+                  >
+                    Regenerate AssetID
+                  </v-btn>
+                  <v-btn
+                    color="info"
+                    variant="outlined"
+                    @click="copyAssetIDToClipboard"
+                    prepend-icon="mdi-content-copy"
+                    :disabled="!selectedEpisodeForAssetId.AssetID && !selectedEpisodeForAssetId.asset_id"
+                  >
+                    Copy AssetID
+                  </v-btn>
+                </div>
+              </v-card-text>
+            </v-card>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn
+            variant="text"
+            @click="assetIdInfoDialog = false"
+          >
+            Close
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 
@@ -485,11 +706,14 @@ export default {
     const deleteDialog = ref(false);
     const editingEpisode = ref(false);
     const episodeToDelete = ref(null);
+    const assetIdInfoDialog = ref(false);
+    const selectedEpisodeForAssetId = ref(null);
     const episodeForm = ref({
       episode_number: '',
       template_id: null,
       title: '',
-      airdate: ''
+      airdate: '',
+      is_dummy: false
     });
 
     // New template-related data
@@ -504,18 +728,17 @@ export default {
       { title: 'Title', key: 'title', width: '200px' },
       { title: 'Air Date', key: 'airdate', width: '150px' },
       { title: 'Duration', key: 'duration', width: '100px' },
-      { title: 'Guest', key: 'guest', width: '150px' },
+      { title: 'AssetID', key: 'asset_id', width: '140px' },
       { title: 'Actions', key: 'actions', sortable: false, width: '280px' }
     ];
 
     // Options
     const statusOptions = [
       'draft',
-      'scheduled',
-      'recording',
-      'post-production',
-      'published',
-      'archived'
+      'approved',
+      'production',
+      'promotion',
+      'completed'
     ];
 
     const dateFilterOptions = [
@@ -624,7 +847,8 @@ export default {
       const statusColorMap = {
         'draft': getColorValue('draft'),           // grey-darken-2
         'approved': getColorValue('approved'),     // green-accent
-        'production': getColorValue('production'), // blue-accent  
+        'production': getColorValue('production'), // blue-accent
+        'promotion': getColorValue('promotion'),   // orange/purple-accent
         'completed': getColorValue('completed'),   // yellow-accent
         // Legacy mappings for backwards compatibility
         'scheduled': getColorValue('approved'),
@@ -632,6 +856,7 @@ export default {
         'post-production': getColorValue('production'),
         'published': getColorValue('completed'),
         'archived': getColorValue('completed'),
+        'live': getColorValue('promotion'),
         'unknown': getColorValue('unknown')
       };
       
@@ -791,7 +1016,11 @@ export default {
           status: response.data.info.status || 'draft',
           duration: response.data.info.duration || '01:00:00',
           guest: response.data.info.guest || '',
-          description: response.data.body || ''
+          description: response.data.body || '',
+          is_dummy: response.data.info.is_dummy || false,
+          // Include AssetID fields
+          AssetID: response.data.info.AssetID || '',
+          asset_id: response.data.info.asset_id || response.data.info.AssetID || ''
         };
         episodeDialog.value = true;
       } catch (error) {
@@ -815,7 +1044,8 @@ export default {
         rundown_id: rundownId,
         title: `${episode.title} (Copy)`,
         airdate: getNextSaturday(),
-        status: 'draft'
+        status: 'draft',
+        is_dummy: false
       };
       episodeDialog.value = true;
     };
@@ -865,7 +1095,8 @@ export default {
         episode_number: '',
         template_id: null,
         title: '',
-        airdate: ''
+        airdate: '',
+        is_dummy: false
       };
     };
 
@@ -884,6 +1115,7 @@ export default {
             duration: episodeForm.value.duration || '01:00:00',
             guest: episodeForm.value.guest || '',
             description: episodeForm.value.description || '',
+            is_dummy: episodeForm.value.is_dummy || false,
             // Keep existing fields
             show_id: episodeForm.value.show_id,
             rundown_id: episodeForm.value.rundown_id,
@@ -891,8 +1123,8 @@ export default {
             slug: `episode-${episodeForm.value.episode_number}`
           };
           
-          await axios.put(`/api/episodes/${episodeForm.value.episode_number}/info`, updateData, {
-            headers: { 
+          await axios.put(`/api/episodes/${episodeForm.value.episode_number}/save-episode`, updateData, {
+            headers: {
               'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
               'Content-Type': 'application/json'
             }
@@ -1032,6 +1264,8 @@ export default {
       editingEpisode,
       episodeToDelete,
       episodeForm,
+      assetIdInfoDialog,
+      selectedEpisodeForAssetId,
       headers,
       statusOptions,
       dateFilterOptions,
@@ -1057,8 +1291,220 @@ export default {
       // Production tools
       calculateDuration,
       generateScript,
-      collectMedia
+      collectMedia,
+      // AssetID management
+      requestNewEpisodeAssetID,
+      showEpisodeAssetIDInfo,
+      requestNewEpisodeAssetIDModal,
+      showEpisodeAssetIDInfoModal,
+      requestNewEpisodeAssetIDFromModal,
+      copyAssetIDToClipboard
     };
+
+    // AssetID Management Methods
+    async function requestNewEpisodeAssetID(episode) {
+      try {
+        console.log('🆔 Requesting new Episode AssetID for episode:', episode.episode_number);
+
+        // Get current episode AssetID from metadata
+        let currentEpisodeAssetID = episode.AssetID || episode.asset_id;
+
+        if (!currentEpisodeAssetID) {
+          // Try to fetch episode info to get AssetID
+          try {
+            const infoResponse = await axios.get(`/api/episodes/${episode.episode_number}/info`);
+            currentEpisodeAssetID = infoResponse.data.info?.AssetID || infoResponse.data.info?.asset_id;
+          } catch (error) {
+            console.warn('Could not fetch episode info for AssetID');
+          }
+        }
+
+        if (!currentEpisodeAssetID) {
+          alert('No episode AssetID found. Please ensure the episode is properly loaded.');
+          return;
+        }
+
+        const response = await fetch('/assetid/regenerate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          },
+          body: JSON.stringify({
+            old_asset_id: currentEpisodeAssetID,
+            entity_type: 'episode',
+            episode_number: episode.episode_number
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to regenerate AssetID: ${response.status} ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        alert(`Episode AssetID successfully regenerated!\n\nOld: ${result.old_asset_id}\nNew: ${result.new_asset_id}\n\nThe episode will be updated automatically.`);
+        console.log('✅ Episode AssetID regenerated:', result);
+
+        // Update the local episode data
+        episode.AssetID = result.new_asset_id;
+        episode.asset_id = result.new_asset_id;
+
+        // Refresh episodes to show updated AssetID
+        await fetchEpisodes();
+
+      } catch (error) {
+        console.error('❌ Failed to regenerate Episode AssetID:', error);
+        alert(`Failed to regenerate Episode AssetID: ${error.message}`);
+      }
+    }
+
+    async function showEpisodeAssetIDInfo(episode) {
+      try {
+        console.log('🆔 Showing AssetID info for episode:', episode.episode_number);
+
+        // Get current episode AssetID and fetch full episode info if needed
+        let episodeData = { ...episode };
+
+        if (!episodeData.AssetID && !episodeData.asset_id) {
+          // Try to fetch episode info to get AssetID
+          try {
+            const infoResponse = await axios.get(`/api/episodes/${episode.episode_number}/info`);
+            episodeData = { ...episodeData, ...infoResponse.data.info };
+          } catch (error) {
+            console.warn('Could not fetch episode info for AssetID');
+          }
+        }
+
+        selectedEpisodeForAssetId.value = episodeData;
+        assetIdInfoDialog.value = true;
+
+      } catch (error) {
+        console.error('❌ Failed to show AssetID info:', error);
+        alert(`Failed to show AssetID info: ${error.message}`);
+      }
+    }
+
+    // Modal-specific AssetID management methods
+    async function requestNewEpisodeAssetIDModal() {
+      try {
+        console.log('🆔 Requesting new Episode AssetID from modal for episode:', episodeForm.value.episode_number);
+
+        // Get current episode AssetID from form data
+        let currentEpisodeAssetID = episodeForm.value.AssetID || episodeForm.value.asset_id;
+
+        if (!currentEpisodeAssetID) {
+          alert('No episode AssetID found in the current episode data. Please ensure the episode is properly loaded.');
+          return;
+        }
+
+        const response = await fetch('/assetid/regenerate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          },
+          body: JSON.stringify({
+            old_asset_id: currentEpisodeAssetID,
+            entity_type: 'episode',
+            episode_number: episodeForm.value.episode_number
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to regenerate AssetID: ${response.status} ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        alert(`Episode AssetID successfully regenerated!\n\nOld: ${result.old_asset_id}\nNew: ${result.new_asset_id}\n\nThe form will be updated with the new AssetID.`);
+        console.log('✅ Episode AssetID regenerated from modal:', result);
+
+        // Update the form data with new AssetID
+        episodeForm.value.AssetID = result.new_asset_id;
+        episodeForm.value.asset_id = result.new_asset_id;
+
+      } catch (error) {
+        console.error('❌ Failed to regenerate Episode AssetID from modal:', error);
+        alert(`Failed to regenerate Episode AssetID: ${error.message}`);
+      }
+    }
+
+    async function showEpisodeAssetIDInfoModal() {
+      try {
+        console.log('🆔 Showing AssetID info from modal for episode:', episodeForm.value.episode_number);
+
+        // Use the form data as the episode data for the modal
+        selectedEpisodeForAssetId.value = { ...episodeForm.value };
+        assetIdInfoDialog.value = true;
+
+      } catch (error) {
+        console.error('❌ Failed to show AssetID info from modal:', error);
+        alert(`Failed to show AssetID info: ${error.message}`);
+      }
+    }
+
+    // Additional methods for the AssetID info modal
+    async function requestNewEpisodeAssetIDFromModal() {
+      try {
+        console.log('🆔 Requesting new Episode AssetID from info modal for episode:', selectedEpisodeForAssetId.value.episode_number);
+
+        const currentEpisodeAssetID = selectedEpisodeForAssetId.value.AssetID || selectedEpisodeForAssetId.value.asset_id;
+
+        if (!currentEpisodeAssetID) {
+          alert('No episode AssetID found. Please ensure the episode is properly loaded.');
+          return;
+        }
+
+        const response = await fetch('/assetid/regenerate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          },
+          body: JSON.stringify({
+            old_asset_id: currentEpisodeAssetID,
+            entity_type: 'episode',
+            episode_number: selectedEpisodeForAssetId.value.episode_number
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to regenerate AssetID: ${response.status} ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        alert(`Episode AssetID successfully regenerated!\n\nOld: ${result.old_asset_id}\nNew: ${result.new_asset_id}`);
+        console.log('✅ Episode AssetID regenerated from info modal:', result);
+
+        // Update the selected episode data in the modal
+        selectedEpisodeForAssetId.value.AssetID = result.new_asset_id;
+        selectedEpisodeForAssetId.value.asset_id = result.new_asset_id;
+
+        // If this was called from the edit episode modal, update the form too
+        if (episodeForm.value.episode_number === selectedEpisodeForAssetId.value.episode_number) {
+          episodeForm.value.AssetID = result.new_asset_id;
+          episodeForm.value.asset_id = result.new_asset_id;
+        }
+
+        // Refresh episodes list
+        await fetchEpisodes();
+
+      } catch (error) {
+        console.error('❌ Failed to regenerate Episode AssetID from info modal:', error);
+        alert(`Failed to regenerate Episode AssetID: ${error.message}`);
+      }
+    }
+
+    function copyAssetIDToClipboard() {
+      const assetId = selectedEpisodeForAssetId.value.AssetID || selectedEpisodeForAssetId.value.asset_id;
+      if (assetId) {
+        navigator.clipboard.writeText(assetId).then(() => {
+          alert(`AssetID copied to clipboard: ${assetId}`);
+        }).catch(err => {
+          console.error('Failed to copy AssetID to clipboard:', err);
+          alert('Failed to copy AssetID to clipboard');
+        });
+      }
+    }
   }
 };
 </script>
@@ -1163,5 +1609,26 @@ export default {
   font-size: 0.9375rem !important;
   font-weight: 700 !important;
   letter-spacing: 0.5px !important;
+}
+
+/* Episode title link styling */
+.episode-title-link {
+  cursor: pointer;
+  color: rgb(var(--v-theme-primary)) !important;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.episode-title-link:hover {
+  color: rgb(var(--v-theme-primary-darken-1)) !important;
+  text-decoration: underline;
+}
+
+/* Dummy episode text styling */
+.dummy-text {
+  color: #f44336 !important;
+  font-weight: bold;
+  font-size: 0.75rem;
+  margin: 0 4px;
 }
 </style>

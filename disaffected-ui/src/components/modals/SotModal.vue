@@ -1,80 +1,1267 @@
 <template>
-  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="500">
-    <v-card>
-      <v-card-title>Add Sound on Tape (SOT)</v-card-title>
-      <v-card-text>
-        <v-text-field 
-          v-model="filename" 
-          label="Audio File Name" 
-          variant="outlined"
-          required
-        ></v-text-field>
-        <v-text-field 
-          v-model="duration" 
-          label="Duration" 
-          variant="outlined"
-          placeholder="00:00:30"
-          required
-        ></v-text-field>
-        <v-textarea 
-          v-model="description" 
-          label="Description (optional)" 
-          variant="outlined"
-          rows="2"
-        ></v-textarea>
-        <v-text-field 
-          v-model="timestamp" 
-          label="Timestamp (optional)" 
-          variant="outlined"
-          placeholder="00:00:00"
-        ></v-text-field>
+  <v-dialog
+    :model-value="show"
+    @update:model-value="$emit('update:show', $event)"
+    max-width="800px"
+    persistent
+    class="sot-modal"
+    style="z-index: 9999;"
+  >
+    <!-- Full Modal Container with 70% transparent overlay -->
+    <v-card class="sot-modal-card" style="max-height: 80vh; overflow: hidden;">
+      <!-- Collapsible Error at Top -->
+      <div
+        ref="topErrorEl"
+        class="top-error"
+        style="background: #ff4444; color: white; height: 0; overflow: hidden; transition: all 0.3s ease; font-weight: bold; text-align: center; border-radius: 4px 4px 0 0;"
+      ></div>
+
+      <!-- Header with Title and Close Buttons -->
+      <div class="modal-header d-flex justify-space-between align-center pa-3" style="padding: 10px 15px;">
+        <h2 class="text-uppercase font-weight-bold ma-0" style="font-size: 1.2em;">NEW SOT CUE</h2>
+        <div class="d-flex" style="gap: 5px;">
+          <v-btn
+            @click="cancel"
+            size="x-small"
+            color="#ff4444"
+            variant="flat"
+            style="color: white; min-width: 30px; height: 36px; font-size: 16px; font-weight: bold;"
+            title="Close modal"
+          >✕</v-btn>
+          <v-btn
+            @click="cancel"
+            size="x-small"
+            color="#666"
+            variant="flat"
+            style="color: white; height: 36px; font-size: 10px; font-weight: bold; padding: 6px 11px;"
+            title="Press ESC to close"
+          >ESC</v-btn>
+        </div>
+      </div>
+
+      <!-- Interior Container with light grey background -->
+      <v-card-text
+        class="pa-5 interior-container"
+        style="background-color: #f0f0f0; max-height: calc(80vh - 60px); overflow-y: auto; padding: 20px !important;"
+      >
+        <!-- Episode Info Bar -->
+        <div class="info-bar d-flex justify-space-between mb-5 pa-3" style="background-color: #e8e8e8; border-radius: 4px; border: 1px solid #e0e0e0;">
+          <div class="info-item d-flex flex-column align-start">
+            <div class="text-caption font-weight-bold" style="font-size: 12px; color: #333; margin-bottom: 2px;">{{ episodeNumber || 'N/A' }}</div>
+            <div class="text-caption" style="font-size: 12px; color: #666;">Episode</div>
+          </div>
+          <div class="info-item d-flex flex-column align-start">
+            <div class="text-caption font-weight-bold" style="font-size: 12px; color: #333; margin-bottom: 2px;">{{ segmentName || 'N/A' }}</div>
+            <div class="text-caption" style="font-size: 12px; color: #666;">Segment</div>
+          </div>
+          <div class="info-item d-flex flex-column align-start">
+            <div class="text-caption font-weight-bold" style="font-size: 12px; color: #333; margin-bottom: 2px;">{{ assetId || 'Generated on save' }}</div>
+            <div class="text-caption" style="font-size: 12px; color: #666;">Asset ID</div>
+          </div>
+        </div>
+
+        <v-form ref="sotFormRef">
+          <!-- Slug (Required) -->
+          <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">
+            Slug: <span style="color: red;">*</span>
+          </label>
+          <input
+            v-model="slug"
+            class="cue-modal-input mb-3"
+            type="text"
+            placeholder="short-descriptive-name"
+            style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+          />
+
+          <!-- Select Video and Duration Row -->
+          <div class="d-flex mb-3" style="gap: 20px;">
+            <!-- Select Video Buttons (Left, flex: 2) -->
+            <div style="flex: 2;">
+              <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">
+                Select Video: <span style="color: red;">*</span>
+              </label>
+              <div class="d-flex" style="gap: 3px;">
+                <button
+                  @click="triggerFileInput"
+                  class="cue-modal-button-small"
+                  type="button"
+                  style="padding: 15px 30px; font-size: 14px; min-width: 120px; background: #87CEEB; color: white; border: 1px solid #87CEEB; border-radius: 3px; cursor: pointer; transition: background-color 0.2s ease;"
+                  title="Browse for video file"
+                >Local File</button>
+                <button
+                  @click="clearVideo"
+                  class="cue-modal-button-small"
+                  type="button"
+                  style="padding: 15px 30px; font-size: 14px; min-width: 120px; background: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer; transition: background-color 0.2s ease;"
+                  title="Clear selected video"
+                >Clear</button>
+              </div>
+              <input
+                ref="fileInputRef"
+                type="file"
+                accept="video/*"
+                style="display: none;"
+                @change="handleFileUpload"
+              />
+            </div>
+
+            <!-- Duration Display (Right, flex: 1) -->
+            <div style="flex: 1;">
+              <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Duration:</label>
+              <div
+                class="duration-display"
+                style="font-family: monospace; font-size: 14px; color: #666; padding: 8px 12px; background: #f8f8f8; border-radius: 4px; border: 1px solid #ddd;"
+              >{{ duration || 'Pending...' }}</div>
+            </div>
+          </div>
+
+          <!-- Video Player Container with Topgrid, Timecode, and Control Grid -->
+          <div v-if="mediaUrl" class="video-wrapper mb-3" style="position: relative; z-index: 10;">
+            <!-- 1x8 Topgrid (Above Video) -->
+            <div class="topgrid-container mb-0" style="width: 100%; position: relative; z-index: 14;">
+              <div class="topgrid-row d-flex" style="gap: 1px; margin-bottom: 1px;">
+                <div
+                  v-for="cellNum in 8"
+                  :key="`topgrid-${cellNum}`"
+                  class="topgrid-cell"
+                  style="flex: 1; height: 27.5px; background: #d3d3d3; border-radius: 0px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; color: #888; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; box-shadow: 0 1px 3px rgba(0,0,0,0.1);"
+                  @mouseenter="e => { e.target.style.background = '#bbb'; e.target.style.transform = 'scale(1.02)'; }"
+                  @mouseleave="e => { e.target.style.background = '#d3d3d3'; e.target.style.transform = 'scale(1)'; }"
+                >{{ cellNum }}</div>
+              </div>
+            </div>
+
+            <!-- Live Timecode Display (Black Bar Above Video) -->
+            <div
+              ref="timecodeDisplay"
+              class="timecode-display"
+              style="width: 100%; background: #000; border: 2px solid #ccc; border-bottom: none; border-radius: 4px 4px 0 0; position: relative; z-index: 15; margin-bottom: 0;"
+            >
+              <div class="d-flex justify-space-between align-center pa-2" style="padding: 5px 15px;">
+                <div style="font-size: 18px; font-weight: bold; font-family: monospace; color: white;">{{ currentTimecode }}</div>
+                <div style="font-size: 12px; color: #ccc; font-family: monospace;">{{ durationTimecode }} | -{{ remainingTimecode }} | {{ currentFramerate }}fps</div>
+              </div>
+            </div>
+
+            <!-- Video Player with Metadata Overlay -->
+            <div class="video-container" style="width: 100%; max-width: 100%; background: #000; border: 2px solid #ccc; border-top: none; border-radius: 0 0 4px 4px; overflow: hidden; position: relative; z-index: 10; margin-bottom: 15px;">
+              <video
+                ref="videoPlayerRef"
+                class="video-player"
+                style="width: 100% !important; height: 300px !important; max-width: 100% !important; position: relative; z-index: 11; display: block; border: none; border-radius: 0; object-fit: contain;"
+                preload="metadata"
+                @loadedmetadata="handleVideoMetadataLoaded"
+                @timeupdate="updateTimecode"
+                @play="updatePlayPauseState"
+                @pause="updatePlayPauseState"
+              ></video>
+
+              <!-- Video Info Overlay (Bottom-left corner) -->
+              <div
+                ref="videoInfoOverlay"
+                class="video-info-overlay"
+                style="position: absolute; bottom: 35px; left: 10px; background: rgba(0, 0, 0, 0.8); color: white; padding: 8px 10px; border-radius: 3px; font-family: monospace; z-index: 20; max-width: 200px; pointer-events: none; font-size: 11px; line-height: 1.3;"
+              >
+                <div><strong>Loading...</strong></div>
+                <div>Resolution: --</div>
+                <div>Duration: --</div>
+              </div>
+            </div>
+
+            <!-- 3x8 Control Grid Below Video -->
+            <div class="control-grid-container" style="width: 100%; margin-top: 1px; margin-bottom: 15px; position: relative; z-index: 13;">
+              <!-- Row 1: Mark In (1-2), Go In (3), Empty (4-5), Go Out (6), Mark Out (7-8) -->
+              <div class="control-row d-flex mb-0" style="margin-bottom: 1px;">
+                <!-- Mark In Button (Cells 1-2, 25% width) -->
+                <div
+                  ref="markInBtn"
+                  class="grid-btn mark-in"
+                  @click="performMarkInAction"
+                  @mouseenter="e => hoverButton(e, '#2196F3')"
+                  @mouseleave="e => unhoverButton(e, '#2196F3')"
+                  style="width: calc(25% + 1px); height: 55px; display: flex; flex-direction: column; background: #2196F3; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  title="Mark In point (I key)"
+                >
+                  <div style="background: #1976D2; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">MARK IN</div>
+                  <div style="background: #2196F3; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">I</div>
+                </div>
+
+                <!-- Go to In Button (Cell 3, 12.5% width) -->
+                <div
+                  ref="goToInBtn"
+                  class="grid-btn go-to"
+                  @click="performGoToInAction"
+                  @mouseenter="e => hoverButton(e, '#64B5F6')"
+                  @mouseleave="e => unhoverButton(e, '#64B5F6')"
+                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #64B5F6; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  title="Go to In point (Q key)"
+                >
+                  <div style="background: #42A5F5; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">GO IN</div>
+                  <div style="background: #64B5F6; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">Q</div>
+                </div>
+
+                <!-- Empty cells 4-5 (25% total) -->
+                <div v-for="cellNum in [4, 5]" :key="`r1-${cellNum}`" class="grid-cell-empty" style="width: 12.5%; height: 55px; background: #d3d3d3; color: #666; display: flex; align-items: center; justify-content: center; border: none; margin-right: 1px; font-size: 14px; font-weight: bold; font-family: Helvetica, Arial, sans-serif; cursor: pointer; transition: all 0.2s ease;">{{ cellNum }}</div>
+
+                <!-- Go to Out Button (Cell 6, 12.5% width) -->
+                <div
+                  ref="goToOutBtn"
+                  class="grid-btn go-to"
+                  @click="performGoToOutAction"
+                  @mouseenter="e => hoverButton(e, '#FFAB91')"
+                  @mouseleave="e => unhoverButton(e, '#FFAB91')"
+                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #FFAB91; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  title="Go to Out point (W key)"
+                >
+                  <div style="background: #FF8A65; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">GO OUT</div>
+                  <div style="background: #FFAB91; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">W</div>
+                </div>
+
+                <!-- Mark Out Button (Cells 7-8, 25% width) -->
+                <div
+                  ref="markOutBtn"
+                  class="grid-btn mark-out"
+                  @click="performMarkOutAction"
+                  @mouseenter="e => hoverButton(e, '#FF5722')"
+                  @mouseleave="e => unhoverButton(e, '#FF5722')"
+                  style="width: calc(25% + 1px); height: 55px; display: flex; flex-direction: column; background: #FF5722; border: none; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  title="Mark Out point (O key)"
+                >
+                  <div style="background: #E64A19; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">MARK OUT</div>
+                  <div style="background: #FF5722; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">O</div>
+                </div>
+              </div>
+
+              <!-- Row 2: Step controls and Play/Pause -->
+              <div class="control-row d-flex mb-0" style="margin-bottom: 1px;">
+                <!-- -10s (Cell 9) -->
+                <div
+                  ref="step10sBackBtn"
+                  class="grid-btn step dark-orange"
+                  @click="performJumpBackTenSeconds"
+                  @mouseenter="e => hoverButton(e, '#E65100')"
+                  @mouseleave="e => unhoverButton(e, '#E65100')"
+                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #E65100; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  title="Jump back 10 seconds"
+                >
+                  <div style="background: #BF360C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">-10s</div>
+                  <div style="background: #E65100; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">◄◄</div>
+                </div>
+
+                <!-- -1s (Cell 10) -->
+                <div
+                  ref="step1sBackBtn"
+                  class="grid-btn step orange"
+                  @click="performStepBackSecond"
+                  @mouseenter="e => hoverButton(e, '#FF9800')"
+                  @mouseleave="e => unhoverButton(e, '#FF9800')"
+                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #FF9800; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  title="Step back 1 second (J key)"
+                >
+                  <div style="background: #F57C00; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">-1s</div>
+                  <div style="background: #FF9800; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">◄</div>
+                </div>
+
+                <!-- -1f (Cell 11) -->
+                <div
+                  ref="step1fBackBtn"
+                  class="grid-btn step light-orange"
+                  @click="performStepBackFrame"
+                  @mouseenter="e => hoverButton(e, '#FFB74D')"
+                  @mouseleave="e => unhoverButton(e, '#FFB74D')"
+                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #FFB74D; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  title="Step back 1 frame (← key)"
+                >
+                  <div style="background: #FFA726; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">-1f</div>
+                  <div style="background: #FFB74D; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">|◄</div>
+                </div>
+
+                <!-- Play/Pause (Cells 12-13, 25% width) -->
+                <div
+                  ref="playPauseBtn"
+                  class="grid-btn play-pause"
+                  @click="performPlayPauseAction"
+                  @mouseenter="e => hoverButton(e, '#4CAF50')"
+                  @mouseleave="e => unhoverButton(e, '#4CAF50')"
+                  style="width: calc(25% + 1px); height: 55px; display: flex; flex-direction: column; background: #4CAF50; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  title="Play/Pause - Toggle playback (Space or K)"
+                >
+                  <div style="background: #388E3C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">PLAY/PAUSE</div>
+                  <div style="background: #4CAF50; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">{{ isPlaying ? '⏸' : '▶' }}</div>
+                </div>
+
+                <!-- +1f (Cell 14) -->
+                <div
+                  ref="step1fForwardBtn"
+                  class="grid-btn step light-orange"
+                  @click="performStepForwardFrame"
+                  @mouseenter="e => hoverButton(e, '#FFB74D')"
+                  @mouseleave="e => unhoverButton(e, '#FFB74D')"
+                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #FFB74D; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  title="Step forward 1 frame (→ key)"
+                >
+                  <div style="background: #FFA726; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">+1f</div>
+                  <div style="background: #FFB74D; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">►|</div>
+                </div>
+
+                <!-- +1s (Cell 15) -->
+                <div
+                  ref="step1sForwardBtn"
+                  class="grid-btn step orange"
+                  @click="performStepForwardSecond"
+                  @mouseenter="e => hoverButton(e, '#FF9800')"
+                  @mouseleave="e => unhoverButton(e, '#FF9800')"
+                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #FF9800; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  title="Step forward 1 second (L key)"
+                >
+                  <div style="background: #F57C00; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">+1s</div>
+                  <div style="background: #FF9800; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">►</div>
+                </div>
+
+                <!-- +10s (Cell 16) -->
+                <div
+                  ref="step10sForwardBtn"
+                  class="grid-btn step dark-orange"
+                  @click="performJumpForwardTenSeconds"
+                  @mouseenter="e => hoverButton(e, '#E65100')"
+                  @mouseleave="e => unhoverButton(e, '#E65100')"
+                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #E65100; border: none; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  title="Jump forward 10 seconds"
+                >
+                  <div style="background: #BF360C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">+10s</div>
+                  <div style="background: #E65100; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">►►</div>
+                </div>
+              </div>
+
+              <!-- Row 3: Empty cells, Preview, Take -->
+              <div class="control-row d-flex">
+                <!-- Empty cells 17-20 -->
+                <div v-for="cellNum in [17, 18, 19, 20]" :key="`r3-${cellNum}`" class="grid-cell-empty" style="width: 12.5%; height: 55px; background: #d3d3d3; color: #666; display: flex; align-items: center; justify-content: center; border: none; margin-right: 1px; font-size: 14px; font-weight: bold; font-family: Helvetica, Arial, sans-serif; cursor: pointer; transition: all 0.2s ease;">{{ cellNum }}</div>
+
+                <!-- Preview Button (Cell 21) -->
+                <div
+                  ref="previewBtn"
+                  class="grid-btn preview"
+                  @click="performPreviewAction"
+                  @mouseenter="e => hoverButton(e, '#9C27B0')"
+                  @mouseleave="e => unhoverButton(e, '#9C27B0')"
+                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #9C27B0; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  title="Preview - Play from In to Out (Shift+Space)"
+                >
+                  <div style="background: #7B1FA2; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">PREVIEW</div>
+                  <div style="background: #9C27B0; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">▶|</div>
+                </div>
+
+                <!-- Empty cell 22 -->
+                <div class="grid-cell-empty" style="width: 12.5%; height: 55px; background: #d3d3d3; color: #666; display: flex; align-items: center; justify-content: center; border: none; margin-right: 1px; font-size: 14px; font-weight: bold; font-family: Helvetica, Arial, sans-serif; cursor: pointer; transition: all 0.2s ease;">22</div>
+
+                <!-- Take Button (Cells 23-24, 25% width) -->
+                <div
+                  ref="takeBtn"
+                  class="grid-btn take"
+                  @click="performTakeAction"
+                  @mouseenter="e => hoverButton(e, '#4CAF50')"
+                  @mouseleave="e => unhoverButton(e, '#4CAF50')"
+                  style="width: calc(25% + 1px); height: 55px; display: flex; flex-direction: column; background: #4CAF50; border: none; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  title="Take - Commit current cut (Ctrl+Enter)"
+                >
+                  <div style="background: #388E3C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">TAKE</div>
+                  <div style="background: #4CAF50; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">✂</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Trim Start and Trim End (Side by Side) -->
+          <div class="d-flex mb-3" style="gap: 15px;">
+            <div style="flex: 1;">
+              <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Trim Start:</label>
+              <input
+                ref="trimStartInputRef"
+                v-model="trimStart"
+                class="cue-modal-input"
+                type="text"
+                placeholder="HH:MM:SS"
+                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+              />
+            </div>
+            <div style="flex: 1;">
+              <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Trim End:</label>
+              <input
+                ref="trimEndInputRef"
+                v-model="trimEnd"
+                class="cue-modal-input"
+                type="text"
+                placeholder="HH:MM:SS"
+                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+              />
+            </div>
+          </div>
+
+          <!-- Credits/Lower Thirds (Dynamic Key-Value) -->
+          <div class="mb-3">
+            <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Credits/Lower Thirds:</label>
+            <div class="credits-container pa-2" style="border: 1px solid #ddd; border-radius: 4px; background: white;">
+              <div ref="creditsListRef" class="credits-list mb-2">
+                <div
+                  v-for="(credit, index) in credits"
+                  :key="`credit-${index}`"
+                  class="d-flex mb-2"
+                  style="gap: 10px; align-items: center;"
+                >
+                  <input
+                    v-model="credit.key"
+                    class="cue-modal-input"
+                    type="text"
+                    placeholder="Key (e.g., speaker)"
+                    style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin-bottom: 0;"
+                  />
+                  <input
+                    v-model="credit.value"
+                    class="cue-modal-input"
+                    type="text"
+                    placeholder="Value (e.g., Dr. Jane Smith)"
+                    style="flex: 2; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin-bottom: 0;"
+                  />
+                  <button
+                    @click="removeCredit(index)"
+                    class="cue-modal-button-small"
+                    type="button"
+                    style="background-color: #ff4444; color: white; min-width: 70px; padding: 6px 12px; font-size: 12px; border: none; border-radius: 3px; cursor: pointer;"
+                  >Remove</button>
+                </div>
+              </div>
+              <button
+                @click="addCredit"
+                class="cue-modal-button-small"
+                type="button"
+                style="background-color: #4CAF50; color: white; padding: 6px 12px; font-size: 12px; border: none; border-radius: 3px; cursor: pointer;"
+              >+ Add Credit</button>
+            </div>
+          </div>
+
+          <!-- Description -->
+          <div class="mb-3">
+            <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Description:</label>
+            <textarea
+              v-model="description"
+              class="cue-modal-textarea"
+              rows="2"
+              placeholder="Brief description of the SOT content and context..."
+              style="width: 100%; height: 75px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box; resize: none;"
+            ></textarea>
+          </div>
+
+          <!-- Transcription -->
+          <div class="mb-3">
+            <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Transcription:</label>
+            <textarea
+              v-model="transcription"
+              class="cue-modal-textarea"
+              rows="4"
+              placeholder="Full transcription of the audio/video content..."
+              style="width: 100%; height: 150px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box; resize: vertical;"
+            ></textarea>
+          </div>
+
+          <!-- Buttons -->
+          <div class="d-flex" style="gap: 10px; margin-top: 20px;">
+            <button
+              type="button"
+              @click="cancel"
+              class="cue-modal-button cancel"
+              style="flex: 1; padding: 20px 40px; font-size: 16px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
+            >Cancel</button>
+            <button
+              type="button"
+              @click="handleAddCue"
+              class="cue-modal-button"
+              style="flex: 1; padding: 20px 40px; font-size: 16px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
+            >Add SOT Cue</button>
+          </div>
+        </v-form>
       </v-card-text>
-      <v-card-actions>
-        <v-spacer></v-spacer>
-        <v-btn color="error" @click="cancel">Cancel</v-btn>
-        <v-btn color="success" @click="submit" :disabled="!filename || !duration">Insert</v-btn>
-      </v-card-actions>
     </v-card>
   </v-dialog>
 </template>
 
 <script>
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useToast } from 'vue-toastification'
+import axios from 'axios'
+
 export default {
   name: 'SotModal',
   props: {
-    show: { type: Boolean, required: true },
+    show: Boolean,
+    episodeNumber: String,
+    segmentName: String
   },
   emits: ['update:show', 'submit'],
-  data() {
-    return {
-      filename: '',
-      duration: '',
-      description: '',
-      timestamp: ''
-    }
-  },
-  methods: {
-    submit() {
-      const cueData = {
-        type: 'SOT',
-        filename: this.filename,
-        duration: this.duration,
-        description: this.description,
-        timestamp: this.timestamp
+  setup(props, { emit }) {
+    const toast = useToast()
+
+    // Form refs
+    const sotFormRef = ref(null)
+    const fileInputRef = ref(null)
+    const videoPlayerRef = ref(null)
+    const trimStartInputRef = ref(null)
+    const trimEndInputRef = ref(null)
+    const topErrorEl = ref(null)
+    const timecodeDisplay = ref(null)
+    const videoInfoOverlay = ref(null)
+    const creditsListRef = ref(null)
+
+    // Button refs for keyboard shortcuts
+    const markInBtn = ref(null)
+    const markOutBtn = ref(null)
+    const goToInBtn = ref(null)
+    const goToOutBtn = ref(null)
+    const playPauseBtn = ref(null)
+    const previewBtn = ref(null)
+    const takeBtn = ref(null)
+    const step10sBackBtn = ref(null)
+    const step1sBackBtn = ref(null)
+    const step1fBackBtn = ref(null)
+    const step10sForwardBtn = ref(null)
+    const step1sForwardBtn = ref(null)
+    const step1fForwardBtn = ref(null)
+
+    // Form data
+    const assetId = ref('Generated on save')
+    const slug = ref('')
+    const mediaUrl = ref('')
+    const thumbnailUrl = ref('')
+    const duration = ref('')
+    const trimStart = ref('00:00:00')
+    const trimEnd = ref('00:00:00')
+    const description = ref('')
+    const transcription = ref('')
+    const credits = ref([])
+
+    // Video state
+    const currentFramerate = ref(30)
+    const isPlaying = ref(false)
+    const currentTimecode = ref('00:00:00:00')
+    const durationTimecode = ref('00:00:00:00')
+    const remainingTimecode = ref('00:00:00:00')
+    const previewInterval = ref(null)
+    const videoSpecs = ref({})
+    const blobUrl = ref('')
+    const fileExtension = ref('')
+    const originalFile = ref(null)
+
+    // Keyboard handler
+    const keyboardHandler = ref(null)
+
+    // Utility functions
+    const secondsToTimecode = (seconds, showFrames = true) => {
+      const hours = Math.floor(seconds / 3600)
+      const minutes = Math.floor((seconds % 3600) / 60)
+      const secs = Math.floor(seconds % 60)
+      const frames = Math.floor((seconds % 1) * currentFramerate.value)
+
+      if (showFrames) {
+        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`
+      } else {
+        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
       }
-      this.$emit('submit', cueData)
-      this.reset()
-    },
-    cancel() {
-      this.$emit('update:show', false)
-      this.reset()
-    },
-    reset() {
-      this.filename = ''
-      this.duration = ''
-      this.description = ''
-      this.timestamp = ''
+    }
+
+    const timecodeToSeconds = (timecode) => {
+      const parts = timecode.split(':').map(p => parseInt(p, 10))
+      if (parts.length === 3) {
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+      } else if (parts.length === 4) {
+        const frames = parts[3] / currentFramerate.value
+        return parts[0] * 3600 + parts[1] * 60 + parts[2] + frames
+      }
+      return 0
+    }
+
+    const formatFileSize = (bytes) => {
+      if (bytes === 0) return '0 B'
+      const k = 1024
+      const sizes = ['B', 'KB', 'MB', 'GB']
+      const i = Math.floor(Math.log(bytes) / Math.log(k))
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+    }
+
+    const getDarkerColor = (color) => {
+      // Simple darkening - reduce brightness
+      const hex = color.replace('#', '')
+      const r = Math.max(0, parseInt(hex.substr(0, 2), 16) - 30)
+      const g = Math.max(0, parseInt(hex.substr(2, 2), 16) - 30)
+      const b = Math.max(0, parseInt(hex.substr(4, 2), 16) - 30)
+      return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+    }
+
+    // Button hover effects
+    const hoverButton = (e, baseColor) => {
+      const darkerColor = getDarkerColor(baseColor)
+      e.currentTarget.querySelectorAll('div').forEach((div, idx) => {
+        if (idx === 0) div.style.background = getDarkerColor(darkerColor)
+        else div.style.background = darkerColor
+      })
+      e.currentTarget.style.transform = 'scale(1.05)'
+      e.currentTarget.style.zIndex = '100'
+      e.currentTarget.style.boxShadow = `0 4px 12px ${baseColor}66`
+    }
+
+    const unhoverButton = (e, baseColor) => {
+      const sections = e.currentTarget.querySelectorAll('div')
+      if (sections.length >= 2) {
+        sections[0].style.background = getDarkerColor(baseColor)
+        sections[1].style.background = baseColor
+      }
+      e.currentTarget.style.transform = 'scale(1)'
+      e.currentTarget.style.zIndex = '13'
+      e.currentTarget.style.boxShadow = 'none'
+    }
+
+    const animateButtonPress = (button) => {
+      if (!button) return
+      button.style.transform = 'scale(0.95)'
+      setTimeout(() => {
+        button.style.transform = 'scale(1)'
+      }, 100)
+    }
+
+    // Video control actions
+    const performMarkInAction = () => {
+      if (!videoPlayerRef.value) return
+      trimStart.value = secondsToTimecode(videoPlayerRef.value.currentTime, false)
+      animateButtonPress(markInBtn.value)
+    }
+
+    const performMarkOutAction = () => {
+      if (!videoPlayerRef.value) return
+      trimEnd.value = secondsToTimecode(videoPlayerRef.value.currentTime, false)
+      animateButtonPress(markOutBtn.value)
+    }
+
+    const performGoToInAction = () => {
+      if (!videoPlayerRef.value) return
+      const seconds = timecodeToSeconds(trimStart.value)
+      videoPlayerRef.value.currentTime = seconds
+      animateButtonPress(goToInBtn.value)
+    }
+
+    const performGoToOutAction = () => {
+      if (!videoPlayerRef.value) return
+      const seconds = timecodeToSeconds(trimEnd.value)
+      videoPlayerRef.value.currentTime = seconds
+      animateButtonPress(goToOutBtn.value)
+    }
+
+    const performPlayPauseAction = () => {
+      if (!videoPlayerRef.value) return
+      if (videoPlayerRef.value.paused) {
+        videoPlayerRef.value.play()
+      } else {
+        videoPlayerRef.value.pause()
+      }
+      animateButtonPress(playPauseBtn.value)
+    }
+
+    const performPreviewAction = () => {
+      if (!videoPlayerRef.value) return
+
+      // Clear any existing preview interval
+      if (previewInterval.value) {
+        clearInterval(previewInterval.value)
+        previewInterval.value = null
+      }
+
+      const inPoint = timecodeToSeconds(trimStart.value)
+      const outPoint = timecodeToSeconds(trimEnd.value)
+
+      if (outPoint <= inPoint) {
+        toast.warning('Out point must be after In point')
+        return
+      }
+
+      videoPlayerRef.value.currentTime = inPoint
+      videoPlayerRef.value.play()
+
+      // Monitor playback and pause at Out point
+      previewInterval.value = setInterval(() => {
+        if (videoPlayerRef.value.currentTime >= outPoint) {
+          videoPlayerRef.value.pause()
+          clearInterval(previewInterval.value)
+          previewInterval.value = null
+        }
+      }, 100)
+
+      animateButtonPress(previewBtn.value)
+    }
+
+    const performTakeAction = () => {
+      console.log('[SOT Modal] Take action - commit current cut')
+      toast.info('Take: Current cut committed')
+      animateButtonPress(takeBtn.value)
+      // TODO: Implement multiple cuts storage system
+    }
+
+    const performStepBackFrame = () => {
+      if (!videoPlayerRef.value) return
+      const frameDuration = 1 / currentFramerate.value
+      videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - frameDuration)
+      animateButtonPress(step1fBackBtn.value)
+    }
+
+    const performStepForwardFrame = () => {
+      if (!videoPlayerRef.value) return
+      const frameDuration = 1 / currentFramerate.value
+      videoPlayerRef.value.currentTime = Math.min(videoPlayerRef.value.duration || 0, videoPlayerRef.value.currentTime + frameDuration)
+      animateButtonPress(step1fForwardBtn.value)
+    }
+
+    const performStepBackSecond = () => {
+      if (!videoPlayerRef.value) return
+      videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - 1)
+      animateButtonPress(step1sBackBtn.value)
+    }
+
+    const performStepForwardSecond = () => {
+      if (!videoPlayerRef.value) return
+      videoPlayerRef.value.currentTime = Math.min(videoPlayerRef.value.duration || 0, videoPlayerRef.value.currentTime + 1)
+      animateButtonPress(step1sForwardBtn.value)
+    }
+
+    const performJumpBackTenSeconds = () => {
+      if (!videoPlayerRef.value) return
+      videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - 10)
+      animateButtonPress(step10sBackBtn.value)
+    }
+
+    const performJumpForwardTenSeconds = () => {
+      if (!videoPlayerRef.value) return
+      videoPlayerRef.value.currentTime = Math.min(videoPlayerRef.value.duration || 0, videoPlayerRef.value.currentTime + 10)
+      animateButtonPress(step10sForwardBtn.value)
+    }
+
+    // Keyboard shortcuts setup
+    const setupKeyboardShortcuts = () => {
+      keyboardHandler.value = (event) => {
+        // Don't interfere with typing in input fields (except trim inputs with arrow keys)
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+          if (!(event.target === trimStartInputRef.value || event.target === trimEndInputRef.value) ||
+              !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+            return
+          }
+        }
+
+        if (!videoPlayerRef.value) return
+
+        let handled = true
+
+        switch(event.key) {
+          case ' ': // Space - Play/Pause or Preview with Shift
+            event.preventDefault()
+            if (event.shiftKey) {
+              performPreviewAction()
+            } else {
+              performPlayPauseAction()
+            }
+            break
+
+          case 'j':
+          case 'J': // J - Step back 1 second
+            event.preventDefault()
+            performStepBackSecond()
+            break
+
+          case 'k':
+          case 'K': // K - Play/Pause
+            event.preventDefault()
+            performPlayPauseAction()
+            break
+
+          case 'l':
+          case 'L': // L - Step forward 1 second
+            event.preventDefault()
+            performStepForwardSecond()
+            break
+
+          case 'ArrowLeft': // Left Arrow - Frame/second/10-second step back
+            event.preventDefault()
+            if (event.ctrlKey) {
+              performJumpBackTenSeconds()
+            } else if (event.shiftKey) {
+              // Step back 10 frames
+              if (videoPlayerRef.value) {
+                videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - (10 / currentFramerate.value))
+              }
+            } else {
+              performStepBackFrame()
+            }
+            break
+
+          case 'ArrowRight': // Right Arrow - Frame/second/10-second step forward
+            event.preventDefault()
+            if (event.ctrlKey) {
+              performJumpForwardTenSeconds()
+            } else if (event.shiftKey) {
+              // Step forward 10 frames
+              if (videoPlayerRef.value) {
+                const duration = videoPlayerRef.value.duration || 0
+                videoPlayerRef.value.currentTime = Math.min(duration, videoPlayerRef.value.currentTime + (10 / currentFramerate.value))
+              }
+            } else {
+              performStepForwardFrame()
+            }
+            break
+
+          case 'i':
+          case 'I': // I - Mark In
+            event.preventDefault()
+            performMarkInAction()
+            break
+
+          case 'o':
+          case 'O': // O - Mark Out
+            event.preventDefault()
+            performMarkOutAction()
+            break
+
+          case 'q':
+          case 'Q': // Q - Go to In
+            event.preventDefault()
+            performGoToInAction()
+            break
+
+          case 'w':
+          case 'W': // W - Go to Out
+            event.preventDefault()
+            performGoToOutAction()
+            break
+
+          case 'Enter': // Ctrl+Enter - Take
+            if (event.ctrlKey) {
+              event.preventDefault()
+              performTakeAction()
+            }
+            break
+
+          default:
+            handled = false
+            break
+        }
+
+        if (handled) {
+          event.stopPropagation()
+        }
+      }
+
+      document.addEventListener('keydown', keyboardHandler.value, true)
+    }
+
+    // Video metadata handling
+    const handleVideoMetadataLoaded = () => {
+      if (!videoPlayerRef.value) return
+
+      const videoDuration = videoPlayerRef.value.duration
+      const videoWidth = videoPlayerRef.value.videoWidth
+      const videoHeight = videoPlayerRef.value.videoHeight
+
+      // Detect framerate (simplified - defaults to 30fps)
+      currentFramerate.value = 30
+
+      // Store video specs
+      videoSpecs.value = {
+        resolution: videoWidth && videoHeight ? `${videoWidth}×${videoHeight}` : null,
+        width: videoWidth || null,
+        height: videoHeight || null,
+        aspectRatio: videoWidth && videoHeight ? (videoWidth / videoHeight).toFixed(3) : null,
+        duration: videoDuration || null,
+        framerate: currentFramerate.value,
+        framerateSource: 'assumed',
+        fileSize: originalFile.value?.size || null,
+        filename: originalFile.value?.name || null
+      }
+
+      // Auto-populate duration with frame-accurate timecode
+      if (videoDuration && videoDuration > 0) {
+        duration.value = secondsToTimecode(videoDuration, true)
+        toast.success(`Duration auto-detected: ${duration.value} @ ${currentFramerate.value}fps`)
+      }
+
+      // Update video info overlay
+      if (videoInfoOverlay.value) {
+        const resolution = videoSpecs.value.resolution || 'Unknown'
+        const aspectRatio = videoSpecs.value.aspectRatio || 'Unknown'
+        const fileSizeText = videoSpecs.value.fileSize ? formatFileSize(videoSpecs.value.fileSize) : 'Unknown'
+
+        videoInfoOverlay.value.innerHTML = `
+          <div><strong>${videoSpecs.value.filename || 'Video'}</strong></div>
+          <div>Resolution: ${resolution}</div>
+          <div>Aspect: ${aspectRatio}:1</div>
+          <div>Duration: ${secondsToTimecode(videoDuration, true)}</div>
+          <div>Framerate: ${currentFramerate.value}fps</div>
+          <div>Size: ${fileSizeText}</div>
+        `
+      }
+    }
+
+    const updateTimecode = () => {
+      if (!videoPlayerRef.value || !timecodeDisplay.value) return
+
+      const current = videoPlayerRef.value.currentTime
+      const videoDuration = videoPlayerRef.value.duration || 0
+      const remaining = videoDuration - current
+
+      currentTimecode.value = secondsToTimecode(current, true)
+      durationTimecode.value = secondsToTimecode(videoDuration, true)
+      remainingTimecode.value = secondsToTimecode(remaining, true)
+    }
+
+    const updatePlayPauseState = () => {
+      if (!videoPlayerRef.value) return
+      isPlaying.value = !videoPlayerRef.value.paused
+    }
+
+    // File handling
+    const triggerFileInput = () => {
+      fileInputRef.value?.click()
+    }
+
+    const handleFileUpload = async (event) => {
+      const file = event.target.files?.[0]
+      if (!file) return
+
+      originalFile.value = file
+      fileExtension.value = file.name.split('.').pop() || 'mp4'
+
+      // Create blob URL for preview
+      const objectURL = URL.createObjectURL(file)
+      blobUrl.value = objectURL
+      mediaUrl.value = objectURL
+
+      // Set video player source
+      await nextTick()
+      if (videoPlayerRef.value) {
+        videoPlayerRef.value.src = objectURL
+        videoPlayerRef.value.load()
+      }
+
+      toast.success(`Video selected: ${file.name}`)
+    }
+
+    const clearVideo = () => {
+      if (videoPlayerRef.value) {
+        videoPlayerRef.value.pause()
+        videoPlayerRef.value.src = ''
+      }
+
+      mediaUrl.value = ''
+      blobUrl.value = ''
+      duration.value = ''
+      originalFile.value = null
+
+      if (previewInterval.value) {
+        clearInterval(previewInterval.value)
+        previewInterval.value = null
+      }
+
+      toast.info('Video cleared')
+    }
+
+    // Credits management
+    const addCredit = () => {
+      credits.value.push({ key: `credit${credits.value.length + 1}`, value: '' })
+
+      // Focus the new key input
+      nextTick(() => {
+        const inputs = creditsListRef.value?.querySelectorAll('input[type="text"]')
+        if (inputs && inputs.length > 0) {
+          const lastKeyInput = inputs[inputs.length - 2]
+          lastKeyInput?.focus()
+          lastKeyInput?.select()
+        }
+      })
+    }
+
+    const removeCredit = (index) => {
+      credits.value.splice(index, 1)
+    }
+
+    // Form actions
+    const showTopError = (message) => {
+      if (!topErrorEl.value) return
+      topErrorEl.value.textContent = message
+      topErrorEl.value.style.height = 'auto'
+      topErrorEl.value.style.padding = '12px 20px'
+      topErrorEl.value.style.marginBottom = '10px'
+
+      setTimeout(() => {
+        hideTopError()
+      }, 10000)
+    }
+
+    const hideTopError = () => {
+      if (!topErrorEl.value) return
+      topErrorEl.value.style.height = '0'
+      topErrorEl.value.style.padding = '0'
+      topErrorEl.value.style.marginBottom = '0'
+    }
+
+    const generateAssetId = async () => {
+      try {
+        console.log('Requesting AssetID for SOT cue')
+
+        // Create a slug from the SOT slug field
+        const slugForAssetId = slug.value.trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, '') // Remove punctuation except spaces and hyphens
+          .replace(/\s+/g, '-') // Convert spaces to hyphens
+          .replace(/-+/g, '-') // Collapse multiple hyphens
+          .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
+          .substring(0, 50) // Limit length
+
+        // Create form data for the API call
+        const formData = new FormData()
+        formData.append('slug', slugForAssetId || 'sot-cue')
+        formData.append('type', 'sot')
+
+        // Try the legacy endpoint first (most reliable)
+        const response = await axios.post('/assetid/generate-legacy', formData, {
+          headers: {
+            'Accept': 'application/json',
+            'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
+          }
+        })
+
+        if (response.data && response.data.id) {
+          console.log('Successfully generated AssetID:', response.data.id)
+          return response.data.id
+        } else {
+          throw new Error('Invalid response format: missing id field')
+        }
+      } catch (error) {
+        console.warn('AssetID generation failed, using fallback:', error)
+
+        // Fallback to local generation if server fails
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        let result = 'LOCAL_SOT_'
+        for (let i = 0; i < 8; i++) {
+          result += chars.charAt(Math.floor(Math.random() * chars.length))
+        }
+        console.log('Generated local fallback AssetID:', result)
+        return result
+      }
+    }
+
+    const handleAddCue = async () => {
+      hideTopError()
+
+      // Validate required fields
+      if (!slug.value.trim()) {
+        showTopError('ERROR: Slug is required')
+        return
+      }
+
+      // Video is now optional - allow cue insertion without video
+      // if (!mediaUrl.value.trim()) {
+      //   showTopError('ERROR: Please select a video file')
+      //   return
+      // }
+
+      // Generate AssetID
+      const generatedAssetId = await generateAssetId()
+
+      // Format credits as JSON
+      const creditsFormatted = credits.value
+        .filter(c => c.key.trim() && c.value.trim())
+        .reduce((acc, c) => {
+          acc[c.key] = c.value
+          return acc
+        }, {})
+
+      // Build SOT cue data
+      const sotData = {
+        assetId: generatedAssetId,
+        slug: slug.value.trim(),
+        description: description.value,
+        mediaUrl: mediaUrl.value,
+        duration: duration.value,
+        trimStart: trimStart.value,
+        trimEnd: trimEnd.value,
+        transcription: transcription.value,
+        thumbnailUrl: thumbnailUrl.value,
+        credits: JSON.stringify(creditsFormatted)
+      }
+
+      console.log('SOT cue data:', sotData)
+      emit('submit', sotData)
+      emit('update:show', false)
+
+      // Reset form
+      resetForm()
+    }
+
+    const cancel = () => {
+      emit('update:show', false)
+      resetForm()
+    }
+
+    const resetForm = () => {
+      slug.value = ''
+      mediaUrl.value = ''
+      blobUrl.value = ''
+      duration.value = ''
+      trimStart.value = '00:00:00'
+      trimEnd.value = '00:00:00'
+      description.value = ''
+      transcription.value = ''
+      credits.value = []
+      originalFile.value = null
+
+      if (videoPlayerRef.value) {
+        videoPlayerRef.value.pause()
+        videoPlayerRef.value.src = ''
+      }
+
+      if (previewInterval.value) {
+        clearInterval(previewInterval.value)
+        previewInterval.value = null
+      }
+    }
+
+    // Lifecycle
+    onMounted(() => {
+      setupKeyboardShortcuts()
+    })
+
+    onBeforeUnmount(() => {
+      if (keyboardHandler.value) {
+        document.removeEventListener('keydown', keyboardHandler.value, true)
+      }
+
+      if (previewInterval.value) {
+        clearInterval(previewInterval.value)
+      }
+
+      // Clean up blob URL
+      if (blobUrl.value) {
+        URL.revokeObjectURL(blobUrl.value)
+      }
+    })
+
+    return {
+      // Refs
+      sotFormRef,
+      fileInputRef,
+      videoPlayerRef,
+      trimStartInputRef,
+      trimEndInputRef,
+      topErrorEl,
+      timecodeDisplay,
+      videoInfoOverlay,
+      creditsListRef,
+      markInBtn,
+      markOutBtn,
+      goToInBtn,
+      goToOutBtn,
+      playPauseBtn,
+      previewBtn,
+      takeBtn,
+      step10sBackBtn,
+      step1sBackBtn,
+      step1fBackBtn,
+      step10sForwardBtn,
+      step1sForwardBtn,
+      step1fForwardBtn,
+
+      // Form data
+      assetId,
+      slug,
+      mediaUrl,
+      thumbnailUrl,
+      duration,
+      trimStart,
+      trimEnd,
+      description,
+      transcription,
+      credits,
+
+      // Video state
+      currentFramerate,
+      isPlaying,
+      currentTimecode,
+      durationTimecode,
+      remainingTimecode,
+
+      // Actions
+      triggerFileInput,
+      handleFileUpload,
+      clearVideo,
+      addCredit,
+      removeCredit,
+      handleAddCue,
+      cancel,
+      hoverButton,
+      unhoverButton,
+      performMarkInAction,
+      performMarkOutAction,
+      performGoToInAction,
+      performGoToOutAction,
+      performPlayPauseAction,
+      performPreviewAction,
+      performTakeAction,
+      performStepBackFrame,
+      performStepForwardFrame,
+      performStepBackSecond,
+      performStepForwardSecond,
+      performJumpBackTenSeconds,
+      performJumpForwardTenSeconds,
+      updateTimecode,
+      updatePlayPauseState,
+      handleVideoMetadataLoaded
     }
   }
 }
 </script>
+
+<style scoped>
+/* Modal overlay with 70% transparency */
+.v-overlay {
+  background-color: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Interior container scrollbar styling */
+.interior-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.interior-container::-webkit-scrollbar-track {
+  background: #e0e0e0;
+  border-radius: 4px;
+}
+
+.interior-container::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.interior-container::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Grid cell hover effects */
+.grid-cell-empty:hover {
+  background: #bbb !important;
+  transform: scale(1.02);
+  z-index: 100;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.topgrid-cell:hover {
+  background: #bbb !important;
+  transform: scale(1.02);
+  z-index: 100;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+/* Button hover effects handled in template inline styles */
+</style>

@@ -4,6 +4,7 @@ from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Depends, Web
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.encoders import jsonable_encoder
+from fastapi.staticfiles import StaticFiles
 from preproc_mqtt_pub import publish_message
 from preproc_mqtt_listen import MQTTListener
 from pydantic import BaseModel, Field
@@ -27,8 +28,9 @@ from enhanced_reorder import reorder_rundown_with_rename
 
 # Database and background processing imports
 from database import engine, Base, get_db
-from models import ProcessingJob  # Keep only non-conflicting legacy models
-from models_episode import BlueprintTemplate, BlueprintNode, EpisodeTemplate  
+from sqlalchemy.orm import Session
+# from models import ProcessingJob  # REMOVED - models.py deleted
+from models_episode import BlueprintTemplate, BlueprintNode, Blueprint  
 from models_assetid import AssetIDRegistry, AssetIDRelationship, AssetIDPendingMessage
 from models_v2 import Organization, Show, Season, Episode, Break, Rundown, RundownItem, Segment, Script, Element, Cue, AssetLink, AssetMessage
 from services.script_compilation import compile_episode_script
@@ -61,6 +63,17 @@ try:
     from episodes_router import router as episodes_router
     from episode_scaffold_router import router as episode_scaffold_router
     from setup_router import router as setup_router
+    from rbac_router import router as rbac_router
+    from duration_analysis_router import router as duration_router
+    from new_assetid_router import router as new_assetid_router
+    from convert_assetid_router import router as convert_assetid_router
+    from duration_estimation_router import router as duration_estimation_router
+    from fsq_asset_router import router as fsq_asset_router
+    from speakers_router import router as speakers_router
+    from voice_sample_router import router as voice_sample_router
+    from xtts_router import router as xtts_router
+    from housekeeping_router import router as housekeeping_router
+    from sot_router import router as sot_router
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Current directory: {os.getcwd()}")
@@ -88,6 +101,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files for episode assets (images, etc.)
+app.mount("/episodes", StaticFiles(directory="/home/episodes"), name="episodes")
 
 # Include the auth router with /api prefix
 app.include_router(auth_router, prefix="/api")
@@ -129,6 +145,42 @@ app.include_router(episode_scaffold_router, prefix="/api")
 
 # Include the setup router
 app.include_router(setup_router, prefix="/api")
+
+# Include the RBAC router
+app.include_router(rbac_router, prefix="/api")
+
+# Include the duration analysis router
+app.include_router(duration_router)
+# Include the unified new AssetID router
+app.include_router(new_assetid_router)
+
+# Include the AssetID conversion router
+app.include_router(convert_assetid_router, prefix="/api")
+
+# Include the duration estimation router
+app.include_router(duration_estimation_router, prefix="/api")
+
+# Include the FSQ asset generation router
+app.include_router(fsq_asset_router, prefix="/api/fsq", tags=["fsq"])
+
+# Include the Speakers router
+app.include_router(speakers_router)
+
+# Include the Voice Sample router
+app.include_router(voice_sample_router)
+
+# Include the XTTS status router
+app.include_router(xtts_router)
+
+# Include housekeeping router
+app.include_router(housekeeping_router, prefix="/api")
+
+# Include SOT processing router
+app.include_router(sot_router)
+
+# Include the media analysis router
+from media_analysis_router import router as media_analysis_router
+app.include_router(media_analysis_router)
 
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
@@ -214,22 +266,53 @@ async def listen_endpoint(topic: str):
 
 @app.get("/health")
 async def health():
-    health_status = {"status": "healthy", "database": "unknown"}
-    
+    from datetime import datetime
+    import httpx
+
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "services": {
+            "database": "unknown",
+            "ollama": {
+                "status": "unknown",
+                "model": None,
+                "url": None
+            },
+            "redis": {
+                "status": "unknown",
+                "connected": False,
+                "latency": None,
+                "error": None
+            },
+            "celery": {
+                "status": "unknown",
+                "workers": [],
+                "error": None
+            },
+            "xtts": {
+                "status": "unknown",
+                "connected": False,
+                "quota_remaining": None,
+                "error": None
+            }
+        }
+    }
+
     # Test database connectivity
     try:
         from pathlib import Path
         import json
         import asyncpg
-        
+
         # Load database config if it exists
         config_dir = Path("/app/config") if Path("/app").exists() else Path("app/config")
         db_config_file = config_dir / "database.json"
-        
+
         if db_config_file.exists():
             with open(db_config_file, 'r') as f:
                 db_config = json.load(f)
-            
+
             # Test connection
             conn = await asyncpg.connect(
                 host=db_config.get("host", "postgres"),
@@ -238,28 +321,277 @@ async def health():
                 user=db_config.get("username", "showbuild"),
                 password=db_config.get("password", "showbuild")
             )
-            
+
             # Simple connectivity test
             await conn.fetchval("SELECT 1")
             await conn.close()
-            
-            health_status["database"] = "connected"
+
+            health_status["services"]["database"] = "connected"
         else:
-            health_status["database"] = "no_config"
-            
+            health_status["services"]["database"] = "no_config"
+
     except asyncpg.InvalidAuthorizationSpecificationError:
-        health_status["database"] = "auth_failed"
+        health_status["services"]["database"] = "auth_failed"
     except asyncpg.InvalidCatalogNameError:
-        health_status["database"] = "db_not_found"
+        health_status["services"]["database"] = "db_not_found"
     except OSError:
-        health_status["database"] = "connection_refused"
+        health_status["services"]["database"] = "connection_refused"
     except Exception as e:
-        health_status["database"] = f"error: {str(e)[:50]}"
-    
-    # Set overall status based on database
-    if health_status["database"] not in ["connected", "no_config"]:
+        health_status["services"]["database"] = f"error: {str(e)[:50]}"
+
+    # Test Ollama connectivity
+    try:
+        from pathlib import Path
+        import json
+
+        # Load API config
+        api_config_file = Path("/app/storage/api_configs.json") if Path("/app").exists() else Path("app/storage/api_configs.json")
+
+        if api_config_file.exists():
+            with open(api_config_file, 'r') as f:
+                api_config = json.load(f)
+
+            ollama_config = api_config.get("preproduction", {}).get("ai_services", {}).get("ollama", {})
+
+            if ollama_config.get("enabled", False):
+                ollama_host = ollama_config.get("host")
+                ollama_model = ollama_config.get("model")
+
+                health_status["services"]["ollama"]["url"] = ollama_host
+                health_status["services"]["ollama"]["model"] = ollama_model
+
+                # Ping Ollama API
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    response = await client.get(f"{ollama_host}/api/tags")
+                    if response.status_code == 200:
+                        health_status["services"]["ollama"]["status"] = "connected"
+                    else:
+                        health_status["services"]["ollama"]["status"] = f"error: HTTP {response.status_code}"
+            else:
+                # Ollama not enabled - remove from status
+                health_status["services"].pop("ollama", None)
+        else:
+            # No config file - remove from status
+            health_status["services"].pop("ollama", None)
+
+    except httpx.TimeoutException:
+        health_status["services"]["ollama"]["status"] = "timeout"
+    except httpx.ConnectError:
+        health_status["services"]["ollama"]["status"] = "connection_refused"
+    except Exception as e:
+        # Config error - remove from status
+        health_status["services"].pop("ollama", None)
+
+    # Test Redis connectivity
+    try:
+        import redis
+        import time
+
+        # Get Redis URL from environment
+        redis_url = os.getenv("REDIS_URL", "redis://192.168.51.223:6379/0")
+        redis_password = os.getenv("REDIS_PASSWORD", "showbuild2025")
+
+        # Parse Redis URL (handle password in URL like redis://:password@host:port/db)
+        if redis_url.startswith("redis://"):
+            # Remove redis:// prefix
+            url_part = redis_url.replace("redis://", "")
+
+            # Check for password in URL (format: :password@host:port/db)
+            if "@" in url_part:
+                _, host_port = url_part.split("@", 1)
+            else:
+                host_port = url_part
+
+            # Split host:port/db
+            redis_host = host_port.split(":")[0]
+            port_and_db = host_port.split(":")[1] if ":" in host_port else "6379/0"
+            redis_port = int(port_and_db.split("/")[0])
+        else:
+            redis_host = "192.168.51.223"
+            redis_port = 6379
+
+        # Connect to Redis with timeout
+        start_time = time.time()
+        r = redis.Redis(
+            host=redis_host,
+            port=redis_port,
+            password=redis_password,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            db=0
+        )
+
+        # Ping Redis
+        r.ping()
+        latency_ms = int((time.time() - start_time) * 1000)
+
+        health_status["services"]["redis"]["status"] = "connected"
+        health_status["services"]["redis"]["connected"] = True
+        health_status["services"]["redis"]["latency"] = latency_ms
+
+    except redis.ConnectionError as e:
+        health_status["services"]["redis"]["status"] = "error"
+        health_status["services"]["redis"]["error"] = "Connection refused"
+    except redis.TimeoutError:
+        health_status["services"]["redis"]["status"] = "error"
+        health_status["services"]["redis"]["error"] = "Timeout"
+    except Exception as e:
+        health_status["services"]["redis"]["status"] = "error"
+        health_status["services"]["redis"]["error"] = str(e)[:50]
+
+    # Test Celery worker connectivity
+    try:
+        from celery_app import celery_app
+
+        # Get active workers
+        inspect = celery_app.control.inspect(timeout=5)
+        active_workers = inspect.active()
+
+        if active_workers:
+            worker_names = list(active_workers.keys())
+            health_status["services"]["celery"]["status"] = "connected"
+            health_status["services"]["celery"]["workers"] = worker_names
+        else:
+            health_status["services"]["celery"]["status"] = "no_workers"
+            health_status["services"]["celery"]["workers"] = []
+
+    except Exception as e:
+        health_status["services"]["celery"]["status"] = "error"
+        health_status["services"]["celery"]["error"] = str(e)[:50]
+
+    # Test NFS/shared storage connectivity
+    # Note: Container has /home/episodes mounted from /mnt/sync/disaffected/episodes
+    # We check accessibility of the mounted directories, not the NFS mount itself
+    try:
+        from pathlib import Path
+
+        # Check if episodes directory is accessible (via NFS or local mount)
+        episodes_dir = Path("/home/episodes")
+
+        if episodes_dir.exists():
+            try:
+                # Test read
+                list(episodes_dir.iterdir())
+
+                # Test write in shared_media location
+                shared_media = Path("/shared_media")
+                if shared_media.exists():
+                    test_dir = shared_media / "temp" / "uploads"
+                    test_dir.mkdir(parents=True, exist_ok=True)
+                    test_file = test_dir / ".health_check"
+                    test_file.touch()
+                    test_file.unlink()
+
+                    health_status["services"]["nfs"] = {
+                        "status": "connected",
+                        "mount_point": "/mnt/sync",
+                        "readable": True,
+                        "writable": True
+                    }
+                else:
+                    health_status["services"]["nfs"] = {
+                        "status": "warning",
+                        "mount_point": "/mnt/sync",
+                        "readable": True,
+                        "writable": False,
+                        "error": "Shared media directory not found"
+                    }
+            except PermissionError:
+                health_status["services"]["nfs"] = {
+                    "status": "warning",
+                    "mount_point": "/mnt/sync",
+                    "readable": True,
+                    "writable": False,
+                    "error": "Write permission denied"
+                }
+            except Exception as e:
+                health_status["services"]["nfs"] = {
+                    "status": "warning",
+                    "mount_point": "/mnt/sync",
+                    "readable": True,
+                    "writable": False,
+                    "error": f"Write test failed: {str(e)[:50]}"
+                }
+        else:
+            health_status["services"]["nfs"] = {
+                "status": "error",
+                "mount_point": "/mnt/sync",
+                "readable": False,
+                "writable": False,
+                "error": "Episodes directory not accessible"
+            }
+
+    except Exception as e:
+        health_status["services"]["nfs"] = {
+            "status": "error",
+            "error": str(e)[:50]
+        }
+
+    # Test XTTS connectivity
+    try:
+        from pathlib import Path
+        import json
+        from api_config import api_config_manager
+
+        # Load XTTS configuration
+        xtts_config = api_config_manager.get_service_config(
+            workflow="preproduction",
+            category="ai_services",
+            service="xtts"
+        )
+
+        if not xtts_config or not xtts_config.get("enabled"):
+            # XTTS not configured or disabled - remove from status
+            health_status["services"].pop("xtts", None)
+        else:
+            host = xtts_config.get("host")
+            if not host:
+                health_status["services"]["xtts"] = {
+                    "status": "error",
+                    "connected": False,
+                    "error": "No host configured"
+                }
+            else:
+                # Test XTTS connectivity
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    response = await client.get(f"{host}/speakers")
+                    if response.status_code == 200:
+                        data = response.json()
+                        quota = data.get("quota_remaining")
+
+                        health_status["services"]["xtts"] = {
+                            "status": "connected" if (quota is None or quota >= 100) else "depleted",
+                            "connected": True,
+                            "quota_remaining": quota
+                        }
+                    else:
+                        health_status["services"]["xtts"] = {
+                            "status": "error",
+                            "connected": False,
+                            "error": f"HTTP {response.status_code}"
+                        }
+
+    except httpx.TimeoutException:
+        health_status["services"]["xtts"] = {
+            "status": "error",
+            "connected": False,
+            "error": "Timeout"
+        }
+    except httpx.ConnectError:
+        health_status["services"]["xtts"] = {
+            "status": "error",
+            "connected": False,
+            "error": "Connection refused"
+        }
+    except Exception as e:
+        # If XTTS is not configured, remove it from status
+        health_status["services"].pop("xtts", None)
+
+    # Set overall status based on CRITICAL services only (database)
+    # Ollama is non-critical - it has its own status indicator
+    if health_status["services"]["database"] not in ["connected", "no_config"]:
         health_status["status"] = "degraded"
-    
+
     return health_status
 
 @app.get("/show-info")
@@ -275,7 +607,7 @@ async def get_show_info():
     }
 
 @app.get("/episodes")
-async def list_episodes():
+async def list_episodes(db: Session = Depends(get_db)):
     """
     Lists all available episodes by scanning the /home/episodes directory.
     An episode is considered a directory with a 'rundown' subdirectory.
@@ -298,6 +630,7 @@ async def list_episodes():
         title = f"Episode {item}"
         airdate = None
         status = "unknown"
+        asset_id = None
 
         if os.path.exists(info_path):
             metadata = None  # Ensure metadata is reset for each episode
@@ -309,6 +642,7 @@ async def list_episodes():
                     title = metadata.get("title", title)
                     airdate = metadata.get("airdate")
                     status = metadata.get("status", "unknown")
+                    asset_id = metadata.get("AssetID")
                 elif metadata:
                     # Log if metadata is not a dictionary, to debug the 'tuple' error
                     logging.warning(f"Metadata for episode {item} is not a dictionary. Type: {type(metadata)}. Data: {metadata}")
@@ -317,11 +651,30 @@ async def list_episodes():
                 # This will catch errors during parsing or attribute access
                 logging.warning(f"Could not process info.md for episode {item}: {e}")
         
+        # If no AssetID in filesystem, check database
+        if not asset_id:
+            try:
+                from models_v2 import Episode
+                # Convert string episode number to int for database query
+                try:
+                    episode_num_int = int(item.lstrip('0')) if item.isdigit() else None
+                    if episode_num_int:
+                        episode_record = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
+                    else:
+                        episode_record = None
+                except ValueError:
+                    episode_record = None
+                if episode_record and episode_record.asset_id:
+                    asset_id = episode_record.asset_id
+            except Exception as e:
+                logging.warning(f"Could not query database for episode {item} AssetID: {e}")
+
         episodes.append({
-            "episode_number": item, 
-            "title": title, 
+            "episode_number": item,
+            "title": title,
             "airdate": airdate,
-            "status": status
+            "status": status,
+            "asset_id": asset_id
         })
             
     if not episodes:
@@ -355,6 +708,77 @@ async def next_id_legacy_redirect(slug: str = Form(...), type: str = Form(...)):
     except Exception as e:
         logging.error(f"Failed to generate ID: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/generate_asset_id/rundown")
+async def generate_rundown_asset_id(
+    type: str = Form(...),
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate AssetID for rundown items - Obsidian plugin compatibility endpoint.
+    """
+    try:
+        from services.asset_id import AssetIDService
+        
+        # Generate AssetID with full tracking
+        asset_id = AssetIDService.request_asset_id(
+            db=db,
+            entity_type="rundown",
+            reason="create",
+            requested_by=current_user.get("username", current_user.get("client_name", "obsidian_plugin")),
+            context={
+                "source": "obsidian_plugin",
+                "legacy_type": type
+            }
+        )
+        
+        return {"asset_id": asset_id}
+        
+    except Exception as e:
+        logging.error(f"Failed to generate rundown AssetID: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate AssetID: {str(e)}")
+
+@app.post("/generate_asset_id/cue")
+async def generate_cue_asset_id(
+    type: str = Form(...),  # SOT, GFX, FSQ
+    media_url: str = Form(None),
+    cue_type: str = Form(None),
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate AssetID for cue blocks - Obsidian plugin compatibility endpoint.
+    """
+    try:
+        from services.asset_id import AssetIDService
+        
+        # Build context with cue-specific information
+        context = {
+            "source": "obsidian_plugin",
+            "cue_type": type,
+            "legacy_type": type
+        }
+        
+        if media_url:
+            context["media_url"] = media_url
+        if cue_type:
+            context["specific_cue_type"] = cue_type
+        
+        # Generate AssetID with full tracking
+        asset_id = AssetIDService.request_asset_id(
+            db=db,
+            entity_type="cue",
+            reason="create",
+            requested_by=current_user.get("username", current_user.get("client_name", "obsidian_plugin")),
+            context=context
+        )
+        
+        return {"asset_id": asset_id}
+        
+    except Exception as e:
+        logging.error(f"Failed to generate cue AssetID: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate AssetID: {str(e)}")
 
 @app.post("/proc_vid")
 async def upload(
@@ -444,6 +868,79 @@ async def upload_image(
     except Exception as e:
         logging.error(f"Failed to save image: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/upload/image")
+async def upload_img_cue_image(
+    file: UploadFile = File(...),
+    filename: str = Form(...),
+    episode: str = Form(...)
+):
+    """
+    Upload an image file for IMG cue blocks to episode assets/images directory.
+
+    Args:
+        file (UploadFile): The image file to upload.
+        filename (str): The normalized filename (slug-based with extension).
+        episode (str): The episode number for the target directory.
+
+    Returns:
+        dict: Status and file information.
+    """
+    if not file:
+        raise HTTPException(status_code=400, detail="File is required")
+
+    if not filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    if not episode:
+        raise HTTPException(status_code=400, detail="Episode number is required")
+
+    file_content = await file.read()
+
+    if not file_content:
+        raise HTTPException(status_code=422, detail="File content is empty")
+
+    # Validate image file type
+    allowed_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
+    if not any(filename.lower().endswith(ext) for ext in allowed_extensions):
+        raise HTTPException(
+            status_code=422,
+            detail="File must be an image (png, jpg, jpeg, gif, webp)"
+        )
+
+    # Ensure episode is properly formatted (4 digits)
+    padded_episode = episode.zfill(4)
+
+    # Create the assets/images directory for the episode
+    images_dir = f"/home/episodes/{padded_episode}/assets/images"
+    os.makedirs(images_dir, exist_ok=True)
+
+    # Create the full file path
+    filepath = os.path.join(images_dir, filename)
+    
+    try:
+        # Write the file
+        with open(filepath, "wb") as f:
+            f.write(file_content)
+        
+        # Calculate MD5 for verification
+        md5_hash = hashlib.md5(file_content).hexdigest()
+        
+        logging.info(f"IMG cue image saved: {filepath}, MD5: {md5_hash}")
+        
+        return {
+            "status": "success",
+            "message": "Image uploaded successfully",
+            "filename": filename,
+            "filepath": filepath,
+            "md5": md5_hash,
+            "size": len(file_content)
+        }
+        
+    except Exception as e:
+        logging.error(f"Failed to save IMG cue image: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save image: {str(e)}")
 
 
 @app.get("/rundown/{episode_number}/debug")
@@ -685,61 +1182,6 @@ async def get_show_info():
         "episodes_base_path": "/home/episodes"
     }
 
-@app.get("/episodes")
-async def list_episodes():
-    """
-    Lists all available episodes by scanning the /home/episodes directory.
-    An episode is considered a directory with a 'rundown' subdirectory.
-    """
-    base_path = "/home/episodes"
-    if not os.path.isdir(base_path):
-        logging.error(f"Episodes base path not found: {base_path}")
-        raise HTTPException(status_code=500, detail="Episodes directory not configured.")
-
-    episodes = []
-    for item in sorted(os.listdir(base_path), reverse=True):
-        episode_path = os.path.join(base_path, item)
-        if not os.path.isdir(episode_path):
-            continue
-
-        # We no longer require a 'rundown' subdirectory to list an episode
-        info_path = os.path.join(episode_path, "info.md")
-        
-        # Default values
-        title = f"Episode {item}"
-        airdate = None
-        status = "unknown"
-
-        if os.path.exists(info_path):
-            metadata = None  # Ensure metadata is reset for each episode
-            try:
-                metadata, _ = parse_markdown_file(info_path)
-                
-                # Defensive check: ensure metadata is a dictionary
-                if metadata and isinstance(metadata, dict):
-                    title = metadata.get("title", title)
-                    airdate = metadata.get("airdate")
-                    status = metadata.get("status", "unknown")
-                elif metadata:
-                    # Log if metadata is not a dictionary, to debug the 'tuple' error
-                    logging.warning(f"Metadata for episode {item} is not a dictionary. Type: {type(metadata)}. Data: {metadata}")
-
-            except Exception as e:
-                # This will catch errors during parsing or attribute access
-                logging.warning(f"Could not process info.md for episode {item}: {e}")
-        
-        episodes.append({
-            "episode_number": item, 
-            "title": title, 
-            "airdate": airdate,
-            "status": status
-        })
-            
-    if not episodes:
-        logging.warning(f"No valid episodes found in {base_path}")
-
-    return {"episodes": episodes}
-
 @app.get("/protected-endpoint")
 async def protected_route(current_user: dict = Depends(get_current_user_or_key)):
     return {
@@ -804,44 +1246,6 @@ async def get_episode_info(episode_number: str, current_user: dict = Depends(get
             detail=f"Failed to read episode info: {str(e)}"
         )
 
-@app.put("/episodes/{episode_number}/info")
-async def update_episode_info(episode_number: str, info_data: dict, current_user: dict = Depends(get_current_user_or_key)):
-    """Update episode information in info.md file"""
-    base_path = "/home/episodes"
-    info_path = os.path.join(base_path, episode_number, "info.md")
-    
-    try:
-        # Read existing content to preserve body
-        existing_body = ""
-        if os.path.exists(info_path):
-            with open(info_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            if content.startswith('---'):
-                parts = content.split('---', 2)
-                if len(parts) >= 3:
-                    existing_body = parts[2].strip()
-        
-        # Create new content with updated frontmatter
-        frontmatter_yaml = yaml.dump(info_data, default_flow_style=False, allow_unicode=True)
-        new_content = f"---\n{frontmatter_yaml}---\n{existing_body}"
-        
-        # Write back to file
-        with open(info_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
-        
-        return {
-            "message": f"Episode {episode_number} info updated successfully",
-            "episode_number": episode_number,
-            "info": info_data
-        }
-        
-    except Exception as e:
-        logging.error(f"Failed to update episode info: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to update episode info: {str(e)}"
-        )
 
 # WebSocket endpoint for real-time updates
 @app.websocket("/ws/{client_id}")
@@ -878,7 +1282,7 @@ async def compile_script_async(
         )
         
         # Create database record for job tracking
-        from models import ProcessingStatus
+        # from models import ProcessingStatus  # REMOVED - models.py deleted
         db_job = ProcessingJob(
             job_type="script_compilation",
             job_id=job.id,

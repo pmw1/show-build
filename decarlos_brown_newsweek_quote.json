@@ -1,0 +1,22 @@
+{
+  "quotes": [
+    {
+      "id": "brown_arrest_record",
+      "category": "FS Quote/records show that",
+      "text": "Records show that Brown has been arrested 14 times in over a decade and was diagnosed with schizophrenia.He has previously been convicted of felony larceny, robbery with a dangerous weapon and communicating threats, leading to a six-year prison sentence in 2015 for incidents dating to 2013 and 2014. He was released in 2020; then, months later, he was charged with assaulting his sister.",
+      "attribution": "Newsweek",
+      "source_type": "news_article",
+      "tags": ["criminal_record", "arrests", "schizophrenia", "mental_health", "violence", "DeCarlos_Brown"],
+      "content_warning": "violence, mental_health",
+      "priority": "high"
+    }
+  ],
+  "metadata": {
+    "source": "newsweek_decarlos_brown_article",
+    "date_processed": "2025-09-14",
+    "content_type": "news_citation",
+    "requires_review": false,
+    "broadcast_ready": true,
+    "episode": "0240"
+  }
+}

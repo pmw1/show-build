@@ -30,8 +30,11 @@ export default {
         const formData = new FormData();
         formData.append('type', 'vo');
         formData.append('slug', normalizedSlug);
-        const response = await axios.post('http://192.168.51.210:8888/next-id', formData, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
+        const response = await axios.post('/assetid/generate-legacy', formData, {
+          headers: {
+            'Accept': 'application/json',
+            'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
+          }
         });
         const assetID = response.data.id;
         let mediaURL = '';

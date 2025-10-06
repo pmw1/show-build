@@ -32,7 +32,7 @@
     </div>
 
     <!-- Edit Form -->
-    <v-form v-else-if="organization" ref="form" v-model="formValid" @submit.prevent="saveOrganization">
+    <v-form v-else-if="organization" ref="orgFormRef" v-model="formValid" @submit.prevent="saveOrganization">
       <v-row>
         <!-- Basic Information -->
         <v-col cols="12" md="4">

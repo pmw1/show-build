@@ -1,9 +1,11 @@
 import { ref } from 'vue'
 import axios from 'axios'
 
+// Global shared state
+const isAuthenticated = ref(false)
+const currentUser = ref({})
+
 export function useAuth() {
-  const isAuthenticated = ref(false)
-  const currentUser = ref({})
 
   const checkAuthStatus = () => {
     const token = localStorage.getItem('auth-token')

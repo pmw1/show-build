@@ -6,7 +6,7 @@ from celery import Celery
 import os
 
 # Redis configuration
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = os.getenv("REDIS_URL", "redis://:showbuild2025@192.168.51.223:6379/0")
 
 # Create Celery app
 celery_app = Celery(
@@ -15,8 +15,9 @@ celery_app = Celery(
     backend=REDIS_URL,
     include=[
         "services.script_compilation",
-        "services.quote_extraction", 
-        "services.asset_processing"
+        "services.quote_extraction",
+        "services.asset_processing",
+        "services.ffmpeg_tasks"
     ]
 )
 
@@ -33,6 +34,7 @@ celery_app.conf.update(
         "services.script_compilation.*": {"queue": "compilation"},
         "services.quote_extraction.*": {"queue": "quotes"},
         "services.asset_processing.*": {"queue": "assets"},
+        "services.ffmpeg_tasks.*": {"queue": "media"},
     },
     
     # Result backend settings

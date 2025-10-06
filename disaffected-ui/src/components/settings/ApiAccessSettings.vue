@@ -63,29 +63,6 @@
                 </v-card>
               </v-col>
 
-              <!-- Whisper Configuration -->
-              <v-col cols="12" md="6">
-                <v-card variant="outlined" class="pa-4">
-                  <v-card-title class="text-subtitle-1">Whisper (Local)</v-card-title>
-                  <v-text-field
-                    v-model="configs.whisper.host"
-                    label="Host URL"
-                    placeholder="http://localhost:9000"
-                    persistent-hint
-                    hint="Local Whisper transcription endpoint"
-                  />
-                  <v-text-field
-                    v-model="configs.whisper.endpoint"
-                    label="Transcription Endpoint"
-                    placeholder="/v1/audio/transcriptions"
-                  />
-                  <v-switch
-                    v-model="configs.whisper.enabled"
-                    label="Enable Whisper transcription"
-                    color="primary"
-                  />
-                </v-card>
-              </v-col>
             </v-row>
           </v-expansion-panel-text>
         </v-expansion-panel>
@@ -565,7 +542,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 const props = defineProps({
   modelValue: {
@@ -577,7 +554,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'save'])
 
 const configs = computed({
-  get: () => props.modelValue,
+  get: () => props.modelValue || {},
   set: (value) => emit('update:modelValue', value)
 })
 
@@ -592,13 +569,14 @@ const emailProviders = [
   { name: 'SparkPost', value: 'sparkpost' }
 ]
 
+
 async function testConnection(service) {
   try {
     const response = await fetch(`/api/settings/test/${service}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
+        'Authorization': `Bearer ${localStorage.getItem('auth-token') || localStorage.getItem('token')}`
       },
       body: JSON.stringify(configs.value[service])
     })
@@ -620,16 +598,56 @@ function authorizeGoogle() {
   // Implementation would involve redirecting to Google OAuth endpoint
 }
 
+onMounted(() => {
+  // Component mounted
+})
+
+
 async function saveSettings() {
   saving.value = true
   try {
+    // Transform the flat configs structure to the hierarchical API structure
+    const apiConfigStructure = {
+      preproduction: {
+        ai_services: {
+          ollama: configs.value.ollama,
+          openai: configs.value.openai,
+          anthropic: configs.value.anthropic,
+          gemini: configs.value.gemini,
+          grok: configs.value.grok,
+          stabilityAi: configs.value.stabilityAi,
+          elevenLabs: configs.value.elevenLabs
+        },
+        storage: {
+          google: configs.value.google,
+          aws: configs.value.aws
+        },
+        communication: {
+          slack: configs.value.slack,
+          discord: configs.value.discord,
+          twilio: configs.value.twilio,
+          email: configs.value.email
+        }
+      },
+      promotion: {
+        social_media: {
+          youtube: configs.value.youtube,
+          vimeo: configs.value.vimeo
+        }
+      },
+      development: {
+        github: configs.value.github,
+        webhooks: configs.value.webhooks
+      }
+    }
+
     const response = await fetch('/api/settings/api-configs', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
+        'Authorization': `Bearer ${localStorage.getItem('auth-token') || localStorage.getItem('token')}`
       },
-      body: JSON.stringify(configs.value)
+      body: JSON.stringify({ config: apiConfigStructure })
     })
 
     if (response.ok) {

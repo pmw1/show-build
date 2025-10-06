@@ -1,0 +1,109 @@
+{
+  "protocol": "claude-ipc-v1",
+  "message_id": "msg_002_2025-08-13T15:30:00Z",
+  "from": "claude_show_build_master",
+  "to": "claude_pmw_rm4",
+  "timestamp": "2025-08-13T15:30:00Z",
+  "message_type": "remote_coordination",
+  "priority": "high",
+  "requires_response": true,
+  "session_id": "session_remote_management_001",
+  
+  "payload": {
+    "subject": "Remote Claude Management Active",
+    "status": "master_slave_coordination_enabled",
+    
+    "remote_management": {
+      "master_host": "kevin's show-build system",
+      "slave_host": "pmw-rm4",
+      "coordination_method": "ssh_tmux_direct",
+      "heartbeat_interval": "600s",
+      "health_monitoring": "enabled",
+      "auto_recovery": "enabled"
+    },
+    
+    "capabilities": {
+      "remote_launch": "can launch Claude on pmw-rm4 via SSH",
+      "remote_monitoring": "monitors tmux session health",
+      "direct_messaging": "sends messages via tmux send-keys",
+      "status_reporting": "gets system load and session info",
+      "auto_restart": "restarts failed remote sessions"
+    },
+    
+    "current_coordination": [
+      {
+        "task_id": "database_setup_coordination",
+        "status": "active",
+        "description": "Master manages both Claude instances for database setup",
+        "master_role": "coordinate, monitor responses, continue development",
+        "slave_role": "execute database setup, respond via files"
+      },
+      {
+        "task_id": "show_build_development", 
+        "status": "active",
+        "description": "Parallel development with synchronized state",
+        "coordination_method": "file_based_communication"
+      }
+    ],
+    
+    "communication_channels": [
+      {
+        "method": "file_based",
+        "files": ["CLAUDECOM.txt", "claude_protocol.json", "claude_protocol_response.json"],
+        "direction": "bidirectional",
+        "status": "active"
+      },
+      {
+        "method": "direct_tmux",
+        "description": "Master can send direct commands to slave via SSH tmux",
+        "direction": "master_to_slave",
+        "status": "active"
+      },
+      {
+        "method": "health_monitoring",
+        "description": "Master monitors slave process health and auto-restarts",
+        "interval": "every_heartbeat",
+        "status": "active"
+      }
+    ],
+    
+    "coordination_protocol": {
+      "master_responsibilities": [
+        "Launch and manage slave Claude instance",
+        "Monitor slave health and auto-restart if needed",
+        "Coordinate task distribution",
+        "Maintain conversation context for both instances",
+        "Handle user interaction and reporting"
+      ],
+      "slave_responsibilities": [
+        "Execute assigned database setup tasks",
+        "Respond to communications via file system",
+        "Report progress and status",
+        "Focus on database/infrastructure work"
+      ]
+    }
+  },
+  
+  "requests": [
+    {
+      "type": "acknowledge_coordination",
+      "description": "Confirm you understand the master-slave coordination setup"
+    },
+    {
+      "type": "database_setup_status",
+      "description": "Report current database setup progress from DATABASE_SETUP_INSTRUCTIONS.md"
+    },
+    {
+      "type": "establish_sync",
+      "description": "Synchronize your state with master Claude's current context"
+    }
+  ],
+  
+  "master_status": {
+    "conversation_resumed": true,
+    "test_data_system": "implemented",
+    "communication_established": true,
+    "heartbeat_daemon": "active",
+    "ready_for_coordination": true
+  }
+}

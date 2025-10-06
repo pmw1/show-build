@@ -4,7 +4,7 @@ from .utils import verify_password, create_access_token, get_current_user, get_c
 from .db_service import AuthService
 from pydantic import BaseModel
 from datetime import timedelta
-from typing import List
+from typing import List, Optional
 from secrets import token_urlsafe
 import logging
 
@@ -12,6 +12,15 @@ import logging
 class UserLogin(BaseModel):
     username: str
     password: str
+
+class UserUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    access_level: Optional[str] = None
+    is_active: Optional[bool] = None
+    password: Optional[str] = None
 
 class Token(BaseModel):
     access_token: str
@@ -24,7 +33,50 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login_json(login_data: UserLogin):
+    logger.info(f"JSON Login attempt for username: {login_data.username}")
+
+    user = AuthService.get_user(login_data.username)
+    if not user:
+        logger.warning(f"User not found: {login_data.username}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    logger.info(f"User found: {user['username']}, checking password...")
+
+    password_valid = verify_password(login_data.password, user['hashed_password'])
+    logger.info(f"Password verification result: {password_valid}")
+
+    if not password_valid:
+        logger.warning(f"Password verification failed for user: {login_data.username}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Update last login timestamp
+    AuthService.update_last_login(user['username'])
+
+    access_token = create_access_token(
+        data={"sub": user['username']},
+        expires_delta=timedelta(minutes=2880)  # 48 hours
+    )
+
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        user={
+            "username": user['username'],
+            "access_level": user['access_level']
+        }
+    )
+
+@router.post("/login-form", response_model=Token)
+async def login_form(form_data: OAuth2PasswordRequestForm = Depends()):
     logger.info(f"Login attempt for username: {form_data.username}")
     
     user = AuthService.get_user(form_data.username)
@@ -201,10 +253,92 @@ async def debug_api_keys(current_user: dict = Depends(get_current_user_or_key)):
     """Debug endpoint to list stored API keys (admin only)"""
     if current_user["access_level"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
-    
+
     # Load keys from database
     api_keys = AuthService.list_api_keys()
     return [{"key": key.key_hash, "client": key.client_name} for key in api_keys]
+
+# Admin-only: Update user
+@router.put("/users/{username}", response_model=dict)
+async def update_user(
+    username: str,
+    user_update: UserUpdate,
+    current_user: dict = Depends(get_current_user_or_key)
+):
+    """Update user information (admin only)"""
+    if current_user["access_level"] != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can update users"
+        )
+
+    # Build update dict from provided fields
+    update_data = {}
+    if user_update.first_name is not None:
+        update_data['first_name'] = user_update.first_name
+    if user_update.last_name is not None:
+        update_data['last_name'] = user_update.last_name
+    if user_update.email is not None:
+        update_data['email'] = user_update.email
+    if user_update.phone is not None:
+        update_data['phone'] = user_update.phone
+    if user_update.access_level is not None:
+        update_data['access_level'] = user_update.access_level
+    if user_update.is_active is not None:
+        update_data['is_active'] = user_update.is_active
+    if user_update.password is not None:
+        update_data['password'] = user_update.password
+
+    user = AuthService.update_user(username, **update_data)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    return {
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "access_level": user.access_level,
+        "is_active": user.is_active,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None
+    }
+
+# Admin-only: Delete user
+@router.delete("/users/{username}", response_model=dict)
+async def delete_user(
+    username: str,
+    current_user: dict = Depends(get_current_user_or_key)
+):
+    """Delete user (admin only)"""
+    if current_user["access_level"] != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can delete users"
+        )
+
+    # Prevent deleting yourself
+    if username == current_user.get("username"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own account"
+        )
+
+    success = AuthService.delete_user(username)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    return {
+        "success": True,
+        "message": f"User '{username}' deleted successfully"
+    }
 
 # Debug endpoint for testing password hashing
 @router.post("/debug/hash")

@@ -14,10 +14,9 @@ const defaultColors = {
   'sot': 'amber',            // #FFC107 - Amber for sound on tape
   'interview': 'teal',       // #009688 - Teal for interviews
   'live': 'red',             // #F44336 - Red for live shots
-  'break': 'brown',          // #795548 - Brown for breaks
+  'block': 'grey-darken-1',  // #757575 - Dark grey for blocks
   'tease': 'pink',           // #E91E63 - Pink for teases
   'tag': 'indigo',           // #3F51B5 - Indigo for tags
-  'bump': 'deep-purple',     // #673AB7 - Deep purple for bumps
   'music': 'orange',         // #FF9800 - Orange for music
   'gfx': 'cyan',             // #00BCD4 - Cyan for graphics
   'fsq': 'lime',             // #CDDC39 - Lime for full screen quotes
@@ -29,6 +28,9 @@ const defaultColors = {
   'brief': 'grey-lighten-2', // #E0E0E0 - Light grey for news briefs
   'reader': 'amber-lighten-2', // #FFD54F - Light amber for readers
   'openclose': 'purple-darken-2', // #7B1FA2 - Dark purple for open/close
+  'cut': 'red-darken-1',       // #E53935 - Red for hard cuts
+  'fade': 'blue-grey-darken-1', // #546E7A - Blue grey for fades
+  'img': 'purple-lighten-2',    // #BA68C8 - Light purple for images
   
   // UI/System colors
   'selection': 'warning',    // #FB8C00 - Orange
@@ -41,7 +43,14 @@ const defaultColors = {
   'draft': 'grey-darken-2',  // #616161 - Dark grey
   'approved': 'green-accent', // #69F0AE - Bright green
   'production': 'blue-accent', // #448AFF - Bright blue
-  'completed': 'yellow-accent' // #FFD740 - Bright yellow
+  'promotion': 'deep-orange', // #FF5722 - Orange
+  'completed': 'yellow-accent', // #FFD740 - Bright yellow
+
+  // AI Interaction States
+  'ai-analyzing': 'amber',       // #FFC107 - Gold: AI considering something (don't know what yet)
+  'ai-rejected': 'red',          // #F44336 - Red: Change pending/possible rejection - needs human attention
+  'ai-approved': 'green',        // #4CAF50 - Green: AI generation approved by user
+  'ai-auto': 'blue'              // #2196F3 - Blue: AI auto-generation not requiring human approval
 };
 
 // Export defaultColors for external use
@@ -68,7 +77,24 @@ export const updateColor = (type, newColor) => {
 };
 
 export const getColorValue = (type) => {
-  return currentColors[type.toLowerCase()] || defaultColors[type.toLowerCase()] || 'grey';
+  const key = type.toLowerCase();
+  const currentValue = currentColors[key];
+  const defaultValue = defaultColors[key];
+  const result = currentValue || defaultValue || 'grey';
+
+  // Debug logging for selection-interface specifically
+  if (key === 'selection-interface') {
+    console.log('🔍 getColorValue debug for selection-interface:', {
+      key,
+      currentValue,
+      defaultValue,
+      result,
+      currentColorKeys: Object.keys(currentColors),
+      hasLoadedFromDatabase
+    });
+  }
+
+  return result;
 };
 
 export const getAllColors = () => {
@@ -84,12 +110,20 @@ export const loadColorsFromDatabase = async (profile = 'default') => {
       const data = await response.json();
       console.log('Database response:', data);
       if (data.success && data.colors) {
+        // Normalize database color keys to lowercase for consistent lookup
+        const normalizedDbColors = {};
+        for (const [key, value] of Object.entries(data.colors)) {
+          normalizedDbColors[key.toLowerCase()] = value;
+        }
+
         // Update current colors with database values
-        currentColors = { ...defaultColors, ...data.colors };
+        currentColors = { ...defaultColors, ...normalizedDbColors };
         hasLoadedFromDatabase = true;
         // Also update localStorage as backup
         localStorage.setItem('themeColors', JSON.stringify(currentColors));
         console.log('Colors loaded from database successfully:', currentColors);
+        console.log('Original DB keys:', Object.keys(data.colors));
+        console.log('Normalized keys:', Object.keys(normalizedDbColors));
         return currentColors;
       }
     }
@@ -134,7 +168,24 @@ export const resolveVuetifyColor = (colorName, vuetifyInstance) => {
     'red-darken-3': '#C62828',
     'red-darken-4': '#B71C1C',
     'pink': '#E91E63',
+    'pink-lighten-1': '#EC407A',
+    'pink-lighten-2': '#F06292',
+    'pink-lighten-3': '#F48FB1',
+    'pink-lighten-4': '#F8BBD9',
+    'pink-darken-1': '#D81B60',
+    'pink-darken-2': '#C2185B',
+    'pink-darken-3': '#AD1457',
+    'pink-darken-4': '#880E4F',
     'purple': '#9C27B0',
+    'purple-lighten-1': '#AB47BC',
+    'purple-lighten-2': '#BA68C8',
+    'purple-lighten-3': '#CE93D8',
+    'purple-lighten-4': '#E1BEE7',
+    'purple-lighten-5': '#F3E5F5',
+    'purple-darken-1': '#8E24AA',
+    'purple-darken-2': '#7B1FA2',
+    'purple-darken-3': '#6A1B9A',
+    'purple-darken-4': '#4A148C',
     'deep-purple': '#673AB7',
     'deep-purple-lighten-1': '#7986CB',
     'deep-purple-lighten-2': '#9575CD',
@@ -146,6 +197,15 @@ export const resolveVuetifyColor = (colorName, vuetifyInstance) => {
     'deep-purple-darken-3': '#4527A0',
     'deep-purple-darken-4': '#311B92',
     'indigo': '#3F51B5',
+    'indigo-lighten-1': '#5C6BC0',
+    'indigo-lighten-2': '#7986CB',
+    'indigo-lighten-3': '#9FA8DA',
+    'indigo-lighten-4': '#C5CAE9',
+    'indigo-lighten-5': '#E8EAF6',
+    'indigo-darken-1': '#3949AB',
+    'indigo-darken-2': '#303F9F',
+    'indigo-darken-3': '#283593',
+    'indigo-darken-4': '#1A237E',
     'blue': '#2196F3',
     'blue-lighten-1': '#42A5F5',
     'blue-lighten-2': '#64B5F6',
@@ -171,7 +231,20 @@ export const resolveVuetifyColor = (colorName, vuetifyInstance) => {
     'cyan-lighten-2': '#4DD0E1',
     'cyan-lighten-3': '#80DEEA',
     'cyan-lighten-4': '#B2EBF2',
+    'cyan-darken-1': '#00ACC1',
+    'cyan-darken-2': '#0097A7',
+    'cyan-darken-3': '#00838F',
+    'cyan-darken-4': '#006064',
     'teal': '#009688',
+    'teal-lighten-1': '#26A69A',
+    'teal-lighten-2': '#4DB6AC',
+    'teal-lighten-3': '#80CBC4',
+    'teal-lighten-4': '#B2DFDB',
+    'teal-lighten-5': '#E0F2F1',
+    'teal-darken-1': '#00897B',
+    'teal-darken-2': '#00796B',
+    'teal-darken-3': '#00695C',
+    'teal-darken-4': '#004D40',
     'green': '#4CAF50',
     'green-lighten-1': '#66BB6A',
     'green-lighten-2': '#81C784',
@@ -199,6 +272,10 @@ export const resolveVuetifyColor = (colorName, vuetifyInstance) => {
     'yellow-lighten-3': '#FFF59D',
     'yellow-lighten-4': '#FFF9C4',
     'yellow-accent': '#FFD740',
+    'yellow-darken-1': '#FBC02D',
+    'yellow-darken-2': '#F9A825',
+    'yellow-darken-3': '#F57F17',
+    'yellow-darken-4': '#F57C00',
     'amber': '#FFC107',
     'amber-lighten-1': '#FFCA28',
     'amber-lighten-2': '#FFD54F',
@@ -301,44 +378,213 @@ export const resolveVuetifyColor = (colorName, vuetifyInstance) => {
   return vuetifyColors[colorName] || vuetifyColors[colorName.split('-')[0]] || '#9E9E9E';
 };
 
-// Contrast ratio function removed - was causing colors to display as black
-// If contrast checking is needed in the future, it should be done differently
+// Contrast calculation functions for readable text colors
+export function hexToRgb(hex) {
+  if (!hex) return null;
+  
+  // Remove # if present
+  hex = hex.replace(/^#/, '');
+  
+  // Handle 3-character hex codes
+  if (hex.length === 3) {
+    hex = hex.split('').map(char => char + char).join('');
+  }
+  
+  const result = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16)
+  } : null;
+}
 
-// Legacy themeColorMap export for backward compatibility
+// Calculate relative luminance according to WCAG guidelines
+export function getLuminance(hexColor) {
+  const rgb = hexToRgb(hexColor);
+  if (!rgb) return 0;
+  
+  const [r, g, b] = [rgb.r, rgb.g, rgb.b].map(c => {
+    c = c / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+// Calculate contrast ratio between two colors
+export function getContrastRatio(color1, color2) {
+  const lum1 = getLuminance(color1);
+  const lum2 = getLuminance(color2);
+  const brightest = Math.max(lum1, lum2);
+  const darkest = Math.min(lum1, lum2);
+  return (brightest + 0.05) / (darkest + 0.05);
+}
+
+// Get readable text color (black or white) for a given background color
+export function getReadableTextColor(backgroundColor) {
+  if (!backgroundColor) return '#FFFFFF'; // Default to white if no background
+  
+  // Resolve the background color to hex format
+  const resolvedBg = resolveVuetifyColor(backgroundColor);
+  
+  const whiteContrast = getContrastRatio(resolvedBg, '#FFFFFF');
+  const blackContrast = getContrastRatio(resolvedBg, '#000000');
+  
+  // WCAG AA standard requires 4.5:1 contrast ratio for normal text
+  // Return the color with better contrast, preferring white if both meet standards
+  if (whiteContrast >= 4.5) {
+    return '#FFFFFF';
+  } else if (blackContrast >= 4.5) {
+    return '#000000';
+  } else {
+    // If neither meets the standard, choose the one with better contrast
+    return whiteContrast > blackContrast ? '#FFFFFF' : '#000000';
+  }
+}
+
+// Utility function to get text color for a theme color name
+export function getTextColorForBackground(backgroundColorName) {
+  const resolvedBg = resolveVuetifyColor(backgroundColorName);
+  return getReadableTextColor(resolvedBg);
+}
+
+// Legacy themeColorMap export for backward compatibility with dynamic contrast
 export const themeColorMap = {
   // Core content types
-  get segment() { return { textColor: '#ffffff', backgroundColor: getColorValue('segment') } },
-  get ad() { return { textColor: '#ffffff', backgroundColor: getColorValue('ad') } },
-  get promo() { return { textColor: '#ffffff', backgroundColor: getColorValue('promo') } },
-  get cta() { return { textColor: '#ffffff', backgroundColor: getColorValue('cta') } },
-  get trans() { return { textColor: '#ffffff', backgroundColor: getColorValue('trans') } },
-  get unknown() { return { textColor: '#ffffff', backgroundColor: getColorValue('unknown') } },
+  get segment() { 
+    const bgColor = getColorValue('segment');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get ad() { 
+    const bgColor = getColorValue('ad');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get promo() { 
+    const bgColor = getColorValue('promo');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get cta() { 
+    const bgColor = getColorValue('cta');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get trans() { 
+    const bgColor = getColorValue('trans');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get unknown() { 
+    const bgColor = getColorValue('unknown');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
   
   // Broadcast production types
-  get pkg() { return { textColor: '#ffffff', backgroundColor: getColorValue('pkg') } },
-  get vo() { return { textColor: '#ffffff', backgroundColor: getColorValue('vo') } },
-  get sot() { return { textColor: '#ffffff', backgroundColor: getColorValue('sot') } },
-  get interview() { return { textColor: '#ffffff', backgroundColor: getColorValue('interview') } },
-  get live() { return { textColor: '#ffffff', backgroundColor: getColorValue('live') } },
-  get break() { return { textColor: '#ffffff', backgroundColor: getColorValue('break') } },
-  get tease() { return { textColor: '#ffffff', backgroundColor: getColorValue('tease') } },
-  get tag() { return { textColor: '#ffffff', backgroundColor: getColorValue('tag') } },
-  get bump() { return { textColor: '#ffffff', backgroundColor: getColorValue('bump') } },
-  get music() { return { textColor: '#ffffff', backgroundColor: getColorValue('music') } },
-  get gfx() { return { textColor: '#ffffff', backgroundColor: getColorValue('gfx') } },
-  get fsq() { return { textColor: '#ffffff', backgroundColor: getColorValue('fsq') } },
-  get nat() { return { textColor: '#ffffff', backgroundColor: getColorValue('nat') } },
-  get vox() { return { textColor: '#ffffff', backgroundColor: getColorValue('vox') } },
-  get credits() { return { textColor: '#ffffff', backgroundColor: getColorValue('credits') } },
-  get weather() { return { textColor: '#ffffff', backgroundColor: getColorValue('weather') } },
-  get sports() { return { textColor: '#ffffff', backgroundColor: getColorValue('sports') } },
-  get brief() { return { textColor: '#ffffff', backgroundColor: getColorValue('brief') } },
-  get reader() { return { textColor: '#ffffff', backgroundColor: getColorValue('reader') } },
-  get openclose() { return { textColor: '#ffffff', backgroundColor: getColorValue('openclose') } },
+  get pkg() { 
+    const bgColor = getColorValue('pkg');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get vo() { 
+    const bgColor = getColorValue('vo');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get sot() { 
+    const bgColor = getColorValue('sot');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get interview() { 
+    const bgColor = getColorValue('interview');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get live() { 
+    const bgColor = getColorValue('live');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get block() {
+    const bgColor = getColorValue('block');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get tease() { 
+    const bgColor = getColorValue('tease');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get tag() { 
+    const bgColor = getColorValue('tag');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get music() { 
+    const bgColor = getColorValue('music');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get gfx() { 
+    const bgColor = getColorValue('gfx');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get fsq() { 
+    const bgColor = getColorValue('fsq');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get nat() { 
+    const bgColor = getColorValue('nat');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get vox() { 
+    const bgColor = getColorValue('vox');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get credits() { 
+    const bgColor = getColorValue('credits');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get weather() { 
+    const bgColor = getColorValue('weather');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get sports() { 
+    const bgColor = getColorValue('sports');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get brief() { 
+    const bgColor = getColorValue('brief');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get reader() { 
+    const bgColor = getColorValue('reader');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get openclose() { 
+    const bgColor = getColorValue('openclose');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get cut() { 
+    const bgColor = getColorValue('cut');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get fade() { 
+    const bgColor = getColorValue('fade');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get img() { 
+    const bgColor = getColorValue('img');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
   
   // Status colors
-  get draft() { return { textColor: '#ffffff', backgroundColor: getColorValue('draft') } },
-  get approved() { return { textColor: '#ffffff', backgroundColor: getColorValue('approved') } },
-  get production() { return { textColor: '#ffffff', backgroundColor: getColorValue('production') } },
-  get completed() { return { textColor: '#ffffff', backgroundColor: getColorValue('completed') } }
+  get draft() {
+    const bgColor = getColorValue('draft');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get approved() {
+    const bgColor = getColorValue('approved');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get production() {
+    const bgColor = getColorValue('production');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get promotion() {
+    const bgColor = getColorValue('promotion');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  },
+  get completed() {
+    const bgColor = getColorValue('completed');
+    return { textColor: getTextColorForBackground(bgColor), backgroundColor: bgColor };
+  }
 };

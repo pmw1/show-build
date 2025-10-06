@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from database import get_db
-from auth.utils import get_current_user
+from auth.utils import get_current_user_or_key
 from models_user import User
 from models_episode import (
-    EpisodeTemplateCreate, EpisodeTemplateResponse, 
+    BlueprintCreate, BlueprintResponse,
     BlueprintTemplateResponse
 )
 from services.episode_scaffold import EpisodeScaffoldService
@@ -25,21 +25,19 @@ def get_episode_service(db: Session = Depends(get_db)) -> EpisodeScaffoldService
 
 @router.get("/next-number")
 async def get_next_episode_number(
-    service: EpisodeScaffoldService = Depends(get_episode_service),
-    current_user: User = Depends(get_current_user)
+    service: EpisodeScaffoldService = Depends(get_episode_service)
 ):
     """Get the next available episode number"""
     try:
         next_number = await service.get_next_episode_number()
-        return {"next_episode_number": next_number}
+        return {"next_number": next_number}
     except Exception as e:
         logger.error(f"Error getting next episode number: {e}")
         raise HTTPException(status_code=500, detail="Failed to get next episode number")
 
 @router.get("/templates")
 async def get_blueprint_templates(
-    service: EpisodeScaffoldService = Depends(get_episode_service),
-    current_user: User = Depends(get_current_user)
+    service: EpisodeScaffoldService = Depends(get_episode_service)
 ) -> List[BlueprintTemplateResponse]:
     """Get available blueprint templates for episode creation"""
     try:
@@ -49,21 +47,22 @@ async def get_blueprint_templates(
         logger.error(f"Error getting blueprint templates: {e}")
         raise HTTPException(status_code=500, detail="Failed to get blueprint templates")
 
-@router.post("/create", response_model=EpisodeTemplateResponse)
+@router.post("/create", response_model=BlueprintResponse)
 async def create_episode(
-    request: EpisodeTemplateCreate,
+    request: BlueprintCreate,
     service: EpisodeScaffoldService = Depends(get_episode_service),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_or_key),
     db: Session = Depends(get_db)
 ):
     """Create a new episode from blueprint template"""
     try:
-        # Use user's organization if available  
+        # Handle both user authentication and API key authentication
+        user_id = current_user.get('id') or current_user.get('user_id')
         organization_id = current_user.get('organization_id', None)
         
         episode = await service.create_episode(
             request=request,
-            user_id=current_user['id'],
+            user_id=user_id,
             organization_id=organization_id
         )
         
@@ -79,7 +78,7 @@ async def create_episode(
 async def validate_episode_number(
     episode_number: str,
     service: EpisodeScaffoldService = Depends(get_episode_service),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user_or_key)
 ):
     """Validate if an episode number is available"""
     try:
@@ -93,7 +92,7 @@ async def validate_episode_number(
 async def get_episode(
     episode_number: str,
     service: EpisodeScaffoldService = Depends(get_episode_service),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user_or_key)
 ):
     """Get episode information by number"""
     try:
@@ -112,8 +111,8 @@ async def list_episodes(
     skip: int = 0,
     limit: int = 100,
     service: EpisodeScaffoldService = Depends(get_episode_service),
-    current_user: User = Depends(get_current_user)
-) -> List[EpisodeTemplateResponse]:
+    current_user: dict = Depends(get_current_user_or_key)
+) -> List[BlueprintResponse]:
     """List all episodes"""
     try:
         episodes = await service.list_episodes(skip=skip, limit=limit)

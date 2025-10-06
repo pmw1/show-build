@@ -1,41 +1,33 @@
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar 
+    <v-app-bar
+      v-if="isAuthenticated"
       color="surface"
       elevation="1"
+      style="padding-top: 5px; padding-bottom: 5px;"
     >
       <v-app-bar-nav-icon
         @click="drawer = !drawer"
       ></v-app-bar-nav-icon>
 
-      <v-app-bar-title class="text-primary font-weight-bold">
+      <v-app-bar-title class="text-primary font-weight-bold app-title-compact" style="margin-right: 0.25em;">
         Show Builder
       </v-app-bar-title>
+
+      <!-- Status Clock (Today's Date) -->
+      <StatusClock v-if="isAuthenticated" style="margin-left: -20px;" />
+
+      <!-- Live Clock (Countdown) -->
+      <LiveClock v-if="isAuthenticated" class="ms-3" />
 
       <v-spacer></v-spacer>
 
       <!-- Authentication Status -->
-      <div v-if="isAuthenticated" class="d-flex align-center">
-        <!-- Admin Organization Switcher -->
-        <div v-if="isAdmin && allOrganizations.length > 1" class="me-4">
-          <v-select
-            v-model="selectedOrgId"
-            :items="allOrganizations"
-            item-title="name"
-            item-value="id"
-            label="Organization"
-            variant="outlined"
-            density="compact"
-            style="min-width: 180px; transform: scale(0.85) translateY(12px); transform-origin: center center; margin-right: -27px;"
-            @update:model-value="switchOrganization"
-          />
-        </div>
-
-        <!-- Welcome message -->
-        <div class="me-4 d-none d-sm-flex">
-          <span class="text-body-2 text-grey-darken-1">Welcome, </span>
-          <span class="text-body-2 font-weight-medium ml-1">{{ currentUser.username }}</span>
+      <div v-if="isAuthenticated" class="d-flex align-center user-info-section">
+        <!-- User name -->
+        <div class="me-3 d-none d-sm-flex align-center">
+          <span class="user-name-text text-primary">{{ userFullName }}</span>
         </div>
 
         <!-- User Menu -->
@@ -44,14 +36,15 @@
             <v-btn
               icon
               v-bind="props"
+              size="small"
             >
-              <v-avatar size="32">
+              <v-avatar size="28">
                 <v-img
                   v-if="currentUser.profile_picture"
                   :src="currentUser.profile_picture"
-                  :alt="currentUser.username"
+                  :alt="userFullName"
                 />
-                <v-icon v-else>mdi-account-circle</v-icon>
+                <v-icon color="primary" size="28">mdi-account-circle</v-icon>
               </v-avatar>
             </v-btn>
           </template>
@@ -87,6 +80,7 @@
 
     <!-- Navigation Drawer -->
     <v-navigation-drawer
+      v-if="isAuthenticated"
       v-model="drawer"
       :temporary="$route.name !== 'ContentEditor'"
     >
@@ -118,50 +112,123 @@
     
     <!-- Urgent Flash Overlay -->
     <UrgentFlash ref="urgentFlash" />
-    
+
+    <!-- Standard Notification -->
+    <StandardNotification ref="standardNotification" />
+
     <!-- Status Grid - Fixed at top center -->
     <div v-if="isAuthenticated" class="status-grid-overlay">
-      <div class="grid-cell" v-for="n in 7" :key="n" :class="{ 
-        'backend-connected': n === 5 && backendConnected, 
-        'backend-disconnected': n === 5 && !backendConnected,
-        'db-connected': n === 6 && backendStatus === 'healthy',
-        'db-disconnected': n === 6 && backendStatus === 'degraded',
-        'db-unknown': n === 6 && (backendStatus === 'unknown' || backendStatus === 'disconnected')
+      <!-- Status indicator cells -->
+      <div class="grid-cell" :class="{
+        'backend-connected': health.status === 'healthy',
+        'backend-disconnected': health.status !== 'healthy'
       }">
-        {{ n === 5 ? 'BACK' : n === 6 ? 'DB1' : n === 7 ? 'DB2' : n }}
+        BACK
+      </div>
+      <div class="grid-cell" :class="{
+        'db-connected': health.services?.database === 'connected',
+        'db-disconnected': health.services?.database === 'auth_failed' || health.services?.database === 'db_not_found' || health.services?.database === 'connection_refused',
+        'db-unknown': health.services?.database === 'unknown' || health.services?.database === 'no_config'
+      }">
+        DB1
+      </div>
+      <div class="grid-cell">
+        DB2
+      </div>
+      <div
+        v-if="health.services?.ollama"
+        class="grid-cell"
+        :class="{
+          'ollama-connected': health.services?.ollama?.status === 'connected',
+          'ollama-disconnected': health.services?.ollama?.status === 'connection_refused' || health.services?.ollama?.status === 'timeout' || health.services?.ollama?.status?.startsWith('error'),
+          'ollama-unknown': health.services?.ollama?.status === 'unknown'
+        }"
+      >
+        OLLAMA
+      </div>
+      <div
+        v-if="health.services?.xtts"
+        class="grid-cell"
+        :class="{
+          'xtts-connected': health.services?.xtts?.status === 'connected',
+          'xtts-depleted': health.services?.xtts?.status === 'depleted',
+          'xtts-disconnected': health.services?.xtts?.status === 'error' || !health.services?.xtts?.connected
+        }"
+      >
+        XTTS
+      </div>
+      <div class="grid-cell" :class="{
+        'redis-connected': health.services?.redis?.connected,
+        'redis-disconnected': health.services?.redis?.error || !health.services?.redis?.connected,
+        'redis-slow': health.services?.redis?.latency > 100
+      }">
+        REDIS
+      </div>
+      <div class="grid-cell" :class="{
+        'celery-connected': health.services?.celery?.workers?.length > 0,
+        'celery-disconnected': health.services?.celery?.error || health.services?.celery?.workers?.length === 0
+      }">
+        {{ health.services?.celery?.workers?.length > 0 ? 'W:' + health.services?.celery?.workers?.length : 'CELERY' }}
+      </div>
+      <div
+        class="grid-cell nfs-cell"
+        :class="{
+          'nfs-connected': health.services?.nfs?.status === 'connected',
+          'nfs-warning': health.services?.nfs?.status === 'warning',
+          'nfs-disconnected': health.services?.nfs?.status === 'error' || !health.services?.nfs?.status
+        }"
+        @click="openNfsModal"
+        style="cursor: pointer;"
+      >
+        NFS
       </div>
     </div>
+
+    <!-- NFS Status Modal -->
+    <NfsStatusModal ref="nfsModalRef" />
   </v-app>
 </template>
 
 <script>
 import LoginModal from '@/components/LoginModal.vue'
 import UrgentFlash from '@/components/UrgentFlash.vue'
+import StandardNotification from '@/components/StandardNotification.vue'
+import LiveClock from '@/components/LiveClock.vue'
+import StatusClock from '@/components/StatusClock.vue'
+import NfsStatusModal from '@/components/NfsStatusModal.vue'
 import axios from 'axios'
 import { useAuth } from '@/composables/useAuth'
 import { useUrgentFlash } from '@/composables/useUrgentFlash'
-import { ref, onMounted } from 'vue'
+import { useStandardNotification } from '@/composables/useStandardNotification'
+import { useSystemHealth } from '@/composables/useSystemHealth'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 export default {
   name: 'App',
   components: {
     LoginModal,
-    UrgentFlash
+    UrgentFlash,
+    StandardNotification,
+    LiveClock,
+    StatusClock,
+    NfsStatusModal
   },
   setup() {
     const { isAuthenticated, currentUser, checkAuthStatus, handleLogout, setAuth } = useAuth()
     const { registerFlashComponent } = useUrgentFlash()
+    const { registerNotificationComponent } = useStandardNotification()
+    const { health } = useSystemHealth()
     const router = useRouter()
-    
+
     const drawer = ref(false)
     const showLoginModal = ref(false)
     const isAdmin = ref(false)
     const allOrganizations = ref([])
     const selectedOrgId = ref(null)
     const urgentFlash = ref(null)
-    const backendConnected = ref(false)
-    const backendStatus = ref('unknown')
+    const standardNotification = ref(null)
+    const nfsModalRef = ref(null)
     
     const navItems = [
       { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/dashboard' },
@@ -181,13 +248,26 @@ export default {
       { title: 'Settings', icon: 'mdi-cog', action: 'settings' },
       { title: 'Logout', icon: 'mdi-logout', action: 'logout' }
     ]
+
+    // Computed property for user's full name
+    const userFullName = computed(() => {
+      if (currentUser.value?.first_name && currentUser.value?.last_name) {
+        return `${currentUser.value.first_name} ${currentUser.value.last_name}`
+      } else if (currentUser.value?.first_name) {
+        return currentUser.value.first_name
+      } else if (currentUser.value?.last_name) {
+        return currentUser.value.last_name
+      } else {
+        return currentUser.value?.username || 'User'
+      }
+    })
     
     const handleLoginSuccess = async (authData) => {
       setAuth(authData.token, authData.user, authData.expiry)
       showLoginModal.value = false
       
-      // Show success flash
-      window.showUrgentFlash("WINNER!", "green")
+      // Show success notification
+      window.notifyUserStandard("Login successful!", window.NOTIFICATION_COLORS.SUCCESS, 2000)
       
       // Check if user is admin and load organizations
       isAdmin.value = authData.user?.access_level === 'admin'
@@ -233,25 +313,25 @@ export default {
       console.log('Switched to organization ID:', orgId)
     }
 
-    const checkBackendHealth = async () => {
-      try {
-        const response = await axios.get('/health', { timeout: 5000 })
-        backendConnected.value = response.data.status === 'healthy'
-        backendStatus.value = response.data.status
-      } catch (error) {
-        backendConnected.value = false
-        backendStatus.value = 'disconnected'
+    const openNfsModal = () => {
+      if (nfsModalRef.value) {
+        nfsModalRef.value.open()
       }
     }
     
     onMounted(async () => {
       checkAuthStatus()
-      
+
       // Register the urgent flash component
       if (urgentFlash.value) {
         registerFlashComponent(urgentFlash.value)
       }
-      
+
+      // Register the standard notification component
+      if (standardNotification.value) {
+        registerNotificationComponent(standardNotification.value)
+      }
+
       // Check if user is admin and load organizations
       if (isAuthenticated.value) {
         isAdmin.value = currentUser.value?.access_level === 'admin'
@@ -259,11 +339,7 @@ export default {
           await loadOrganizations()
         }
       }
-      
-      // Start backend health monitoring
-      await checkBackendHealth()
-      setInterval(checkBackendHealth, 30000)
-      
+
       // Setup axios interceptors
       axios.interceptors.response.use(
         response => response,
@@ -282,6 +358,7 @@ export default {
       showLoginModal,
       isAuthenticated,
       currentUser,
+      userFullName,
       navItems,
       userMenuItems,
       handleLoginSuccess,
@@ -291,8 +368,10 @@ export default {
       selectedOrgId,
       switchOrganization,
       urgentFlash,
-      backendConnected,
-      backendStatus
+      standardNotification,
+      nfsModalRef,
+      openNfsModal,
+      health
     }
   }
 }
@@ -304,6 +383,24 @@ export default {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05) !important;
 }
 
+/* App title - shrink to content width */
+.app-title-compact {
+  min-width: 150px !important;
+  max-width: 200px !important;
+}
+
+/* User info section - add spacing below status indicators */
+.user-info-section {
+  margin-top: 14px;
+}
+
+/* User name styling - matches Show Builder title color */
+.user-name-text {
+  font-size: 0.9rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
 .v-main {
   background: #f5f5f5;
   padding-top: 64px !important;  /* Only app bar height */
@@ -312,12 +409,13 @@ export default {
   padding-bottom: 0 !important;
 }
 
-/* Status Grid Overlay - Fixed at top of screen */
+/* Status Grid Overlay - Fixed at top right above user info */
 .status-grid-overlay {
   position: fixed;
   top: 0px;
-  left: 50%;
-  transform: translateX(-50%) scale(0.85);
+  right: 0px;
+  transform: scale(0.75);
+  transform-origin: top right;
   display: flex;
   flex-direction: row;
   gap: 1px;
@@ -370,6 +468,127 @@ export default {
   background-color: #ff9800;
   color: black;
   font-weight: bold;
+}
+
+.grid-cell.xtts-connected {
+  background-color: #4caf50;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.xtts-depleted {
+  background-color: #ffc107;
+  color: black;
+  font-weight: bold;
+}
+
+.grid-cell.xtts-disconnected {
+  background-color: #f44336;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.ollama-connected {
+  background-color: #4caf50;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.ollama-disconnected {
+  background-color: #f44336;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.ollama-disabled {
+  background-color: #9e9e9e;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.ollama-unknown {
+  background-color: #757575;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.redis-connected {
+  background-color: #4caf50;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.redis-disconnected {
+  background-color: #f44336;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.redis-slow {
+  background-color: #ff9800;
+  color: black;
+  font-weight: bold;
+}
+
+.grid-cell.celery-connected {
+  background-color: #4caf50;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.celery-disconnected {
+  background-color: #f44336;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.nfs-connected {
+  background-color: #4caf50;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.nfs-warning {
+  background-color: #ff9800;
+  color: black;
+  font-weight: bold;
+}
+
+.grid-cell.nfs-disconnected {
+  background-color: #f44336;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.nfs-cell:hover {
+  opacity: 0.8;
+  transform: scale(1.05);
+  transition: all 0.2s ease;
+}
+
+/* GLOBAL FIX: Vuetify 3 label positioning issues across all modals and forms */
+.v-field .v-field__label {
+  transition: all 0.2s ease !important;
+  transform-origin: top left !important;
+}
+
+/* Ensure labels start in the correct position */
+.v-field:not(.v-field--focused):not(.v-field--active):not(.v-field--dirty) .v-field__label {
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  font-size: 1rem !important;
+}
+
+/* When field is focused, active, or has value, move label up */
+.v-field--focused .v-field__label,
+.v-field--active .v-field__label,
+.v-field--dirty .v-field__label {
+  top: 0 !important;
+  transform: translateY(-50%) scale(0.75) !important;
+  font-size: 0.75rem !important;
+  background-color: white !important;
+  padding: 0 4px !important;
+  z-index: 1 !important;
 }
 
 </style>

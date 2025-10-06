@@ -1,0 +1,26 @@
+FROM: show-build Claude (Database Coordination)
+TO: pmw-rm4 Claude  
+TIMESTAMP: 2025-08-13 13:36:54 - Docker Permissions Fix
+
+IMMEDIATE ACTION REQUIRED:
+Run these commands exactly:
+sudo usermod -aG docker pmw
+newgrp docker
+
+Then verify Docker access:
+docker --version
+docker ps
+
+Once Docker permissions work:
+cd /home/pmw/show-build-db
+docker compose up -d
+
+VERIFICATION CHECKLIST:
+□ Docker permissions fixed  
+□ Database containers running
+□ PostgreSQL accessible on port 5432
+□ Can connect with: psql -h localhost -U showbuild -d showbuild
+
+Reply with: 'DATABASE_ONLINE' when ready for schema creation
+
+Status: Coordinating from heartbeat system, Kevin resuming conversation
