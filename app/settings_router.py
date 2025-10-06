@@ -93,39 +93,90 @@ class SettingsUpdate(BaseModel):
     generation: Optional[GenerationSettings] = None
 
 def load_settings() -> Dict[str, Any]:
-    """Load settings from file or return defaults"""
-    if SETTINGS_FILE.exists():
-        try:
-            with open(SETTINGS_FILE, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Failed to load settings: {e}")
-    
-    # Return default settings
-    return {
-        "media_paths": {
-            "show_root": os.getenv("MEDIA_ROOT", "/mnt/sync/disaffected"),
-            "episodes_folder": None,  # Will auto-derive
-            "media_assets": None,
-            "uploads": None,
-            "process": None,
-            "archive_enabled": False,
-            "archive_type": "s3"
-        },
-        "interface": InterfaceSettings().dict(),
-        "rundown": RundownSettings().dict(),
-        "system": SystemSettings().dict()
-    }
+    """Load settings from DATABASE"""
+    from database import SessionLocal
+    from sqlalchemy import text
+
+    try:
+        with SessionLocal() as db:
+            result = db.execute(text("SELECT category, key, value FROM settings"))
+            rows = result.fetchall()
+
+        # Build nested settings structure
+        settings = {}
+        for category, key, value in rows:
+            if category not in settings:
+                settings[category] = {}
+
+            # Parse JSON value
+            try:
+                settings[category][key] = json.loads(value)
+            except:
+                settings[category][key] = value
+
+        # Add defaults for missing categories
+        if "media_paths" not in settings:
+            settings["media_paths"] = {
+                "show_root": os.getenv("MEDIA_ROOT", "/mnt/sync/disaffected"),
+                "episodes_folder": None,
+                "media_assets": None,
+                "uploads": None,
+                "process": None,
+                "archive_enabled": False,
+                "archive_type": "s3"
+            }
+
+        return settings
+    except Exception as e:
+        logger.error(f"Failed to load settings from database: {e}")
+        # Return defaults on error
+        return {
+            "media_paths": {
+                "show_root": os.getenv("MEDIA_ROOT", "/mnt/sync/disaffected"),
+                "episodes_folder": None,
+                "media_assets": None,
+                "uploads": None,
+                "process": None,
+                "archive_enabled": False,
+                "archive_type": "s3"
+            },
+            "interface": InterfaceSettings().dict(),
+            "rundown": RundownSettings().dict(),
+            "system": SystemSettings().dict()
+        }
 
 def save_settings(settings: Dict[str, Any]) -> bool:
-    """Save settings to file"""
+    """Save settings to DATABASE"""
+    from database import SessionLocal
+    from sqlalchemy import text
+
     try:
-        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(SETTINGS_FILE, 'w') as f:
-            json.dump(settings, f, indent=2)
+        with SessionLocal() as db:
+            for category, category_data in settings.items():
+                if not isinstance(category_data, dict):
+                    continue
+
+                for key, value in category_data.items():
+                    # Convert value to JSON string
+                    value_str = json.dumps(value) if not isinstance(value, str) else value
+
+                    # Upsert to database
+                    db.execute(text("""
+                        INSERT INTO settings (category, key, value, updated_at)
+                        VALUES (:category, :key, :value, NOW())
+                        ON CONFLICT (key)
+                        DO UPDATE SET
+                            value = :value,
+                            category = :category,
+                            updated_at = NOW()
+                    """), {"category": category, "key": key, "value": value_str})
+
+            db.commit()
+
+        logger.info("Settings saved successfully to database")
         return True
     except Exception as e:
-        logger.error(f"Failed to save settings: {e}")
+        logger.error(f"Failed to save settings to database: {e}")
         return False
 
 def derive_paths(show_root: str, settings: Dict[str, Any]) -> Dict[str, Any]:
