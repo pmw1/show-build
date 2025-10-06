@@ -1,37 +1,57 @@
 """
 API Configuration Management
 Handles storage and retrieval of API keys and configurations for all external services.
+ALL DATA STORED IN DATABASE - NO JSON FILES.
 """
 
-import json
 import os
 from typing import Dict, Any, Optional
 from datetime import datetime
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
 import logging
+from sqlalchemy.orm import Session
+from database import get_db, SessionLocal
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
 class APIConfigManager:
-    """Manages API configurations with encryption and file-based storage."""
-    
+    """Manages API configurations with encryption and DATABASE storage."""
+
     def __init__(self, config_dir: str = "app/storage"):
         self.config_dir = config_dir
-        self.config_file = os.path.join(config_dir, "api_configs.json")
-        self.backup_file = os.path.join(config_dir, "api_configs_backup.json")
         self.key_file = os.path.join(config_dir, "encryption.key")
-        
-        # Ensure storage directory exists
+
+        # Ensure storage directory exists for encryption key only
         os.makedirs(config_dir, exist_ok=True)
-        
+
         # Initialize encryption
         self.cipher_suite = self._get_or_create_cipher()
-        
-        # Initialize empty config if none exists
-        if not os.path.exists(self.config_file):
-            self._create_default_config()
+
+        # Initialize database structure if needed
+        self._ensure_table_exists()
     
+    def _ensure_table_exists(self):
+        """Ensure api_configs table exists in database."""
+        with SessionLocal() as db:
+            db.execute(text("""
+                CREATE TABLE IF NOT EXISTS api_configs (
+                    id SERIAL PRIMARY KEY,
+                    workflow VARCHAR(50) NOT NULL,
+                    category VARCHAR(50) NOT NULL,
+                    service VARCHAR(50) NOT NULL,
+                    config_key VARCHAR(100) NOT NULL,
+                    config_value TEXT,
+                    is_encrypted BOOLEAN DEFAULT FALSE,
+                    is_enabled BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    UNIQUE(workflow, category, service, config_key)
+                );
+            """))
+            db.commit()
+
     def _get_or_create_cipher(self) -> Fernet:
         """Get or create encryption cipher for sensitive data."""
         if os.path.exists(self.key_file):
@@ -43,182 +63,122 @@ class APIConfigManager:
                 f.write(key)
         return Fernet(key)
     
-    def _encrypt_sensitive_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Encrypt sensitive fields in the configuration."""
-        encrypted_data = data.copy()
-        
-        # Fields that should be encrypted
+    def _is_sensitive_field(self, key: str) -> bool:
+        """Check if a field contains sensitive data."""
         sensitive_fields = [
-            'apiKey', 'api_key', 'accessToken', 'access_token', 
+            'apiKey', 'api_key', 'accessToken', 'access_token',
             'clientSecret', 'client_secret', 'authToken', 'auth_token',
             'apiSecret', 'api_secret', 'serviceAccount', 'botToken',
             'webhookUrl', 'secretAccessKey'
         ]
-        
-        def encrypt_recursive(obj):
-            if isinstance(obj, dict):
-                for key, value in obj.items():
-                    if key in sensitive_fields and isinstance(value, str) and value:
-                        obj[key] = self.cipher_suite.encrypt(value.encode()).decode()
-                    elif isinstance(value, (dict, list)):
-                        encrypt_recursive(value)
-            elif isinstance(obj, list):
-                for item in obj:
-                    if isinstance(item, (dict, list)):
-                        encrypt_recursive(item)
-        
-        encrypt_recursive(encrypted_data)
-        return encrypted_data
-    
-    def _decrypt_sensitive_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Decrypt sensitive fields in the configuration."""
-        decrypted_data = data.copy()
-        
-        sensitive_fields = [
-            'apiKey', 'api_key', 'accessToken', 'access_token', 
-            'clientSecret', 'client_secret', 'authToken', 'auth_token',
-            'apiSecret', 'api_secret', 'serviceAccount', 'botToken',
-            'webhookUrl', 'secretAccessKey'
-        ]
-        
-        def decrypt_recursive(obj):
-            if isinstance(obj, dict):
-                for key, value in obj.items():
-                    if key in sensitive_fields and isinstance(value, str) and value:
-                        try:
-                            obj[key] = self.cipher_suite.decrypt(value.encode()).decode()
-                        except Exception:
-                            # If decryption fails, assume it's already decrypted
-                            pass
-                    elif isinstance(value, (dict, list)):
-                        decrypt_recursive(value)
-            elif isinstance(obj, list):
-                for item in obj:
-                    if isinstance(item, (dict, list)):
-                        decrypt_recursive(item)
-        
-        decrypt_recursive(decrypted_data)
-        return decrypted_data
-    
-    def _create_default_config(self):
-        """Create default configuration structure."""
-        default_config = {
-            "metadata": {
-                "created": datetime.now().isoformat(),
-                "version": "1.0",
-                "description": "API configurations for pre-production, production, and promotion workflows"
-            },
-            "preproduction": {
-                "ai_services": {
-                    "ollama": {"host": "", "apiKey": "", "enabled": False},
-                    "whisper": {"host": "", "endpoint": "", "enabled": False},
-                    "xtts": {"host": "http://192.168.51.197:5001", "endpoint": "/v1/audio/speech", "language": "en", "speed": 1.0, "speaker": "", "enabled": False},
-                    "openai": {"apiKey": "", "organization": "", "enabled": False},
-                    "anthropic": {"apiKey": "", "enabled": False},
-                    "gemini": {"apiKey": "", "enabled": False},
-                    "grok": {"apiKey": "", "enabled": False},
-                    "stabilityAi": {"apiKey": "", "enabled": False},
-                    "elevenLabs": {"apiKey": "", "enabled": False}
-                },
-                "storage": {
-                    "google": {
-                        "clientId": "",
-                        "clientSecret": "",
-                        "serviceAccount": "",
-                        "driveEnabled": False,
-                        "calendarEnabled": False
-                    },
-                    "aws": {
-                        "accessKeyId": "",
-                        "secretAccessKey": "",
-                        "region": "",
-                        "bucket": "",
-                        "enabled": False
-                    }
-                },
-                "communication": {
-                    "slack": {"botToken": "", "webhookUrl": "", "enabled": False},
-                    "discord": {"botToken": "", "webhookUrl": "", "enabled": False},
-                    "twilio": {"accountSid": "", "authToken": "", "phoneNumber": "", "enabled": False},
-                    "email": {"provider": "", "apiKey": "", "fromEmail": "", "enabled": False}
-                }
-            },
-            "production": {
-                "streaming": {},
-                "recording": {},
-                "live_control": {}
-            },
-            "promotion": {
-                "social_media": {
-                    "youtube": {"apiKey": "", "clientId": "", "enabled": False},
-                    "vimeo": {"accessToken": "", "enabled": False},
-                    "twitter": {"apiKey": "", "apiSecret": "", "accessToken": "", "enabled": False},
-                    "facebook": {"accessToken": "", "pageId": "", "enabled": False},
-                    "instagram": {"accessToken": "", "enabled": False},
-                    "linkedin": {"accessToken": "", "enabled": False},
-                    "tiktok": {"accessToken": "", "enabled": False},
-                    "rumble": {"apiKey": "", "channelId": "", "enabled": False}
-                },
-                "analytics": {},
-                "advertising": {}
-            },
-            "development": {
-                "github": {"accessToken": "", "organization": "", "enabled": False},
-                "gitlab": {"accessToken": "", "baseUrl": "https://gitlab.com", "enabled": False},
-                "zapier": {"webhookUrl": "", "enabled": False},
-                "webhooks": [],
-                "customEndpoints": []
-            }
-        }
-        
-        self.save_config(default_config)
+        return key in sensitive_fields
     
     def load_config(self) -> Dict[str, Any]:
-        """Load and decrypt configuration from file."""
+        """Load and decrypt configuration from DATABASE."""
         try:
-            with open(self.config_file, 'r') as f:
-                encrypted_config = json.load(f)
-            
-            # Decrypt sensitive data
-            config = self._decrypt_sensitive_data(encrypted_config)
-            
-            # Add metadata
-            config["metadata"]["last_loaded"] = datetime.now().isoformat()
-            
+            with SessionLocal() as db:
+                result = db.execute(text("""
+                    SELECT workflow, category, service, config_key, config_value, is_encrypted, is_enabled
+                    FROM api_configs
+                    ORDER BY workflow, category, service, config_key
+                """))
+                rows = result.fetchall()
+
+            # Build nested config structure
+            config = {"metadata": {"last_loaded": datetime.now().isoformat()}}
+
+            for row in rows:
+                workflow, category, service, key, value, is_encrypted, is_enabled = row
+
+                # Initialize nested dict structure
+                if workflow not in config:
+                    config[workflow] = {}
+                if category not in config[workflow]:
+                    config[workflow][category] = {}
+                if service not in config[workflow][category]:
+                    config[workflow][category][service] = {}
+
+                # Decrypt if needed
+                if is_encrypted and value:
+                    try:
+                        value = self.cipher_suite.decrypt(value.encode()).decode()
+                    except Exception as e:
+                        logger.warning(f"Failed to decrypt {workflow}.{category}.{service}.{key}: {e}")
+
+                # Store value
+                if key == 'enabled':
+                    config[workflow][category][service]['enabled'] = is_enabled
+                else:
+                    config[workflow][category][service][key] = value or ""
+
             return config
-            
-        except FileNotFoundError:
-            logger.warning("Config file not found, creating default")
-            self._create_default_config()
-            return self.load_config()
+
         except Exception as e:
-            logger.error(f"Error loading config: {e}")
+            logger.error(f"Error loading config from database: {e}")
             raise HTTPException(status_code=500, detail="Failed to load API configuration")
     
     def save_config(self, config: Dict[str, Any]) -> bool:
-        """Encrypt and save configuration to file."""
+        """Encrypt and save configuration to DATABASE."""
         try:
-            # Create backup of existing config
-            if os.path.exists(self.config_file):
-                import shutil
-                shutil.copy2(self.config_file, self.backup_file)
-            
-            # Add metadata
-            config["metadata"] = config.get("metadata", {})
-            config["metadata"]["last_saved"] = datetime.now().isoformat()
-            
-            # Encrypt sensitive data
-            encrypted_config = self._encrypt_sensitive_data(config)
-            
-            # Save to file
-            with open(self.config_file, 'w') as f:
-                json.dump(encrypted_config, f, indent=2)
-            
-            logger.info("API configuration saved successfully")
+            with SessionLocal() as db:
+                # Flatten nested config to database rows
+                for workflow, workflow_data in config.items():
+                    if workflow == "metadata":
+                        continue
+
+                    if not isinstance(workflow_data, dict):
+                        continue
+
+                    for category, category_data in workflow_data.items():
+                        if not isinstance(category_data, dict):
+                            continue
+
+                        for service, service_data in category_data.items():
+                            if not isinstance(service_data, dict):
+                                continue
+
+                            # Extract enabled flag
+                            is_enabled = service_data.get('enabled', False)
+
+                            # Save each config key
+                            for key, value in service_data.items():
+                                if key == 'enabled':
+                                    continue
+
+                                # Encrypt if sensitive
+                                is_encrypted = self._is_sensitive_field(key)
+                                stored_value = value
+
+                                if is_encrypted and value:
+                                    stored_value = self.cipher_suite.encrypt(str(value).encode()).decode()
+
+                                # Upsert to database
+                                db.execute(text("""
+                                    INSERT INTO api_configs (workflow, category, service, config_key, config_value, is_encrypted, is_enabled, updated_at)
+                                    VALUES (:workflow, :category, :service, :key, :value, :encrypted, :enabled, NOW())
+                                    ON CONFLICT (workflow, category, service, config_key)
+                                    DO UPDATE SET
+                                        config_value = :value,
+                                        is_encrypted = :encrypted,
+                                        is_enabled = :enabled,
+                                        updated_at = NOW()
+                                """), {
+                                    "workflow": workflow,
+                                    "category": category,
+                                    "service": service,
+                                    "key": key,
+                                    "value": stored_value,
+                                    "encrypted": is_encrypted,
+                                    "enabled": is_enabled
+                                })
+
+                db.commit()
+
+            logger.info("API configuration saved successfully to database")
             return True
-            
+
         except Exception as e:
-            logger.error(f"Error saving config: {e}")
+            logger.error(f"Error saving config to database: {e}")
             raise HTTPException(status_code=500, detail="Failed to save API configuration")
     
     def get_service_config(self, workflow: str, category: str, service: str) -> Optional[Dict[str, Any]]:
