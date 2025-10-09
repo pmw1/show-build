@@ -123,6 +123,7 @@
           @metadata-change="onMetadataChange"
           @update:slug="handleSlugChangeFromEditor"
           @update:duration="handleDurationChangeFromEditor"
+          @duration-calculated="handleDurationCalculated"
           @insert-cue="handleInsertCue"
         />
       </div>
@@ -183,7 +184,13 @@
       @submit="submitGraphic"
     />
 
-    <FsqModal :show="showFsqModal" @update:show="handleFsqModalClose" :current-episode="currentEpisodeNumber" @submit="submitFsq" />
+    <FsqModal
+      :show="showFsqModal"
+      @update:show="handleFsqModalClose"
+      :current-episode="currentEpisodeNumber"
+      :speaker-wpm="currentSpeakerWpm"
+      @submit="submitFsq"
+    />
     <SotModal
       v-model:show="showSotModal"
       :episode-number="currentEpisodeNumber"
@@ -267,6 +274,7 @@ import { getColorValue, resolveVuetifyColor, loadColorsFromDatabase } from '../u
 import { debounce } from 'lodash-es';
 import { getItemTypesForDropdown } from '../config/itemTypes';
 import { notifyUserStandard, NOTIFICATION_COLORS } from '../composables/useStandardNotification';
+import { useLLM } from '../composables/useLLM';
 
 export default {
   name: 'ContentEditor',
@@ -947,7 +955,16 @@ Try dropping an image or video file here!`
     currentRundownItem() {
       return (this.rundownItems && this.rundownItems[this.selectedItemIndex]) || null
     },
-    
+
+    currentSpeakerWpm() {
+      // Get speaker WPM from current rundown item's speaker data
+      // Default to 150 if no speaker is set or WPM is not available
+      if (this.currentRundownItem && this.currentRundownItem.speaker_wpm) {
+        return this.currentRundownItem.speaker_wpm
+      }
+      return 150
+    },
+
     // Form validation rules
     titleRules() {
       return [
@@ -1041,6 +1058,12 @@ Try dropping an image or video file here!`
     }
   },
   methods: {
+    // Get color for segment type from theme settings
+    getTypeColor(segmentType) {
+      // Map segment types to color keys in themeColorMap
+      return getColorValue(segmentType) || '#2196F3'; // Fallback to blue
+    },
+
     // Modal handlers to prevent infinite recursion with v-model
     handleShowImgModal() {
       if (!this.showImgCueModal) {
@@ -2243,15 +2266,12 @@ Try dropping an image or video file here!`
         }
       }
       // Handle Alt+G for creating new GFX item
-      else if (event.altKey && event.key === 'g' && !event.ctrlKey && !event.metaKey) {
-        // Only trigger if not in a text input/textarea
-        if (!['INPUT', 'TEXTAREA'].includes(event.target.tagName)) {
-          event.preventDefault();
-          this.openNewGFXModal();
-        }
+      else if (event.altKey && event.key === 'g' && !event.ctrlKey && !event.metaKey && !isInTextField) {
+        event.preventDefault();
+        this.openNewGFXModal();
       }
       // Handle Alt+S for SOT cue
-      else if (event.altKey && event.key === 's' && !event.ctrlKey && !event.metaKey) {
+      else if (event.altKey && event.key === 's' && !event.ctrlKey && !event.metaKey && !isInTextField) {
         event.preventDefault();
         // If in textarea, insert cue directly, otherwise show modal
         if (event.target.tagName === 'TEXTAREA') {
@@ -2264,7 +2284,7 @@ Try dropping an image or video file here!`
       // NOTE: ALT+Q is now handled by EditorPanel.vue with placement overlay workflow
       // Removed duplicate handler to prevent conflicts
       // Handle Alt+I for IMG cue
-      else if (event.altKey && event.key === 'i' && !event.ctrlKey && !event.metaKey) {
+      else if (event.altKey && event.key === 'i' && !event.ctrlKey && !event.metaKey && !isInTextField) {
         event.preventDefault();
         // If in textarea, insert cue directly, otherwise show modal
         if (event.target.tagName === 'TEXTAREA') {
@@ -2274,7 +2294,7 @@ Try dropping an image or video file here!`
         }
       }
       // Handle Alt+V for VO (Voice Over) cue
-      else if (event.altKey && event.key === 'v' && !event.ctrlKey && !event.metaKey) {
+      else if (event.altKey && event.key === 'v' && !event.ctrlKey && !event.metaKey && !isInTextField) {
         event.preventDefault();
         // If in textarea, insert cue directly, otherwise show modal
         if (event.target.tagName === 'TEXTAREA') {
@@ -2284,7 +2304,7 @@ Try dropping an image or video file here!`
         }
       }
       // Handle Alt+N for NAT (Natural Sound) cue
-      else if (event.altKey && event.key === 'n' && !event.ctrlKey && !event.metaKey) {
+      else if (event.altKey && event.key === 'n' && !event.ctrlKey && !event.metaKey && !isInTextField) {
         event.preventDefault();
         // If in textarea, insert cue directly, otherwise show modal
         if (event.target.tagName === 'TEXTAREA') {
@@ -2294,7 +2314,7 @@ Try dropping an image or video file here!`
         }
       }
       // Handle Alt+P for PKG (Package) cue
-      else if (event.altKey && event.key === 'p' && !event.ctrlKey && !event.metaKey) {
+      else if (event.altKey && event.key === 'p' && !event.ctrlKey && !event.metaKey && !isInTextField) {
         event.preventDefault();
         // If in textarea, insert cue directly, otherwise show modal
         if (event.target.tagName === 'TEXTAREA') {
@@ -2302,6 +2322,13 @@ Try dropping an image or video file here!`
         } else {
           this.showPkgModal = true;
         }
+      }
+      // Handle Ctrl+Alt+Shift+Number for test segment generation (developer tool)
+      else if (event.ctrlKey && event.altKey && event.shiftKey && /^Digit[1-9]$/.test(event.code)) {
+        event.preventDefault();
+        const paragraphCount = parseInt(event.code.replace('Digit', ''));
+        console.log('🧪 Generating test segment with', paragraphCount, 'paragraphs');
+        this.generateTestSegment(paragraphCount);
       }
       // Handle Delete key for deleting selected rundown item
       else if (event.key === 'Delete' && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -2935,19 +2962,54 @@ Try dropping an image or video file here!`
       }
       fsqCueBlock += `<!-- End Cue -->`;
 
-      // Use the same insertion pattern as IMG/SOT modals
-      this.handleInsertCue({
-        cueType: 'FSQ',
-        cueText: fsqCueBlock,
-        editorMode: this.editorMode
-      });
+      // Initialize pending cues array if this is the first part
+      if (!this.$refs.editorPanel.pendingCueDataArray) {
+        this.$refs.editorPanel.pendingCueDataArray = [];
+      }
 
-      // Close the modal
-      this.showFsqModal = false;
+      // Add this cue to the array
+      this.$refs.editorPanel.pendingCueDataArray.push(fsqCueBlock);
+      console.log(`📦 Collected FSQ part ${this.$refs.editorPanel.pendingCueDataArray.length} (Part: ${fsqCueData.part})`);
 
-      // Show success feedback to user
-      this.$toast.success('FSQ cue inserted successfully!');
-      console.log('✅ FSQ cue inserted');
+      // Check if this is a multipart quote and if we're on the last part
+      const partMatch = fsqCueData.part?.match(/(\d+)x(\d+)/);
+      const currentPart = partMatch ? parseInt(partMatch[1]) : 1;
+      const totalParts = partMatch ? parseInt(partMatch[2]) : 1;
+      const isLastPart = currentPart === totalParts;
+
+      console.log(`🔢 Multipart check: ${currentPart}/${totalParts}, isLastPart: ${isLastPart}`);
+
+      // Only show placement overlay when we have ALL parts
+      if (isLastPart) {
+        console.log(`✅ All ${totalParts} FSQ parts collected, activating placement overlay`);
+
+        // Close the modal
+        this.showFsqModal = false;
+
+        // Store pending cue data for placement overlay (array of all parts)
+        if (this.$refs.editorPanel) {
+          console.log('📍 Activating FSQ placement overlay with', this.$refs.editorPanel.pendingCueDataArray.length, 'cues');
+          this.$refs.editorPanel.pendingCueData = this.$refs.editorPanel.pendingCueDataArray; // Store array
+          this.$refs.editorPanel.pendingCueType = 'FSQ';
+          this.$refs.editorPanel.showCuePlacement = true;
+        } else {
+          console.warn('⚠️ EditorPanel ref not available, falling back to direct insertion');
+          // Insert all parts
+          this.$refs.editorPanel.pendingCueDataArray.forEach(cueBlock => {
+            this.handleInsertCue({
+              cueType: 'FSQ',
+              cueText: cueBlock,
+              editorMode: this.editorMode
+            });
+          });
+          this.$toast.success(`${totalParts} FSQ cue(s) inserted successfully!`);
+        }
+
+        // Clear the array for next time
+        this.$refs.editorPanel.pendingCueDataArray = [];
+      } else {
+        console.log(`⏳ Waiting for remaining parts (${currentPart}/${totalParts})...`);
+      }
     },
 
     // Handle FSQ modal close (including cancel/ESC)
@@ -2957,14 +3019,15 @@ Try dropping an image or video file here!`
 
       // When modal is closed (isVisible becomes false)
       if (!isVisible) {
-        console.log('🎬🔥 FSQ modal closed - clearing placement highlighting');
-
-        // Clear placement overlay if it's active
-        if (this.$refs.editorPanel) {
+        // Only clear placement if there's NO pending cue waiting to be placed
+        // (if user submitted, placement overlay should remain active)
+        if (this.$refs.editorPanel && !this.$refs.editorPanel.pendingCueData) {
+          console.log('🎬🔥 FSQ modal closed - no pending cue, clearing placement highlighting');
           this.$refs.editorPanel.showCuePlacement = false;
           this.$refs.editorPanel.pendingCueType = null;
           this.$refs.editorPanel.pendingPlacement = null;
-          this.$refs.editorPanel.pendingCueData = null;
+        } else if (this.$refs.editorPanel && this.$refs.editorPanel.pendingCueData) {
+          console.log('🎬✅ FSQ modal closed - pending cue active, keeping placement overlay');
         }
       }
     },
@@ -3016,46 +3079,93 @@ Try dropping an image or video file here!`
       }
     },
     
-    submitVo(data) {
-      const voCue = `[VO: ${data.text}${data.duration ? ' | ' + data.duration : ''}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
+    async submitVo(data) {
+      try {
+        console.log('🎬 VO Modal Submit');
+        console.log('📋 VO data received:', data);
 
-      this.handleInsertCue({
-        cueType: 'VO',
-        cueText: voCue,
-        editorMode: this.editorMode
-      });
+        // Build the VO cue
+        const voCue = `[VO: ${data.text}${data.duration ? ' | ' + data.duration : ''}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
 
-      this.showVoModal = false;
-      this.$toast.success('VO cue inserted successfully!');
-      console.log('✅ VO cue inserted');
+        console.log('📝 Built VO cue, sending to EditorPanel for placement insertion');
+
+        // Close modal first
+        this.showVoModal = false;
+
+        // Send cue data to EditorPanel for placement-based insertion
+        // EditorPanel will activate placement overlay for user to click drop zone
+        // After user clicks, the cue will be inserted and we'll auto-save
+        if (this.$refs.editorPanel) {
+          await this.$refs.editorPanel.handleVoCueSubmit(voCue);
+          console.log('✅ VO cue data sent to EditorPanel - placement overlay now active');
+          console.log('📍 Waiting for user to click drop zone to insert VO...');
+        }
+
+        // NOTE: Database save will happen automatically after user clicks placement
+        // via the normal auto-save mechanism when scriptContent is updated
+
+      } catch (error) {
+        console.error('❌ Error in submitVo:', error);
+        if (this.$toast) {
+          this.$toast.error(`Failed to insert VO cue: ${error.message}`);
+        }
+      }
     },
     
-    submitNat(data) {
-      const natCue = `[NAT: ${data.description}${data.duration ? ' | ' + data.duration : ''}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
+    async submitNat(data) {
+      try {
+        console.log('🎬 NAT Modal Submit');
+        console.log('📋 NAT data received:', data);
 
-      this.handleInsertCue({
-        cueType: 'NAT',
-        cueText: natCue,
-        editorMode: this.editorMode
-      });
+        // Build the NAT cue
+        const natCue = `[NAT: ${data.description}${data.duration ? ' | ' + data.duration : ''}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
 
-      this.showNatModal = false;
-      this.$toast.success('NAT cue inserted successfully!');
-      console.log('✅ NAT cue inserted');
+        console.log('📝 Built NAT cue, sending to EditorPanel for placement insertion');
+
+        // Close modal first
+        this.showNatModal = false;
+
+        // Send cue data to EditorPanel for placement-based insertion
+        if (this.$refs.editorPanel) {
+          await this.$refs.editorPanel.handleNatCueSubmit(natCue);
+          console.log('✅ NAT cue data sent to EditorPanel - placement overlay now active');
+          console.log('📍 Waiting for user to click drop zone to insert NAT...');
+        }
+
+      } catch (error) {
+        console.error('❌ Error in submitNat:', error);
+        if (this.$toast) {
+          this.$toast.error(`Failed to insert NAT cue: ${error.message}`);
+        }
+      }
     },
     
-    submitPkg(data) {
-      const pkgCue = `[PKG: ${data.title} | ${data.duration}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
+    async submitPkg(data) {
+      try {
+        console.log('🎬 PKG Modal Submit');
+        console.log('📋 PKG data received:', data);
 
-      this.handleInsertCue({
-        cueType: 'PKG',
-        cueText: pkgCue,
-        editorMode: this.editorMode
-      });
+        // Build the PKG cue
+        const pkgCue = `[PKG: ${data.title} | ${data.duration}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
 
-      this.showPkgModal = false;
-      this.$toast.success('PKG cue inserted successfully!');
-      console.log('✅ PKG cue inserted');
+        console.log('📝 Built PKG cue, sending to EditorPanel for placement insertion');
+
+        // Close modal first
+        this.showPkgModal = false;
+
+        // Send cue data to EditorPanel for placement-based insertion
+        if (this.$refs.editorPanel) {
+          await this.$refs.editorPanel.handlePkgCueSubmit(pkgCue);
+          console.log('✅ PKG cue data sent to EditorPanel - placement overlay now active');
+          console.log('📍 Waiting for user to click drop zone to insert PKG...');
+        }
+
+      } catch (error) {
+        console.error('❌ Error in submitPkg:', error);
+        if (this.$toast) {
+          this.$toast.error(`Failed to insert PKG cue: ${error.message}`);
+        }
+      }
     },
     
     submitVox(data) {
@@ -3811,6 +3921,17 @@ Try dropping an image or video file here!`
       }
     },
 
+    // Handle calculated duration from EditorPanel (auto-calculated based on content)
+    handleDurationCalculated(calculatedDuration) {
+      console.log('⏱️ Auto-calculated duration from content:', calculatedDuration);
+      if (this.currentRundownItem) {
+        this.currentRundownItem.duration = calculatedDuration;
+        this.currentItemMetadata.duration = calculatedDuration;
+        // Mark as having unsaved changes
+        this.hasUnsavedChanges = true;
+      }
+    },
+
     // Handle other header field changes
     handleTitleChange(newTitle) {
       console.log('Title change from header:', newTitle);
@@ -3969,6 +4090,138 @@ Try dropping an image or video file here!`
         behavior: 'smooth',
         block: 'center'
       });
+    },
+
+    /**
+     * Generate test podcast segment using LLM (Developer Tool)
+     * Triggered by Ctrl+Alt+Shift+[1-9]
+     * @param {number} paragraphCount - Number of paragraphs to generate (1-9)
+     */
+    async generateTestSegment(paragraphCount) {
+      console.log(`🧪 Generating test segment with ${paragraphCount} paragraphs...`);
+
+      // Get current item's duration or use default
+      const duration = this.currentRundownItem?.duration || '3';
+      const segmentType = this.currentRundownItem?.type || 'segment';
+
+      // Get upcoming segments if this is a tease
+      let upcomingSegments = '';
+      if (segmentType === 'tease') {
+        const currentIndex = this.rundownItems.findIndex(item => item.id === this.currentRundownItem?.id);
+        if (currentIndex >= 0) {
+          // Get next few segments (skip other teases/ads)
+          const upcoming = this.rundownItems
+            .slice(currentIndex + 1)
+            .filter(item => ['segment', 'coldopen'].includes(item.type))
+            .slice(0, 3) // Get up to 3 upcoming segments
+            .map(item => item.title || 'Untitled')
+            .filter(title => title !== 'Untitled');
+
+          if (upcoming.length > 0) {
+            upcomingSegments = `\n\nUpcoming segments to tease:\n${upcoming.map(t => `- ${t}`).join('\n')}`;
+          }
+        }
+      }
+
+      // Show loading notification with type-specific color
+      const typeColor = this.getTypeColor(segmentType);
+      notifyUserStandard(`Generating ${paragraphCount}-paragraph ${segmentType}...`, typeColor, 2000);
+
+      try {
+        // Check if user is authenticated
+        const token = localStorage.getItem('auth-token');
+        if (!token) {
+          notifyUserStandard('Please login to use LLM features', NOTIFICATION_COLORS.ERROR, 3000);
+          return;
+        }
+
+        const { smartCall } = useLLM();
+
+        // Fetch prompt template from settings based on segment type
+        let promptName;
+        if (segmentType === 'tease') {
+          promptName = 'Segment Generator (Tease)';
+        } else if (segmentType === 'coldopen') {
+          promptName = 'Segment Generator (Cold Open)';
+        } else {
+          promptName = 'Segment Generator (Standard)';
+        }
+
+        // Get LLM routing settings from database
+        let template = null;
+        try {
+          const response = await this.$axios.get('/settings/llm_routing');
+          const prompts = response.data?.value?.prompts || [];
+          const promptConfig = prompts.find(p => p.name === promptName && p.enabled);
+
+          if (promptConfig) {
+            template = promptConfig.template;
+            console.log(`📋 Using prompt template: ${promptName}`);
+          }
+        } catch (error) {
+          console.warn('Failed to load prompt from settings, using fallback:', error);
+        }
+
+        // Fallback to basic template if not found in settings
+        if (!template) {
+          console.warn(`⚠️ Prompt "${promptName}" not found in settings, using fallback template`);
+          template = 'Write a {duration}-minute podcast {segmentType} with {paragraphs} paragraphs. DO NOT include any introductory text - start immediately with the content.';
+        }
+
+        const prompt = template
+          .replace('{duration}', duration)
+          .replace('{paragraphs}', paragraphCount)
+          .replace('{upcomingSegments}', upcomingSegments)
+          .replace('{segmentType}', segmentType);
+
+        console.log('🎯 Calling smartCall with taskType: content-expansion');
+        // Use smartCall with routing
+        const generatedText = await smartCall(prompt, {
+          taskType: 'content-expansion',
+          temperature: 0.8,
+          max_tokens: 2000
+        });
+
+        // Insert into current script content
+        if (this.$refs.editorPanel) {
+          // Get current script content
+          const currentScript = this.scriptContent || '';
+
+          console.log('📝 Generated text length:', generatedText?.length, 'chars');
+          console.log('📝 Generated text preview:', generatedText?.substring(0, 100));
+
+          // Wrap each paragraph in <p class="josh"> tags for script mode parsing
+          const paragraphs = generatedText.split(/\n\s*\n/).filter(p => p.trim());
+          const wrappedParagraphs = paragraphs.map(p => `<p class="josh">${p.trim()}</p>`).join('\n\n');
+
+          // Append generated segment with spacing
+          const newScript = currentScript + (currentScript ? '\n\n' : '') + wrappedParagraphs;
+
+          console.log('📝 New script length:', newScript.length, 'chars');
+
+          // Update script content
+          this.updateScriptContent(newScript);
+
+          // Force Vue to re-render in case reactivity doesn't trigger
+          this.$nextTick(() => {
+            console.log('🔄 After nextTick, scriptContent:', this.scriptContent?.substring(0, 100));
+            // Force editor refresh if needed
+            if (this.$refs.editorPanel && this.$refs.editorPanel.$forceUpdate) {
+              this.$refs.editorPanel.$forceUpdate();
+            }
+          });
+
+          notifyUserStandard('Test segment generated successfully!', NOTIFICATION_COLORS.SUCCESS, 3000);
+          console.log('✅ Test segment generated and inserted');
+        } else {
+          console.error('❌ EditorPanel ref not available');
+          notifyUserStandard('Failed to insert segment - editor not ready', NOTIFICATION_COLORS.ERROR, 3000);
+        }
+
+      } catch (error) {
+        console.error('❌ Test segment generation failed:', error);
+        notifyUserStandard(`Generation failed: ${error.message}`, NOTIFICATION_COLORS.ERROR, 5000);
+      }
     }
   }
 }

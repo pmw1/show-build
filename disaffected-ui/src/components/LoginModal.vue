@@ -130,18 +130,12 @@ export default {
       this.fieldErrors = { username: [], password: [] }
 
       try {
-        // Create URL-encoded form data for OAuth2PasswordRequestForm
-        const formData = new URLSearchParams()
-        formData.append('username', this.credentials.username)
-        formData.append('password', this.credentials.password)
-
+        // Send JSON data to login endpoint
         const response = await axios.post(
           '/api/auth/login',
-          formData,
           {
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded'
-            }
+            username: this.credentials.username,
+            password: this.credentials.password
           }
         )
 

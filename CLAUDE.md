@@ -2,6 +2,30 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ **MANDATORY: ALWAYS RUN LINTING AFTER CODE CHANGES** ⚠️
+
+**CRITICAL RULE**: After modifying any Vue, JavaScript, or TypeScript files, you MUST run linting before completing tasks:
+
+```bash
+cd disaffected-ui && npm run lint -- --fix
+```
+
+**When to run:**
+- After creating/modifying `.vue` files
+- After creating/modifying `.js` files
+- After creating/modifying composables, mixins, stores
+- Before marking any frontend task as complete
+- Before presenting code to the user for testing
+
+**If linting fails:**
+- Fix all errors before proceeding
+- Use `--fix` flag to auto-correct most issues
+- Do NOT present code with linting errors
+
+**This is not optional - it prevents wasted user testing time on preventable errors.**
+
+---
+
 ## 🚨 **DEBUGGING FRONTEND ISSUES?** 🚨
 **→ [`DEBUG_FIRST.md`](DEBUG_FIRST.md) ← START HERE IMMEDIATELY**
 
@@ -114,18 +138,42 @@ python claudespawn.py --mode local --port 47291
 
 ## Project Overview
 
-Show-Build is a full-stack broadcast rundown management system designed for the Disaffected media ecosystem. It serves as a drop-in replacement for Obsidian-based workflows while maintaining complete file format compatibility. The system operates on the same markdown files and organizational structure as Obsidian.
+Show-Build is a full-stack broadcast rundown management system designed for the Disaffected media ecosystem. It serves as a drop-in replacement for Obsidian-based workflows while maintaining complete file format compatibility. The system maintains compatibility with markdown file format for future filesystem integration, using the same organizational structure as Obsidian.
 
-**📋 Key Documentation**: See [`docs/ASSETID_SYSTEM_GUIDE.md`](docs/ASSETID_SYSTEM_GUIDE.md) for comprehensive AssetID system reference including generation, conversion, scanning, and integration workflows.
+**📋 Key Documentation**:
+- [`docs/ASSETID_SYSTEM_GUIDE.md`](docs/ASSETID_SYSTEM_GUIDE.md) - AssetID system reference
+- [`docs/LLM_GENERATOR_TROUBLESHOOTING.md`](docs/LLM_GENERATOR_TROUBLESHOOTING.md) - LLM test segment generator debugging guide
 
 ## Architecture
+
+### Data Storage Architecture (CRITICAL - READ THIS FIRST)
+
+**CURRENT STATE**: 100% Database-Only Content Storage
+- All rundown items stored in PostgreSQL `rundown_items.script_content` field
+- NO filesystem markdown files are currently read or written for content
+- Media assets (images/video/audio) ARE written to `/mnt/sync/disaffected/episodes/{episode}/assets/`
+- Episode directory structure exists for media organization
+
+**FUTURE FILESYSTEM INTEGRATION** (Planned, Not Implemented):
+- YAML frontmatter format in `script_content` matches Obsidian/markdown conventions
+- When mirroring is implemented, content will be exported to:
+  - `/mnt/sync/disaffected/episodes/{episode_number}/rundown/*.md` - Individual markdown files
+  - `/mnt/sync/disaffected/episodes/{episode_number}/info.md` - Episode metadata
+  - Full bidirectional sync between database and filesystem
+  - Compatible with Obsidian workflows
+
+**DEVELOPER GUIDANCE**:
+- ✅ USE: Database queries to `rundown_items` table for content
+- ✅ USE: Filesystem operations for media assets in `assets/` directory
+- ❌ AVOID: Reading/writing markdown files in `rundown/` directory (not active)
+- ✅ MAINTAIN: YAML frontmatter format compatibility in `script_content` field
 
 ### Backend (FastAPI + Python)
 - **Main Application**: `app/main.py` - Central FastAPI application with comprehensive API endpoints
 - **Database**: PostgreSQL with SQLAlchemy ORM (`app/database.py`)
 - **Authentication**: JWT-based auth system in `app/auth/` with role-based access control
 - **Background Processing**: Celery with Redis for async tasks (`app/celery_app.py`)
-- **File Storage**: Episode data stored in `/home/episodes` (container) or `/mnt/sync/disaffected/episodes/` (host)
+- **Media Storage**: Episode media assets stored in `/mnt/sync/disaffected/episodes/{episode}/assets/` (host)
 
 ### Frontend (Vue 3 + Vuetify)
 - **Framework**: Vue 3 with Composition API, Vuetify 3 for UI components
@@ -174,14 +222,25 @@ cd app && python -m alembic upgrade head
 
 ## File Structure and Data Flow
 
-### Episode Data Structure
-Episodes are stored as directories in `/home/episodes/{episode_number}/`:
-- `rundown/` - Individual markdown files for each rundown item
-- `info.md` - Episode metadata with YAML frontmatter
-- `assets/` - Media files and assets
+### Episode Directory Structure (File System Organization)
+**CURRENT STATE**: Directory structure exists for media asset storage only
 
-### Rundown Items
-Each rundown item is a markdown file with YAML frontmatter:
+Episodes are organized as directories in `/mnt/sync/disaffected/episodes/{episode_number}/`:
+- `assets/` - Media files (images, video clips, thumbnails, audio) actively used
+- `rundown/` - Reserved for future markdown file mirroring (not yet implemented)
+- `info.md` - Reserved for future episode metadata export (not yet implemented)
+
+**CRITICAL**: Rundown content is currently stored 100% in database, NOT filesystem.
+
+### Rundown Items (Database Records)
+Each rundown item is a **PostgreSQL database record** in the `rundown_items` table with:
+- **Parent Relationship**: Links to `rundown_id` (which episode it belongs to)
+- **Optional Child Relationship**: May link to `segment_id` for segment-type items
+- **Script Storage**: `script_content` TEXT field contains markdown with YAML frontmatter
+- **Metadata Fields**: `title`, `slug`, `item_type`, `order_in_rundown`, `duration`, `status`, etc.
+- **Asset References**: Media files stored in `/mnt/sync/disaffected/episodes/{episode}/assets/`
+
+**YAML frontmatter format example** (stored in `script_content` field):
 ```yaml
 ---
 id: '12345'
@@ -326,7 +385,7 @@ cd app && python -m pytest
 1. Make changes to code
 2. For backend: `docker compose up --build server`
 3. For frontend: `npm run serve` in `disaffected-ui/`
-4. Test changes at `http://localhost:8080` (frontend) and `http://localhost:8888` (backend)
+4. Test changes at `http://192.168.51.210:8091` (frontend) and `http://192.168.51.210:8888` (backend)
 
 ### Health Check
 - Backend health: `GET /health`
@@ -349,11 +408,11 @@ Colors are centralized in `disaffected-ui/src/utils/themeColorMap.js`:
 
 ## File Compatibility
 
-The system maintains **complete Obsidian compatibility**:
-- Same markdown file format
-- Identical YAML frontmatter structure
-- Same directory organization
-- No data migration required
+The system maintains **format compatibility** for future Obsidian integration:
+- YAML frontmatter structure matches Obsidian conventions (stored in database `script_content` field)
+- Directory organization follows Obsidian structure (media in `assets/`, reserved `rundown/` for future)
+- Markdown format maintained in database for eventual filesystem mirroring
+- When filesystem integration is implemented, no data migration will be required
 
 ## Common Development Tasks
 
@@ -489,3 +548,19 @@ grep -rn 'ref="[^"]*"' . | sed 's/.*ref="\([^"]*\)".*/\1/' | sort | uniq -d
 - provide all urls using lan-accessible ip.  never localhost.
 - cache clearing requests can run scripts/clean-npm-servers.sh for a thorough job.
 - xtts requests made from anywhere in the show-build environment should use xtts settings in the database which were defined in the settings.
+
+### Ollama Configuration
+**CRITICAL**: Correct Ollama server address is `http://192.168.51.197:11434` (NOT .223)
+
+Database configuration:
+```sql
+-- Verify Ollama config
+SELECT service, config_key, config_value, is_enabled
+FROM api_configs WHERE service = 'ollama';
+```
+
+Available models on 192.168.51.197:
+- deepseek-r1:8b, llama3:latest, mistral:7b, mistral-large:latest
+- wizardlm-uncensored:13b, Qwen2.5-Coder:7b/32b, codellama:34b
+
+Test connectivity: `curl -s http://192.168.51.197:11434/api/tags`

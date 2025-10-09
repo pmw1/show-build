@@ -32,9 +32,20 @@ app.use(Toast, {
   newestOnTop: true
 });
 
-app.config.globalProperties.$axios = axios.create({
+const axiosInstance = axios.create({
   baseURL: process.env.VUE_APP_API_BASE_URL || '/api',
 });
+
+// Add JWT token to all requests
+axiosInstance.interceptors.request.use(config => {
+  const token = localStorage.getItem('auth-token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+app.config.globalProperties.$axios = axiosInstance;
 
 // Mount app and store reference for hot module reload
 app.mount('#app')

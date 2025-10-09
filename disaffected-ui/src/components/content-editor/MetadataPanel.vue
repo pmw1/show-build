@@ -397,7 +397,7 @@ export default {
       this.loadingSpeakers = true
       try {
         const authToken = localStorage.getItem('auth-token')
-        const response = await this.$axios.get('/api/speakers/', {
+        const response = await this.$axios.get('/speakers/', {
           headers: {
             'Authorization': `Bearer ${authToken}`
           }

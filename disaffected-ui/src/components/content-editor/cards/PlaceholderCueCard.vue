@@ -1,8 +1,11 @@
 <template>
   <v-card
     class="cue-card placeholder-cue-card"
-    :class="{ 'selected': selected }"
-    :style="{ borderColor: cueTypeColor }"
+    :class="[
+      { 'selected': selected },
+      getAnalysisClass
+    ]"
+    :style="getCardStyle"
     variant="elevated"
     @click="$emit('select')"
   >
@@ -155,6 +158,46 @@ export default {
       return {
         backgroundColor: lighterColor || '#666',
         color: 'white'
+      };
+    },
+
+    /**
+     * Get CSS class for analysis state
+     */
+    getAnalysisClass() {
+      const state = this.cueData?.analysisState;
+      if (state === 'analyzing') return 'cue-analyzing';
+      if (state === 'needs_review') return 'cue-needs-review';
+      return '';
+    },
+
+    /**
+     * Get card style including analysis state border
+     */
+    getCardStyle() {
+      const state = this.cueData?.analysisState;
+
+      if (state === 'analyzing') {
+        // Purple 7px border while analyzing
+        return {
+          borderColor: '#9C27B0',
+          borderWidth: '7px',
+          borderStyle: 'solid'
+        };
+      } else if (state === 'needs_review') {
+        // Red 7px border when needs review
+        return {
+          borderColor: '#D32F2F',
+          borderWidth: '7px',
+          borderStyle: 'solid'
+        };
+      }
+
+      // Default: use cue type color with 4px border
+      return {
+        borderColor: this.cueTypeColor,
+        borderWidth: '4px',
+        borderStyle: 'solid'
       };
     }
   },

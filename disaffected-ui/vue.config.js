@@ -64,27 +64,27 @@ module.exports = defineConfig({
     } : true,
     proxy: {
       '/api': {
-        target: 'http://192.168.51.210:8888',
+        target: 'http://server:80',
         changeOrigin: true,
         secure: false
       },
       '/assetid': {
-        target: 'http://192.168.51.210:8888',
+        target: 'http://server:80',
         changeOrigin: true,
         secure: false
       },
       '/newAssetID': {
-        target: 'http://192.168.51.210:8888',
+        target: 'http://server:80',
         changeOrigin: true,
         secure: false
       },
       '/health': {
-        target: 'http://192.168.51.210:8888',
+        target: 'http://server:80',
         changeOrigin: true,
         secure: false
       },
       '/episodes': {
-        target: 'http://192.168.51.210:8888',
+        target: 'http://server:80',
         changeOrigin: true,
         secure: false
       }

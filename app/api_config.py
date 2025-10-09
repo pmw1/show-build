@@ -72,7 +72,12 @@ class APIConfigManager:
             'webhookUrl', 'secretAccessKey'
         ]
         return key in sensitive_fields
-    
+
+    def _to_camel_case(self, snake_str: str) -> str:
+        """Convert snake_case to camelCase."""
+        components = snake_str.split('_')
+        return components[0] + ''.join(x.title() for x in components[1:])
+
     def load_config(self) -> Dict[str, Any]:
         """Load and decrypt configuration from DATABASE."""
         try:
@@ -105,11 +110,14 @@ class APIConfigManager:
                     except Exception as e:
                         logger.warning(f"Failed to decrypt {workflow}.{category}.{service}.{key}: {e}")
 
+                # Convert snake_case to camelCase for frontend compatibility
+                camel_key = self._to_camel_case(key)
+
                 # Store value
                 if key == 'enabled':
                     config[workflow][category][service]['enabled'] = is_enabled
                 else:
-                    config[workflow][category][service][key] = value or ""
+                    config[workflow][category][service][camel_key] = value or ""
 
             return config
 

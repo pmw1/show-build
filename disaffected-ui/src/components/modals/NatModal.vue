@@ -1,9 +1,15 @@
 <template>
   <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="500">
-    <v-card>
-      <v-card-title>Add Natural Sound (NAT) Cue</v-card-title>
+    <v-card :style="modalStyles">
+      <v-card-title :style="headerStyles">Add Natural Sound (NAT) Cue</v-card-title>
       <v-card-text>
-        <v-text-field v-model="slug" label="Slug" required :rules="[v => !!v || 'Slug is required', v => !duplicateSlugs.includes(v) || 'Slug must be unique']"></v-text-field>
+        <v-text-field
+          ref="slugField"
+          v-model="slug"
+          label="Slug"
+          required
+          :rules="[v => !!v || 'Slug is required', v => !duplicateSlugs.includes(v) || 'Slug must be unique']"
+        ></v-text-field>
         <v-textarea v-model="description" label="Description" required :rules="[v => !!v || 'Description is required']" rows="4"></v-textarea>
         <v-text-field v-model="duration" label="Duration (HH:MM:SS)" required :rules="[v => /^\d{2}:\d{2}:\d{2}$/.test(v) || 'Format must be HH:MM:SS']"></v-text-field>
         <v-text-field v-model="timestamp" label="Timestamp (HH:MM:SS, optional)" :rules="[v => !v || /^\d{2}:\d{2}:\d{2}$/.test(v) || 'Format must be HH:MM:SS']"></v-text-field>
@@ -11,19 +17,37 @@
       </v-card-text>
       <v-card-actions>
         <v-spacer></v-spacer>
-        <v-btn color="error" @click="$emit('update:show', false)">Cancel</v-btn>
-        <v-btn color="success" @click="submit" :disabled="!slug || !description || !duration">Submit</v-btn>
+        <v-btn color="error" @click="handleAbort">Cancel (ESC)</v-btn>
+        <v-btn color="success" @click="handleSubmit" :disabled="!slug || !description || !duration">Submit (Shift+Enter)</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
 </template>
 <script>
 import axios from 'axios';
+import { cueModalMixin } from '@/mixins/cueModalMixin';
+
 export default {
   name: 'NatModal',
-  props: { show: Boolean, episode: String, duplicateSlugs: Array },
+  mixins: [cueModalMixin],
+  props: {
+    show: Boolean,
+    episode: String,
+    duplicateSlugs: Array,
+    cueType: {
+      type: String,
+      default: 'nat'
+    }
+  },
   data() { return { slug: '', description: '', duration: '', timestamp: '', file: null }; },
   methods: {
+    async handleSubmit() {
+      // Validate before submitting
+      if (!this.slug || !this.description || !this.duration) {
+        return;
+      }
+      await this.submit();
+    },
     async submit() {
       const normalizedSlug = this.slug.toLowerCase().replace(/['".,!?]/g, '').replace(/\s+/g, '-');
       try {

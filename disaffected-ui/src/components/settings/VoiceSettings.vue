@@ -160,6 +160,66 @@
         </v-col>
       </v-row>
 
+      <!-- Voice Model Training Section -->
+      <v-row class="mt-4">
+        <v-col cols="12">
+          <v-card variant="outlined" class="pa-4" :disabled="true" style="opacity: 0.6;">
+            <v-card-title class="text-subtitle-1 d-flex align-center">
+              <v-icon left>mdi-brain</v-icon>
+              Voice Model Training
+              <v-chip size="small" color="orange" class="ml-3">Coming Soon</v-chip>
+            </v-card-title>
+            <v-card-text>
+              <v-alert type="info" variant="tonal" class="mb-4">
+                Progressive voice sample collection and model training for speaker-specific voice synthesis.
+              </v-alert>
+
+              <div class="d-flex flex-column" style="gap: 12px;">
+                <div class="d-flex align-center">
+                  <v-icon color="grey">mdi-microphone-variant</v-icon>
+                  <span class="ml-3 text-grey">Weekly audio sample ingestion</span>
+                </div>
+                <div class="d-flex align-center">
+                  <v-icon color="grey">mdi-text-box-outline</v-icon>
+                  <span class="ml-3 text-grey">Whisper transcription integration</span>
+                </div>
+                <div class="d-flex align-center">
+                  <v-icon color="grey">mdi-waveform</v-icon>
+                  <span class="ml-3 text-grey">Voice segment extraction (5-10 sec chunks)</span>
+                </div>
+                <div class="d-flex align-center">
+                  <v-icon color="grey">mdi-robot</v-icon>
+                  <span class="ml-3 text-grey">XTTS model fine-tuning</span>
+                </div>
+              </div>
+
+              <v-divider class="my-4"></v-divider>
+
+              <div class="text-caption text-grey">
+                <strong>Current Status:</strong> Infrastructure complete, processing pipelines pending<br>
+                <strong>API Endpoints:</strong> /api/voice-model/ingest-sample, /api/voice-model/train<br>
+                <strong>Documentation:</strong> docs/VOICE_MODEL_TRAINING_GUIDE.md
+              </div>
+
+              <div class="mt-4">
+                <v-btn disabled variant="outlined" size="small" class="mr-2">
+                  <v-icon left>mdi-upload</v-icon>
+                  Upload Voice Sample
+                </v-btn>
+                <v-btn disabled variant="outlined" size="small" class="mr-2">
+                  <v-icon left>mdi-folder-open</v-icon>
+                  View Samples
+                </v-btn>
+                <v-btn disabled variant="outlined" size="small">
+                  <v-icon left>mdi-play</v-icon>
+                  Train Model
+                </v-btn>
+              </div>
+            </v-card-text>
+          </v-card>
+        </v-col>
+      </v-row>
+
       <!-- Save Button -->
       <v-row class="mt-6">
         <v-col class="text-center">

@@ -91,13 +91,14 @@ export default {
       required: true
     }
   },
-  emits: ['place-cue', 'cancel'],
+  emits: ['place-cue', 'cancel', 'update:show'],
   data() {
     return {
       phase: 1, // 1 = between/paragraph selection, 2 = character-level cursor
       betweenZones: [],
       paragraphZones: [],
       hoveredZone: null,
+      selectedZoneIndex: 0, // Always have a zone selected (for arrow key navigation)
       selectedParagraph: null, // For phase 2
       characterCursor: {
         show: false,
@@ -108,7 +109,8 @@ export default {
       paragraphTextStyle: {},
       paragraphText: '',
       resizeObserver: null,
-      scrollUpdateInterval: null
+      scrollUpdateInterval: null,
+      keyboardHandler: null
     };
   },
   computed: {
@@ -125,6 +127,28 @@ export default {
         return this.paragraphText.substring(this.characterCursor.position);
       }
       return this.paragraphText.substring(this.characterCursor.position + 1);
+    },
+    /**
+     * Get currently selected zone (for arrow key navigation)
+     * Always returns a zone - never null
+     */
+    currentSelectedZone() {
+      // Interleave between and paragraph zones
+      const allZones = [];
+      for (let i = 0; i < Math.max(this.betweenZones.length, this.paragraphZones.length); i++) {
+        if (i < this.betweenZones.length) {
+          allZones.push({ type: 'between', index: i, data: this.betweenZones[i] });
+        }
+        if (i < this.paragraphZones.length) {
+          allZones.push({ type: 'paragraph', index: i, data: this.paragraphZones[i] });
+        }
+      }
+
+      if (allZones.length === 0) return null;
+
+      // Clamp index to valid range
+      const clampedIndex = Math.max(0, Math.min(this.selectedZoneIndex, allZones.length - 1));
+      return allZones[clampedIndex];
     }
   },
   watch: {
@@ -132,12 +156,19 @@ export default {
       console.log('🎨 CuePlacementOverlay: Show changed to', newVal);
       if (newVal) {
         this.phase = 1;
-        this.hoveredZone = null;
+        this.selectedZoneIndex = 0; // Start with first zone selected
         this.selectedParagraph = null;
         this.characterCursor = { show: false, position: 0, style: {} };
         this.$nextTick(() => {
           this.$nextTick(() => {
             this.calculateZones();
+            // Auto-select first zone
+            if (this.currentSelectedZone) {
+              this.hoveredZone = {
+                type: this.currentSelectedZone.type,
+                index: this.currentSelectedZone.index
+              };
+            }
             this.setupResizeObserver();
             this.startContinuousUpdate();
           });
@@ -334,9 +365,118 @@ export default {
 
     handleKeydown(event) {
       if (event.key === 'Escape') {
-        console.log('🚫 ESC pressed - cancelling drop locator');
+        console.log('🚫 ESC pressed - cancelling drop locator with ABORT flash');
+
+        // Flash red "ABORT" message
+        import('@/composables/useScreenFlash').then(({ useScreenFlash }) => {
+          const { flashUrgent } = useScreenFlash();
+          flashUrgent('ABORT', '#F44336', 500);
+        });
+
         this.$emit('cancel');
         this.$emit('update:show', false);
+        return;
+      }
+
+      // Arrow keys for zone navigation (Phase 1 only)
+      if (this.phase === 1) {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          this.navigateDown();
+          return;
+        }
+
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          this.navigateUp();
+          return;
+        }
+
+        // Enter or Shift+Enter to confirm selection
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          this.confirmCurrentZone();
+          return;
+        }
+      }
+    },
+
+    /**
+     * Navigate to next zone (down arrow)
+     */
+    navigateDown() {
+      const allZones = this.getAllZones();
+      if (allZones.length === 0) return;
+
+      this.selectedZoneIndex = Math.min(this.selectedZoneIndex + 1, allZones.length - 1);
+      this.hoveredZone = this.currentSelectedZone ? {
+        type: this.currentSelectedZone.type,
+        index: this.currentSelectedZone.index
+      } : null;
+
+      // Scroll zone into view if needed
+      this.scrollZoneIntoView(this.currentSelectedZone);
+    },
+
+    /**
+     * Navigate to previous zone (up arrow)
+     */
+    navigateUp() {
+      this.selectedZoneIndex = Math.max(this.selectedZoneIndex - 1, 0);
+      this.hoveredZone = this.currentSelectedZone ? {
+        type: this.currentSelectedZone.type,
+        index: this.currentSelectedZone.index
+      } : null;
+
+      // Scroll zone into view if needed
+      this.scrollZoneIntoView(this.currentSelectedZone);
+    },
+
+    /**
+     * Get all zones in interleaved order
+     */
+    getAllZones() {
+      const allZones = [];
+      for (let i = 0; i < Math.max(this.betweenZones.length, this.paragraphZones.length); i++) {
+        if (i < this.betweenZones.length) {
+          allZones.push({ type: 'between', index: i, data: this.betweenZones[i] });
+        }
+        if (i < this.paragraphZones.length) {
+          allZones.push({ type: 'paragraph', index: i, data: this.paragraphZones[i] });
+        }
+      }
+      return allZones;
+    },
+
+    /**
+     * Confirm current zone selection (Enter key)
+     */
+    confirmCurrentZone() {
+      if (!this.currentSelectedZone) return;
+
+      if (this.currentSelectedZone.type === 'between') {
+        this.handleBetweenZoneClick(this.currentSelectedZone.index);
+      } else {
+        this.handleParagraphZoneClick(this.currentSelectedZone.index, this.currentSelectedZone.data);
+      }
+    },
+
+    /**
+     * Scroll zone into view
+     */
+    scrollZoneIntoView(zone) {
+      if (!zone || !zone.data) return;
+
+      // Find the zone element by its position
+      const zoneElements = document.querySelectorAll('.drop-zone');
+      for (const el of zoneElements) {
+        const rect = el.getBoundingClientRect();
+        const zoneTop = parseFloat(zone.data.style.top);
+
+        if (Math.abs(rect.top + window.pageYOffset - zoneTop) < 5) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          break;
+        }
       }
     },
 
@@ -481,44 +621,48 @@ export default {
   white-space: nowrap;
 }
 
-/* Between-paragraph zones */
+/* Between-paragraph zones - uses draglight for shadow, dragline for border */
 .between-zone {
-  background-color: rgba(33, 150, 243, 0.05);
-  border-color: rgba(33, 150, 243, 0.2);
+  background-color: transparent;
+  border: 2px dotted #C8E6C9; /* dropline color */
+  margin: 1em 0; /* Push content away visually */
 }
 
 .between-zone.highlighted {
-  background-color: rgba(33, 150, 243, 0.25);
-  border-color: rgba(33, 150, 243, 0.8);
-  border-width: 3px;
-  border-style: solid;
-  box-shadow: 0 0 20px rgba(33, 150, 243, 0.4);
+  background-color: #B2EBF2; /* draglight color */
+  border: 3px dotted #4CAF50; /* dragline color - solid green */
+  border-style: dotted;
+  box-shadow: 0 4px 12px rgba(178, 235, 242, 0.6); /* draglight shadow */
+  margin: 1em 0; /* Maintain spacing when highlighted */
 }
 
 .between-zone.highlighted .zone-label {
   opacity: 1;
-  color: #2196f3;
+  color: #1B5E20;
   background: rgba(255, 255, 255, 0.95);
+  font-weight: bold;
 }
 
-/* Paragraph zones */
+/* Paragraph zones - uses draglight for shadow, dragline for border */
 .paragraph-zone {
-  background-color: rgba(76, 175, 80, 0.05);
-  border-color: rgba(76, 175, 80, 0.2);
+  background-color: transparent;
+  border: 2px dotted #C8E6C9; /* dropline color */
+  margin: 1em 0; /* Push content away visually */
 }
 
 .paragraph-zone.highlighted {
-  background-color: rgba(76, 175, 80, 0.25);
-  border-color: rgba(76, 175, 80, 0.8);
-  border-width: 3px;
-  border-style: solid;
-  box-shadow: 0 0 20px rgba(76, 175, 80, 0.4);
+  background-color: rgba(178, 235, 242, 0.4); /* draglight color with transparency */
+  border: 3px dotted #4CAF50; /* dragline color - solid green */
+  border-style: dotted;
+  box-shadow: 0 4px 12px rgba(178, 235, 242, 0.6); /* draglight shadow */
+  margin: 1em 0; /* Maintain spacing when highlighted */
 }
 
 .paragraph-zone.highlighted .zone-label {
   opacity: 1;
-  color: #4caf50;
+  color: #1B5E20;
   background: rgba(255, 255, 255, 0.95);
+  font-weight: bold;
 }
 
 /* Phase 2: Character-Level Cursor */

@@ -116,19 +116,28 @@
     <!-- Standard Notification -->
     <StandardNotification ref="standardNotification" />
 
+    <!-- Screen Flash for modal triggers and aborts -->
+    <ScreenFlash />
+
+    <!-- Initialization Overlay - shows while health check loads -->
+    <InitializationOverlay />
+
     <!-- Status Grid - Fixed at top center -->
     <div v-if="isAuthenticated" class="status-grid-overlay">
       <!-- Status indicator cells -->
       <div class="grid-cell" :class="{
         'backend-connected': health.status === 'healthy',
-        'backend-disconnected': health.status !== 'healthy'
+        'backend-disconnected': health.status === 'error',
+        'backend-unknown': health.status === 'unknown',
+        'status-checking': loading
       }">
         BACK
       </div>
       <div class="grid-cell" :class="{
         'db-connected': health.services?.database === 'connected',
-        'db-disconnected': health.services?.database === 'auth_failed' || health.services?.database === 'db_not_found' || health.services?.database === 'connection_refused',
-        'db-unknown': health.services?.database === 'unknown' || health.services?.database === 'no_config'
+        'db-disconnected': health.services?.database === 'auth_failed' || health.services?.database === 'db_not_found' || health.services?.database === 'connection_refused' || health.services?.database === 'error',
+        'db-unknown': health.services?.database === 'unknown' || health.services?.database === 'no_config' || !health.services?.database,
+        'status-checking': loading
       }">
         DB1
       </div>
@@ -141,7 +150,8 @@
         :class="{
           'ollama-connected': health.services?.ollama?.status === 'connected',
           'ollama-disconnected': health.services?.ollama?.status === 'connection_refused' || health.services?.ollama?.status === 'timeout' || health.services?.ollama?.status?.startsWith('error'),
-          'ollama-unknown': health.services?.ollama?.status === 'unknown'
+          'ollama-unknown': health.services?.ollama?.status === 'unknown',
+          'status-checking': loading
         }"
       >
         OLLAMA
@@ -152,7 +162,8 @@
         :class="{
           'xtts-connected': health.services?.xtts?.status === 'connected',
           'xtts-depleted': health.services?.xtts?.status === 'depleted',
-          'xtts-disconnected': health.services?.xtts?.status === 'error' || !health.services?.xtts?.connected
+          'xtts-disconnected': health.services?.xtts?.status === 'error' || !health.services?.xtts?.connected,
+          'status-checking': loading
         }"
       >
         XTTS
@@ -160,13 +171,15 @@
       <div class="grid-cell" :class="{
         'redis-connected': health.services?.redis?.connected,
         'redis-disconnected': health.services?.redis?.error || !health.services?.redis?.connected,
-        'redis-slow': health.services?.redis?.latency > 100
+        'redis-slow': health.services?.redis?.latency > 100,
+        'status-checking': loading
       }">
         REDIS
       </div>
       <div class="grid-cell" :class="{
         'celery-connected': health.services?.celery?.workers?.length > 0,
-        'celery-disconnected': health.services?.celery?.error || health.services?.celery?.workers?.length === 0
+        'celery-disconnected': health.services?.celery?.error || health.services?.celery?.workers?.length === 0,
+        'status-checking': loading
       }">
         {{ health.services?.celery?.workers?.length > 0 ? 'W:' + health.services?.celery?.workers?.length : 'CELERY' }}
       </div>
@@ -175,7 +188,8 @@
         :class="{
           'nfs-connected': health.services?.nfs?.status === 'connected',
           'nfs-warning': health.services?.nfs?.status === 'warning',
-          'nfs-disconnected': health.services?.nfs?.status === 'error' || !health.services?.nfs?.status
+          'nfs-disconnected': health.services?.nfs?.status === 'error' || !health.services?.nfs?.status,
+          'status-checking': loading
         }"
         @click="openNfsModal"
         style="cursor: pointer;"
@@ -193,6 +207,8 @@
 import LoginModal from '@/components/LoginModal.vue'
 import UrgentFlash from '@/components/UrgentFlash.vue'
 import StandardNotification from '@/components/StandardNotification.vue'
+import ScreenFlash from '@/components/ScreenFlash.vue'
+import InitializationOverlay from '@/components/InitializationOverlay.vue'
 import LiveClock from '@/components/LiveClock.vue'
 import StatusClock from '@/components/StatusClock.vue'
 import NfsStatusModal from '@/components/NfsStatusModal.vue'
@@ -201,6 +217,7 @@ import { useAuth } from '@/composables/useAuth'
 import { useUrgentFlash } from '@/composables/useUrgentFlash'
 import { useStandardNotification } from '@/composables/useStandardNotification'
 import { useSystemHealth } from '@/composables/useSystemHealth'
+import { NOTIFICATION_COLORS } from '@/composables/useStandardNotification'
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -210,6 +227,8 @@ export default {
     LoginModal,
     UrgentFlash,
     StandardNotification,
+    ScreenFlash,
+    InitializationOverlay,
     LiveClock,
     StatusClock,
     NfsStatusModal
@@ -218,7 +237,7 @@ export default {
     const { isAuthenticated, currentUser, checkAuthStatus, handleLogout, setAuth } = useAuth()
     const { registerFlashComponent } = useUrgentFlash()
     const { registerNotificationComponent } = useStandardNotification()
-    const { health } = useSystemHealth()
+    const { health, isLoading: loading } = useSystemHealth() // eslint-disable-line no-unused-vars
     const router = useRouter()
 
     const drawer = ref(false)
@@ -267,7 +286,7 @@ export default {
       showLoginModal.value = false
       
       // Show success notification
-      window.notifyUserStandard("Login successful!", window.NOTIFICATION_COLORS.SUCCESS, 2000)
+      window.notifyUserStandard("Login successful!", NOTIFICATION_COLORS.SUCCESS, 2000)
       
       // Check if user is admin and load organizations
       isAdmin.value = authData.user?.access_level === 'admin'
@@ -345,7 +364,9 @@ export default {
         response => response,
         error => {
           if (error.response?.status === 401) {
-            handleLogout()
+            // Don't clear localStorage token on 401 - just show login modal
+            // This prevents logout loops when token expires or API calls fail
+            isAuthenticated.value = false
             showLoginModal.value = true
           }
           return Promise.reject(error)
@@ -371,7 +392,8 @@ export default {
       standardNotification,
       nfsModalRef,
       openNfsModal,
-      health
+      health,
+      loading
     }
   }
 }
@@ -448,6 +470,12 @@ export default {
 
 .grid-cell.backend-disconnected {
   background-color: #f44336;
+  color: white;
+  font-weight: bold;
+}
+
+.grid-cell.backend-unknown {
+  background-color: #757575;
   color: white;
   font-weight: bold;
 }
@@ -564,6 +592,21 @@ export default {
   opacity: 0.8;
   transform: scale(1.05);
   transition: all 0.2s ease;
+}
+
+/* Status checking animation - blue/white throb */
+.grid-cell.status-checking {
+  animation: status-throb 1.5s ease-in-out infinite;
+  position: relative;
+}
+
+@keyframes status-throb {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 12px 4px rgba(33, 150, 243, 0.4);
+  }
 }
 
 /* GLOBAL FIX: Vuetify 3 label positioning issues across all modals and forms */

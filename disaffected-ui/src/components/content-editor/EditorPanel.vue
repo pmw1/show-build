@@ -438,6 +438,7 @@
                         hide-details
                         class="speaker-textarea"
                         :class="`speaker-${segment.speaker}`"
+                        :style="getSpeakerTextStyle(segment.speaker)"
                         :placeholder="`Enter ${getSpeakerDisplayName(segment.speaker)}'s dialogue here...`"
                         no-resize
                       ></v-textarea>
@@ -1159,6 +1160,7 @@ import SpeakerSelectorModal from './modals/SpeakerSelectorModal.vue';
 import CuePlacementOverlay from './CuePlacementOverlay.vue';
 import CueParser from '../../utils/cueParser.js';
 import { useXtts } from '../../composables/useXtts.js';
+import { useAsyncAnalysis } from '../../composables/useAsyncAnalysis.js';
 
 export default {
   name: 'EditorPanel',
@@ -1392,6 +1394,14 @@ export default {
           }
         });
       }
+    },
+
+    // Watch calculated duration and emit to parent for metadata update
+    calculatedItemDuration: {
+      handler(newDuration) {
+        console.log('⏱️ Calculated item duration:', newDuration);
+        this.$emit('duration-calculated', newDuration);
+      }
     }
   },
   emits: [
@@ -1420,7 +1430,8 @@ export default {
     'toggleRundownPanel',
     'showAssetBrowserModal',
     'showTemplateManagerModal',
-    'update:item'
+    'update:item',
+    'duration-calculated'
   ],
   props: {
     showRundownPanel: {
@@ -1596,6 +1607,32 @@ export default {
       }
     },
 
+    // Calculate total duration of rundown item (cue durations + paragraph text durations)
+    calculatedItemDuration() {
+      if (!this.scriptSegments || this.scriptSegments.length === 0) {
+        return '00:00:00:00';
+      }
+
+      let totalSeconds = 0;
+      const speakerWpm = this.item?.speaker_wpm || 150; // Get speaker WPM from item
+
+      this.scriptSegments.forEach(segment => {
+        if (segment.type === 'cue' && segment.data) {
+          // Add cue duration (parse from HH:MM:SS:FF format)
+          const duration = segment.data.duration || segment.data.Duration || '00:00:00:00';
+          totalSeconds += this.parseDurationToSeconds(duration);
+        } else if (segment.type === 'text' && segment.content) {
+          // Calculate paragraph duration based on word count and speaker WPM
+          const wordCount = segment.content.trim().split(/\s+/).filter(w => w.length > 0).length;
+          const paragraphSeconds = Math.ceil((wordCount / speakerWpm) * 60);
+          totalSeconds += paragraphSeconds;
+        }
+      });
+
+      // Convert total seconds back to HH:MM:SS:FF format
+      return this.secondsToDuration(totalSeconds);
+    },
+
     // Enhanced options for select fields
     statusOptions() {
       return [
@@ -1709,6 +1746,30 @@ export default {
 
   },
   methods: {
+    // Parse HH:MM:SS:FF duration format to total seconds
+    parseDurationToSeconds(duration) {
+      if (!duration || typeof duration !== 'string') return 0;
+
+      const parts = duration.split(':');
+      if (parts.length !== 4) return 0;
+
+      const hours = parseInt(parts[0]) || 0;
+      const minutes = parseInt(parts[1]) || 0;
+      const seconds = parseInt(parts[2]) || 0;
+      // Ignore frames (parts[3]) for now
+
+      return (hours * 3600) + (minutes * 60) + seconds;
+    },
+
+    // Convert total seconds to HH:MM:SS:FF duration format
+    secondsToDuration(totalSeconds) {
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+
+      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:00`;
+    },
+
     // Handle textarea input - update content and auto-resize
     handleTextareaInput(index, value) {
       console.log(`✏️ handleTextareaInput called for index ${index}, value length: ${value?.length}`);
@@ -2226,88 +2287,67 @@ export default {
         return;
       }
 
-      // SCRIPT MODE: Full workflow with placement overlay
-      console.log('📄 Script mode detected - using placement overlay workflow');
+      // SCRIPT MODE: Flash screen with cue color, then open modal
+      console.log('📄 Script mode detected - flashing screen then opening modal');
 
-      // Special handling for SOT - skip pre-modal highlighting, show modal immediately
-      if (cueType === 'SOT') {
-        console.log('🎯 SOT detected - opening modal immediately (placement overlay will activate AFTER modal closes)');
-        this.pendingCueType = cueType;
-        this.$emit('show-sot-modal');
-        console.log('🎬 SOT modal opened - placement overlay will activate when modal closes');
-        return;
-      }
+      // Import flash utility dynamically
+      import('@/composables/useScreenFlash').then(({ useScreenFlash }) => {
+        const { flashForCue } = useScreenFlash();
+        flashForCue(cueType, 250); // Fast flash with cue type color
+      });
 
-      // For other cue types: Show placement overlay with flash animation before modal
-      // Step 1: Detect segment ID
-      console.log('🎯 Step 1: Detecting segment ID...');
-      const insertionPoint = this.detectAndHighlightCursorPosition(cueType);
-      console.log('🎯 Segment detected:', insertionPoint?.segmentId);
-
-      // Step 2: Show placement overlay with flash animation (preview of planned insertion)
-      console.log('🎯 Step 2: Showing placement overlay preview with flash animation');
+      // All cue types now use the same workflow: flash -> modal -> placement
       this.pendingCueType = cueType;
-      this.pendingInsertionPoint = insertionPoint;
-      this.showCuePlacement = true;
 
-      // Wait for flash animation to complete (5 flashes * 100ms * 2 = 1000ms)
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Small delay to let flash complete
+      setTimeout(() => {
+        // Open the appropriate modal
+        if (cueType === 'SOT') {
+          this.$emit('show-sot-modal');
+          console.log('🎬 SOT modal opened - placement overlay will activate when modal closes');
+          return;
+        }
 
-      // Hide placement overlay after preview (for non-SOT cues)
-      this.showCuePlacement = false;
-      console.log('🎯 Placement overlay preview complete');
+        if (cueType === 'IMG') {
+          this.showImgModal = true;
+          console.log('🎬 IMG modal opened - placement overlay will activate when modal closes');
+          return;
+        }
 
-      // Step 3: Show flash message "Insert {CUE_TYPE} CUE" for 500ms
-      console.log('🎯 Step 3: Showing flash message');
-      this.showFlashMessage(cueType);
+        if (cueType === 'FSQ') {
+          this.$emit('show-fsq-modal');
+          console.log('🎬 FSQ modal opened - placement overlay will activate when modal closes');
+          return;
+        }
 
-      // Wait for flash message to complete (800ms total duration)
-      await new Promise(resolve => setTimeout(resolve, 800));
-      console.log('🎯 Flash message complete');
+        if (cueType === 'GFX') {
+          this.$emit('show-gfx-modal');
+          console.log('🎬 GFX modal opened - placement overlay will activate when modal closes');
+          return;
+        }
 
-      // Step 4: Open modal
-      console.log('🎯 Step 4: Opening modal');
-      if (cueType === 'IMG') {
-        this.showImgModal = true;
-        console.log('🎬 IMG modal opened');
-        return;
-      }
+        if (cueType === 'VO') {
+          this.$emit('show-vo-modal');
+          console.log('🎬 VO modal opened - placement overlay will activate when modal closes');
+          return;
+        }
 
-      if (cueType === 'FSQ') {
-        // Set pending cue type for placement workflow
-        this.pendingCueType = 'FSQ';
-        this.$emit('show-fsq-modal');
-        console.log('🎬 FSQ modal opened');
-        console.log('📄 Set pendingCueType to FSQ for placement overlay');
-        return;
-      }
+        if (cueType === 'NAT') {
+          this.$emit('show-nat-modal');
+          console.log('🎬 NAT modal opened - placement overlay will activate when modal closes');
+          return;
+        }
 
-      if (cueType === 'GFX') {
-        this.$emit('show-gfx-modal');
-        console.log('🎬 GFX modal opened');
-        return;
-      }
+        if (cueType === 'PKG') {
+          this.$emit('show-pkg-modal');
+          console.log('🎬 PKG modal opened - placement overlay will activate when modal closes');
+          return;
+        }
 
-      if (cueType === 'VO') {
-        this.$emit('show-vo-modal');
-        console.log('🎬 VO modal opened');
-        return;
-      }
-
-      if (cueType === 'NAT') {
-        this.$emit('show-nat-modal');
-        console.log('🎬 NAT modal opened');
-        return;
-      }
-
-      if (cueType === 'PKG') {
-        this.$emit('show-pkg-modal');
-        console.log('🎬 PKG modal opened');
-        return;
-      }
-
-      // For other cue types, show placement overlay for final selection
-      this.showCuePlacement = true;
+        // Fallback for other cue types
+        const cueText = `**[${cueType}: ]**`;
+        this.insertCueAtCursor(cueText);
+      }, 250);
     },
 
     // Get theme color for cue type
@@ -2989,6 +3029,155 @@ export default {
       }
     },
 
+    /**
+     * Apply analysis recommendations to a cue
+     * Handles actions like splitting FSQ quotes, cleaning SOT transcripts, etc.
+     *
+     * @param {string} assetId - Cue AssetID
+     * @param {string} analysisId - Analysis ID from cueAnalysisStore
+     */
+    async applyAnalysisRecommendations(assetId, analysisId) {
+      const { getRecommendations, markReviewed } = useAsyncAnalysis();
+      const recommendations = getRecommendations(analysisId);
+
+      if (!recommendations) {
+        console.warn('No recommendations found for analysis:', analysisId);
+        return;
+      }
+
+      console.log(`📋 Applying recommendations for ${assetId}:`, recommendations);
+
+      // Find the cue in scriptSegments
+      const cueIndex = this.scriptSegments.findIndex(
+        segment => segment.type === 'cue' && segment.data?.assetId === assetId
+      );
+
+      if (cueIndex === -1) {
+        console.error('Cue not found in script segments:', assetId);
+        return;
+      }
+
+      const cueSegment = this.scriptSegments[cueIndex];
+      const cueData = cueSegment.data;
+
+      // Handle FSQ split recommendations
+      if (recommendations.shouldSplit && recommendations.splitRecommendations) {
+        console.log(`✂️ Splitting FSQ quote into ${recommendations.splitRecommendations.length} parts`);
+
+        // Delete original cue
+        const updatedSegments = [...this.scriptSegments];
+        updatedSegments.splice(cueIndex, 1);
+
+        // Insert split cues at the same position
+        const splitCues = [];
+        for (let i = 0; i < recommendations.splitRecommendations.length; i++) {
+          const splitQuote = recommendations.splitRecommendations[i];
+
+          // Generate AssetID for each split
+          const splitAssetId = await this.generateAssetId();
+
+          // Word count for duration calculation
+          const wordCount = splitQuote.trim().split(/\s+/).filter(w => w.length > 0).length;
+          const speakerWpm = this.item?.speaker_wpm || 150;
+          const durationInSeconds = Math.ceil((wordCount / speakerWpm) * 60);
+          const hours = Math.floor(durationInSeconds / 3600);
+          const minutes = Math.floor((durationInSeconds % 3600) / 60);
+          const seconds = durationInSeconds % 60;
+          const duration = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:00`;
+
+          // Create split cue data
+          const splitCueData = {
+            type: cueData.type,
+            assetId: splitAssetId,
+            slug: `${cueData.slug}-part-${i + 1}`,
+            quote: splitQuote,
+            style: cueData.style || cueData.rawData?.style,
+            fontFamily: cueData.fontFamily || cueData.rawData?.fontfamily,
+            fontSize: cueData.fontSize || cueData.rawData?.fontsize,
+            renderMode: cueData.renderMode || cueData.rawData?.rendermode,
+            duration: duration,
+            wordCount: wordCount,
+            part: `${i + 1}x${recommendations.splitRecommendations.length}`,
+            source: cueData.source || cueData.rawData?.source,
+            includeAttribution: cueData.includeAttribution || cueData.rawData?.includeattribution
+          };
+
+          // Format to cue block markdown
+          const cueBlock = this.formatCueBlock(splitCueData);
+          splitCues.push(cueBlock);
+        }
+
+        // Insert split cues with spacing
+        const insertPosition = cueIndex;
+        updatedSegments.splice(insertPosition, 0, ...splitCues.map(block => ({
+          type: 'cue',
+          cueType: 'FSQ',
+          data: CueParser.parseCueBlock(block)
+        })));
+
+        // Update script content
+        const newRawContent = this.reconstructRawContent(updatedSegments);
+        this.rawScriptContent = newRawContent;
+
+        console.log(`✅ Applied FSQ split: ${recommendations.splitRecommendations.length} quotes inserted`);
+      }
+
+      // Handle other recommendation types (SOT cleanup, PKG optimization, etc.)
+      else if (recommendations.action === 'modify' || recommendations.modifications) {
+        console.log('🔧 Applying field modifications:', recommendations.modifications);
+
+        // Update cue data with modifications
+        const modifiedCueData = { ...cueData.rawData };
+
+        if (recommendations.modifications) {
+          recommendations.modifications.forEach(mod => {
+            if (mod.field && mod.newValue !== undefined) {
+              modifiedCueData[mod.field] = mod.newValue;
+            }
+          });
+        }
+
+        // Update the cue in segments
+        const updatedSegments = [...this.scriptSegments];
+        updatedSegments[cueIndex] = {
+          type: 'cue',
+          cueType: cueData.type,
+          data: {
+            ...cueData,
+            rawData: modifiedCueData
+          }
+        };
+
+        // Update script content
+        const newRawContent = this.reconstructRawContent(updatedSegments);
+        this.rawScriptContent = newRawContent;
+
+        console.log('✅ Applied modifications to cue');
+      }
+
+      // Mark analysis as reviewed
+      markReviewed(analysisId);
+      console.log('✅ Analysis marked as reviewed:', analysisId);
+    },
+
+    /**
+     * Format cue data to markdown cue block
+     * @param {object} cueData - Cue data to format
+     * @returns {string} Formatted cue block
+     */
+    formatCueBlock(cueData) {
+      let cueBlock = '<!-- Begin Cue -->\n';
+
+      Object.keys(cueData).forEach(key => {
+        if (cueData[key]) {
+          const displayKey = key.charAt(0).toUpperCase() + key.slice(1);
+          cueBlock += `[${displayKey}: ${cueData[key]}]\n`;
+        }
+      });
+
+      cueBlock += '<!-- End Cue -->';
+      return cueBlock;
+    },
 
     extractOrderFromSlug(slug) {
       if (!slug) return null;
@@ -3127,10 +3316,20 @@ export default {
       if (placement.cueType === 'IMG' || placement.cueType === 'FSQ' || placement.cueType === 'SOT') {
         console.log(`📍 ${placement.cueType} cue type detected`);
         if (this.pendingCueData) {
-          console.log(`✅ Using pendingCueData for ${placement.cueType} insertion`);
-          console.log('📍 pendingCueData preview:', this.pendingCueData.substring(0, 200));
-          // We already have cue data from modal, insert it
-          this.insertCueAtPlacement(placement, this.pendingCueData);
+          // Check if pendingCueData is an array (multipart FSQ)
+          if (Array.isArray(this.pendingCueData)) {
+            console.log(`✅ Using pendingCueData array for ${placement.cueType} insertion (${this.pendingCueData.length} parts)`);
+            // Insert each part sequentially at the same location
+            this.pendingCueData.forEach((cueBlock, index) => {
+              console.log(`📍 Inserting part ${index + 1}/${this.pendingCueData.length}`);
+              this.insertCueAtPlacement(placement, cueBlock);
+            });
+          } else {
+            console.log(`✅ Using pendingCueData for ${placement.cueType} insertion`);
+            console.log('📍 pendingCueData preview:', this.pendingCueData.substring(0, 200));
+            // We already have cue data from modal, insert it
+            this.insertCueAtPlacement(placement, this.pendingCueData);
+          }
           this.pendingCueData = null;
           this.pendingPlacement = null;
           this.pendingCueType = null;
@@ -3194,6 +3393,66 @@ export default {
 
       console.log('📍 Placement overlay activated - waiting for user to click drop zone');
       // User clicks a drop zone -> handleCuePlacement is called -> cue is inserted
+    },
+
+    async handleVoCueSubmit(voCueText) {
+      console.log('🎬 VO cue submitted to EditorPanel for placement-based insertion');
+
+      this.pendingCueData = voCueText;
+      this.pendingCueType = 'VO';
+
+      if (this.editorMode === 'code') {
+        console.log('📝 Code mode: Inserting VO at cursor position');
+        this.insertCueAtCursor(voCueText);
+        this.pendingCueData = null;
+        this.pendingCueType = null;
+        console.log('✅ VO cue inserted in code mode');
+        return;
+      }
+
+      console.log('📄 Script mode: Activating placement overlay for VO insertion');
+      this.showCuePlacement = true;
+      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+    },
+
+    async handleNatCueSubmit(natCueText) {
+      console.log('🎬 NAT cue submitted to EditorPanel for placement-based insertion');
+
+      this.pendingCueData = natCueText;
+      this.pendingCueType = 'NAT';
+
+      if (this.editorMode === 'code') {
+        console.log('📝 Code mode: Inserting NAT at cursor position');
+        this.insertCueAtCursor(natCueText);
+        this.pendingCueData = null;
+        this.pendingCueType = null;
+        console.log('✅ NAT cue inserted in code mode');
+        return;
+      }
+
+      console.log('📄 Script mode: Activating placement overlay for NAT insertion');
+      this.showCuePlacement = true;
+      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+    },
+
+    async handlePkgCueSubmit(pkgCueText) {
+      console.log('🎬 PKG cue submitted to EditorPanel for placement-based insertion');
+
+      this.pendingCueData = pkgCueText;
+      this.pendingCueType = 'PKG';
+
+      if (this.editorMode === 'code') {
+        console.log('📝 Code mode: Inserting PKG at cursor position');
+        this.insertCueAtCursor(pkgCueText);
+        this.pendingCueData = null;
+        this.pendingCueType = null;
+        console.log('✅ PKG cue inserted in code mode');
+        return;
+      }
+
+      console.log('📄 Script mode: Activating placement overlay for PKG insertion');
+      this.showCuePlacement = true;
+      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
     },
 
     generateCueBlock(cueType) {
@@ -3758,6 +4017,14 @@ export default {
       const options = CueParser.getSpeakerOptions();
       const option = options.find(opt => opt.value === speaker);
       return option ? option.label : speaker.charAt(0).toUpperCase() + speaker.slice(1);
+    },
+
+    // Get explicit text color style for speaker
+    getSpeakerTextStyle(speaker) {
+      const speakerColor = CueParser.getSpeakerColor(speaker);
+      return {
+        color: speakerColor + ' !important'
+      };
     },
 
     // Get light background style for speaker

@@ -41,9 +41,11 @@ Episodes Router (/api/episodes/{episode}/rundown)
 PostgreSQL Database (rundown_items table)
     ↓ script_content field
 Content Editor Components
+    ↓ Media references
+Filesystem Assets (/mnt/sync/disaffected/episodes/{episode}/assets/)
 ```
 
-**Key Insight**: The system is **100% database-driven**. Markdown files exist but are NOT the primary data source. All content editing works directly with PostgreSQL `rundown_items` table.
+**Key Insight**: The system is **100% database-driven for content**. Markdown files in `rundown/` directories are reserved for future mirroring but not yet implemented. Media assets (images, video, audio) ARE actively stored in episode `assets/` directories.
 
 ---
 
@@ -94,10 +96,12 @@ link:                      # Extra fields after closing
 
 **Investigation**: Enhanced debugging added to `generateCurrentFrontmatter()` in EditorPanel.vue
 
-#### Database-Filesystem Synchronization Issues
+#### Database Metadata Consistency Issues
 **Status**: DATA INTEGRITY PROBLEM
-**Evidence**: Episode 0243 shows different data in database vs expected content
-**Impact**: Content editor receives inconsistent metadata causing frontmatter corruption
+**Scope**: Database-only (filesystem markdown not in use)
+**Evidence**: Episode 0243 shows different data in database vs expected metadata
+**Impact**: Content editor receives inconsistent metadata causing frontmatter corruption in `script_content` field
+**Note**: This is a database corruption issue, not a file sync issue (files not actively used)
 
 ### ⚠️ Stability Concerns
 
@@ -224,6 +228,60 @@ link:                      # Extra fields after closing
 - ✅ Celery task management
 - ✅ WebSocket real-time updates
 - ✅ API key authentication for services
+- ✅ Ollama LLM integration (local AI services)
+
+### AI Services Configuration
+
+#### Ollama (Local LLM Server)
+**Status**: ✅ Configured and operational (as of October 6, 2025)
+
+**Critical Configuration Details**:
+- **Correct Host**: `http://192.168.51.197:11434` ✅
+- **Incorrect Host**: `http://192.168.51.223:11434` ❌ (returns connection refused)
+- **Default Model**: `llama3.2`
+
+**Available Models on 192.168.51.197**:
+- `deepseek-r1:8b` - DeepSeek reasoning model
+- `llama3:latest` - Meta's Llama 3
+- `mistral:7b` - Mistral 7B base model
+- `mistral-large:latest` - Mistral Large
+- `wizardlm-uncensored:13b` - Uncensored WizardLM
+- `Qwen2.5-Coder:7b` - Qwen 2.5 coding model (7B)
+- `Qwen2.5-Coder:32b` - Qwen 2.5 coding model (32B)
+- `codellama:34b` - Meta's CodeLlama 34B
+
+**Database Storage**:
+```sql
+-- Ollama config stored in api_configs table
+SELECT service, config_key, config_value, is_enabled
+FROM api_configs
+WHERE service = 'ollama';
+
+-- Expected output:
+-- service | config_key | config_value                  | is_enabled
+-- ollama  | host       | http://192.168.51.197:11434  | t
+-- ollama  | model      | llama3.2                     | t
+-- ollama  | enabled    | true                         | t
+```
+
+**Health Check Integration**:
+- Ollama status appears in `/health` endpoint
+- Frontend status indicator shows connection state
+- Queries database for configuration (not file-based)
+- Tests connectivity via `/api/tags` endpoint
+
+**Quick Verification**:
+```bash
+# Test Ollama server directly
+curl -s http://192.168.51.197:11434/api/tags
+
+# Check Show-Build health status
+curl -s http://192.168.51.210:8888/health | jq '.services.ollama'
+```
+
+**UI Access**:
+- Settings → API Access → Local AI Access
+- Status Grid Overlay shows Ollama connection state
 
 ---
 

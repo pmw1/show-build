@@ -56,30 +56,43 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     )
     try:
         if not token:
+            logger.error("❌ JWT token is empty or None")
             raise credentials_exception
-            
+
         if not SECRET_KEY:
+            logger.error("❌ JWT_SECRET_KEY environment variable not set!")
             raise HTTPException(
                 status_code=500,
                 detail="JWT_SECRET_KEY not configured"
             )
-            
+
+        logger.info(f"🔑 Decoding JWT token (length: {len(token)}, first 20 chars: {token[:20]}...)")
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        logger.info(f"✅ JWT decoded successfully, payload: {payload}")
         username: str = payload.get("sub")
         if username is None:
+            logger.error("JWT payload missing 'sub' claim")
             raise credentials_exception
-            
+
         # Get user from database
         user = AuthService.get_user(username)
         if not user:
+            logger.error(f"User '{username}' from JWT not found in database")
             raise credentials_exception
-            
+
         return {
             "id": user['id'],
             "username": user['username'],
             "access_level": user['access_level']
         }
-    except JWTError:
+    except jwt.ExpiredSignatureError as e:
+        logger.warning(f"JWT token expired: {e}")
+        raise credentials_exception
+    except jwt.InvalidSignatureError as e:
+        logger.error(f"JWT invalid signature (wrong SECRET_KEY?): {e}")
+        raise credentials_exception
+    except JWTError as e:
+        logger.error(f"JWT validation error: {type(e).__name__} - {e}")
         raise credentials_exception
 
 async def get_current_user_or_key(

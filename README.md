@@ -1,7 +1,7 @@
 📦 Show-Build — Disaffected Rundown Management System
 The Show-Build project is a full-stack application designed for the Disaff🚀 Usage
 
-Navigate to http://192.168.51.210:8080/rundown-manager/0225 to manage episode 0225.
+Navigate to http://192.168.51.210:8091/rundown-manager/0225 to manage episode 0225.
 Use the episode selector to switch episodes (e.g., 0226, 0227).
 Drag and drop segments to reorder, then click "Save & Commit" to persist changes.
 View segment metadata (title, ID, length) and colors based on segment type.
@@ -158,14 +158,14 @@ npm install
 npm run serve
 
 
-Access at http://192.168.51.210:8080.
+Access at http://192.168.51.210:8091.
 
 
 
 
 🚀 Usage
 
-Navigate to http://192.168.51.210:8080/ to access the main dashboard.
+Navigate to http://192.168.51.210:8091/ to access the main dashboard.
 
 🌈 Features
 
