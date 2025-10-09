@@ -9,77 +9,87 @@
           <v-icon>mdi-close</v-icon>
         </v-btn>
       </v-card-title>
-      
+
       <v-card-text class="pb-2 compact-fsq-modal">
         <v-form ref="fsqFormRef" v-model="formValid">
           <!-- Quote Text -->
-          <v-textarea
-            ref="quoteFieldRef"
-            v-model="quote"
-            label="Quote Text"
-            placeholder="Enter the quote text..."
-            variant="outlined"
-            rows="6"
-            auto-grow
-            :rules="quoteRules"
-            required
-            :class="[
-              'mb-2',
-              {
-                'ai-analyzing': aiState === 'analyzing',
-                'ai-rejected': aiState === 'rejected',
-                'ai-approved': aiState === 'approved',
-                'ai-auto': aiState === 'auto'
-              }
-            ]"
-            density="compact"
-            @paste="handleQuotePaste"
-            @input="handleQuoteInput"
-          >
-            <template #append-inner>
-              <v-icon v-if="aiState === 'analyzing'" color="amber" size="small" class="rotating">mdi-brain</v-icon>
-              <v-icon v-else-if="aiState === 'rejected'" color="error" size="small">mdi-alert-circle</v-icon>
-              <v-icon v-else-if="aiState === 'approved'" color="success" size="small">mdi-check-circle</v-icon>
-              <v-icon v-else-if="aiState === 'auto'" color="info" size="small">mdi-robot</v-icon>
-              <span v-else class="text-error">*</span>
-            </template>
-            <template #messages>
-              <div v-if="aiMessage" class="ai-feedback-message" :class="`ai-message-${aiState}`">
-                <div class="d-flex align-center justify-space-between">
-                  <div class="flex-grow-1">
-                    {{ aiMessage }}
-                    <!-- Debug: {{ aiState }} -->
-                  </div>
-                  <div v-if="aiActionPending" class="ai-action-buttons ml-2">
-                    <v-btn
-                      size="x-small"
-                      color="success"
-                      variant="text"
-                      @click="acceptAIChange"
-                      class="mr-1"
-                    >
-                      Accept
-                    </v-btn>
-                    <v-btn
-                      size="x-small"
-                      color="error"
-                      variant="text"
-                      @click="rejectAIChange"
-                    >
-                      Revert
-                    </v-btn>
+          <div class="quote-field-wrapper" style="position: relative;">
+            <v-textarea
+              ref="quoteFieldRef"
+              v-model="quote"
+              label="Quote Text"
+              placeholder="Enter the quote text..."
+              variant="outlined"
+              rows="10"
+              auto-grow
+              :rules="quoteRules"
+              required
+              :class="[
+                'mb-2',
+                'large-quote-field',
+                {
+                  'ai-analyzing': aiState === 'analyzing',
+                  'ai-rejected': aiState === 'rejected',
+                  'ai-approved': aiState === 'approved',
+                  'ai-auto': aiState === 'auto'
+                }
+              ]"
+              density="comfortable"
+              @paste="handleQuotePaste"
+              @input="handleQuoteInput"
+            >
+              <template #append-inner>
+                <v-icon v-if="aiState === 'analyzing'" color="purple" size="small" class="rotating">mdi-brain</v-icon>
+                <v-icon v-else-if="aiState === 'rejected'" color="error" size="small">mdi-alert-circle</v-icon>
+                <v-icon v-else-if="aiState === 'approved'" color="success" size="small">mdi-check-circle</v-icon>
+                <v-icon v-else-if="aiState === 'auto'" color="info" size="small">mdi-robot</v-icon>
+                <span v-else class="text-error">*</span>
+              </template>
+              <template #messages>
+                <div v-if="aiMessage" class="ai-feedback-message" :class="`ai-message-${aiState}`">
+                  <div class="d-flex align-center justify-space-between">
+                    <div class="flex-grow-1">
+                      {{ aiMessage }}
+                    </div>
+                    <div v-if="aiActionPending" class="ai-action-buttons ml-2">
+                      <v-btn
+                        size="x-small"
+                        color="success"
+                        variant="text"
+                        @click="acceptAIChange"
+                        class="mr-1"
+                      >
+                        Accept
+                      </v-btn>
+                      <v-btn
+                        size="x-small"
+                        color="error"
+                        variant="text"
+                        @click="rejectAIChange"
+                      >
+                        Revert
+                      </v-btn>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </template>
-          </v-textarea>
+              </template>
+            </v-textarea>
 
-          <!-- AI Generation Credits (very small text) -->
+            <!-- AI Model Badge -->
+            <div v-if="aiState" class="ai-model-badge" :class="`badge-${aiState}`">
+              <div class="badge-content">
+                <div class="badge-service">Ollama</div>
+                <div class="badge-model">qwen2.5-coder:7b</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI Generation Credits -->
           <div v-if="aiGenerationInfo" class="ai-credit-text mt-n2 mb-2">
             Generated by: {{ aiGenerationInfo.model }} | {{ aiGenerationInfo.timestamp }}
           </div>
 
-          <!-- Word count display - directly under quote, bottom left -->
+          <!-- Word count display -->
           <div v-if="quote && quote.length > 0" class="word-count-display mb-2">
             WORDCOUNT: <strong>{{ quote.trim().split(/\s+/).filter(w => w.length > 0).length }}</strong>
           </div>
@@ -87,29 +97,7 @@
           <!-- Spacing after AI credits -->
           <div v-if="aiGenerationInfo" style="margin-bottom: 1em;"></div>
 
-          <!-- Collapsible AI Recommendation Section -->
-          <!-- AI Recommendation Banner (when recommendations exist but panel is collapsed) -->
-          <v-alert
-            v-if="splitRecommendations && splitRecommendations.length > 1 && aiRecommendationExpanded.length === 0"
-            type="error"
-            variant="tonal"
-            prominent
-            class="mb-2 ai-recommendation-banner"
-            @click="aiRecommendationExpanded = [0]"
-            style="cursor: pointer; border: 2px dashed #F44336 !important;"
-          >
-            <div class="d-flex align-center justify-space-between">
-              <div class="d-flex align-center">
-                <v-icon class="mr-2" size="large">mdi-alert-circle-outline</v-icon>
-                <div>
-                  <div class="text-h6 mb-1">AI Review Required</div>
-                  <div><strong>{{ splitRecommendations.length }} split recommendations</strong> — Click to expand and review</div>
-                </div>
-              </div>
-              <v-icon size="x-large">mdi-chevron-down</v-icon>
-            </div>
-          </v-alert>
-
+          <!-- AI Recommendation Expansion Panel -->
           <v-expansion-panels
             v-if="splitRecommendations && splitRecommendations.length > 1"
             v-model="aiRecommendationExpanded"
@@ -128,7 +116,7 @@
                   <div class="d-flex flex-column">
                     <div>
                       <strong>AI Recommendation:</strong>
-                      <span class="ml-1" v-if="aiRecommendationExpanded.length === 0">Click to expand</span>
+                      <span class="ml-1" v-if="!aiRecommendationExpanded || aiRecommendationExpanded.length === 0">Click to expand</span>
                       <span class="ml-1" v-else>{{ splitRecommendations.length }} split segments suggested</span>
                     </div>
                     <div class="text-caption text-grey" style="font-size: 0.65rem; margin-top: -2px;">
@@ -178,6 +166,24 @@
             </v-expansion-panel>
           </v-expansion-panels>
 
+          <!-- Slug Field -->
+          <v-text-field
+            ref="slugFieldRef"
+            v-model="slug"
+            label="Slug"
+            placeholder="Enter a short slug for this quote..."
+            variant="outlined"
+            :rules="slugRules"
+            required
+            density="compact"
+            class="mb-2"
+            @blur="normalizeSlug"
+          >
+            <template #append-inner>
+              <span class="text-error">*</span>
+            </template>
+          </v-text-field>
+
           <!-- Attribution inline -->
           <v-row dense class="mb-2" justify="end">
             <v-col cols="7">
@@ -224,7 +230,7 @@
             </div>
           </div>
 
-          <!-- Quote Style Options - Below Preview -->
+          <!-- Quote Style Options -->
           <v-row dense class="mb-2" style="margin-top: 2em;">
             <v-col cols="6">
               <v-select
@@ -246,7 +252,7 @@
             </v-col>
           </v-row>
 
-          <!-- Font Size Slider on its own line -->
+          <!-- Font Size Slider -->
           <v-row dense class="mb-2">
             <v-col cols="12">
               <v-slider
@@ -288,7 +294,7 @@
           </v-alert>
         </v-form>
       </v-card-text>
-      
+
       <v-card-actions class="px-6 pb-4 d-flex">
         <v-btn color="secondary" @click="cancel" variant="outlined">
           Cancel All
@@ -327,7 +333,6 @@
   overflow-y: auto;
 }
 
-/* Compact FSQ modal styling */
 .compact-fsq-modal {
   font-size: 0.9rem;
 }
@@ -339,20 +344,33 @@
   font-size: 0.85rem;
 }
 
-/* Move floating labels up by 1em */
 :deep(.v-field-label--floating) {
   transform: translateY(-1em) !important;
 }
 
-/* Move Source/Attribution floating label up by additional 0.7em (total 1.7em) */
 :deep(.v-text-field .v-field-label--floating) {
   transform: translateY(-1.7em) !important;
 }
 
-/* AI Processing Visual Feedback - DISTINCTIVE STYLES */
-/* Gold DASHED border: AI considering something about this field (thinking/analyzing) */
+/* Larger Quote Field */
+.large-quote-field :deep(textarea) {
+  font-size: 16px !important;
+  line-height: 1.6 !important;
+  padding: 12px !important;
+}
+
+.large-quote-field :deep(.v-field__input) {
+  min-height: 200px !important;
+}
+
+/* AI Processing Visual Feedback */
+.ai-analyzing {
+  margin-top: 7px !important;
+  margin-bottom: 7px !important;
+}
+
 .ai-analyzing :deep(.v-field) {
-  border: 2px dashed #FFC107 !important;
+  border: 7px solid #9C27B0 !important;
   border-radius: 0 !important;
 }
 
@@ -361,9 +379,13 @@
   overflow-y: hidden !important;
 }
 
-/* Red DASHED border: Change pending or possible rejection - needs human attention */
+.ai-rejected {
+  margin-top: 7px !important;
+  margin-bottom: 7px !important;
+}
+
 .ai-rejected :deep(.v-field) {
-  border: 2px dashed #F44336 !important;
+  border: 7px solid #F44336 !important;
   border-radius: 0 !important;
 }
 
@@ -372,9 +394,13 @@
   overflow-y: hidden !important;
 }
 
-/* Green DASHED border: AI generation approved by user */
+.ai-approved {
+  margin-top: 7px !important;
+  margin-bottom: 7px !important;
+}
+
 .ai-approved :deep(.v-field) {
-  border: 2px dashed #4CAF50 !important;
+  border: 7px solid #4CAF50 !important;
   border-radius: 0 !important;
 }
 
@@ -383,9 +409,13 @@
   overflow-y: hidden !important;
 }
 
-/* Blue DASHED border: AI auto-generation not requiring human approval */
+.ai-auto {
+  margin-top: 7px !important;
+  margin-bottom: 7px !important;
+}
+
 .ai-auto :deep(.v-field) {
-  border: 2px dashed #2196F3 !important;
+  border: 7px solid #2196F3 !important;
   border-radius: 0 !important;
 }
 
@@ -394,7 +424,57 @@
   overflow-y: hidden !important;
 }
 
-/* Rotating brain icon animation */
+/* AI Model Badge */
+.ai-model-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  z-index: 100;
+  pointer-events: none;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  line-height: 1.2;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  border-radius: 2px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.ai-model-badge.badge-analyzing {
+  border-left: 3px solid #9C27B0;
+}
+
+.ai-model-badge.badge-rejected {
+  border-left: 3px solid #F44336;
+}
+
+.ai-model-badge.badge-approved {
+  border-left: 3px solid #4CAF50;
+}
+
+.ai-model-badge.badge-auto {
+  border-left: 3px solid #2196F3;
+}
+
+.badge-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.badge-service {
+  font-weight: bold;
+  text-transform: uppercase;
+  opacity: 0.8;
+  font-size: 8px;
+}
+
+.badge-model {
+  font-weight: normal;
+  color: #00ff00;
+}
+
 .rotating {
   animation: rotate 2s linear infinite;
 }
@@ -407,8 +487,8 @@
 .quote-preview-container {
   position: relative;
   width: 100%;
-  min-height: 400px; /* Larger preview - was aspect-ratio 16/9 */
-  border-radius: 0 !important; /* NO ROUNDED CORNERS */
+  min-height: 400px;
+  border-radius: 0 !important;
   overflow: hidden;
   background: #000;
 }
@@ -440,7 +520,7 @@
   width: 100%;
   height: 80%;
   color: white;
-  padding: 10%; /* 10% padding inside black box */
+  padding: 10%;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -464,10 +544,10 @@
   font-weight: 500;
   color: #e0e0e0;
   position: absolute;
-  bottom: 5px; /* 5px above bottom of black box */
-  left: 10%; /* Match parent padding */
-  right: 10%; /* Match parent padding */
-  text-align: inherit; /* Inherit alignment from parent */
+  bottom: 5px;
+  left: 10%;
+  right: 10%;
+  text-align: inherit;
 }
 
 .quote-timestamp {
@@ -476,7 +556,6 @@
   font-family: 'Courier New', monospace;
 }
 
-/* Responsive typography */
 @media (max-width: 600px) {
   .quote-text {
     font-size: 1.2rem;
@@ -491,12 +570,10 @@
   }
 }
 
-/* Font size slider styling */
 .font-size-slider {
   margin-top: 8px;
 }
 
-/* Word count display - directly under quote */
 .word-count-display {
   font-size: 12px;
   color: #666;
@@ -504,7 +581,6 @@
   margin-top: 4px;
 }
 
-/* AI feedback messages - styled by state */
 .ai-feedback-message {
   font-size: 13px;
   padding: 4px 8px;
@@ -513,22 +589,21 @@
 }
 
 .ai-message-analyzing {
-  color: #F57C00; /* Amber/orange for analyzing */
+  color: #9C27B0;
 }
 
 .ai-message-rejected {
-  color: #D32F2F; /* Red for split recommendation */
+  color: #D32F2F;
 }
 
 .ai-message-approved {
-  color: #388E3C; /* Green for approved */
+  color: #388E3C;
 }
 
 .ai-message-auto {
-  color: #1976D2; /* Blue for auto-corrections */
+  color: #1976D2;
 }
 
-/* AI generation credit text - very small, subtle */
 .ai-credit-text {
   font-size: 9px;
   color: #999;
@@ -539,11 +614,10 @@
   opacity: 0.7;
 }
 
-/* Split segment styling */
 .split-segment {
   background: rgba(33, 150, 243, 0.05);
   padding: 8px 12px;
-  border-radius: 0 !important; /* NO ROUNDED CORNERS */
+  border-radius: 0 !important;
   border-left: 3px solid #2196F3;
 }
 
@@ -553,41 +627,36 @@
   line-height: 1.5;
 }
 
-/* AI Recommendation Panel styling - matches text field border color */
 .ai-recommendation-panel {
-  border-radius: 0 !important; /* NO ROUNDED CORNERS */
+  border-radius: 0 !important;
 }
 
-/* Gold panel for analyzing state */
 .ai-recommendation-panel.ai-panel-analyzing {
-  border: 2px dashed #FFC107;
+  border: 3px solid #9C27B0;
 }
 
 .ai-recommendation-panel.ai-panel-analyzing .ai-recommendation-header {
-  background: linear-gradient(135deg, rgba(255, 193, 7, 0.1) 0%, rgba(255, 193, 7, 0.05) 100%);
+  background: linear-gradient(135deg, rgba(156, 39, 176, 0.1) 0%, rgba(156, 39, 176, 0.05) 100%);
 }
 
-/* Red panel for rejected state */
 .ai-recommendation-panel.ai-panel-rejected {
-  border: 2px dashed #F44336;
+  border: 3px solid #F44336;
 }
 
 .ai-recommendation-panel.ai-panel-rejected .ai-recommendation-header {
   background: linear-gradient(135deg, rgba(244, 67, 54, 0.1) 0%, rgba(244, 67, 54, 0.05) 100%);
 }
 
-/* Green panel for approved state */
 .ai-recommendation-panel.ai-panel-approved {
-  border: 2px dashed #4CAF50;
+  border: 3px solid #4CAF50;
 }
 
 .ai-recommendation-panel.ai-panel-approved .ai-recommendation-header {
   background: linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(76, 175, 80, 0.05) 100%);
 }
 
-/* Blue panel for auto state */
 .ai-recommendation-panel.ai-panel-auto {
-  border: 2px dashed #2196F3;
+  border: 3px solid #2196F3;
 }
 
 .ai-recommendation-panel.ai-panel-auto .ai-recommendation-header {
@@ -602,7 +671,6 @@
   padding: 12px 0;
 }
 
-/* GLOBAL: NO ROUNDED CORNERS ON ANYTHING */
 .fsq-modal-card :deep(.v-field),
 .fsq-modal-card :deep(.v-text-field),
 .fsq-modal-card :deep(.v-textarea),
@@ -618,12 +686,15 @@
 <script>
 import axios from 'axios'
 import { useLLM } from '@/composables/useLLM'
+import aiFieldMixin from '@/mixins/aiFieldMixin'
 
 export default {
   name: 'FsqModal',
+  mixins: [aiFieldMixin],
   props: {
     show: { type: Boolean, required: true },
-    currentEpisode: { type: String, default: '' }
+    currentEpisode: { type: String, default: '' },
+    speakerWpm: { type: Number, default: 150 }  // Speaker WPM from profile
   },
   emits: ['update:show', 'submit'],
   data() {
@@ -632,6 +703,7 @@ export default {
       loading: false,
       error: '',
       quote: '',
+      slug: '',
       source: '',
       includeAttribution: true,
       quoteStyle: 'left',
@@ -639,17 +711,18 @@ export default {
       fontSize: 25,
       renderMode: 'png',
       duration: '00:00:05:00',
-      lastSubmittedSource: '', // Store last submitted source
-      sourceAutopopulated: false, // Track if source was autopopulated
-      aiAnalyzing: false, // Track if AI is analyzing the quote
-      analyzeTimeout: null, // Debounce timeout for quote analysis
-      aiState: null, // 'analyzing', 'rejected', 'approved', 'auto', or null
-      aiMessage: '', // AI feedback message to display
-      aiActionPending: false, // Whether AI action needs user accept/reject
-      aiPreviousQuote: '', // Store quote before AI changes for revert
-      splitRecommendations: null, // Store AI split recommendations
-      aiGenerationInfo: null, // { model: 'qwen2.5-coder:7b', timestamp: '2025-10-03 14:23:15' }
-      aiRecommendationExpanded: [] // Controls expansion panel (empty array = collapsed by default)
+      lastSubmittedSource: '',
+      sourceAutopopulated: false,
+      aiAnalyzing: false,
+      analyzeTimeout: null,
+      aiState: null,
+      aiMessage: '',
+      aiActionPending: false,
+      aiPreviousQuote: '',
+      splitRecommendations: null,
+      aiGenerationInfo: null,
+      aiRecommendationExpanded: [],
+      analysisAbortController: null  // For cancelling in-flight analysis
     }
   },
   setup() {
@@ -659,13 +732,11 @@ export default {
   watch: {
     show(newVal) {
       if (newVal) {
-        // Autopopulate source field with last submitted value
         if (this.lastSubmittedSource && !this.source) {
           this.source = this.lastSubmittedSource
           this.sourceAutopopulated = true
         }
 
-        // Focus the quote field when modal opens
         this.$nextTick(() => {
           if (this.$refs.quoteFieldRef) {
             this.$refs.quoteFieldRef.focus()
@@ -673,7 +744,6 @@ export default {
         })
       }
     },
-    // Clear autopopulate flag when user modifies source field
     source(newVal) {
       if (this.sourceAutopopulated && newVal !== this.lastSubmittedSource) {
         this.sourceAutopopulated = false
@@ -685,6 +755,11 @@ export default {
       return [
         v => !!v || 'Quote text is required',
         v => !v || v.length >= 10 || 'Quote must be at least 10 characters'
+      ]
+    },
+    slugRules() {
+      return [
+        v => !!v || 'Slug is required'
       ]
     },
     sourceRules() {
@@ -749,58 +824,61 @@ export default {
     },
     formattedQuotePreview() {
       const rawText = this.quote || 'Quote text will appear here...';
-
-      // Step 1: Decode any stored escape sequences first
       const decoded = this.decodeQuoteText(rawText);
-
-      // Step 2: Escape for safe HTML display
       const escaped = decoded
-        .replace(/&/g, '&amp;')           // Escape ampersands first
-        .replace(/"/g, '&quot;')           // Escape all double quotes
-        .replace(/'/g, '&#39;')            // Escape all single quotes
-        .replace(/</g, '&lt;')             // Escape less-than
-        .replace(/>/g, '&gt;')             // Escape greater-than
-        .replace(/\n/g, '<br>');           // Actual newlines to <br>
-
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>');
       return '"' + escaped + '"';
     }
   },
   mounted() {
-    // Add ESC key listener
     document.addEventListener('keydown', this.handleKeydown)
   },
   beforeUnmount() {
     document.removeEventListener('keydown', this.handleKeydown)
   },
   methods: {
-    /**
-     * Detect if quote text has nested quotes (quotes within quotes)
-     * @param {string} text - The quote text to analyze
-     * @returns {boolean} - True if nested quotes detected
-     */
+    // Normalize slug to lowercase with hyphens (auto-correct on blur)
+    normalizeSlug() {
+      if (!this.slug) return
+
+      this.slug = this.slug
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9\s-]/g, '')  // Remove special characters
+        .replace(/\s+/g, '-')           // Replace spaces with hyphens
+        .replace(/-+/g, '-')            // Replace multiple hyphens with single
+        .replace(/^-+|-+$/g, '')        // Remove leading/trailing hyphens
+        .substring(0, 50)               // Limit to 50 characters
+    },
+
+    // Calculate duration based on word count and speaker WPM
+    calculateDurationFromWPM(wordCount) {
+      const wpm = this.speakerWpm || 150
+      const durationInSeconds = Math.ceil((wordCount / wpm) * 60)
+
+      const hours = Math.floor(durationInSeconds / 3600)
+      const minutes = Math.floor((durationInSeconds % 3600) / 60)
+      const seconds = durationInSeconds % 60
+
+      // Return in HH:MM:SS:FF format (frames = 00 for FSQ)
+      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:00`
+    },
+
     hasNestedQuotes(text) {
       if (!text) return false
-
-      // Decode first to check actual quote characters
       const decoded = this.decodeQuoteText(text)
-
-      // Count different types of quotes
       const doubleQuotes = (decoded.match(/"/g) || []).length
       const singleQuotes = (decoded.match(/'/g) || []).length
-
-      // Filter out apostrophes (single quotes followed by letters or preceded by letters)
       const apostrophes = (decoded.match(/[a-z]'|'[a-z]/gi) || []).length
-
-      // Actual single quotes = total single quotes - apostrophes
       const actualSingleQuotes = singleQuotes - apostrophes
-
-      // Nested quotes exist if:
-      // 1. We have both double and single quotes (mixing styles)
-      // 2. OR we have multiple pairs of the same type (more than 2 of same quote mark)
       const hasMixedQuotes = doubleQuotes > 0 && actualSingleQuotes > 0
-      const hasMultipleDoubles = doubleQuotes > 2 // More than one pair
+      const hasMultipleDoubles = doubleQuotes > 2
       const hasMultipleSingles = actualSingleQuotes > 2
-
       const hasNesting = hasMixedQuotes || hasMultipleDoubles || hasMultipleSingles
 
       if (hasNesting) {
@@ -819,33 +897,21 @@ export default {
       return hasNesting
     },
 
-    /**
-     * Decode stored escape sequences and HTML entities
-     * This handles quotes that may have been stored with escape sequences like:
-     * - &quot; → "
-     * - &#39; → '
-     * - &amp; → &
-     * - \" → "
-     * - \' → '
-     * - \n → newline
-     */
     decodeQuoteText(text) {
       if (!text) return text
 
       let decoded = text
-        // First decode HTML entities
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'")
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
-        // Then decode backslash escape sequences
         .replace(/\\"/g, '"')
         .replace(/\\'/g, "'")
         .replace(/\\n/g, '\n')
         .replace(/\\r/g, '\r')
         .replace(/\\t/g, '\t')
-        .replace(/\\\\/g, '\\') // Double backslash last
+        .replace(/\\\\/g, '\\')
 
       return decoded
     },
@@ -857,27 +923,59 @@ export default {
     },
 
     async handleQuotePaste() {
-      // Triggered immediately on paste
       console.log('📋 Paste detected, waiting for v-model update...')
-
-      // Wait for v-model to update with multiple attempts
       await this.$nextTick()
-
-      // Give a small delay for paste to fully populate
       await new Promise(resolve => setTimeout(resolve, 50))
+      console.log('📋 Quote pasted (length: ' + this.quote.length + ')')
 
-      console.log('📋 Quote pasted (length: ' + this.quote.length + '), starting AI analysis...')
+      // Cancel any ongoing analysis
+      this.cancelAnalysis()
 
-      // Only analyze if we have content
-      if (this.quote && this.quote.length > 20) {
-        await this.analyzeQuote()
-      } else {
-        console.log('⏭️ Paste content too short or empty, skipping AI analysis')
+      // If there's a pending action, clear it (user is pasting new content)
+      if (this.aiActionPending) {
+        console.log('🔄 Clearing pending AI action - user pasted new content')
+        this.aiActionPending = false
+        this.aiPreviousQuote = ''
       }
+
+      // Reset AI state
+      this.aiState = null
+      this.aiMessage = ''
+      this.splitRecommendations = null
+      this.aiGenerationInfo = null
+
+      // Use debounce for paste too (gives user time to edit after paste)
+      clearTimeout(this.analyzeTimeout)
+      this.analyzeTimeout = setTimeout(() => {
+        if (this.quote && this.quote.length > 20) {
+          console.log('🤖 Starting AI analysis after paste (2s delay)...')
+          this.analyzeQuote()
+        }
+      }, 2000)
     },
 
     handleQuoteInput() {
-      // Clear AI state when user starts typing again (but not messages or pending state)
+      // Cancel any ongoing analysis immediately when user starts typing
+      if (this.aiState === 'analyzing') {
+        console.log('⏸️ User started typing - cancelling ongoing analysis')
+        this.cancelAnalysis()
+      }
+
+      // Detect significant text changes (clearing field or major edits)
+      const significantChange = Math.abs(this.quote.length - (this.aiPreviousQuote?.length || 0)) > 50
+
+      // If there's a pending action but the text has changed significantly, reset everything
+      if (this.aiActionPending && significantChange) {
+        console.log('🔄 Significant text change detected - resetting AI state')
+        this.aiActionPending = false
+        this.aiPreviousQuote = ''
+        this.aiState = null
+        this.aiMessage = ''
+        this.splitRecommendations = null
+        this.aiGenerationInfo = null
+      }
+
+      // Clear AI state when user is actively editing (but not if there's a pending action)
       if (this.aiState && this.aiState !== 'analyzing' && !this.aiActionPending) {
         this.aiState = null
         this.aiMessage = ''
@@ -885,19 +983,38 @@ export default {
         this.aiGenerationInfo = null
       }
 
-      // Don't re-analyze if there's a pending action waiting for user
+      // Don't trigger new analysis if there's a pending action (user hasn't accepted/rejected yet)
       if (this.aiActionPending) {
         return
       }
 
-      // Debounce input changes - give user time to finish typing
+      // Reset debounce timer - analysis will start 2 seconds after user stops typing
       clearTimeout(this.analyzeTimeout)
       this.analyzeTimeout = setTimeout(() => {
         if (this.quote.length > 20) {
-          console.log('🤖 Triggering AI quote analysis after typing pause...')
+          console.log('🤖 Triggering AI quote analysis after typing pause (2s)...')
           this.analyzeQuote()
         }
-      }, 2000) // 2 second debounce - faster response
+      }, 2000)
+    },
+
+    cancelAnalysis() {
+      // Cancel the debounce timeout
+      clearTimeout(this.analyzeTimeout)
+
+      // Abort any in-flight API request
+      if (this.analysisAbortController) {
+        console.log('🛑 Aborting in-flight API request')
+        this.analysisAbortController.abort()
+        this.analysisAbortController = null
+      }
+
+      // Reset analyzing state
+      if (this.aiState === 'analyzing') {
+        this.aiAnalyzing = false
+        this.aiState = null
+        this.aiMessage = ''
+      }
     },
 
     async analyzeQuote() {
@@ -911,45 +1028,42 @@ export default {
       this.aiState = 'analyzing'
       this.aiMessage = 'AI is analyzing your quote...'
 
+      // Create abort controller for this analysis
+      this.analysisAbortController = new AbortController()
+
       try {
-        // STEP 1: Decode escape sequences first
+        // STEP 1: Decode escape sequences
         let workingQuote = this.decodeQuoteText(this.quote)
         if (workingQuote !== this.quote) {
           console.log('🔓 Decoded escape sequences:', { before: this.quote, after: workingQuote })
-          this.aiPreviousQuote = this.quote // Save for revert
+          this.aiPreviousQuote = this.quote
           this.quote = workingQuote
           this.aiState = 'auto'
           this.aiMessage = 'AI decoded escape sequences in your quote text'
           this.aiActionPending = true
-          return // Wait for user to accept/reject
+          return
         }
 
-        // STEP 2: Check for nested quotes and normalize if needed
+        // STEP 2: Check for nested quotes
         if (this.hasNestedQuotes(workingQuote)) {
           console.log('📝 Nested quotes detected, normalizing...')
           this.aiMessage = 'Nested quotes detected - normalizing quotation marks...'
           const normalized = await this.normalizeNestedQuotes(workingQuote)
 
-          // If normalization changed the text, update the quote field
           if (normalized !== this.quote) {
             console.log('✨ Quote normalized:', { before: this.quote, after: normalized })
-            this.aiPreviousQuote = this.quote // Save for revert
+            this.aiPreviousQuote = this.quote
             this.quote = normalized
             workingQuote = normalized
-
-            // Flash blue to indicate AI auto-correction
-            this.aiState = 'auto'
-            this.aiMessage = 'AI corrected quotation mark nesting to follow American English style'
-            this.aiActionPending = true
-            return // Wait for user to accept/reject
+            // Don't return - continue to split analysis with normalized quote
+            console.log('⏭️ Continuing to split analysis with normalized quote...')
           }
         }
 
-        // Continue to split analysis
+        // STEP 3: Load settings
         this.aiState = 'analyzing'
         this.aiMessage = 'AI is checking if quote needs to be split...'
 
-        // STEP 3: Load generation settings from backend
         console.log('📥 Loading generation settings from backend...')
         const settingsResponse = await axios.get('/api/settings/', {
           headers: {
@@ -958,23 +1072,28 @@ export default {
         })
 
         const settings = settingsResponse.data.generation || {}
-        console.log('⚙️ Generation settings:', {
-          maxLines: settings.fsq_max_lines || 4,
-          charsPerLine: settings.fsq_chars_per_line || 70,
-          fontSize: settings.default_font_size || '19px'
-        })
+        console.log('⚙️ Generation settings loaded:', settings)
 
-        // STEP 4: Call AI for split analysis with decoded and normalized quote
-        console.log('🧠 Calling intelligentQuoteSplit()...')
-        const segments = await this.intelligentQuoteSplit(workingQuote, {
-          maxLines: settings.fsq_max_lines || 4,
-          charsPerLine: settings.fsq_chars_per_line || 70,
-          fontSize: settings.default_font_size || '19px'
-        })
+        const splitConfig = {
+          maxLines: settings.fsq_max_lines || 5,
+          charsPerLine: settings.fsq_chars_per_line || 50,
+          fontSize: settings.default_font_size || '19px',
+          minSecondScreen: settings.fsq_min_second_screen || 80,
+          splitStrategy: settings.fsq_split_strategy || 'smart',
+          balanceThresholdPercent: settings.fsq_balance_threshold_percent || 30,
+          preferSentenceBoundaries: settings.fsq_prefer_sentence_boundaries !== false,
+          allowMidSentenceSplit: settings.fsq_allow_mid_sentence_split || false,
+          overflowHandling: settings.fsq_overflow_handling || 'multi_segment'
+        }
+
+        console.log('🧮 Smart Split Config:', splitConfig)
+
+        // STEP 4: Call AI for split analysis
+        console.log('🧠 Calling intelligentQuoteSplit() with smart split logic...')
+        const segments = await this.intelligentQuoteSplit(workingQuote, splitConfig)
 
         console.log('✅ AI quote analysis result:', segments)
 
-        // Store AI generation info
         const now = new Date()
         this.aiGenerationInfo = {
           model: 'qwen2.5-coder:7b',
@@ -989,52 +1108,52 @@ export default {
           })
         }
 
-        // If split into multiple segments, show review modal (red state = requires changes)
         if (segments.length > 1) {
           this.aiState = 'rejected'
           this.aiMessage = `AI recommends splitting this quote into ${segments.length} separate FSQ cues`
           this.splitRecommendations = segments
-
-          // Keep panel collapsed - let invitation banner prompt user to expand
-          this.aiRecommendationExpanded = [] // Collapsed by default
+          this.aiRecommendationExpanded = []
 
           console.log(`✂️ AI recommends splitting into ${segments.length} segments`)
           console.log('📋 Recommendation panel ready - invitation banner will prompt user to expand')
           console.log('💬 AI Message set to:', this.aiMessage)
         } else {
-          // Quote fits as-is (green state = approved)
           this.aiState = 'approved'
           this.aiMessage = 'AI approved - quote fits perfectly as a single full-screen graphic'
-          this.splitRecommendations = null // Clear any previous recommendations
-          this.aiRecommendationExpanded = [] // Collapse panel
+          this.splitRecommendations = null
+          this.aiRecommendationExpanded = []
 
           console.log('✅ AI approved - quote fits as single FSQ')
           console.log('💬 AI Message set to:', this.aiMessage)
           console.log('🎨 AI State set to:', this.aiState)
-          // Keep green border visible - don't auto-clear
         }
       } catch (error) {
+        // Silently ignore aborted requests (user cancelled by typing)
+        if (error.name === 'AbortError' || error.message?.includes('abort')) {
+          console.log('⏸️ Analysis aborted by user')
+          return
+        }
+
         console.error('Quote analysis failed:', error)
         this.aiState = null
         this.aiMessage = `Analysis failed: ${error.message || 'Unknown error'}`
       } finally {
         this.aiAnalyzing = false
+        this.analysisAbortController = null
       }
     },
 
-    // Generate a slug from quote text using AI-friendly approach
     generateSlugFromQuote(quoteText) {
       return quoteText
         .toLowerCase()
-        .replace(/[^a-z0-9\s-]/g, '') // Remove punctuation except spaces and hyphens
-        .replace(/\s+/g, '-') // Convert spaces to hyphens
-        .replace(/-+/g, '-') // Collapse multiple hyphens
-        .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
-        .substring(0, 50) // Limit length
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .substring(0, 50)
         || 'fsq-quote'
     },
 
-    // Split long quotes into multiple segments at sentence boundaries
     splitQuoteIntoSegments(quoteText, maxLength = 300) {
       if (quoteText.length <= maxLength) {
         return [quoteText]
@@ -1043,7 +1162,6 @@ export default {
       const segments = []
       let currentSegment = ''
 
-      // Split by sentences (periods, exclamation marks, question marks)
       const sentences = quoteText.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [quoteText]
 
       for (const sentence of sentences) {
@@ -1065,12 +1183,17 @@ export default {
     },
 
     async submit() {
-      // Validate form
       const isValid = await this.$refs.fsqFormRef.validate()
       console.log('Form validation result:', isValid)
       if (!isValid) {
         console.warn('Form validation failed')
         return
+      }
+
+      // Cancel any ongoing AI analysis - user has made their decision
+      if (this.aiAnalyzing) {
+        console.log('⏸️ User submitted during analysis - cancelling AI analysis')
+        this.cancelAnalysis()
       }
 
       this.loading = true
@@ -1083,75 +1206,57 @@ export default {
           throw new Error('No episode ID available')
         }
 
-        // Use AI split recommendations if available, otherwise use legacy split
         const quoteSegments = this.splitRecommendations && this.splitRecommendations.length > 0
           ? this.splitRecommendations
           : [this.quote.trim()]
 
         console.log(`Creating ${quoteSegments.length} FSQ cue(s)`)
 
-        // Store the source for next time if attribution is included
         if (this.includeAttribution && this.source.trim()) {
           this.lastSubmittedSource = this.source.trim()
         }
 
-        // Process each segment
         for (let i = 0; i < quoteSegments.length; i++) {
           const segment = quoteSegments[i]
           const isMultipart = quoteSegments.length > 1
 
-          // Generate AssetID for this FSQ cue segment
           const assetId = await this.generateAssetId()
-
-          // Auto-generate slug from quote text
-          const baseSlug = this.generateSlugFromQuote(segment)
-          const slug = isMultipart ? `${baseSlug}-part-${i + 1}` : baseSlug
+          // Use user-entered slug, add part suffix for multipart quotes
+          const slug = isMultipart ? `${this.slug}-part-${i + 1}` : this.slug
 
           console.log(`Creating FSQ cue ${i + 1}/${quoteSegments.length} (media generation deferred)...`)
 
-          // NOTE: Media generation is now deferred to batch processing
-          // The FSQ PNG will be generated later via the batch rendering system
-          // For now, just create the cue block with metadata
-
-          // Calculate word count for this segment
           const wordCount = segment.trim().split(/\s+/).filter(word => word.length > 0).length;
-
-          // Create the FSQ cue data without media URL (will be generated later)
-          // Store quote with decoded text (clean, no escape sequences)
           const cleanQuote = this.decodeQuoteText(segment);
+
+          // Calculate duration based on word count and speaker WPM
+          const calculatedDuration = this.calculateDurationFromWPM(wordCount);
 
           const cueData = {
             type: 'FSQ',
             assetId: assetId,
             slug: slug,
-            quote: cleanQuote, // Store decoded text
+            quote: cleanQuote,
             style: this.quoteStyle,
             fontFamily: this.fontFamily,
             fontSize: this.fontSize,
             renderMode: this.renderMode,
-            duration: this.duration,
+            duration: calculatedDuration,
             wordCount: wordCount,
             part: isMultipart ? `${i + 1}x${quoteSegments.length}` : '1x1'
-            // mediaUrl: null  // Will be populated during batch render
           }
 
-          // Only include source if attribution is enabled
           if (this.includeAttribution && this.source.trim()) {
             cueData.source = this.source.trim()
           }
 
           console.log(`Creating FSQ cue ${i + 1} with asset:`, cueData)
 
-          // Emit the cue creation
           this.$emit('submit', cueData)
 
-          // Small delay between multiple segments to allow placement
-          if (i < quoteSegments.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 500))
-          }
+          // No delay between segments - user can place them consecutively
         }
 
-        // Reset and close
         this.reset()
         this.$emit('update:show', false)
 
@@ -1162,29 +1267,28 @@ export default {
         this.loading = false
       }
     },
+
     cancel() {
       this.$emit('update:show', false)
       this.reset()
     },
+
     async generateAssetId() {
       try {
         console.log('Requesting AssetID for FSQ cue')
 
-        // Create a slug from the quote text
         const slug = this.quote.trim()
           .toLowerCase()
-          .replace(/[^a-z0-9\s-]/g, '') // Remove punctuation except spaces and hyphens
-          .replace(/\s+/g, '-') // Convert spaces to hyphens
-          .replace(/-+/g, '-') // Collapse multiple hyphens
-          .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
-          .substring(0, 50) // Limit length
+          .replace(/[^a-z0-9\s-]/g, '')
+          .replace(/\s+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .substring(0, 50)
 
-        // Create form data for the API call
         const formData = new FormData()
         formData.append('slug', slug || 'fsq-quote')
         formData.append('type', 'fsq')
 
-        // Try the legacy endpoint first (most reliable)
         const response = await axios.post('/assetid/generate-legacy', formData, {
           headers: {
             'Accept': 'application/json',
@@ -1200,8 +1304,6 @@ export default {
         }
       } catch (error) {
         console.warn('AssetID generation failed, using fallback:', error)
-
-        // Fallback to local generation if server fails
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
         let result = 'LOCAL_FSQ_'
         for (let i = 0; i < 8; i++) {
@@ -1211,8 +1313,13 @@ export default {
         return result
       }
     },
+
     reset() {
+      // Cancel any ongoing analysis
+      this.cancelAnalysis()
+
       this.quote = ''
+      this.slug = ''
       this.source = ''
       this.sourceAutopopulated = false
       this.includeAttribution = true
@@ -1225,26 +1332,25 @@ export default {
       this.aiState = null
       this.splitRecommendations = null
       this.aiGenerationInfo = null
+      this.aiActionPending = false
+      this.aiPreviousQuote = ''
 
-      // Reset form validation
       this.$nextTick(() => {
         if (this.$refs.fsqFormRef) {
           this.$refs.fsqFormRef.resetValidation()
         }
       })
     },
+
     acceptAIChange() {
-      // User accepted the AI change
       console.log('✅ User accepted AI change')
       this.aiActionPending = false
-      this.aiPreviousQuote = '' // Clear the backup
-      this.aiMessage = '' // Clear message
-      // Continue with analysis if needed
+      this.aiPreviousQuote = ''
+      this.aiMessage = ''
       this.analyzeQuote()
     },
 
     rejectAIChange() {
-      // User rejected the AI change - revert to previous quote
       console.log('❌ User rejected AI change - reverting')
       this.quote = this.aiPreviousQuote
       this.aiPreviousQuote = ''
@@ -1254,21 +1360,18 @@ export default {
     },
 
     async acceptAIRecommendation() {
-      // Accept AI split recommendations and insert them
-      // The submit() method already handles splitRecommendations
       console.log('Accepting AI split recommendation and submitting...')
       await this.submit()
     },
+
     async rejectAIRecommendation() {
-      // Reject AI recommendations and insert original quote as single cue
-      // Clear split recommendations before submitting
       this.splitRecommendations = null
       this.aiState = null
       this.aiGenerationInfo = null
       await this.submit()
     },
+
     async suggestDifferentSplit() {
-      // Request the AI to suggest an alternative split for the quote
       console.log('Requesting alternative split suggestion...')
 
       if (!this.quote || this.quote.length < 20) {
@@ -1280,7 +1383,6 @@ export default {
       this.aiState = 'analyzing'
 
       try {
-        // Load generation settings from backend
         const settingsResponse = await axios.get('/api/settings/', {
           headers: {
             'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
@@ -1289,17 +1391,23 @@ export default {
 
         const settings = settingsResponse.data.generation || {}
 
-        // Call AI with higher temperature for more variation in splits
-        const segments = await this.intelligentQuoteSplit(this.quote, {
-          maxLines: settings.fsq_max_lines || 4,
-          charsPerLine: settings.fsq_chars_per_line || 70,
+        const splitConfig = {
+          maxLines: settings.fsq_max_lines || 5,
+          charsPerLine: settings.fsq_chars_per_line || 50,
           fontSize: settings.default_font_size || '19px',
-          temperature: 0.5  // Higher temperature for more varied results
-        })
+          minSecondScreen: settings.fsq_min_second_screen || 80,
+          splitStrategy: settings.fsq_split_strategy || 'smart',
+          balanceThresholdPercent: settings.fsq_balance_threshold_percent || 30,
+          preferSentenceBoundaries: settings.fsq_prefer_sentence_boundaries !== false,
+          allowMidSentenceSplit: settings.fsq_allow_mid_sentence_split || false,
+          overflowHandling: settings.fsq_overflow_handling || 'multi_segment',
+          temperature: 0.5
+        }
+
+        const segments = await this.intelligentQuoteSplit(this.quote, splitConfig)
 
         console.log('Alternative AI quote analysis result:', segments)
 
-        // Update AI generation info
         const now = new Date()
         this.aiGenerationInfo = {
           model: 'qwen2.5-coder:7b',
@@ -1314,13 +1422,11 @@ export default {
           })
         }
 
-        // Update split recommendations
         if (segments.length > 1) {
           this.aiState = 'rejected'
           this.splitRecommendations = segments
           console.log('New split suggestion:', segments.length, 'segments')
         } else {
-          // If AI suggests no split this time, show that
           this.aiState = 'approved'
           this.splitRecommendations = null
           setTimeout(() => {
@@ -1329,7 +1435,7 @@ export default {
         }
       } catch (error) {
         console.error('Alternative split analysis failed:', error)
-        this.aiState = 'rejected'  // Keep current state on error
+        this.aiState = 'rejected'
       } finally {
         this.aiAnalyzing = false
       }

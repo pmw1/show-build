@@ -109,7 +109,69 @@ export function useSystemHealth(pollInterval = 10000) {
   const loading = computed(() => isLoading.value)
 
   /**
+   * Fetch individual service health (for progressive updates)
+   */
+  const fetchServiceHealth = async (serviceName) => {
+    try {
+      const response = await axios.get(`/health/${serviceName}`)
+
+      // Update just this service
+      if (serviceName === 'backend') {
+        health.value.status = response.data.status
+        health.value.timestamp = response.data.timestamp
+      } else {
+        health.value.services[serviceName] = response.data
+      }
+    } catch (error) {
+      console.error(`Health check failed for ${serviceName}:`, error)
+      // Don't update on error - let it stay in "checking" state
+    }
+  }
+
+  /**
+   * Save health status to localStorage for carryover on reload
+   */
+  const saveHealthToStorage = (healthData) => {
+    try {
+      localStorage.setItem('system-health-status', JSON.stringify({
+        data: healthData,
+        savedAt: new Date().toISOString()
+      }))
+    } catch (error) {
+      console.warn('Failed to save health status to localStorage:', error)
+    }
+  }
+
+  /**
+   * Load last known health status from localStorage
+   * Returns null if no saved status or if it's too old (>5 minutes)
+   */
+  const loadHealthFromStorage = () => {
+    try {
+      const saved = localStorage.getItem('system-health-status')
+      if (!saved) return null
+
+      const { data, savedAt } = JSON.parse(saved)
+      const age = Date.now() - new Date(savedAt).getTime()
+      const maxAge = 5 * 60 * 1000 // 5 minutes
+
+      // Only use saved status if it's recent
+      if (age < maxAge) {
+        console.log(`📦 Loaded health status from localStorage (${Math.round(age / 1000)}s old)`)
+        return data
+      } else {
+        console.log('📦 Saved health status too old, discarding')
+        return null
+      }
+    } catch (error) {
+      console.warn('Failed to load health status from localStorage:', error)
+      return null
+    }
+  }
+
+  /**
    * Fetch current health status from backend
+   * Progressive loading: backend/db first, then other services
    */
   const fetchHealth = async () => {
     try {
@@ -128,37 +190,93 @@ export function useSystemHealth(pollInterval = 10000) {
         }
       }
 
+      // Save to localStorage for next reload
+      saveHealthToStorage(health.value)
+
     } catch (error) {
       console.error('Health check failed:', error)
       lastError.value = error.message
 
-      // Set all services to error state
-      health.value = {
-        status: 'error',
-        timestamp: new Date().toISOString(),
-        services: {
-          database: 'error',
-          ollama: {
-            status: 'error',
-            model: null,
-            url: null
-          },
-          redis: {
-            status: 'error',
-            connected: false,
-            latency: null,
-            error: 'Health check failed'
-          },
-          celery: {
-            status: 'error',
-            workers: [],
-            error: 'Health check failed'
+      // Only set to error state if we've had at least one successful check before
+      // Otherwise keep it as "unknown" to avoid red status on initial load
+      if (health.value.timestamp !== null) {
+        // We've had a successful check before, so this is a real error
+        health.value = {
+          status: 'error',
+          timestamp: new Date().toISOString(),
+          services: {
+            database: 'error',
+            ollama: {
+              status: 'error',
+              model: null,
+              url: null
+            },
+            redis: {
+              status: 'error',
+              connected: false,
+              latency: null,
+              error: 'Health check failed'
+            },
+            celery: {
+              status: 'error',
+              workers: [],
+              error: 'Health check failed'
+            }
           }
         }
+        // Save error state too
+        saveHealthToStorage(health.value)
       }
+      // else: keep the initial "unknown" state (shows gray, not red)
     } finally {
       isLoading.value = false
     }
+  }
+
+  /**
+   * Progressive health check - checks critical services first
+   */
+  const fetchHealthProgressive = async () => {
+    isLoading.value = true
+    lastError.value = null
+
+    // Phase 1: Check backend + database (critical services)
+    try {
+      const response = await axios.get('/health/critical', { timeout: 3000 })
+
+      health.value.status = response.data.status
+      health.value.timestamp = response.data.timestamp
+      health.value.services.database = response.data.services.database
+
+      console.log('✅ Critical services (BACK, DB) loaded')
+    } catch (error) {
+      console.error('Critical health check failed:', error)
+      if (health.value.timestamp === null) {
+        // First check - keep as unknown
+        return
+      }
+    }
+
+    // Phase 2: Check remaining services in background (non-blocking)
+    setTimeout(async () => {
+      try {
+        const response = await axios.get('/health/secondary', { timeout: 5000 })
+
+        // Update secondary services
+        if (response.data.services) {
+          health.value.services = {
+            ...health.value.services,
+            ...response.data.services
+          }
+        }
+
+        console.log('✅ Secondary services (Ollama, Redis, Celery, etc.) loaded')
+      } catch (error) {
+        console.error('Secondary health check failed:', error)
+      } finally {
+        isLoading.value = false
+      }
+    }, 100) // Small delay to let UI update first
   }
 
   /**
@@ -198,6 +316,14 @@ export function useSystemHealth(pollInterval = 10000) {
 
   // Auto-start/stop with component lifecycle
   onMounted(() => {
+    // Load last known health status from localStorage (carryover from previous session)
+    const savedHealth = loadHealthFromStorage()
+    if (savedHealth) {
+      health.value = savedHealth
+      console.log('✅ Using saved health status - no flash on reload!')
+    }
+
+    // Then start polling (will update with fresh data in background)
     startPolling()
   })
 
@@ -213,6 +339,8 @@ export function useSystemHealth(pollInterval = 10000) {
     startPolling,
     stopPolling,
     checkHealth,
+    fetchServiceHealth,
+    fetchHealthProgressive,
     // Redis computed properties
     redisConnected,
     redisLatency,

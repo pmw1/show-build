@@ -40,7 +40,7 @@
                 Task Assignments
               </v-card-title>
               <v-card-text>
-                <v-list density="compact">
+                <v-list density="compact" v-if="localSettings && localSettings.routing">
                   <!-- Quote Splitting -->
                   <v-list-item>
                     <v-list-item-title class="font-weight-bold mb-2">Quote Splitting</v-list-item-title>
@@ -108,38 +108,161 @@
                   <!-- Content Expansion -->
                   <v-list-item>
                     <v-list-item-title class="font-weight-bold mb-2">Content Expansion</v-list-item-title>
-                    <v-select
-                      v-model="localSettings.routing.contentExpansion"
-                      :items="llmServiceOptions"
-                      label="Preferred Service"
-                      variant="outlined"
-                      density="compact"
-                      hint="Expand brief notes into full script content"
-                      persistent-hint
-                    />
+                    <v-row dense>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="contentExpansionService"
+                          :items="availableServices"
+                          label="Service"
+                          variant="outlined"
+                          density="compact"
+                          @update:model-value="updateContentExpansionModel"
+                        />
+                      </v-col>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="contentExpansionModel"
+                          :items="getModelsForService(contentExpansionService)"
+                          label="Model"
+                          variant="outlined"
+                          density="compact"
+                          :disabled="!contentExpansionService || contentExpansionService === 'auto'"
+                          @update:model-value="updateContentExpansion"
+                        />
+                      </v-col>
+                    </v-row>
+                    <div class="text-caption text-grey mt-1">Expand brief notes into full script content</div>
                   </v-list-item>
 
                   <v-divider class="my-2" />
 
-                  <!-- Fact Checking -->
+                  <!-- Entity Extraction -->
                   <v-list-item>
-                    <v-list-item-title class="font-weight-bold mb-2">Fact Checking</v-list-item-title>
-                    <v-select
-                      v-model="localSettings.routing.factChecking"
-                      :items="llmServiceOptions"
-                      label="Preferred Service"
-                      variant="outlined"
-                      density="compact"
-                      hint="Verify facts and claims in content"
-                      persistent-hint
-                    />
+                    <v-list-item-title class="font-weight-bold mb-2">Entity Extraction</v-list-item-title>
+                    <v-row dense>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="entityExtractionService"
+                          :items="availableServices"
+                          label="Service"
+                          variant="outlined"
+                          density="compact"
+                          @update:model-value="updateTaskService('entityExtraction')"
+                        />
+                      </v-col>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="entityExtractionModel"
+                          :items="getModelsForService(entityExtractionService)"
+                          label="Model"
+                          variant="outlined"
+                          density="compact"
+                          :disabled="!entityExtractionService || entityExtractionService === 'auto'"
+                          @update:model-value="updateTaskModel('entityExtraction')"
+                        />
+                      </v-col>
+                    </v-row>
+                    <div class="text-caption text-grey mt-1">Extract people, organizations, locations from content</div>
+                  </v-list-item>
+
+                  <v-divider class="my-2" />
+
+                  <!-- People Search -->
+                  <v-list-item>
+                    <v-list-item-title class="font-weight-bold mb-2">People Search</v-list-item-title>
+                    <v-row dense>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="peopleSearchService"
+                          :items="availableServices"
+                          label="Service"
+                          variant="outlined"
+                          density="compact"
+                          @update:model-value="updateTaskService('peopleSearch')"
+                        />
+                      </v-col>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="peopleSearchModel"
+                          :items="getModelsForService(peopleSearchService)"
+                          label="Model"
+                          variant="outlined"
+                          density="compact"
+                          :disabled="!peopleSearchService || peopleSearchService === 'auto'"
+                          @update:model-value="updateTaskModel('peopleSearch')"
+                        />
+                      </v-col>
+                    </v-row>
+                    <div class="text-caption text-grey mt-1">Search and identify people mentioned in content</div>
+                  </v-list-item>
+
+                  <v-divider class="my-2" />
+
+                  <!-- Social Search -->
+                  <v-list-item>
+                    <v-list-item-title class="font-weight-bold mb-2">Social Search</v-list-item-title>
+                    <v-row dense>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="socialSearchService"
+                          :items="availableServices"
+                          label="Service"
+                          variant="outlined"
+                          density="compact"
+                          @update:model-value="updateTaskService('socialSearch')"
+                        />
+                      </v-col>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="socialSearchModel"
+                          :items="getModelsForService(socialSearchService)"
+                          label="Model"
+                          variant="outlined"
+                          density="compact"
+                          :disabled="!socialSearchService || socialSearchService === 'auto'"
+                          @update:model-value="updateTaskModel('socialSearch')"
+                        />
+                      </v-col>
+                    </v-row>
+                    <div class="text-caption text-grey mt-1">Find social media profiles and related content</div>
+                  </v-list-item>
+
+                  <v-divider class="my-2" />
+
+                  <!-- Tweet Composing -->
+                  <v-list-item>
+                    <v-list-item-title class="font-weight-bold mb-2">Tweet Composing</v-list-item-title>
+                    <v-row dense>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="tweetComposingService"
+                          :items="availableServices"
+                          label="Service"
+                          variant="outlined"
+                          density="compact"
+                          @update:model-value="updateTaskService('tweetComposing')"
+                        />
+                      </v-col>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="tweetComposingModel"
+                          :items="getModelsForService(tweetComposingService)"
+                          label="Model"
+                          variant="outlined"
+                          density="compact"
+                          :disabled="!tweetComposingService || tweetComposingService === 'auto'"
+                          @update:model-value="updateTaskModel('tweetComposing')"
+                        />
+                      </v-col>
+                    </v-row>
+                    <div class="text-caption text-grey mt-1">Generate engaging social media posts</div>
                   </v-list-item>
                 </v-list>
               </v-card-text>
             </v-card>
 
             <!-- Fallback Strategy -->
-            <v-card variant="tonal" color="warning" class="pa-4">
+            <v-card variant="tonal" color="warning" class="pa-4" v-if="localSettings && localSettings.routing">
               <h4 class="text-subtitle-1 mb-3 d-flex align-center">
                 <v-icon left class="mr-2">mdi-backup-restore</v-icon>
                 Fallback Strategy
@@ -185,21 +308,41 @@
               </v-col>
             </v-row>
 
-            <v-expansion-panels v-model="expandedPrompts">
-              <v-expansion-panel
-                v-for="(prompt, index) in localSettings.prompts"
-                :key="index"
-                :value="index"
-              >
-                <v-expansion-panel-title>
-                  <v-icon left class="mr-3">{{ getPromptIcon(prompt.category) }}</v-icon>
-                  <strong>{{ prompt.name }}</strong>
-                  <v-spacer />
-                  <v-chip size="small" :color="getCategoryColor(prompt.category)" class="mr-2">
-                    {{ prompt.category }}
-                  </v-chip>
-                </v-expansion-panel-title>
-                <v-expansion-panel-text>
+            <!-- Group prompts by category -->
+            <div v-for="category in promptCategoriesWithPrompts" :key="category.value" class="mb-6">
+              <h4 class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center">
+                <v-icon :color="getCategoryColor(category.value)" class="mr-2">
+                  {{ getPromptIcon(category.value) }}
+                </v-icon>
+                {{ category.title }}
+              </h4>
+
+              <v-expansion-panels v-model="expandedPrompts" multiple>
+                <v-expansion-panel
+                  v-for="(prompt, index) in getPromptsForCategory(category.value)"
+                  :key="index"
+                  :value="index"
+                >
+                  <v-expansion-panel-title>
+                    <div class="d-flex flex-column flex-grow-1">
+                      <div class="d-flex align-center">
+                        <strong>{{ prompt.name }}</strong>
+                        <v-spacer />
+                        <v-chip
+                          v-if="!prompt.enabled"
+                          size="small"
+                          color="grey"
+                          class="mr-2"
+                        >
+                          Disabled
+                        </v-chip>
+                      </div>
+                      <div class="text-caption text-medium-emphasis mt-1">
+                        {{ getPromptInvocation(prompt) }}
+                      </div>
+                    </div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text>
                   <v-row>
                     <v-col cols="12">
                       <v-text-field
@@ -294,6 +437,7 @@
                 </v-expansion-panel-text>
               </v-expansion-panel>
             </v-expansion-panels>
+            </div>
           </v-tabs-window-item>
 
           <!-- Performance Monitoring -->
@@ -438,6 +582,10 @@ export default {
           scriptSummary: 'auto',
           titleGeneration: 'auto',
           contentExpansion: 'auto',
+          entityExtraction: 'auto',
+          peopleSearch: 'auto',
+          socialSearch: 'auto',
+          tweetComposing: 'auto',
           factChecking: 'auto',
           enableFallback: true,
           fallbackOrder: ['ollama', 'openai', 'anthropic', 'gemini', 'grok']
@@ -452,7 +600,23 @@ export default {
       routingSubTab: 'task-routing',
       expandedPrompts: [],
       showNewPromptDialog: false,
-      localSettings: JSON.parse(JSON.stringify(this.modelValue)),
+      localSettings: this.modelValue ? JSON.parse(JSON.stringify(this.modelValue)) : {
+        routing: {
+          quoteSplitting: 'auto',
+          slugGeneration: 'auto',
+          scriptSummary: 'auto',
+          titleGeneration: 'auto',
+          contentExpansion: 'auto',
+          entityExtraction: 'auto',
+          peopleSearch: 'auto',
+          socialSearch: 'auto',
+          tweetComposing: 'auto',
+          factChecking: 'auto',
+          enableFallback: true,
+          fallbackOrder: ['ollama', 'openai', 'anthropic', 'gemini', 'grok']
+        },
+        prompts: []
+      },
       newPrompt: {
         name: '',
         category: 'content',
@@ -462,14 +626,30 @@ export default {
         maxTokens: 500,
         enabled: true
       },
-      llmServiceOptions: [
-        { title: 'Auto (Smart Routing)', value: 'auto' },
-        { title: 'Ollama (Local)', value: 'ollama' },
-        { title: 'OpenAI (GPT-4)', value: 'openai' },
-        { title: 'Anthropic (Claude)', value: 'anthropic' },
-        { title: 'Google Gemini', value: 'gemini' },
-        { title: 'xAI (Grok)', value: 'grok' }
+      llmServiceOptions: [],
+      ollamaModels: [],
+      enabledCloudServices: [],
+      availableServices: [
+        { title: 'Auto (Smart Routing)', value: 'auto' }
       ],
+      serviceModels: {
+        ollama: [],
+        openai: [],
+        anthropic: [],
+        gemini: [],
+        grok: []
+      },
+      // Separate service/model selections for each task type
+      contentExpansionService: 'auto',
+      contentExpansionModel: null,
+      entityExtractionService: 'auto',
+      entityExtractionModel: null,
+      peopleSearchService: 'auto',
+      peopleSearchModel: null,
+      socialSearchService: 'auto',
+      socialSearchModel: null,
+      tweetComposingService: 'auto',
+      tweetComposingModel: null,
       fallbackOrderOptions: [
         { title: 'Ollama (Local)', value: 'ollama' },
         { title: 'OpenAI', value: 'openai' },
@@ -482,7 +662,8 @@ export default {
         { title: 'Analysis', value: 'analysis' },
         { title: 'Summarization', value: 'summarization' },
         { title: 'Formatting', value: 'formatting' },
-        { title: 'Research', value: 'research' }
+        { title: 'Research', value: 'research' },
+        { title: 'Development', value: 'development' }
       ],
       performanceStats: {
         avgResponseTime: 0,
@@ -496,16 +677,159 @@ export default {
   watch: {
     modelValue: {
       handler(newVal) {
-        this.localSettings = JSON.parse(JSON.stringify(newVal))
+        if (newVal) {
+          this.localSettings = JSON.parse(JSON.stringify(newVal))
+        }
       },
       deep: true
     }
   },
-  mounted() {
+  computed: {
+    promptCategoriesWithPrompts() {
+      // Only return categories that have prompts
+      if (!this.localSettings || !this.localSettings.prompts) {
+        return []
+      }
+      return this.promptCategories.filter(category => {
+        return this.localSettings.prompts.some(p => p.category === category.value)
+      })
+    }
+  },
+  async mounted() {
+    await this.loadAvailableModels()
     this.loadPerformanceStats()
     this.initializeDefaultPrompts()
   },
   methods: {
+    getPromptsForCategory(category) {
+      if (!this.localSettings || !this.localSettings.prompts) {
+        return []
+      }
+      return this.localSettings.prompts.filter(p => p.category === category)
+    },
+    getPromptInvocation(prompt) {
+      // Return invocation instructions based on prompt name
+      if (prompt.name.includes('Segment Generator (Tease)')) {
+        return 'Invoked: Ctrl+Alt+Shift+[1-9] in tease segments'
+      } else if (prompt.name.includes('Segment Generator (Cold Open)')) {
+        return 'Invoked: Ctrl+Alt+Shift+[1-9] in coldopen segments'
+      } else if (prompt.name.includes('Segment Generator (Standard)')) {
+        return 'Invoked: Ctrl+Alt+Shift+[1-9] in standard segments'
+      } else if (prompt.name.includes('Quote Splitter')) {
+        return 'Invoked: Automatically when splitting long FSQ quotes'
+      } else if (prompt.name.includes('Slug Generator')) {
+        return 'Invoked: Automatically when generating URL slugs'
+      } else if (prompt.name.includes('Script Summarizer')) {
+        return 'Invoked: Via summarize button in content editor'
+      } else {
+        return 'Custom prompt - invocation depends on implementation'
+      }
+    },
+    async loadAvailableModels() {
+      try {
+        // Always show all services regardless of config status
+        const services = [
+          { title: 'Auto (Smart Routing)', value: 'auto' },
+          { title: 'Ollama (Local)', value: 'ollama' },
+          { title: 'OpenAI', value: 'openai' },
+          { title: 'Google Gemini', value: 'gemini' },
+          { title: 'xAI (Grok)', value: 'grok' }
+        ]
+
+        // Fetch Ollama models if available
+        try {
+          const ollamaResponse = await this.$axios.get('/llm/ollama/models')
+          if (ollamaResponse.data.models && ollamaResponse.data.models.length > 0) {
+            this.serviceModels.ollama = ollamaResponse.data.models.map(m => ({
+              title: m.name,
+              value: m.name
+            }))
+          }
+        } catch (e) {
+          console.warn('Ollama models not available:', e)
+        }
+
+        // Define models for all cloud services (always available)
+        this.serviceModels.openai = [
+          { title: 'GPT-4 Turbo', value: 'gpt-4-turbo-preview' },
+          { title: 'GPT-4', value: 'gpt-4' },
+          { title: 'GPT-3.5 Turbo', value: 'gpt-3.5-turbo' },
+          { title: 'GPT-3.5 Turbo 16k', value: 'gpt-3.5-turbo-16k' }
+        ]
+
+        this.serviceModels.gemini = [
+          { title: 'Gemini 2.0 Flash', value: 'gemini-2.0-flash' },
+          { title: 'Gemini Pro', value: 'gemini-pro' },
+          { title: 'Gemini Pro Vision', value: 'gemini-pro-vision' }
+        ]
+
+        this.serviceModels.grok = [
+          { title: 'Grok 4 Latest', value: 'grok-4-latest' },
+          { title: 'Grok Beta', value: 'grok-beta' }
+        ]
+
+        this.availableServices = services
+
+        // Parse existing task type settings
+        const taskTypes = ['contentExpansion', 'entityExtraction', 'peopleSearch', 'socialSearch', 'tweetComposing']
+        taskTypes.forEach(taskType => {
+          if (this.localSettings && this.localSettings.routing && this.localSettings.routing[taskType]) {
+            const [service, model] = this.localSettings.routing[taskType].split(':')
+            this[`${taskType}Service`] = service || 'auto'
+            this[`${taskType}Model`] = model || null
+          }
+        })
+      } catch (error) {
+        console.error('Failed to load available models:', error)
+      }
+    },
+    getModelsForService(service) {
+      if (!service || service === 'auto') {
+        return []
+      }
+      const models = this.serviceModels[service] || []
+      console.log(`getModelsForService(${service}):`, models)
+      return models
+    },
+    updateContentExpansionModel() {
+      // Reset model when service changes
+      this.contentExpansionModel = null
+      if (this.localSettings && this.localSettings.routing && this.contentExpansionService === 'auto') {
+        this.localSettings.routing.contentExpansion = 'auto'
+      }
+    },
+    updateContentExpansion() {
+      if (!this.localSettings || !this.localSettings.routing) return
+
+      if (this.contentExpansionService === 'auto') {
+        this.localSettings.routing.contentExpansion = 'auto'
+      } else if (this.contentExpansionModel) {
+        this.localSettings.routing.contentExpansion = `${this.contentExpansionService}:${this.contentExpansionModel}`
+      }
+    },
+    updateTaskService(taskType) {
+      if (!this.localSettings || !this.localSettings.routing) return
+
+      // Reset model when service changes
+      this[`${taskType}Model`] = null
+      const service = this[`${taskType}Service`]
+
+      if (service === 'auto') {
+        this.localSettings.routing[taskType] = 'auto'
+      }
+    },
+    updateTaskModel(taskType) {
+      if (!this.localSettings || !this.localSettings.routing) return
+
+      const service = this[`${taskType}Service`]
+      const model = this[`${taskType}Model`]
+
+      if (service === 'auto') {
+        this.localSettings.routing[taskType] = 'auto'
+      } else if (model) {
+        this.localSettings.routing[taskType] = `${service}:${model}`
+      }
+    },
     save() {
       this.$emit('update:modelValue', this.localSettings)
       this.$emit('save', this.localSettings)
@@ -536,7 +860,8 @@ export default {
         analysis: 'mdi-chart-line',
         summarization: 'mdi-format-list-bulleted',
         formatting: 'mdi-format-paint',
-        research: 'mdi-magnify'
+        research: 'mdi-magnify',
+        development: 'mdi-code-braces'
       }
       return icons[category] || 'mdi-message-text'
     },
@@ -546,7 +871,8 @@ export default {
         analysis: 'green',
         summarization: 'orange',
         formatting: 'purple',
-        research: 'teal'
+        research: 'teal',
+        development: 'red'
       }
       return colors[category] || 'grey'
     },
@@ -588,6 +914,12 @@ export default {
       localStorage.setItem('llm-performance-stats', JSON.stringify(this.performanceStats))
     },
     initializeDefaultPrompts() {
+      if (!this.localSettings) {
+        return
+      }
+      if (!this.localSettings.prompts) {
+        this.localSettings.prompts = []
+      }
       if (this.localSettings.prompts.length === 0) {
         this.localSettings.prompts = [
           {
@@ -616,6 +948,33 @@ export default {
             maxTokens: 200,
             enabled: true,
             template: 'Summarize this script segment in 2-3 sentences:\n\n{script}\n\nFocus on key points and main message.'
+          },
+          {
+            name: 'Segment Generator (Tease)',
+            category: 'development',
+            preferredService: 'ollama',
+            temperature: 0.8,
+            maxTokens: 1000,
+            enabled: true,
+            template: 'RUNDOWN ITEM TYPE DEFINITIONS:\n- Cold Open: Opening hook before any intro/music. Grabs attention instantly with compelling question, shocking statement, or intriguing scenario. Sets episode tone. No explanations - just hook. 30-90 seconds.\n- Tease: Preview of upcoming segments to keep listeners engaged. Builds curiosity without spoiling details. References specific upcoming topics. Brief and energetic. Appears before breaks or at show start.\n- Segment: Main content blocks. In-depth discussion, analysis, interviews, storytelling. Educational yet engaging. Conversational tone. 5-15 minutes.\n- Ad: Commercial advertisement with sponsor name, product description, benefits, pricing, clear call-to-action.\n- Promo: Promotional content for the show, network shows, events, or membership offers.\n\nYOU ARE WRITING: TEASE\n\nWrite a {duration}-minute podcast tease/preview for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).\n\nThis tease should hook listeners and preview what\'s coming up in the show.{upcomingSegments}\n\nWrite {paragraphs} short, punchy paragraphs that build anticipation.\n\nStyle requirements:\n- Create urgency and intrigue\n- Tease topics without spoiling details\n- Use vivid, compelling language\n- Build curiosity about upcoming segments\n- Keep it brief and energetic\n\nCRITICAL FORMATTING:\n- Separate each paragraph with TWO newlines (blank line between paragraphs)\n- Format: Plain paragraph text, ready to paste into script\n- No titles, no metadata, just the tease content\n\nDO NOT include any introductory text like "Here is the tease" - start IMMEDIATELY with the first paragraph of actual content.\n\nGenerate the tease now:'
+          },
+          {
+            name: 'Segment Generator (Cold Open)',
+            category: 'development',
+            preferredService: 'ollama',
+            temperature: 0.8,
+            maxTokens: 1500,
+            enabled: true,
+            template: 'RUNDOWN ITEM TYPE DEFINITIONS:\n- Cold Open: Opening hook before any intro/music. Grabs attention instantly with compelling question, shocking statement, or intriguing scenario. Sets episode tone. No explanations - just hook. 30-90 seconds.\n- Tease: Preview of upcoming segments to keep listeners engaged. Builds curiosity without spoiling details. References specific upcoming topics. Brief and energetic. Appears before breaks or at show start.\n- Segment: Main content blocks. In-depth discussion, analysis, interviews, storytelling. Educational yet engaging. Conversational tone. 5-15 minutes.\n- Ad: Commercial advertisement with sponsor name, product description, benefits, pricing, clear call-to-action.\n- Promo: Promotional content for the show, network shows, events, or membership offers.\n\nYOU ARE WRITING: COLD OPEN\n\nWrite a {duration}-minute cold open for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).\n\nA cold open should immediately grab attention with a compelling hook - a powerful question, shocking statement, or intriguing scenario.\n\nWrite {paragraphs} paragraphs.\n\nStyle requirements:\n- Start with maximum impact - hook listeners instantly\n- Create immediate tension or curiosity\n- Use vivid, cinematic language\n- Set the tone for the episode\n- Don\'t explain everything - leave them wanting more\n\nCRITICAL FORMATTING:\n- Separate each paragraph with TWO newlines (blank line between paragraphs)\n- Format: Plain paragraph text, ready to paste into script\n- No titles, no metadata, just the cold open content\n\nDO NOT include any introductory text - start IMMEDIATELY with the hook.\n\nGenerate the cold open now:'
+          },
+          {
+            name: 'Segment Generator (Standard)',
+            category: 'development',
+            preferredService: 'ollama',
+            temperature: 0.8,
+            maxTokens: 2000,
+            enabled: true,
+            template: 'RUNDOWN ITEM TYPE DEFINITIONS:\n- Cold Open: Opening hook before any intro/music. Grabs attention instantly with compelling question, shocking statement, or intriguing scenario. Sets episode tone. No explanations - just hook. 30-90 seconds.\n- Tease: Preview of upcoming segments to keep listeners engaged. Builds curiosity without spoiling details. References specific upcoming topics. Brief and energetic. Appears before breaks or at show start.\n- Segment: Main content blocks. In-depth discussion, analysis, interviews, storytelling. Educational yet engaging. Conversational tone. 5-15 minutes.\n- Ad: Commercial advertisement with sponsor name, product description, benefits, pricing, clear call-to-action.\n- Promo: Promotional content for the show, network shows, events, or membership offers.\n\nYOU ARE WRITING: SEGMENT\n\nWrite a {duration}-minute podcast segment for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).\n\nWrite {paragraphs} paragraphs.\n\nStyle requirements:\n- Speak directly to podcast listeners in conversational, engaging tone\n- Use real psychological concepts but fictional case examples\n- Include specific manipulation tactics (gaslighting, love-bombing, triangulation, DARVO, hoovering)\n- Reference clinical patterns while remaining accessible\n- Maintain journalistic credibility and empathy for victims\n- DO NOT use real names or identify real cases\n\nCRITICAL FORMATTING:\n- Separate each paragraph with TWO newlines (blank line between paragraphs)\n- Example format:\n  First paragraph text here.\n\n  Second paragraph text here.\n\n  Third paragraph text here.\n\nFormat: Plain paragraph text, ready to paste into script. No titles, no metadata, just the segment content with blank lines between paragraphs.\n\nDO NOT include any introductory text like "Here is the podcast segment" or "Here you go" - start IMMEDIATELY with the first paragraph of actual content.\n\nGenerate the segment now:'
           }
         ]
       }

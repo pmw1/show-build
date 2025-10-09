@@ -81,8 +81,20 @@ class GenerationSettings(BaseModel):
     default_font_family: str = Field("sans-serif", description="Default font family")
     default_font_size: str = Field("19px", description="Default font size")
     include_attribution_default: bool = Field(True, description="Include attribution by default")
-    fsq_max_lines: int = Field(4, description="Maximum lines per FSQ quote slide")
-    fsq_chars_per_line: int = Field(70, description="Average characters per line at default font size")
+
+    # Screen capacity settings
+    fsq_max_lines: int = Field(5, description="Maximum lines per FSQ quote slide")
+    fsq_chars_per_line: int = Field(50, description="Average characters per line at default font size")
+
+    # Split behavior settings
+    fsq_min_second_screen: int = Field(80, description="Minimum characters for second screen to prevent orphan text")
+    fsq_split_strategy: str = Field("smart", description="Split strategy: smart, always_balance, strict_limit, ai_only")
+
+    # Advanced tuning settings
+    fsq_balance_threshold_percent: int = Field(30, description="Percentage over limit to trigger balanced split instead of standard")
+    fsq_prefer_sentence_boundaries: bool = Field(True, description="Prefer splitting at sentence boundaries (periods, etc)")
+    fsq_allow_mid_sentence_split: bool = Field(False, description="Allow splitting at commas/clauses if needed")
+    fsq_overflow_handling: str = Field("multi_segment", description="Overflow handling: multi_segment, compress, truncate")
 
 class SettingsUpdate(BaseModel):
     """Complete settings update model"""
@@ -145,6 +157,13 @@ def load_settings() -> Dict[str, Any]:
             "system": SystemSettings().dict()
         }
 
+def camel_to_snake(camel_str: str) -> str:
+    """Convert camelCase to snake_case for database storage"""
+    import re
+    # Insert underscore before uppercase letters and convert to lowercase
+    snake = re.sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+    return snake
+
 def save_settings(settings: Dict[str, Any]) -> bool:
     """Save settings to DATABASE"""
     from database import SessionLocal
@@ -157,8 +176,12 @@ def save_settings(settings: Dict[str, Any]) -> bool:
                     continue
 
                 for key, value in category_data.items():
-                    # Convert value to JSON string
-                    value_str = json.dumps(value) if not isinstance(value, str) else value
+                    # Convert camelCase keys to snake_case for database consistency
+                    db_key = camel_to_snake(key)
+
+                    # ALWAYS convert value to JSON string for database storage
+                    # This ensures proper encoding of all types (strings, numbers, booleans, etc.)
+                    value_str = json.dumps(value)
 
                     # Upsert to database
                     db.execute(text("""
@@ -169,7 +192,7 @@ def save_settings(settings: Dict[str, Any]) -> bool:
                             value = :value,
                             category = :category,
                             updated_at = NOW()
-                    """), {"category": category, "key": key, "value": value_str})
+                    """), {"category": category, "key": db_key, "value": value_str})
 
             db.commit()
 
@@ -892,4 +915,95 @@ async def clear_cache(
         
     except Exception as e:
         logger.error(f"Failed to clear cache: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/llm_routing")
+async def get_llm_routing_settings(
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Get LLM routing configuration including prompts"""
+    from database import SessionLocal
+    from models_v2 import Settings
+
+    try:
+        db = SessionLocal()
+        setting = db.query(Settings).filter(Settings.key == "llm_routing").first()
+
+        if setting:
+            return {"key": "llm_routing", "value": setting.value, "category": setting.category}
+        else:
+            # Return default structure if not found
+            return {
+                "key": "llm_routing",
+                "value": {
+                    "routing": {
+                        "quoteSplitting": "auto",
+                        "slugGeneration": "auto",
+                        "scriptSummary": "auto",
+                        "titleGeneration": "auto",
+                        "contentExpansion": "auto",
+                        "entityExtraction": "auto",
+                        "peopleSearch": "auto",
+                        "socialSearch": "auto",
+                        "tweetComposing": "auto",
+                        "factChecking": "auto",
+                        "enableFallback": True,
+                        "fallbackOrder": ["ollama", "openai", "anthropic", "gemini", "grok"]
+                    },
+                    "prompts": []
+                },
+                "category": "llm"
+            }
+    except Exception as e:
+        logger.error(f"Error loading LLM routing settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@router.post("/llm_routing")
+async def save_llm_routing_settings(
+    request: Request,
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Save LLM routing configuration including prompts"""
+    from database import SessionLocal
+    from models_v2 import Settings
+    from sqlalchemy import text
+
+    try:
+        body = await request.json()
+        db = SessionLocal()
+
+        # Find or create setting
+        setting = db.query(Settings).filter(Settings.key == "llm_routing").first()
+
+        if setting:
+            # Update existing
+            setting.value = body
+            setting.updated_at = datetime.utcnow()
+        else:
+            # Create new
+            setting = Settings(
+                key="llm_routing",
+                value=body,
+                category="llm",
+                description="LLM routing and prompt template configuration"
+            )
+            db.add(setting)
+
+        db.commit()
+        db.refresh(setting)
+
+        return {
+            "success": True,
+            "message": "LLM routing settings saved successfully",
+            "value": setting.value
+        }
+    except Exception as e:
+        logger.error(f"Error saving LLM routing settings: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()

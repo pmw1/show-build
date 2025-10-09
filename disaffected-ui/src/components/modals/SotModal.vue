@@ -66,6 +66,7 @@
             Slug: <span style="color: red;">*</span>
           </label>
           <input
+            ref="slugField"
             v-model="slug"
             class="cue-modal-input mb-3"
             type="text"

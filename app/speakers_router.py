@@ -167,9 +167,11 @@ async def list_speakers(
             query = query.filter(Speaker.show_id == show_id)
         elif organization_id:
             query = query.filter(Speaker.organization_id == organization_id)
-        elif current_user.organization_id:
-            # Default to user's organization
-            query = query.filter(Speaker.organization_id == current_user.organization_id)
+        else:
+            # Default to user's organization (handle both dict and User object)
+            user_org_id = current_user.get('organization_id') if isinstance(current_user, dict) else getattr(current_user, 'organization_id', None)
+            if user_org_id:
+                query = query.filter(Speaker.organization_id == user_org_id)
 
         speakers = query.all()
 

@@ -33,19 +33,12 @@ export function useLLM() {
 
   /**
    * Call Ollama (local LLM via llama.cpp)
+   * Falls back to hardcoded host if config fetch fails
    */
-  async function callOllama(prompt, model = 'llama2', options = {}) {
+  async function callOllama(prompt, model = 'llama3:latest', options = {}) {
     try {
-      const configs = await getApiConfigs()
-      const ollamaConfig = configs?.preproduction?.ai_services?.ollama
-
-      if (!ollamaConfig?.enabled) {
-        throw new Error('Ollama is not enabled in settings')
-      }
-
-      const host = ollamaConfig.host || 'http://localhost:11434'
-
-      const response = await axios.post(`${host}/api/generate`, {
+      // Use backend proxy to avoid HTTPS->HTTP mixed content blocking
+      const response = await axios.post('/api/llm/ollama/generate', {
         model: model,
         prompt: prompt,
         stream: false,
@@ -297,7 +290,7 @@ export function useLLM() {
         slugGeneration: 'mistral:7b',
         scriptSummary: 'llama3:latest',
         titleGeneration: 'llama3:latest',
-        contentExpansion: 'llama2:13b-chat',
+        contentExpansion: 'llama3:latest',  // Changed from llama2:13b-chat (too slow)
         factChecking: 'deepseek-r1:8b',
         entityExtraction: 'Qwen2.5-Coder:7b'
       }
@@ -316,6 +309,16 @@ export function useLLM() {
     try {
       const configs = await getApiConfigs()
       const routing = getRoutingPreferences().routing
+
+      // If configs failed to load (auth issue), try Ollama directly as fallback
+      if (!configs) {
+        console.warn('⚠️ Failed to load API configs, attempting direct Ollama fallback')
+        try {
+          return await callOllama(prompt, options.model || 'llama3:latest', options)
+        } catch (err) {
+          throw new Error('Failed to load API configuration. Please ensure you are logged in.')
+        }
+      }
 
       // Determine preferred service based on task type
       let preferredService = 'auto'
@@ -347,8 +350,19 @@ export function useLLM() {
       // Auto routing or fallback
       const fallbackOrder = routing.enableFallback ? routing.fallbackOrder : ['ollama', 'openai', 'anthropic', 'gemini', 'grok']
 
+      console.log('🔍 Checking enabled services...', {
+        hasConfigs: !!configs,
+        hasPreproduction: !!configs?.preproduction,
+        hasAiServices: !!configs?.preproduction?.ai_services,
+        ollamaConfig: configs?.preproduction?.ai_services?.ollama,
+        fallbackOrder
+      })
+
       for (const service of fallbackOrder) {
-        if (configs?.preproduction?.ai_services?.[service]?.enabled) {
+        const isEnabled = configs?.preproduction?.ai_services?.[service]?.enabled
+        console.log(`  ${service}: enabled=${isEnabled}`, configs?.preproduction?.ai_services?.[service])
+
+        if (isEnabled) {
           try {
             const result = await callSpecificService(service, prompt, options)
             if (result) return result
@@ -372,29 +386,40 @@ export function useLLM() {
    * Call a specific LLM service by name
    */
   async function callSpecificService(service, prompt, options) {
-    switch (service) {
+    // Parse service string if it includes model (e.g., "ollama:llama3:latest")
+    let serviceName = service
+    let modelOverride = null
+
+    if (service.includes(':')) {
+      const parts = service.split(':')
+      serviceName = parts[0]
+      modelOverride = parts.slice(1).join(':') // Handle models like "llama3:latest"
+      console.log(`📦 Parsed service: ${serviceName}, model: ${modelOverride}`)
+    }
+
+    switch (serviceName) {
       case 'ollama': {
         // Use task-specific Ollama model if available
         const routing = getRoutingPreferences()
-        let ollamaModel = options.model
+        let ollamaModel = modelOverride || options.model
 
-        if (options.taskType && routing.ollamaModels && routing.ollamaModels[options.taskType]) {
+        if (!ollamaModel && options.taskType && routing.ollamaModels && routing.ollamaModels[options.taskType]) {
           ollamaModel = routing.ollamaModels[options.taskType]
           console.log(`🤖 Using Ollama (${ollamaModel}) for ${options.taskType}`)
         } else {
-          console.log('🤖 Using Ollama (local)')
+          console.log(`🤖 Using Ollama (${ollamaModel || 'default'})`)
         }
 
         return await callOllama(prompt, ollamaModel, options)
       }
       case 'openai':
-        return await callOpenAI(prompt, options.model, options)
+        return await callOpenAI(prompt, modelOverride || options.model, options)
       case 'anthropic':
-        return await callAnthropic(prompt, options.model, options)
+        return await callAnthropic(prompt, modelOverride || options.model, options)
       case 'gemini':
-        return await callGemini(prompt, options.model, options)
+        return await callGemini(prompt, modelOverride || options.model, options)
       case 'grok':
-        return await callGrok(prompt, options.model, options)
+        return await callGrok(prompt, modelOverride || options.model, options)
       default:
         throw new Error(`Unknown service: ${service}`)
     }
@@ -408,71 +433,115 @@ export function useLLM() {
    */
   async function intelligentQuoteSplit(quote, options = {}) {
     // Get display parameters from options or use defaults
-    const maxLines = options.maxLines || 4
-    const charsPerLine = options.charsPerLine || 70
+    const maxLines = options.maxLines || 5
+    const charsPerLine = options.charsPerLine || 50
     const fontSize = options.fontSize || '19px'
-    const maxChars = maxLines * charsPerLine
 
-    const prompt = `You are an FSQ (Full Screen Quote) layout analyzer. Analyze this quote and determine if it needs to be split for optimal visual display.
+    // NEW: Smart split configuration
+    const minSecondScreen = options.minSecondScreen || 80
+    const splitStrategy = options.splitStrategy || 'smart'
+    const balanceThresholdPercent = options.balanceThresholdPercent || 30
+    const preferSentenceBoundaries = options.preferSentenceBoundaries !== false
+    const allowMidSentenceSplit = options.allowMidSentenceSplit || false
+
+    // Calculate thresholds
+    const maxCharsScreen1 = maxLines * charsPerLine
+    const balanceThreshold = maxCharsScreen1 + Math.round(minSecondScreen * (balanceThresholdPercent / 100))
+
+    console.log('🧮 Smart Split Configuration:', {
+      maxCharsScreen1,
+      minSecondScreen,
+      balanceThreshold,
+      splitStrategy,
+      quoteLength: quote.length
+    })
+
+    const prompt = `You are an FSQ (Full Screen Quote) layout analyzer with SMART SPLIT logic to prevent orphan text.
 
 DISPLAY CONSTRAINTS:
 - Screen: 1920x1080 full screen
-- Max comfortable lines: ${maxLines}
+- Max lines for Screen 1: ${maxLines}
 - Characters per line: ~${charsPerLine}
-- Max characters per slide: ${maxChars}
+- Max characters for Screen 1: ${maxCharsScreen1}
+- MINIMUM characters for Screen 2: ${minSecondScreen} (prevents orphans)
+- Balance threshold: ${balanceThreshold} chars
 - Font size: ${fontSize}
 
-QUOTE TO ANALYZE:
+QUOTE TO ANALYZE (${quote.length} characters):
 "${quote}"
 
-⚠️ CRITICAL: Only split if absolutely necessary! Preserving the quote as a single unit is PREFERRED.
+SMART SPLIT STRATEGY: "${splitStrategy}"
 
-DECISION RULES (apply in order):
+🔍 DECISION LOGIC:
 
-1. CHARACTER COUNT CHECK:
-   - Count total characters in quote (including spaces and punctuation)
-   - If ≤ ${maxChars} chars: STOP HERE - DO NOT SPLIT
-     → Return single-element array: ["original quote as-is"]
-   - If > ${maxChars} chars: Splitting is required (proceed to step 2)
+**STEP 1: Length Analysis**
+- Quote length: ${quote.length} chars
+- Max Screen 1: ${maxCharsScreen1} chars
+- Balance threshold: ${balanceThreshold} chars
 
-   IMPORTANT: If the quote fits comfortably, DO NOT split it. Unnecessary splitting reduces impact.
+**STEP 2: Determine Split Behavior**
 
-2. NATURAL BREAK PRIORITY (when splitting needed):
-   a) FIRST CHOICE: Period/sentence boundary
-      - Split at sentence end closest to ${maxChars} chars
-      - Each segment should be complete thought
+A) If ${quote.length} ≤ ${maxCharsScreen1}:
+   → SINGLE SCREEN - Quote fits comfortably
+   → Return: ["original quote as-is"]
 
-   b) SECOND CHOICE: Paragraph break
-      - If quote has paragraphs, split between them
+B) If ${quote.length} is ${maxCharsScreen1 + 1} to ${balanceThreshold}:
+   → BALANCED SPLIT - In the "gray zone"
+   → Splitting at ${maxCharsScreen1} would leave only ${quote.length - maxCharsScreen1} chars on Screen 2
+   → This is LESS than minimum (${minSecondScreen}), creating orphan text!
+   → SOLUTION: Split near the MIDDLE (~${Math.floor(quote.length / 2)} chars) for balanced screens
 
-   c) THIRD CHOICE: Comma or semicolon
-      - Split at major clause break
-      - Must preserve meaning
+C) If ${quote.length} > ${balanceThreshold}:
+   → STANDARD SPLIT - Quote is long enough
+   → Split at ~${maxCharsScreen1} chars
+   → Remainder will be ≥ ${minSecondScreen} chars (adequate for Screen 2)
 
-   d) LAST RESORT: Hard split at ~50 words
-      - Only if no natural breaks exist
-      - Add ellipsis (...) to indicate continuation
+**STEP 3: Find Split Point** ${preferSentenceBoundaries ? '(Prefer Sentence Boundaries)' : ''}
 
-3. VALIDATION:
-   - Each segment must be independently readable
-   - Each segment should fit visual constraints (≤ ${maxChars} chars)
-   - Preserve original meaning and tone
-   - No orphaned words (segments should be substantial)
+Priority order for finding split point:
+1. ${preferSentenceBoundaries ? 'Sentence endings (. ! ?) within ±50 chars of target' : 'Target position'}
+2. ${allowMidSentenceSplit ? 'Clause breaks (, ; -) within ±30 chars if no sentence boundary' : 'Skip mid-sentence'}
+3. Word boundaries (spaces) within ±20 chars
+4. Exact position (last resort)
 
-OUTPUT FORMAT:
+**VALIDATION RULES:**
+- ⚠️ **NO OVERLAPPING SEGMENTS** - Each word should appear in EXACTLY ONE segment
+- ⚠️ **NO DUPLICATE TEXT** - Do not repeat any portion of the quote across segments
+- ⚠️ **CLEAN CUTS** - Split the quote, don't copy it
+- Each segment must be independently readable
+- NO orphan text (Screen 2 must be ≥ ${minSecondScreen} chars)
+- Preserve original meaning and tone
+- Each segment should be substantial
+
+**WRONG EXAMPLE (DO NOT DO THIS):**
+❌ WRONG:
+[
+  "The fundamental problem with modern technology isn't that it's too complex...",
+  "that we've created systems that prioritize convenience over understanding..."
+]
+This is WRONG because "that we've created systems..." appears in BOTH segments (overlapping).
+
+**CORRECT EXAMPLE:**
+✅ CORRECT:
+[
+  "The fundamental problem with modern technology isn't that it's too complex or too simple, but rather that we've created systems that prioritize convenience over understanding.",
+  "We've built a world where people can accomplish incredible things without having the slightest idea how any of it works..."
+]
+This is CORRECT because each segment contains unique, non-overlapping text.
+
+**OUTPUT FORMAT:**
 Return ONLY a valid JSON array of strings, no explanation.
 
 Examples:
-- Quote fits (≤${maxChars} chars): ["The entire quote stays together."]
-  ✅ Correct: Single element array preserving the whole quote
-  ❌ Wrong: Splitting a quote that already fits
+- 220 chars (fits): ["The entire quote stays together."]
+- 280 chars (gray zone): ["First half ~140 chars.", "Second half ~140 chars."] ← BALANCED, NO OVERLAP
+- 400 chars (long): ["First screen ~${maxCharsScreen1} chars.", "Second screen ~${400 - maxCharsScreen1} chars."] ← STANDARD, NO OVERLAP
 
-- Quote too long (>${maxChars} chars): ["First segment ending at period.", "Second segment with rest of quote."]
-  ✅ Correct: Multiple elements only when necessary
+⚠️ CRITICAL:
+1. If split would create orphan (Screen 2 < ${minSecondScreen} chars), BALANCE the split instead!
+2. NEVER repeat or overlap text between segments - split the quote cleanly!
 
-DEFAULT BEHAVIOR: When in doubt, DO NOT SPLIT. Return the original quote as a single-element array.
-
-CRITICAL: Return ONLY the JSON array. No markdown, no explanation, just the array.`
+Return ONLY the JSON array. No markdown, no explanation, just the array.`
 
     try {
       const result = await smartCall(prompt, {
@@ -495,8 +564,16 @@ CRITICAL: Return ONLY the JSON array. No markdown, no explanation, just the arra
 
         // Validate that we got an array of strings
         if (Array.isArray(segments) && segments.every(s => typeof s === 'string')) {
-          console.log(`📊 Quote split analysis: ${segments.length} segment(s)`)
-          return segments
+          // CRITICAL: Validate segments are non-overlapping and cover the full quote
+          const validated = validateAndFixSegments(segments, quote)
+
+          if (validated.valid) {
+            console.log(`✅ Quote split analysis: ${validated.segments.length} segment(s) (validated)`)
+            return validated.segments
+          } else {
+            console.warn('⚠️ LLM returned invalid/overlapping segments, using deterministic fallback')
+            return deterministicSplit(quote, maxCharsScreen1, minSecondScreen, balanceThreshold, preferSentenceBoundaries)
+          }
         }
       }
 
@@ -505,9 +582,145 @@ CRITICAL: Return ONLY the JSON array. No markdown, no explanation, just the arra
       return [quote]
     } catch (err) {
       console.error('Failed to split quote with LLM:', err)
-      // Fallback: return original quote
+      // Fallback: use deterministic algorithm
+      return deterministicSplit(quote, maxCharsScreen1, minSecondScreen, balanceThreshold, preferSentenceBoundaries)
+    }
+  }
+
+  /**
+   * Validate segments returned by LLM
+   * Checks for overlaps and coverage of original quote
+   */
+  function validateAndFixSegments(segments, originalQuote) {
+    // Single segment is always valid
+    if (segments.length === 1) {
+      return { valid: true, segments }
+    }
+
+    // Check if segments are overlapping by seeing if their combined length
+    // is significantly more than the original quote
+    const totalLength = segments.reduce((sum, seg) => sum + seg.trim().length, 0)
+    const originalLength = originalQuote.trim().length
+
+    // Allow 10% variance for punctuation/spacing differences
+    const isOverlapping = totalLength > originalLength * 1.1
+
+    if (isOverlapping) {
+      console.warn('❌ Segments overlap detected:', {
+        totalLength,
+        originalLength,
+        ratio: (totalLength / originalLength).toFixed(2)
+      })
+      return { valid: false, segments }
+    }
+
+    // Check if segments cover the full quote by reconstructing
+    const reconstructed = segments.join(' ').trim()
+    const coverageRatio = reconstructed.length / originalLength
+
+    if (coverageRatio < 0.9) {
+      console.warn('❌ Segments don\'t cover full quote:', {
+        reconstructedLength: reconstructed.length,
+        originalLength,
+        coverageRatio: coverageRatio.toFixed(2)
+      })
+      return { valid: false, segments }
+    }
+
+    console.log('✅ Segments validated as non-overlapping and complete')
+    return { valid: true, segments }
+  }
+
+  /**
+   * Deterministic split algorithm (fallback when LLM fails)
+   * Implements the same smart split logic without AI
+   */
+  function deterministicSplit(quote, maxCharsScreen1, minSecondScreen, balanceThreshold, preferSentenceBoundaries = true) {
+    const quoteLength = quote.length
+
+    // Case A: Fits on single screen
+    if (quoteLength <= maxCharsScreen1) {
+      console.log('📏 Quote fits on single screen')
       return [quote]
     }
+
+    // Case B: Gray zone - needs balanced split
+    if (quoteLength <= balanceThreshold) {
+      const targetSplitPoint = Math.floor(quoteLength / 2)
+      console.log(`⚖️ Balanced split at ~${targetSplitPoint} chars (prevents orphan)`)
+
+      const splitPoint = findBestSplitPoint(quote, targetSplitPoint, preferSentenceBoundaries)
+      return [
+        quote.substring(0, splitPoint).trim(),
+        quote.substring(splitPoint).trim()
+      ]
+    }
+
+    // Case C: Long quote - standard split at max chars
+    console.log(`📐 Standard split at ~${maxCharsScreen1} chars`)
+    const splitPoint = findBestSplitPoint(quote, maxCharsScreen1, preferSentenceBoundaries)
+
+    const firstSegment = quote.substring(0, splitPoint).trim()
+    const remainder = quote.substring(splitPoint).trim()
+
+    // If remainder is still too long, recursively split it
+    if (remainder.length > maxCharsScreen1) {
+      console.log('🔁 Remainder too long, creating additional segments')
+      const additionalSegments = deterministicSplit(
+        remainder,
+        maxCharsScreen1,
+        minSecondScreen,
+        balanceThreshold,
+        preferSentenceBoundaries
+      )
+      return [firstSegment, ...additionalSegments]
+    }
+
+    return [firstSegment, remainder]
+  }
+
+  /**
+   * Find the best split point near a target position
+   * Prefers sentence boundaries, then clause breaks, then word boundaries
+   */
+  function findBestSplitPoint(text, targetPosition, preferSentenceBoundaries = true) {
+    // Search window around target
+    const searchStart = Math.max(0, targetPosition - 50)
+    const searchEnd = Math.min(text.length, targetPosition + 50)
+    const searchText = text.substring(searchStart, searchEnd)
+
+    // Priority 1: Sentence boundaries (. ! ?)
+    if (preferSentenceBoundaries) {
+      const sentenceEndings = ['. ', '! ', '? ']
+      for (const ending of sentenceEndings) {
+        const relativePos = searchText.lastIndexOf(ending, targetPosition - searchStart)
+        if (relativePos !== -1) {
+          console.log(`  ✂️ Split at sentence boundary: "${ending.trim()}"`)
+          return searchStart + relativePos + ending.length
+        }
+      }
+    }
+
+    // Priority 2: Clause breaks (, ; :)
+    const clauseBreaks = [', ', '; ', ': ', ' - ']
+    for (const breakChar of clauseBreaks) {
+      const relativePos = searchText.lastIndexOf(breakChar, targetPosition - searchStart)
+      if (relativePos !== -1) {
+        console.log(`  ✂️ Split at clause break: "${breakChar.trim()}"`)
+        return searchStart + relativePos + breakChar.length
+      }
+    }
+
+    // Priority 3: Word boundary (space)
+    const relativePos = searchText.lastIndexOf(' ', targetPosition - searchStart)
+    if (relativePos !== -1) {
+      console.log('  ✂️ Split at word boundary')
+      return searchStart + relativePos + 1
+    }
+
+    // Last resort: exact position
+    console.log('  ✂️ Split at exact position (no good boundary found)')
+    return targetPosition
   }
 
   /**
@@ -603,6 +816,36 @@ CRITICAL: Return the exact same words with only quotation marks corrected. Do no
 
       // Clean response - remove any markdown or quotes the LLM might add
       let normalized = result.trim()
+
+      // Remove LLM preamble/postamble (common patterns)
+      const preamblePatterns = [
+        /^Here'?s? the corrected text.*?:\s*/i,
+        /^The corrected text is:?\s*/i,
+        /^Corrected:?\s*/i,
+        /^Result:?\s*/i,
+        /^Output:?\s*/i,
+        /^\[.*?\]:?\s*/,
+        /^Sure,.*?:\s*/i
+      ]
+
+      const postamblePatterns = [
+        /\s*I hope this helps!?\s*$/i,
+        /\s*Let me know if.*$/i,
+        /\s*Is there anything.*$/i
+      ]
+
+      // Remove preamble
+      for (const pattern of preamblePatterns) {
+        normalized = normalized.replace(pattern, '')
+      }
+
+      // Remove postamble
+      for (const pattern of postamblePatterns) {
+        normalized = normalized.replace(pattern, '')
+      }
+
+      // Trim again after removing preamble/postamble
+      normalized = normalized.trim()
 
       // Remove surrounding quotes if LLM added them
       if ((normalized.startsWith('"') && normalized.endsWith('"')) ||

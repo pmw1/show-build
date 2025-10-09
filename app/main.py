@@ -13,7 +13,11 @@ from utils.id import get_next_id
 from utils.frontmatter_parser import parse_markdown_file
 from auth.utils import get_current_user_or_key, get_current_user  # Add get_current_user
 import logging
+import httpx
 import hashlib
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 import os
 import sys
 import threading  # Add this import
@@ -71,9 +75,12 @@ try:
     from fsq_asset_router import router as fsq_asset_router
     from speakers_router import router as speakers_router
     from voice_sample_router import router as voice_sample_router
+    from wpm_audio_router import router as wpm_audio_router
+    from voice_model_router import router as voice_model_router
     from xtts_router import router as xtts_router
     from housekeeping_router import router as housekeeping_router
     from sot_router import router as sot_router
+    from llm_proxy_router import router as llm_proxy_router
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Current directory: {os.getcwd()}")
@@ -169,6 +176,12 @@ app.include_router(speakers_router)
 # Include the Voice Sample router
 app.include_router(voice_sample_router)
 
+# Include the WPM Audio Analysis router
+app.include_router(wpm_audio_router)
+
+# Include the Voice Model Training router
+app.include_router(voice_model_router)
+
 # Include the XTTS status router
 app.include_router(xtts_router)
 
@@ -177,6 +190,9 @@ app.include_router(housekeeping_router, prefix="/api")
 
 # Include SOT processing router
 app.include_router(sot_router)
+
+# Include LLM proxy router (for mixed content avoidance)
+app.include_router(llm_proxy_router)
 
 # Include the media analysis router
 from media_analysis_router import router as media_analysis_router
@@ -339,40 +355,51 @@ async def health():
     except Exception as e:
         health_status["services"]["database"] = f"error: {str(e)[:50]}"
 
-    # Test Ollama connectivity
+    # Test Ollama connectivity (load from database)
     try:
-        from pathlib import Path
-        import json
+        from sqlalchemy import text
+        from database import SessionLocal
 
-        # Load API config
-        api_config_file = Path("/app/storage/api_configs.json") if Path("/app").exists() else Path("app/storage/api_configs.json")
+        with SessionLocal() as db:
+            # Query Ollama config from database
+            result = db.execute(text("""
+                SELECT config_key, config_value, is_enabled
+                FROM api_configs
+                WHERE service = 'ollama' AND category = 'ai_services'
+            """))
+            rows = result.fetchall()
 
-        if api_config_file.exists():
-            with open(api_config_file, 'r') as f:
-                api_config = json.load(f)
+            if rows:
+                ollama_config = {}
+                is_enabled = False
 
-            ollama_config = api_config.get("preproduction", {}).get("ai_services", {}).get("ollama", {})
-
-            if ollama_config.get("enabled", False):
-                ollama_host = ollama_config.get("host")
-                ollama_model = ollama_config.get("model")
-
-                health_status["services"]["ollama"]["url"] = ollama_host
-                health_status["services"]["ollama"]["model"] = ollama_model
-
-                # Ping Ollama API
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get(f"{ollama_host}/api/tags")
-                    if response.status_code == 200:
-                        health_status["services"]["ollama"]["status"] = "connected"
+                for row in rows:
+                    key, value, enabled = row
+                    if key == 'enabled':
+                        is_enabled = enabled
                     else:
-                        health_status["services"]["ollama"]["status"] = f"error: HTTP {response.status_code}"
+                        ollama_config[key] = value
+
+                if is_enabled and ollama_config.get("host"):
+                    ollama_host = ollama_config.get("host")
+                    ollama_model = ollama_config.get("model")
+
+                    health_status["services"]["ollama"]["url"] = ollama_host
+                    health_status["services"]["ollama"]["model"] = ollama_model
+
+                    # Ping Ollama API (1s timeout for health check speed)
+                    async with httpx.AsyncClient(timeout=1.0) as client:
+                        response = await client.get(f"{ollama_host}/api/tags")
+                        if response.status_code == 200:
+                            health_status["services"]["ollama"]["status"] = "connected"
+                        else:
+                            health_status["services"]["ollama"]["status"] = f"error: HTTP {response.status_code}"
+                else:
+                    # Ollama not enabled - remove from status
+                    health_status["services"].pop("ollama", None)
             else:
-                # Ollama not enabled - remove from status
+                # No Ollama config in database - remove from status
                 health_status["services"].pop("ollama", None)
-        else:
-            # No config file - remove from status
-            health_status["services"].pop("ollama", None)
 
     except httpx.TimeoutException:
         health_status["services"]["ollama"]["status"] = "timeout"
@@ -410,14 +437,14 @@ async def health():
             redis_host = "192.168.51.223"
             redis_port = 6379
 
-        # Connect to Redis with timeout
+        # Connect to Redis with reduced timeout for faster health checks
         start_time = time.time()
         r = redis.Redis(
             host=redis_host,
             port=redis_port,
             password=redis_password,
-            socket_connect_timeout=5,
-            socket_timeout=5,
+            socket_connect_timeout=1,
+            socket_timeout=1,
             db=0
         )
 
@@ -443,8 +470,8 @@ async def health():
     try:
         from celery_app import celery_app
 
-        # Get active workers
-        inspect = celery_app.control.inspect(timeout=5)
+        # Get active workers (reduced timeout for faster health checks)
+        inspect = celery_app.control.inspect(timeout=1)
         active_workers = inspect.active()
 
         if active_workers:
@@ -540,9 +567,20 @@ async def health():
             service="xtts"
         )
 
-        if not xtts_config or not xtts_config.get("enabled"):
-            # XTTS not configured or disabled - remove from status
-            health_status["services"].pop("xtts", None)
+        if not xtts_config:
+            # XTTS not configured - show as error
+            health_status["services"]["xtts"] = {
+                "status": "error",
+                "connected": False,
+                "error": "Not configured"
+            }
+        elif not xtts_config.get("enabled"):
+            # XTTS disabled in config - show as error
+            health_status["services"]["xtts"] = {
+                "status": "error",
+                "connected": False,
+                "error": "Disabled in settings"
+            }
         else:
             host = xtts_config.get("host")
             if not host:
@@ -552,18 +590,27 @@ async def health():
                     "error": "No host configured"
                 }
             else:
-                # Test XTTS connectivity
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get(f"{host}/speakers")
+                # Test XTTS connectivity using /health endpoint (1s timeout)
+                async with httpx.AsyncClient(timeout=1.0) as client:
+                    response = await client.get(f"{host}/health")
                     if response.status_code == 200:
                         data = response.json()
-                        quota = data.get("quota_remaining")
+                        # Check if service is healthy and model is loaded
+                        is_healthy = data.get("status") == "healthy"
+                        model_loaded = data.get("model_loaded", False)
 
-                        health_status["services"]["xtts"] = {
-                            "status": "connected" if (quota is None or quota >= 100) else "depleted",
-                            "connected": True,
-                            "quota_remaining": quota
-                        }
+                        if is_healthy and model_loaded:
+                            health_status["services"]["xtts"] = {
+                                "status": "connected",
+                                "connected": True,
+                                "quota_remaining": None  # XTTS doesn't have quota
+                            }
+                        else:
+                            health_status["services"]["xtts"] = {
+                                "status": "error",
+                                "connected": False,
+                                "error": f"Unhealthy or model not loaded"
+                            }
                     else:
                         health_status["services"]["xtts"] = {
                             "status": "error",
@@ -584,8 +631,12 @@ async def health():
             "error": "Connection refused"
         }
     except Exception as e:
-        # If XTTS is not configured, remove it from status
-        health_status["services"].pop("xtts", None)
+        # Show error status instead of hiding XTTS
+        health_status["services"]["xtts"] = {
+            "status": "error",
+            "connected": False,
+            "error": f"Error: {str(e)[:30]}"
+        }
 
     # Set overall status based on CRITICAL services only (database)
     # Ollama is non-critical - it has its own status indicator
@@ -593,6 +644,38 @@ async def health():
         health_status["status"] = "degraded"
 
     return health_status
+
+@app.get("/api/llm/ollama/models")
+async def get_ollama_models(current_user: dict = Depends(get_current_user_or_key)):
+    """Get list of available Ollama models"""
+    try:
+        from api_config import api_config_manager
+
+        # Load Ollama config
+        ollama_config = api_config_manager.get_service_config(
+            workflow="preproduction",
+            category="ai_services",
+            service="ollama"
+        )
+
+        if not ollama_config or not ollama_config.get("host"):
+            return {"models": []}
+
+        ollama_host = ollama_config.get("host")
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{ollama_host}/api/tags")
+            if response.status_code == 200:
+                data = response.json()
+                models = data.get("models", [])
+                return {
+                    "models": [{"name": m["name"], "size": m.get("size")} for m in models]
+                }
+
+        return {"models": []}
+    except Exception as e:
+        logger.error(f"Failed to fetch Ollama models: {e}")
+        return {"models": []}
 
 @app.get("/show-info")
 async def get_show_info():
@@ -1171,6 +1254,7 @@ Add script content here...
         )
 
 @app.get("/show-info")
+@app.get("/api/show-info")
 async def get_show_info():
     """
     Returns basic information about the show.
@@ -1181,6 +1265,31 @@ async def get_show_info():
         "show_description": "A show about current events and technology.",
         "episodes_base_path": "/home/episodes"
     }
+
+@app.post("/api/logs/client-event")
+async def log_client_event(event_data: dict):
+    """
+    Log client-side events for monitoring and analytics (mandatory)
+    """
+    logger = logging.getLogger("client_events")
+
+    # Extract event details
+    event_type = event_data.get("event", "unknown")
+    duration = event_data.get("duration_ms", 0)
+    reason = event_data.get("reason", "")
+    timestamp = event_data.get("timestamp", "")
+
+    # Log the event
+    log_message = f"Client Event: {event_type} | Duration: {duration}ms | Reason: {reason} | Time: {timestamp}"
+
+    if duration > 5000:
+        logger.error(log_message)
+    elif duration > 2000:
+        logger.warning(log_message)
+    else:
+        logger.info(log_message)
+
+    return {"success": True, "message": "Event logged"}
 
 @app.get("/protected-endpoint")
 async def protected_route(current_user: dict = Depends(get_current_user_or_key)):

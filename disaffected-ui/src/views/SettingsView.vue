@@ -251,6 +251,7 @@ export default {
 
         if (apiResponse.ok) {
           const apiData = await apiResponse.json()
+          console.log('🔑 API Configs Response:', apiData)
           if (apiData.success && apiData.data) {
             // Flatten the hierarchical API config structure for the frontend form
             const config = apiData.data
@@ -258,6 +259,7 @@ export default {
 
             // Flatten preproduction AI services
             if (config.preproduction?.ai_services) {
+              console.log('🔓 AI Services loaded:', config.preproduction.ai_services)
               Object.assign(flattened, config.preproduction.ai_services)
             }
 
