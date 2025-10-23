@@ -22,16 +22,34 @@
           <!-- Profile Header -->
           <v-card-text class="pa-6">
             <div class="d-flex align-center mb-6">
-              <v-avatar size="80" class="me-4">
-                <v-img
-                  v-if="user.profile_picture"
-                  :src="user.profile_picture"
-                  :alt="user.first_name + ' ' + user.last_name"
+              <div class="position-relative">
+                <v-avatar size="80" class="me-4">
+                  <v-img
+                    v-if="user.profile_picture"
+                    :src="getProfilePictureUrl(user.profile_picture)"
+                    :alt="user.first_name + ' ' + user.last_name"
+                  />
+                  <v-icon v-else size="40" color="grey-lighten-1">
+                    mdi-account-circle
+                  </v-icon>
+                </v-avatar>
+                <v-btn
+                  icon
+                  size="x-small"
+                  color="primary"
+                  class="upload-btn"
+                  @click="triggerFileUpload"
+                >
+                  <v-icon size="16">mdi-camera</v-icon>
+                </v-btn>
+                <input
+                  ref="fileInputRef"
+                  type="file"
+                  accept="image/*"
+                  style="display: none"
+                  @change="handleFileUpload"
                 />
-                <v-icon v-else size="40" color="grey-lighten-1">
-                  mdi-account-circle
-                </v-icon>
-              </v-avatar>
+              </div>
               <div>
                 <h3 class="text-h5 font-weight-bold mb-1">
                   {{ user.first_name || user.username }} {{ user.last_name }}
@@ -144,8 +162,9 @@
 <script>
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import VoicePrintRecorder from '@/components/VoicePrintRecorder.vue'
+import axios from 'axios'
 
 export default {
   name: 'ProfileView',
@@ -153,9 +172,10 @@ export default {
     VoicePrintRecorder
   },
   setup() {
-    const { currentUser, handleLogout } = useAuth()
+    const { currentUser, handleLogout, refreshUserProfile } = useAuth()
     const router = useRouter()
-    
+    const fileInputRef = ref(null)
+
     const getAccessLevelColor = (level) => {
       switch (level) {
         case 'admin':
@@ -168,7 +188,7 @@ export default {
           return 'grey'
       }
     }
-    
+
     const getTokenExpiry = () => {
       const expiry = localStorage.getItem('auth-token-expiry')
       if (expiry) {
@@ -177,17 +197,85 @@ export default {
       }
       return 'Unknown'
     }
-    
+
     const getBrowserInfo = () => {
       return navigator.userAgent.split(' ').slice(-2).join(' ')
     }
-    
+
+    const getProfilePictureUrl = (profilePicture) => {
+      if (!profilePicture) return ''
+      // If it's already a full URL, return it
+      if (profilePicture.startsWith('http')) return profilePicture
+      // Otherwise prepend the API base URL
+      const baseUrl = process.env.VUE_APP_API_BASE_URL || 'http://192.168.51.210:8888'
+      return `${baseUrl}${profilePicture}`
+    }
+
+    const triggerFileUpload = () => {
+      fileInputRef.value.click()
+    }
+
+    const handleFileUpload = async (event) => {
+      const file = event.target.files[0]
+      if (!file) return
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('File size must be less than 5MB')
+        return
+      }
+
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/gif', 'image/webp']
+      if (!allowedTypes.includes(file.type)) {
+        alert('Please upload a valid image file (JPEG, PNG, GIF, or WebP)')
+        return
+      }
+
+      const formData = new FormData()
+      formData.append('file', file)
+
+      try {
+        const token = localStorage.getItem('auth-token')
+        const baseUrl = process.env.VUE_APP_API_BASE_URL || 'http://192.168.51.210:8888'
+
+        const response = await axios.post(
+          `${baseUrl}/api/auth/upload-profile-picture`,
+          formData,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'multipart/form-data'
+            }
+          }
+        )
+
+        if (response.data.success) {
+          // Update the user's profile picture in the currentUser object
+          currentUser.value.profile_picture = response.data.profile_picture
+
+          // Optionally refresh the entire user profile
+          if (refreshUserProfile) {
+            await refreshUserProfile()
+          }
+
+          alert('Profile picture updated successfully!')
+        }
+      } catch (error) {
+        console.error('Error uploading profile picture:', error)
+        alert('Failed to upload profile picture. Please try again.')
+      }
+
+      // Reset the file input
+      event.target.value = ''
+    }
+
     const handleUserLogout = () => {
       handleLogout()
       router.push('/dashboard')
       window.location.reload()
     }
-    
+
     const handleVoiceProfileUpdate = (data) => {
       console.log('Voice profile updated:', data)
       // You can add UI feedback here (toast notification, etc.)
@@ -201,9 +289,13 @@ export default {
 
     return {
       user: currentUser,
+      fileInputRef,
       getAccessLevelColor,
       getTokenExpiry,
       getBrowserInfo,
+      getProfilePictureUrl,
+      triggerFileUpload,
+      handleFileUpload,
       handleLogout: handleUserLogout,
       handleVoiceProfileUpdate
     }
@@ -242,5 +334,17 @@ export default {
 .v-chip {
   font-size: 0.75rem !important;
   height: 24px !important;
+}
+
+.position-relative {
+  position: relative;
+  display: inline-block;
+}
+
+.upload-btn {
+  position: absolute !important;
+  bottom: 0;
+  right: 16px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 </style>

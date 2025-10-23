@@ -11,6 +11,7 @@
   >
     <!-- Card Header -->
     <v-card-title class="cue-card-header" :style="headerStyle">
+      <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 8px; color: white;">mdi-drag-vertical</v-icon>
       <div class="cue-type-badge" :style="badgeStyle">
         {{ cueData.type }}
       </div>
@@ -49,19 +50,26 @@
     <v-card-text class="cue-card-content">
       <!-- Image Display -->
       <div class="image-container">
+        <!-- Loading Placeholder -->
+        <div v-if="!imageLoaded && !imageError && imageUrl" class="image-loading">
+          <v-progress-circular indeterminate size="32" width="3" color="primary"></v-progress-circular>
+          <span class="loading-text">Loading media<span class="loading-dots"></span></span>
+        </div>
+        <!-- Loaded Image -->
         <img
-          v-if="imageUrl"
+          v-show="imageUrl && !imageError"
           :src="resolveImagePath(imageUrl)"
           :alt="cueData.slug"
           class="cue-image"
           @error="handleImageError"
           @load="handleImageLoad"
         />
-        <div v-else-if="imageError" class="image-error">
+        <!-- Error States -->
+        <div v-if="imageError" class="image-error">
           <v-icon color="warning">mdi-image-broken</v-icon>
           <span class="error-text">Image not found</span>
         </div>
-        <div v-else class="image-error">
+        <div v-else-if="!imageUrl" class="image-error">
           <v-icon color="info">mdi-image-off</v-icon>
           <span class="error-text">No image URL found</span>
         </div>
@@ -250,6 +258,7 @@ export default {
     return {
       imageError: false,
       imageLoaded: false,
+      imageLoading: false,
       activeTab: null,
       imageWidth: null,
       imageHeight: null,
@@ -369,11 +378,13 @@ export default {
     handleImageError() {
       this.imageError = true;
       this.imageLoaded = false;
+      this.imageLoading = false;
     },
 
     handleImageLoad(event) {
       this.imageError = false;
       this.imageLoaded = true;
+      this.imageLoading = false;
 
       // Extract image dimensions from the loaded image
       const img = event.target;
@@ -519,6 +530,19 @@ export default {
 
       return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`;
     }
+  },
+  watch: {
+    imageUrl: {
+      immediate: true,
+      handler(newUrl, oldUrl) {
+        // Reset states when URL changes
+        if (newUrl !== oldUrl) {
+          this.imageLoaded = false;
+          this.imageError = false;
+          this.imageLoading = !!newUrl;
+        }
+      }
+    }
   }
 };
 </script>
@@ -645,6 +669,36 @@ export default {
 .error-text {
   margin-top: 8px;
   font-size: 0.8rem;
+}
+
+.image-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  gap: 16px;
+  background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%);
+  min-height: 200px;
+}
+
+.image-loading .loading-text {
+  font-size: 1rem;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.7);
+  letter-spacing: 0.5px;
+}
+
+.loading-dots::after {
+  content: '';
+  animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes dots {
+  0%, 24% { content: ''; }
+  25%, 49% { content: '.'; }
+  50%, 74% { content: '..'; }
+  75%, 100% { content: '...'; }
 }
 
 /* Tab Buttons */

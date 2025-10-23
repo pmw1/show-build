@@ -2,7 +2,8 @@
 LLM Proxy Router - Proxies requests to LLM services to avoid mixed content issues
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import httpx
@@ -14,6 +15,38 @@ from sqlalchemy import text
 
 router = APIRouter(prefix="/api/llm", tags=["llm-proxy"])
 logger = logging.getLogger(__name__)
+security = HTTPBearer(auto_error=False)
+
+
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    request: Request = None
+) -> Optional[dict]:
+    """
+    Optional authentication - returns user if authenticated, None otherwise.
+    Allows unauthenticated access to LLM endpoints for better UX.
+    """
+    if not credentials and not request:
+        return None
+
+    # Check for API key in headers
+    if request and request.headers.get('X-API-Key'):
+        try:
+            from auth.utils import get_current_user_or_key
+            return await get_current_user_or_key(None, db=next(get_db()))
+        except:
+            pass
+
+    # Check for Bearer token
+    if credentials:
+        try:
+            from auth.utils import verify_token
+            payload = verify_token(credentials.credentials)
+            return {"username": payload.get("sub"), "authenticated": True}
+        except:
+            pass
+
+    return None
 
 
 def get_ollama_host_from_db(db: Session) -> Optional[str]:
@@ -48,17 +81,19 @@ class OllamaGenerateResponse(BaseModel):
 @router.post("/ollama/generate", response_model=OllamaGenerateResponse)
 async def ollama_generate_proxy(
     request: OllamaGenerateRequest,
-    current_user: dict = Depends(get_current_user_or_key),
+    current_user: Optional[dict] = Depends(get_optional_user),
     db: Session = Depends(get_db)
 ):
     """
     Proxy endpoint for Ollama generate requests.
     Solves mixed content issues by making backend-to-backend HTTP calls.
+    Allows unauthenticated access for LLM fallback scenarios.
     """
     try:
         host = get_ollama_host_from_db(db)
 
-        logger.info(f"Proxying Ollama request to {host} for user {current_user.get('username', 'unknown')}")
+        username = current_user.get('username', 'anonymous') if current_user else 'anonymous'
+        logger.info(f"Proxying Ollama request to {host} for user {username}")
         logger.info(f"Model: {request.model}, Prompt length: {len(request.prompt)} chars")
 
         # Make request to Ollama server

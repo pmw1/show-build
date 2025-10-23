@@ -90,6 +90,8 @@ class AuthService:
                     "first_name": user.first_name,
                     "last_name": user.last_name,
                     "email": user.email,
+                    "phone": user.phone,
+                    "profile_picture": user.profile_picture,
                     "is_active": user.is_active,
                     "is_verified": user.is_verified,
                     "created_at": user.created_at,
@@ -121,6 +123,7 @@ class AuthService:
                 
                 # Return dict to avoid session issues
                 return {
+                    "id": key_record.id,
                     "client_name": key_record.client_name,
                     "access_level": key_record.access_level,
                     "created_by_username": key_record.created_by_username,

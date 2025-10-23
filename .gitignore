@@ -81,3 +81,4 @@ force_restart.sh
 .copilot/
 copilot/
 
+scripts/collect_disaffected_training_data.py

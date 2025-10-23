@@ -5,10 +5,12 @@
 
 import { ref } from 'vue'
 import axios from 'axios'
+import { notifyUserStandard, NOTIFICATION_COLORS } from '@/composables/useStandardNotification'
 
 export function useLLM() {
   const loading = ref(false)
   const error = ref(null)
+  const lastUsedModel = ref(null) // Track last used model {service, model, timestamp}
 
   /**
    * Get API configurations from backend
@@ -397,6 +399,46 @@ export function useLLM() {
       console.log(`📦 Parsed service: ${serviceName}, model: ${modelOverride}`)
     }
 
+    // Notify when using cloud-based (paid) services
+    const cloudServices = ['openai', 'anthropic', 'gemini', 'grok']
+    const isCloudService = cloudServices.includes(serviceName)
+
+    if (isCloudService) {
+      const serviceNames = {
+        'openai': 'OpenAI',
+        'anthropic': 'Anthropic Claude',
+        'gemini': 'Google Gemini',
+        'grok': 'xAI Grok'
+      }
+      const displayName = serviceNames[serviceName] || serviceName
+
+      // Send notification to backend for tracking
+      try {
+        await axios.post('/api/llm/notifications', {
+          notifications: [{
+            id: `llm-usage-${Date.now()}`,
+            title: `💰 Cloud LLM Used`,
+            message: `${displayName} is processing your request`,
+            priority: 'medium',
+            type: 'llm-usage',
+            operationId: null,
+            success: true,
+            read: false,
+            dismissed: false,
+            timestamp: Date.now(),
+            metadata: {
+              service: serviceName,
+              model: modelOverride || options.model || 'default',
+              taskType: options.taskType || 'unknown'
+            }
+          }]
+        })
+        console.log(`💰 Cloud service notification sent: ${displayName}`)
+      } catch (err) {
+        console.warn('Failed to send cloud LLM notification:', err)
+      }
+    }
+
     switch (serviceName) {
       case 'ollama': {
         // Use task-specific Ollama model if available
@@ -410,16 +452,87 @@ export function useLLM() {
           console.log(`🤖 Using Ollama (${ollamaModel || 'default'})`)
         }
 
+        // Track model usage
+        lastUsedModel.value = {
+          service: 'ollama',
+          model: ollamaModel || 'default',
+          timestamp: new Date().toISOString()
+        }
+
+        // Notify user - LOW priority for local model
+        const taskName = options.taskType ? ` for ${options.taskType.replace(/-/g, ' ')}` : ''
+        notifyUserStandard(
+          `🤖 Local AI Processing<small>Model: ${ollamaModel || 'default'}${taskName}</small>`,
+          NOTIFICATION_COLORS.INFO,
+          2500
+        )
+
         return await callOllama(prompt, ollamaModel, options)
       }
-      case 'openai':
+      case 'openai': {
+        const openaiModel = modelOverride || options.model || 'gpt-4'
+        lastUsedModel.value = {
+          service: 'openai',
+          model: openaiModel,
+          timestamp: new Date().toISOString()
+        }
+        // Notify user - HIGH priority for cloud model
+        const taskName = options.taskType ? ` • Task: ${options.taskType.replace(/-/g, ' ')}` : ''
+        notifyUserStandard(
+          `💰 Cloud AI API Call<small>Provider: OpenAI • Model: ${openaiModel}${taskName}</small>`,
+          NOTIFICATION_COLORS.WARNING,
+          5000
+        )
         return await callOpenAI(prompt, modelOverride || options.model, options)
-      case 'anthropic':
+      }
+      case 'anthropic': {
+        const anthropicModel = modelOverride || options.model || 'claude-3-5-sonnet-20241022'
+        lastUsedModel.value = {
+          service: 'anthropic',
+          model: anthropicModel,
+          timestamp: new Date().toISOString()
+        }
+        // Notify user - HIGH priority for cloud model
+        const taskName = options.taskType ? ` • Task: ${options.taskType.replace(/-/g, ' ')}` : ''
+        notifyUserStandard(
+          `💰 Cloud AI API Call<small>Provider: Anthropic • Model: ${anthropicModel}${taskName}</small>`,
+          NOTIFICATION_COLORS.WARNING,
+          5000
+        )
         return await callAnthropic(prompt, modelOverride || options.model, options)
-      case 'gemini':
+      }
+      case 'gemini': {
+        const geminiModel = modelOverride || options.model || 'gemini-2.0-flash'
+        lastUsedModel.value = {
+          service: 'gemini',
+          model: geminiModel,
+          timestamp: new Date().toISOString()
+        }
+        // Notify user - HIGH priority for cloud model
+        const taskName = options.taskType ? ` • Task: ${options.taskType.replace(/-/g, ' ')}` : ''
+        notifyUserStandard(
+          `💰 Cloud AI API Call<small>Provider: Google Gemini • Model: ${geminiModel}${taskName}</small>`,
+          NOTIFICATION_COLORS.WARNING,
+          5000
+        )
         return await callGemini(prompt, modelOverride || options.model, options)
-      case 'grok':
+      }
+      case 'grok': {
+        const grokModel = modelOverride || options.model || 'grok-4-latest'
+        lastUsedModel.value = {
+          service: 'grok',
+          model: grokModel,
+          timestamp: new Date().toISOString()
+        }
+        // Notify user - HIGH priority for cloud model
+        const taskName = options.taskType ? ` • Task: ${options.taskType.replace(/-/g, ' ')}` : ''
+        notifyUserStandard(
+          `💰 Cloud AI API Call<small>Provider: xAI Grok • Model: ${grokModel}${taskName}</small>`,
+          NOTIFICATION_COLORS.WARNING,
+          5000
+        )
         return await callGrok(prompt, modelOverride || options.model, options)
+      }
       default:
         throw new Error(`Unknown service: ${service}`)
     }
@@ -759,59 +872,31 @@ Return ONLY the slug, nothing else.`
    * @returns {string} - Properly formatted quote text
    */
   async function normalizeNestedQuotes(quoteText) {
-    const prompt = `You are a professional copy editor specializing in English language typography and quotation formatting.
+    const prompt = `Fix quotation marks to follow American English nesting rules (outer: double quotes, inner: single quotes).
 
-TASK: Fix the quotation marks in this text to follow proper English language nesting rules.
+TEXT:
+${quoteText}
 
-TEXT TO ANALYZE:
-"${quoteText}"
+RULES:
+- Outer quotes: " (double)
+- Inner quotes: ' (single)
+- Apostrophes: ' (single)
+- Change ONLY quotation marks
+- Preserve ALL words exactly as-is
 
-RULES FOR PROPER QUOTATION NESTING:
-1. American English style (AP/Chicago):
-   - Outer quotes: Use double quotes (")
-   - Inner quotes (quotes within quotes): Use single quotes (')
-   - Example: He said "She told me 'hello' yesterday."
+OUTPUT: The corrected text ONLY. NO explanations, NO thank you messages, NO commentary, NO additional text whatsoever.
 
-2. British English style (alternative):
-   - Outer quotes: Use single quotes (')
-   - Inner quotes: Use double quotes (")
-   - Example: He said 'She told me "hello" yesterday.'
+EXAMPLE INPUT: He said "I think it's 'great'"
+EXAMPLE OUTPUT: He said "I think it's 'great'"
 
-3. Consistency:
-   - Pick ONE style and apply it throughout
-   - Don't mix American and British styles in the same text
-
-4. Special cases:
-   - Apostrophes (possession/contractions) always use single quote (')
-   - Example: "It's John's book," she said.
-   - Dialogue within dialogue needs proper nesting
-   - Example: "Did he say 'I won't go' or 'I will go'?" she asked.
-
-5. Preserve meaning:
-   - Don't change the actual words
-   - Only fix quotation mark types and nesting
-   - Maintain all punctuation placement
-
-DECISION PROCESS:
-1. Analyze the text for quote nesting levels
-2. Choose American English style (most common for media/broadcast)
-3. Apply consistent quote mark types:
-   - Level 1 (outermost): Double quotes (")
-   - Level 2 (nested): Single quotes (')
-   - Level 3 (rare): Double quotes (")
-4. Preserve apostrophes as single quotes (')
-
-OUTPUT FORMAT:
-Return ONLY the corrected text with proper quotation marks. No explanation, no markdown, just the text.
-
-CRITICAL: Return the exact same words with only quotation marks corrected. Do not add, remove, or modify any other content.`
+DO NOT write thank you messages. DO NOT explain your work. DO NOT add any text beyond the corrected quote.`
 
     try {
       const result = await smartCall(prompt, {
         taskType: 'content-expansion',
-        temperature: 0.2, // Low temperature for consistent formatting
+        temperature: 0.1, // Very low temperature for deterministic formatting
         max_tokens: 500,
-        systemPrompt: 'You are a precise copy editor. Return only the corrected text with no additional commentary.'
+        systemPrompt: 'You are a silent copy editor. Output ONLY the corrected text. NO explanations. NO thank you messages. NO commentary. Just the corrected text.'
       })
 
       // Clean response - remove any markdown or quotes the LLM might add
@@ -831,7 +916,11 @@ CRITICAL: Return the exact same words with only quotation marks corrected. Do no
       const postamblePatterns = [
         /\s*I hope this helps!?\s*$/i,
         /\s*Let me know if.*$/i,
-        /\s*Is there anything.*$/i
+        /\s*Is there anything.*$/i,
+        /\s*Thank you for.*$/i,
+        /\s*I appreciate.*$/i,
+        /\s*Please let me know.*$/i,
+        /\s*Feel free to.*$/i
       ]
 
       // Remove preamble
@@ -844,8 +933,42 @@ CRITICAL: Return the exact same words with only quotation marks corrected. Do no
         normalized = normalized.replace(pattern, '')
       }
 
-      // Trim again after removing preamble/postamble
-      normalized = normalized.trim()
+      // CRITICAL: Remove conversational paragraphs that LLM adds
+      // Split by double newlines to find distinct paragraphs
+      const paragraphs = normalized.split(/\n\n+/)
+
+      // Keep only paragraphs that look like quote content (not meta-commentary)
+      const cleanedParagraphs = paragraphs.filter(para => {
+        const trimmed = para.trim()
+
+        // Remove paragraphs that are clearly LLM meta-commentary
+        const metaPatterns = [
+          /^thank you for/i,
+          /^i appreciate/i,
+          /^i'm (happy|glad|pleased) to/i,
+          /^this (demonstrates|shows|illustrates)/i,
+          /^as you can see/i,
+          /^note that/i,
+          /^please note/i,
+          /^feel free to/i,
+          /^let me know/i,
+          /^if you (need|want|would like)/i,
+          /^i hope/i,
+          /^is there anything/i
+        ]
+
+        for (const pattern of metaPatterns) {
+          if (pattern.test(trimmed)) {
+            console.log('🗑️ Removing LLM meta-commentary:', trimmed.substring(0, 100))
+            return false
+          }
+        }
+
+        return true
+      })
+
+      // Rejoin the cleaned paragraphs
+      normalized = cleanedParagraphs.join('\n\n').trim()
 
       // Remove surrounding quotes if LLM added them
       if ((normalized.startsWith('"') && normalized.endsWith('"')) ||
@@ -947,6 +1070,7 @@ Rules:
   return {
     loading,
     error,
+    lastUsedModel,
     callOllama,
     callOpenAI,
     callAnthropic,

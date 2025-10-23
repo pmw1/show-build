@@ -21,6 +21,27 @@
       <!-- Live Clock (Countdown) -->
       <LiveClock v-if="isAuthenticated" class="ms-3" />
 
+      <!-- Episode Selector (universal - visible on all pages) -->
+      <v-select
+        v-if="isAuthenticated"
+        v-model="selectedEpisode"
+        :items="episodes"
+        item-title="display"
+        item-value="episode_number"
+        label="Episode"
+        variant="outlined"
+        hide-details
+        color="primary"
+        bg-color="rgba(25, 118, 210, 0.05)"
+        style="max-width: 440px; min-width: 440px;"
+        class="ms-3 episode-selector"
+        @update:model-value="loadEpisode"
+      >
+        <template v-slot:prepend-inner>
+          <v-icon size="medium" color="primary">mdi-television-play</v-icon>
+        </template>
+      </v-select>
+
       <v-spacer></v-spacer>
 
       <!-- Authentication Status -->
@@ -28,7 +49,20 @@
         <!-- User name -->
         <div class="me-3 d-none d-sm-flex align-center">
           <span class="user-name-text text-primary">{{ userFullName }}</span>
+          <!-- Access Level Badge -->
+          <v-chip
+            v-if="userAccessLevel"
+            :color="accessLevelColor"
+            size="x-small"
+            class="ms-2 text-uppercase font-weight-bold"
+            variant="flat"
+          >
+            {{ userAccessLevel }}
+          </v-chip>
         </div>
+
+        <!-- LLM Notification Center -->
+        <NotificationCenter />
 
         <!-- User Menu -->
         <v-menu>
@@ -82,17 +116,84 @@
     <v-navigation-drawer
       v-if="isAuthenticated"
       v-model="drawer"
-      :temporary="$route.name !== 'ContentEditor'"
+      permanent
+      width="320"
     >
-      <v-list density="compact" nav>
+      <v-list density="compact" nav v-model:opened="openGroups">
+        <!-- Top level items -->
+        <v-list-item to="/dashboard" prepend-icon="mdi-view-dashboard">
+          <v-list-item-title>Dashboard</v-list-item-title>
+        </v-list-item>
+
+        <!-- Show Factory Section -->
+        <v-list-group value="scriptfactory">
+          <template v-slot:activator="{ props }">
+            <v-list-item v-bind="props" prepend-icon="mdi-script-text">
+              <v-list-item-title>Show Factory</v-list-item-title>
+            </v-list-item>
+          </template>
+          <v-list-item to="/episodes" prepend-icon="mdi-television-classic">
+            <v-list-item-title>Episodes</v-list-item-title>
+          </v-list-item>
+          <v-list-item to="/content-editor" prepend-icon="mdi-script-text-outline">
+            <v-list-item-title>Content Editor</v-list-item-title>
+          </v-list-item>
+          <v-list-item to="/stack" prepend-icon="mdi-playlist-edit">
+            <v-list-item-title>Stack Manager</v-list-item-title>
+          </v-list-item>
+          <v-list-item to="/assets" prepend-icon="mdi-folder">
+            <v-list-item-title>Asset Pool</v-list-item-title>
+          </v-list-item>
+          <v-list-item to="/templates" prepend-icon="mdi-file-document">
+            <v-list-item-title>Templates</v-list-item-title>
+          </v-list-item>
+          <v-list-item to="/item-types" prepend-icon="mdi-format-list-bulleted-type">
+            <v-list-item-title>Item Types</v-list-item-title>
+          </v-list-item>
+
+          <!-- Preshow submenu within Show Factory -->
+          <v-list-group value="brainstorm" subgroup>
+            <template v-slot:activator="{ props }">
+              <v-list-item v-bind="props" prepend-icon="mdi-lightbulb-on">
+                <v-list-item-title>Preshow</v-list-item-title>
+              </v-list-item>
+            </template>
+            <v-list-item to="/whiteboard" prepend-icon="mdi-notebook-edit">
+              <v-list-item-title>Whiteboard</v-list-item-title>
+            </v-list-item>
+            <v-list-item to="/voice-meeting" prepend-icon="mdi-microphone">
+              <v-list-item-title>Production Meeting</v-list-item-title>
+            </v-list-item>
+          </v-list-group>
+        </v-list-group>
+
+        <!-- MediaFactory Section (conditional based on group membership or admin) -->
         <v-list-item
-          v-for="(item, i) in navItems"
-          :key="i"
-          :value="item"
-          :to="item.to"
-          :prepend-icon="item.icon"
+          v-if="isAdmin || userGroups.some(g => g.slug === 'mediafactory')"
+          to="/mediafactory"
+          prepend-icon="mdi-factory"
         >
-          <v-list-item-title>{{ item.title }}</v-list-item-title>
+          <v-list-item-title>MediaFactory</v-list-item-title>
+        </v-list-item>
+
+        <!-- MetaFactory Section (conditional based on group membership or admin) -->
+        <v-list-item
+          v-if="isAdmin || userGroups.some(g => g.slug === 'metafactory')"
+          to="/metafactory"
+          prepend-icon="mdi-database-cog"
+        >
+          <v-list-item-title>MetaFactory</v-list-item-title>
+        </v-list-item>
+
+        <!-- Other items -->
+        <v-list-item to="/tools" prepend-icon="mdi-toolbox">
+          <v-list-item-title>Tools</v-list-item-title>
+        </v-list-item>
+        <v-list-item to="/organization" prepend-icon="mdi-domain">
+          <v-list-item-title>Organization</v-list-item-title>
+        </v-list-item>
+        <v-list-item to="/settings" prepend-icon="mdi-cog">
+          <v-list-item-title>Settings</v-list-item-title>
         </v-list-item>
       </v-list>
     </v-navigation-drawer>
@@ -200,6 +301,28 @@
 
     <!-- NFS Status Modal -->
     <NfsStatusModal ref="nfsModalRef" />
+
+    <!-- Episode Loading Overlay -->
+    <v-overlay
+      v-model="isLoadingEpisode"
+      persistent
+      class="episode-loading-overlay"
+      :scrim="false"
+      :contained="false"
+    >
+      <div class="loading-content">
+        <v-progress-circular
+          indeterminate
+          size="64"
+          width="6"
+          color="primary"
+          class="loading-spinner"
+        ></v-progress-circular>
+        <div class="loading-text">
+          Loading Episode {{ loadingEpisodeInfo.number }}: {{ loadingEpisodeInfo.title }}<span class="loading-dots"></span>
+        </div>
+      </div>
+    </v-overlay>
   </v-app>
 </template>
 
@@ -212,13 +335,14 @@ import InitializationOverlay from '@/components/InitializationOverlay.vue'
 import LiveClock from '@/components/LiveClock.vue'
 import StatusClock from '@/components/StatusClock.vue'
 import NfsStatusModal from '@/components/NfsStatusModal.vue'
+import NotificationCenter from '@/components/NotificationCenter.vue'
 import axios from 'axios'
 import { useAuth } from '@/composables/useAuth'
 import { useUrgentFlash } from '@/composables/useUrgentFlash'
 import { useStandardNotification } from '@/composables/useStandardNotification'
 import { useSystemHealth } from '@/composables/useSystemHealth'
 import { NOTIFICATION_COLORS } from '@/composables/useStandardNotification'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 export default {
@@ -231,7 +355,8 @@ export default {
     InitializationOverlay,
     LiveClock,
     StatusClock,
-    NfsStatusModal
+    NfsStatusModal,
+    NotificationCenter
   },
   setup() {
     const { isAuthenticated, currentUser, checkAuthStatus, handleLogout, setAuth } = useAuth()
@@ -242,12 +367,28 @@ export default {
 
     const drawer = ref(false)
     const showLoginModal = ref(false)
+
+    // Episode selector state
+    const episodes = ref([])
+    const selectedEpisode = ref(null)
+    const isLoadingEpisode = ref(false)
+    const loadingEpisodeInfo = ref({ number: '', title: '' })
+
+    // Close drawer when navigating to a new route
+    watch(
+      () => router.currentRoute.value,
+      () => {
+        drawer.value = false
+      }
+    )
     const isAdmin = ref(false)
     const allOrganizations = ref([])
     const selectedOrgId = ref(null)
     const urgentFlash = ref(null)
     const standardNotification = ref(null)
     const nfsModalRef = ref(null)
+    const userGroups = ref([])
+    const openGroups = ref(['scriptfactory', 'brainstorm', 'mediafactory', 'metafactory']) // Auto-expand all factory groups
     
     const navItems = [
       { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/dashboard' },
@@ -256,9 +397,11 @@ export default {
       { title: 'Organization', icon: 'mdi-domain', to: '/organization' },
       { title: 'Stack Manager', icon: 'mdi-playlist-edit', to: '/stack' },
       { title: 'Content Editor', icon: 'mdi-script-text-outline', to: '/content-editor' },
-      { title: 'Asset Manager', icon: 'mdi-folder', to: '/assets' },
+      { title: 'Asset Pool', icon: 'mdi-folder', to: '/assets' },
       { title: 'Templates', icon: 'mdi-file-document', to: '/templates' },
       { title: 'Item Types', icon: 'mdi-format-list-bulleted-type', to: '/item-types' },
+      { title: 'MediaFactory', icon: 'mdi-factory', to: '/mediafactory', requiresGroup: 'mediafactory' },
+      { title: 'MetaFactory', icon: 'mdi-database-cog', to: '/metafactory', requiresGroup: 'metafactory' },
       { title: 'Settings', icon: 'mdi-cog', to: '/settings' }
     ]
     
@@ -280,19 +423,65 @@ export default {
         return currentUser.value?.username || 'User'
       }
     })
+
+    // Computed property for user's access level
+    const userAccessLevel = computed(() => {
+      return currentUser.value?.access_level || null
+    })
+
+    // Computed property for access level badge color
+    const accessLevelColor = computed(() => {
+      const level = userAccessLevel.value
+      if (level === 'admin') return 'error'
+      if (level === 'editor') return 'warning'
+      if (level === 'viewer') return 'info'
+      return 'grey'
+    })
+
+    // Computed property to filter nav items based on group membership
+    const filteredNavItems = computed(() => {
+      return navItems.filter(item => {
+        // If item doesn't require a group, always show it
+        if (!item.requiresGroup) return true
+
+        // Check if user is in the required group
+        return userGroups.value.some(group => group.slug === item.requiresGroup)
+      })
+    })
+
+    // Load user groups
+    const loadUserGroups = async () => {
+      if (!currentUser.value || !currentUser.value.id) {
+        userGroups.value = []
+        return
+      }
+
+      try {
+        const response = await axios.get(`/api/rbac/users/${currentUser.value.id}/groups`)
+        if (response.data.success) {
+          userGroups.value = response.data.groups || []
+        }
+      } catch (error) {
+        console.error('Failed to load user groups:', error)
+        userGroups.value = []
+      }
+    }
     
     const handleLoginSuccess = async (authData) => {
       setAuth(authData.token, authData.user, authData.expiry)
       showLoginModal.value = false
-      
+
       // Show success notification
       window.notifyUserStandard("Login successful!", NOTIFICATION_COLORS.SUCCESS, 2000)
-      
+
       // Check if user is admin and load organizations
       isAdmin.value = authData.user?.access_level === 'admin'
       if (isAdmin.value) {
         await loadOrganizations()
       }
+
+      // Load user groups for menu filtering
+      await loadUserGroups()
     }
     
     const handleUserMenuItem = (item) => {
@@ -338,6 +527,93 @@ export default {
       }
     }
     
+    // Fetch episodes for selector
+    async function fetchEpisodes() {
+      try {
+        const response = await axios.get('/api/episodes')
+        episodes.value = response.data.episodes
+          .sort((a, b) => b.episode_number.localeCompare(a.episode_number))
+          .map(ep => ({
+            episode_number: ep.episode_number,
+            display: `${ep.episode_number} - ${ep.title || 'Untitled'}`
+          }))
+
+        // Load current episode from sessionStorage
+        const storedEpisode = sessionStorage.getItem('currentEpisode')
+        if (storedEpisode) {
+          selectedEpisode.value = storedEpisode
+        }
+      } catch (error) {
+        console.error('Failed to fetch episodes:', error)
+      }
+    }
+
+    // Update current episode session variable (stay on current route)
+    function loadEpisode(episodeNumber) {
+      if (!episodeNumber) return
+
+      // Check if this is a different episode
+      const currentEpisode = sessionStorage.getItem('currentEpisode')
+      if (currentEpisode !== episodeNumber) {
+        // Different episode - show loading overlay
+        const episodeData = episodes.value.find(ep => ep.episode_number === episodeNumber)
+        if (episodeData) {
+          loadingEpisodeInfo.value = {
+            number: episodeNumber,
+            title: episodeData.title || episodeData.display || 'Untitled Episode'
+          }
+          isLoadingEpisode.value = true
+
+          // Hide overlay after a delay (components will finish loading)
+          setTimeout(() => {
+            isLoadingEpisode.value = false
+          }, 1500)
+        }
+      }
+
+      // Store in sessionStorage for cross-component access
+      sessionStorage.setItem('currentEpisode', episodeNumber)
+
+      // Update route parameter if current route supports it
+      const currentRoute = router.currentRoute.value
+
+      if (currentRoute.params.episode !== undefined || currentRoute.query.episode !== undefined) {
+        // Route has episode parameter - update it
+        if (currentRoute.params.episode !== undefined) {
+          router.push({ ...currentRoute, params: { ...currentRoute.params, episode: episodeNumber } })
+        } else if (currentRoute.query.episode !== undefined) {
+          router.push({ ...currentRoute, query: { ...currentRoute.query, episode: episodeNumber } })
+        }
+      }
+      // If route doesn't have episode param, just update session (components will pick it up)
+    }
+
+    // Watch route changes to sync selected episode with URL
+    watch(
+      () => router.currentRoute.value,
+      (newRoute) => {
+        // Check if route has episode parameter (params or query)
+        const routeEpisode = newRoute.params.episode || newRoute.query.episode
+
+        if (routeEpisode) {
+          selectedEpisode.value = routeEpisode
+          sessionStorage.setItem('currentEpisode', routeEpisode)
+        } else {
+          // Route doesn't have episode param, use sessionStorage value
+          const storedEpisode = sessionStorage.getItem('currentEpisode')
+          if (storedEpisode) {
+            selectedEpisode.value = storedEpisode
+          }
+        }
+
+        // Fetch episodes if not already loaded
+        if (episodes.value.length === 0) {
+          fetchEpisodes()
+        }
+      },
+      { immediate: true }
+    )
+
     onMounted(async () => {
       checkAuthStatus()
 
@@ -357,6 +633,10 @@ export default {
         if (isAdmin.value) {
           await loadOrganizations()
         }
+        // Load user groups for menu filtering
+        await loadUserGroups()
+        // Load episodes for selector
+        await fetchEpisodes()
       }
 
       // Setup axios interceptors
@@ -380,6 +660,8 @@ export default {
       isAuthenticated,
       currentUser,
       userFullName,
+      userAccessLevel,
+      accessLevelColor,
       navItems,
       userMenuItems,
       handleLoginSuccess,
@@ -393,7 +675,16 @@ export default {
       nfsModalRef,
       openNfsModal,
       health,
-      loading
+      loading,
+      userGroups,
+      filteredNavItems,
+      loadUserGroups,
+      openGroups,
+      episodes,
+      selectedEpisode,
+      loadEpisode,
+      isLoadingEpisode,
+      loadingEpisodeInfo
     }
   }
 }
@@ -421,6 +712,95 @@ export default {
   font-size: 0.9rem;
   font-weight: 500;
   letter-spacing: 0.02em;
+}
+
+/* Episode Selector - Match clock height and blue theme */
+.episode-selector {
+  border: 1px solid rgba(25, 118, 210, 0.3) !important;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+}
+
+.episode-selector .v-input__control {
+  height: 100%;
+}
+
+.episode-selector .v-field__input {
+  font-size: 1.1rem !important;
+  font-weight: 500 !important;
+}
+
+.episode-selector .v-select__selection-text {
+  font-size: 1.1rem !important;
+  font-weight: 500 !important;
+}
+
+.episode-selector .v-field {
+  background: rgba(25, 118, 210, 0.05) !important;
+  border-color: rgba(25, 118, 210, 0.3) !important;
+  border-radius: 0 !important;
+}
+
+.episode-selector .v-field--focused {
+  border-color: #1976d2 !important;
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2) !important;
+}
+
+.episode-selector .v-field__outline {
+  color: rgba(25, 118, 210, 0.3) !important;
+}
+
+.episode-selector .v-field--focused .v-field__outline {
+  color: #1976d2 !important;
+}
+
+.episode-selector .v-label {
+  color: #1976d2 !important;
+  font-weight: 500 !important;
+}
+
+/* Episode Selector Dropdown Menu - Blue theme, no rounded corners */
+.v-overlay .v-menu__content {
+  border-radius: 0 !important;
+}
+
+.episode-selector + .v-overlay .v-list {
+  background: rgba(25, 118, 210, 0.02) !important;
+  border: 1px solid rgba(25, 118, 210, 0.3) !important;
+  border-radius: 0 !important;
+}
+
+.episode-selector + .v-overlay .v-list-item {
+  border-radius: 0 !important;
+}
+
+.episode-selector + .v-overlay .v-list-item:hover {
+  background: rgba(25, 118, 210, 0.1) !important;
+}
+
+.episode-selector + .v-overlay .v-list-item--active {
+  background: rgba(25, 118, 210, 0.15) !important;
+  color: #1976d2 !important;
+}
+
+/* Episode Selector Scrollbar - Blue themed */
+.episode-selector + .v-overlay .v-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.episode-selector + .v-overlay .v-list::-webkit-scrollbar-track {
+  background: rgba(25, 118, 210, 0.05);
+  border-radius: 0;
+}
+
+.episode-selector + .v-overlay .v-list::-webkit-scrollbar-thumb {
+  background: rgba(25, 118, 210, 0.4);
+  border-radius: 0;
+}
+
+.episode-selector + .v-overlay .v-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(25, 118, 210, 0.6);
 }
 
 .v-main {
@@ -632,6 +1012,64 @@ export default {
   background-color: white !important;
   padding: 0 4px !important;
   z-index: 1 !important;
+}
+
+/* Episode Loading Overlay */
+.episode-loading-overlay {
+  background: rgba(255, 255, 255, 0.8) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+.episode-loading-overlay .v-overlay__scrim {
+  opacity: 0 !important;
+}
+
+.episode-loading-overlay > .v-overlay__content {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.loading-spinner {
+  margin-bottom: 8px;
+}
+
+.loading-text {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+
+.loading-dots::after {
+  content: '';
+  animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes dots {
+  0%, 20% {
+    content: '';
+  }
+  40% {
+    content: '.';
+  }
+  60% {
+    content: '..';
+  }
+  80%, 100% {
+    content: '...';
+  }
 }
 
 </style>

@@ -2,7 +2,7 @@
   <v-container fluid>
     <v-row>
       <v-col>
-        <h2 class="text-h4 font-weight-bold mb-4">Asset Manager</h2>
+        <h2 class="text-h4 font-weight-bold mb-4">Asset Pool</h2>
         <v-file-input
           label="Upload Asset"
           accept="image/*,video/*,audio/*"

@@ -26,6 +26,20 @@
         <!-- Script Input / Teleprompter View -->
         <v-card variant="outlined" class="mb-4">
           <v-card-text>
+            <div class="d-flex align-center mb-2" v-if="!measuring">
+              <v-spacer></v-spacer>
+              <v-btn
+                @click="generateScript"
+                color="primary"
+                variant="tonal"
+                size="small"
+                :loading="generatingScript"
+                :disabled="generatingScript"
+              >
+                <v-icon left size="small">mdi-auto-fix</v-icon>
+                Generate Sample Script
+              </v-btn>
+            </div>
             <v-textarea
               v-if="!measuring"
               v-model="scriptText"
@@ -35,6 +49,8 @@
               variant="outlined"
               :rules="[v => v && v.length > 0 || 'Script text is required']"
               counter
+              ref="scriptTextareaRef"
+              :class="llmState.getVisualClass('field', 'wpm-script-textarea')"
             ></v-textarea>
 
             <!-- Teleprompter Mode -->
@@ -93,27 +109,33 @@
         <!-- Speaker Info (When Completed) -->
         <v-expand-transition>
           <v-card v-if="completed" variant="outlined" class="mb-4">
-            <v-card-title class="text-subtitle-1">Save Speaker Profile</v-card-title>
+            <v-card-title class="text-subtitle-1">Save to Speaker Profile</v-card-title>
             <v-card-text>
               <v-row>
-                <v-col cols="6">
-                  <v-text-field
-                    v-model="speakerName"
-                    label="Speaker Name"
+                <v-col cols="12">
+                  <v-select
+                    v-model="selectedSpeakerId"
+                    :items="speakerOptions"
+                    label="Select Speaker"
                     variant="outlined"
                     density="compact"
                     prepend-inner-icon="mdi-account"
-                  ></v-text-field>
-                </v-col>
-                <v-col cols="6">
-                  <v-select
-                    v-model="speakerRole"
-                    :items="roleOptions"
-                    label="Role"
-                    variant="outlined"
-                    density="compact"
-                    prepend-inner-icon="mdi-microphone"
-                  ></v-select>
+                    :loading="loadingSpeakers"
+                    item-title="text"
+                    item-value="value"
+                  >
+                    <template v-slot:item="{ props, item }">
+                      <v-list-item v-bind="props">
+                        <template v-slot:prepend>
+                          <v-icon v-if="item.raw.isSelf">mdi-account-circle</v-icon>
+                          <v-icon v-else>mdi-account</v-icon>
+                        </template>
+                        <template v-slot:append v-if="item.raw.wpm">
+                          <v-chip size="x-small" color="primary">{{ item.raw.wpm }} WPM</v-chip>
+                        </template>
+                      </v-list-item>
+                    </template>
+                  </v-select>
                 </v-col>
               </v-row>
 
@@ -154,10 +176,10 @@
           @click="saveSpeaker"
           color="primary"
           variant="elevated"
-          :disabled="!speakerName"
+          :disabled="!selectedSpeakerId"
         >
           <v-icon left>mdi-content-save</v-icon>
-          Save Speaker
+          Save to Profile
         </v-btn>
         <v-btn
           v-if="completed"
@@ -172,12 +194,24 @@
 </template>
 
 <script>
+import { useLLMState } from '@/composables/useLLMState'
+import { useLLM } from '@/composables/useLLM'
+
 export default {
   name: 'WPMMeasurementTool',
   props: {
     modelValue: Boolean
   },
-  emits: ['update:modelValue', 'speaker-saved'],
+  emits: ['update:modelValue', 'speaker-saved', 'show-message'],
+  setup() {
+    const llmState = useLLMState()
+    const { smartCall } = useLLM()
+
+    return {
+      llmState,
+      smartCall
+    }
+  },
   data() {
     return {
       scriptText: '',
@@ -188,16 +222,13 @@ export default {
       elapsedSeconds: 0,
       timerInterval: null,
       teleprompterFontSize: 24,
+      generatingScript: false,
 
       // Speaker data
-      speakerName: '',
-      speakerRole: 'host',
-      roleOptions: [
-        { title: 'Host', value: 'host' },
-        { title: 'Guest', value: 'guest' },
-        { title: 'Narrator', value: 'narrator' },
-        { title: 'Voice Talent', value: 'voice_talent' }
-      ]
+      speakers: [],
+      loadingSpeakers: false,
+      selectedSpeakerId: null,
+      currentUser: null
     }
   },
   computed: {
@@ -228,9 +259,92 @@ export default {
     },
     maxWPM() {
       return Math.round(this.calculatedWPM * 1.15)
+    },
+    speakerOptions() {
+      if (!this.currentUser) return []
+
+      const isAdmin = this.currentUser.access_level === 'admin' || this.currentUser.access_level === 'super_admin'
+
+      // Find user's own speaker profile
+      const userSpeaker = this.speakers.find(s => s.user_id === this.currentUser.id)
+
+      if (isAdmin) {
+        // Admin can save to any speaker
+        return this.speakers.map(speaker => ({
+          text: speaker.name + (speaker.user_id === this.currentUser.id ? ' (You)' : ''),
+          value: speaker.id,
+          isSelf: speaker.user_id === this.currentUser.id,
+          wpm: speaker.wpm
+        }))
+      } else {
+        // Non-admin can only save to their own profile
+        if (userSpeaker) {
+          return [{
+            text: userSpeaker.name + ' (You)',
+            value: userSpeaker.id,
+            isSelf: true,
+            wpm: userSpeaker.wpm
+          }]
+        } else {
+          // User doesn't have a profile yet - will create on save
+          return [{
+            text: this.currentUser.full_name || this.currentUser.username + ' (You)',
+            value: 'me',
+            isSelf: true,
+            wpm: null
+          }]
+        }
+      }
+    }
+  },
+  watch: {
+    show(newVal) {
+      if (newVal) {
+        this.fetchSpeakers()
+        this.fetchCurrentUser()
+      }
     }
   },
   methods: {
+    async fetchCurrentUser() {
+      try {
+        const response = await this.$axios.get('/api/auth/me', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
+        this.currentUser = response.data
+      } catch (error) {
+        console.error('Error fetching current user:', error)
+      }
+    },
+    async fetchSpeakers() {
+      try {
+        this.loadingSpeakers = true
+        const response = await this.$axios.get('/api/speakers/', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
+        if (response.data.success) {
+          this.speakers = response.data.data
+
+          // Auto-select user's own speaker if it exists
+          if (this.currentUser) {
+            const userSpeaker = this.speakers.find(s => s.user_id === this.currentUser.id)
+            if (userSpeaker) {
+              this.selectedSpeakerId = userSpeaker.id
+            } else {
+              this.selectedSpeakerId = 'me'
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching speakers:', error)
+      } finally {
+        this.loadingSpeakers = false
+      }
+    },
     startMeasurement() {
       this.measuring = true
       this.startTime = Date.now()
@@ -246,16 +360,36 @@ export default {
     },
     async saveSpeaker() {
       try {
-        // Save WPM measurement to backend (creates/updates user's speaker profile)
-        const response = await this.$axios.post('/api/speakers/me/measure-wpm', {
-          word_count: this.wordCount,
-          elapsed_seconds: this.elapsedSeconds,
-          script_text: this.scriptText
-        }, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          }
-        })
+        let response
+
+        if (this.selectedSpeakerId === 'me') {
+          // Create/update user's own speaker profile
+          response = await this.$axios.post('/api/speakers/me/measure-wpm', {
+            word_count: this.wordCount,
+            elapsed_seconds: this.elapsedSeconds,
+            script_text: this.scriptText
+          }, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+            }
+          })
+        } else {
+          // Update existing speaker profile (admin only)
+          const minutes = this.elapsedSeconds / 60
+          const calculatedWpm = Math.round(this.wordCount / minutes)
+          const wpmMin = Math.max(100, Math.round(calculatedWpm * 0.85))
+          const wpmMax = Math.round(calculatedWpm * 1.15)
+
+          response = await this.$axios.patch(`/api/speakers/${this.selectedSpeakerId}`, {
+            wpm: calculatedWpm,
+            wpm_min: wpmMin,
+            wpm_max: wpmMax
+          }, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+            }
+          })
+        }
 
         if (response.data.success) {
           this.$emit('speaker-saved', response.data.data)
@@ -263,7 +397,7 @@ export default {
           // Show success message
           this.$emit('show-message', {
             type: 'success',
-            text: response.data.message
+            text: response.data.message || 'Speaker profile updated successfully'
           })
 
           this.close()
@@ -276,6 +410,71 @@ export default {
         })
       }
     },
+    async generateScript() {
+      try {
+        this.generatingScript = true
+        console.log('🎯 Generate Script clicked - starting LLM operation')
+
+        // Use Universal LLM Framework with visual feedback
+        const result = await this.llmState.withLLM(
+          'field',
+          'wpm-script-textarea',
+          'generating',
+          async () => {
+            console.log('📝 Inside withLLM - about to call smartCall')
+            // Generate script using Qwen
+            const prompt = `Generate a natural, conversational broadcast script suitable for reading aloud.
+The script should be between 150-250 words and cover a current events topic or interesting story.
+Write in a friendly, engaging tone as if speaking directly to viewers.
+Do not include any stage directions, just the spoken text.`
+
+            const response = await this.smartCall(
+              prompt,
+              {
+                preferredService: 'ollama',
+                preferredModel: 'qwen2.5-coder:7b'
+              }
+            )
+
+            return response
+          },
+          {
+            state: this.llmState.STATE.GENERATING,  // Blue color for generating
+            message: 'Generating WPM test script with Qwen...',
+            notificationTitle: 'WPM Script Generation',
+            notify: false,  // We'll add custom notification after
+            priority: this.llmState.PRIORITY.NORMAL
+          }
+        )
+
+        if (result) {
+          // smartCall returns the text directly, not wrapped in {response: ...}
+          this.scriptText = typeof result === 'string' ? result.trim() : (result.response || result).toString().trim()
+          console.log('✅ Script generated and inserted:', this.scriptText.substring(0, 100) + '...')
+
+          // Add custom success notification with word count
+          this.$nextTick(() => {
+            const words = this.wordCount
+            this.llmState.addNotification({
+              title: 'WPM Test Script Generated',
+              message: `Generated ${words} word broadcast script for WPM testing`,
+              priority: this.llmState.PRIORITY.NORMAL,
+              type: 'success',
+              success: true
+            })
+          })
+        }
+
+      } catch (error) {
+        console.error('Error generating script:', error)
+        this.$emit('show-message', {
+          type: 'error',
+          text: error.message || 'Failed to generate script'
+        })
+      } finally {
+        this.generatingScript = false
+      }
+    },
     reset() {
       this.scriptText = ''
       this.measuring = false
@@ -283,9 +482,13 @@ export default {
       this.startTime = null
       this.endTime = null
       this.elapsedSeconds = 0
-      this.speakerName = ''
-      this.speakerRole = 'host'
       clearInterval(this.timerInterval)
+
+      // Reset speaker selection to user's profile
+      if (this.currentUser) {
+        const userSpeaker = this.speakers.find(s => s.user_id === this.currentUser.id)
+        this.selectedSpeakerId = userSpeaker ? userSpeaker.id : 'me'
+      }
     },
     close() {
       this.reset()

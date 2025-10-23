@@ -1,5 +1,5 @@
 <template>
-  <v-dialog v-model="show" max-width="500">
+  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="500">
     <v-card>
       <v-card-title class="d-flex align-center">
         <v-icon class="mr-2">mdi-plus</v-icon>

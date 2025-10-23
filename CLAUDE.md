@@ -141,8 +141,11 @@ python claudespawn.py --mode local --port 47291
 Show-Build is a full-stack broadcast rundown management system designed for the Disaffected media ecosystem. It serves as a drop-in replacement for Obsidian-based workflows while maintaining complete file format compatibility. The system maintains compatibility with markdown file format for future filesystem integration, using the same organizational structure as Obsidian.
 
 **📋 Key Documentation**:
+- [`UNIVERSAL_LLM_FRAMEWORK_UFDP.md`](UNIVERSAL_LLM_FRAMEWORK_UFDP.md) - ⭐ **Universal LLM Framework** - Unified AI state management (v1.0)
+- [`docs/EPISODE_DIRECTORY_STANDARD.md`](docs/EPISODE_DIRECTORY_STANDARD.md) - 🗂️ **Episode File Structure Standard** - Canonical specification for all episode organization (AUTHORITATIVE)
 - [`docs/ASSETID_SYSTEM_GUIDE.md`](docs/ASSETID_SYSTEM_GUIDE.md) - AssetID system reference
-- [`docs/LLM_GENERATOR_TROUBLESHOOTING.md`](docs/LLM_GENERATOR_TROUBLESHOOTING.md) - LLM test segment generator debugging guide
+- [`docs/LLM_GENERATOR_TROUBLESHOOTING.md`](docs/LLM_GENERATOR_TROUBLESHOOTING.md) - LLM test segment generator debugging (legacy patterns)
+- [`docs/THUMBNAIL_GENERATION_RESEARCH.md`](docs/THUMBNAIL_GENERATION_RESEARCH.md) - Thumbnail automation research (pending implementation)
 
 ## Architecture
 
@@ -184,6 +187,7 @@ Show-Build is a full-stack broadcast rundown management system designed for the 
 ### Key Components
 - **RundownManager.vue**: Drag-and-drop rundown editing with virtual scrolling
 - **ContentEditor.vue**: Markdown content editing with live preview
+- **Universal LLM Framework**: Centralized AI state management with visual feedback and persistence
 - **Auth System**: Login/JWT authentication with API key fallback
 - **Asset Management**: File upload and media processing capabilities
 
@@ -225,12 +229,20 @@ cd app && python -m alembic upgrade head
 ### Episode Directory Structure (File System Organization)
 **CURRENT STATE**: Directory structure exists for media asset storage only
 
-Episodes are organized as directories in `/mnt/sync/disaffected/episodes/{episode_number}/`:
-- `assets/` - Media files (images, video clips, thumbnails, audio) actively used
-- `rundown/` - Reserved for future markdown file mirroring (not yet implemented)
-- `info.md` - Reserved for future episode metadata export (not yet implemented)
+**📖 AUTHORITATIVE SPECIFICATION**: See [`docs/EPISODE_DIRECTORY_STANDARD.md`](docs/EPISODE_DIRECTORY_STANDARD.md) for complete canonical file structure.
 
-**CRITICAL**: Rundown content is currently stored 100% in database, NOT filesystem.
+Episodes are organized as directories in `/mnt/sync/disaffected/episodes/{episode_number}/`:
+- `projects/` - vMix profiles, After Effects teasers/graphics with source/ subdirectories
+- `captures/` - Raw vMix recordings (BLOCK-A.mov, BLOCK-B.mov, BREAK-1.mov)
+- `thumbnails/` - Master artwork (master-16x9.psd, master-square.psd)
+- `assets/` - Final media files (video/, images/, audio/, graphics/) with AssetID naming
+- `rundown/media-list/` - Symlinks to assets for vMix playlists (enumerated with parent references)
+- `scripts/` - Generated scripts (6 formats: hardcopy, teleprompter, director, media-list, flat-text, source.md)
+- `exports/` - Distribution content (blocks, full episode, audio, subtitles, platform-specific thumbnails)
+- `info.md` - Episode metadata (reserved for future filesystem sync)
+- `{EPISODE}-rundown.json` - Complete rundown structure export
+
+**CRITICAL**: Rundown content is currently stored 100% in database, NOT filesystem. Scripts are generated from database single source of truth.
 
 ### Rundown Items (Database Records)
 Each rundown item is a **PostgreSQL database record** in the `rundown_items` table with:
@@ -564,3 +576,4 @@ Available models on 192.168.51.197:
 - wizardlm-uncensored:13b, Qwen2.5-Coder:7b/32b, codellama:34b
 
 Test connectivity: `curl -s http://192.168.51.197:11434/api/tags`
+- create announcement means to create an html file as specified by the user and put it in the docs/announcements directory so that it will automatically display in the dashboard.

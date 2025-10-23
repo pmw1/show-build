@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import StackOrganizer from '@/components/StackOrganizer.vue'
+import StackManager from '@/components/StackManager.vue'
 import ContentEditor from '@/components/ContentEditor.vue'
 import DashboardView from '@/views/DashboardView.vue'
 import SetupView from '@/views/SetupView.vue'
@@ -57,7 +57,7 @@ const routes = [
     // Keep existing RundownManager route with episode parameter - renamed to Stack Manager
     path: '/stack/:episode?',
     name: 'stack',
-    component: StackOrganizer,
+    component: StackManager,
     props: true,
     meta: { requiresAuth: true }
   },
@@ -128,6 +128,38 @@ const routes = [
     name: 'show',
     component: () => import('@/components/ShowEdit.vue'),
     meta: { requiresAuth: true }
+  },
+  // Factory sections - group-based access
+  {
+    path: '/mediafactory',
+    name: 'mediafactory',
+    component: () => import('@/views/MediaFactoryView.vue'),
+    meta: { requiresAuth: true, requiresGroup: 'mediafactory' }
+  },
+  {
+    path: '/metafactory',
+    name: 'metafactory',
+    component: () => import('@/views/MetaFactoryView.vue'),
+    meta: { requiresAuth: true, requiresGroup: 'metafactory' }
+  },
+  {
+    path: '/consolidation',
+    name: 'consolidation',
+    component: () => import('@/views/ConsolidationView.vue'),
+    meta: { requiresAuth: true }
+  },
+  // Brainstorm section
+  {
+    path: '/whiteboard',
+    name: 'whiteboard',
+    component: () => import('@/views/ScratchpadView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/voice-meeting',
+    name: 'voice-meeting',
+    component: () => import('@/views/VoiceMeetingView.vue'),
+    meta: { requiresAuth: true }
   }
 ]
 
@@ -136,7 +168,7 @@ const router = createRouter({
   routes
 })
 
-// Navigation guard to check setup and authentication
+// Navigation guard to check setup, authentication, and group membership
 router.beforeEach(async (to, from, next) => {
   // Skip setup and login check for those pages themselves
   if (to.name === 'setup' || to.name === 'login') {
@@ -171,9 +203,29 @@ router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth && !isAuthenticated()) {
     // Redirect to login if not authenticated
     next('/login')
-  } else {
-    next()
+    return
   }
+
+  // Check group membership for routes that require specific groups
+  if (to.meta.requiresGroup) {
+    const { checkUserGroup, currentUser } = useAuth()
+
+    // Admin users have access to all routes regardless of group membership
+    const isAdmin = currentUser.value?.access_level === 'admin'
+
+    if (!isAdmin) {
+      const hasAccess = await checkUserGroup(to.meta.requiresGroup)
+
+      if (!hasAccess) {
+        // Redirect to dashboard with error message
+        console.warn(`Access denied: User not in group '${to.meta.requiresGroup}'`)
+        next({ path: '/dashboard', query: { error: 'access_denied', group: to.meta.requiresGroup } })
+        return
+      }
+    }
+  }
+
+  next()
 })
 
 export default router

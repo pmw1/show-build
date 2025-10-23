@@ -13,7 +13,7 @@
             Task Routing
           </v-tab>
           <v-tab value="prompt-library" prepend-icon="mdi-message-text">
-            Prompt Library
+            Custom User Prompts
           </v-tab>
           <v-tab value="performance" prepend-icon="mdi-speedometer">
             Performance
@@ -44,15 +44,30 @@
                   <!-- Quote Splitting -->
                   <v-list-item>
                     <v-list-item-title class="font-weight-bold mb-2">Quote Splitting</v-list-item-title>
-                    <v-select
-                      v-model="localSettings.routing.quoteSplitting"
-                      :items="llmServiceOptions"
-                      label="Preferred Service"
-                      variant="outlined"
-                      density="compact"
-                      hint="Intelligently split long quotes at sentence boundaries"
-                      persistent-hint
-                    />
+                    <v-row dense>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="quoteSplittingService"
+                          :items="availableServices"
+                          label="Service"
+                          variant="outlined"
+                          density="compact"
+                          @update:model-value="updateTaskService('quoteSplitting')"
+                        />
+                      </v-col>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="quoteSplittingModel"
+                          :items="getModelsForService(quoteSplittingService)"
+                          label="Model"
+                          variant="outlined"
+                          density="compact"
+                          :disabled="!quoteSplittingService || quoteSplittingService === 'auto'"
+                          @update:model-value="updateTaskModel('quoteSplitting')"
+                        />
+                      </v-col>
+                    </v-row>
+                    <div class="text-caption text-grey mt-1">Intelligently split long quotes at sentence boundaries</div>
                   </v-list-item>
 
                   <v-divider class="my-2" />
@@ -60,15 +75,30 @@
                   <!-- Slug Generation -->
                   <v-list-item>
                     <v-list-item-title class="font-weight-bold mb-2">Slug Generation</v-list-item-title>
-                    <v-select
-                      v-model="localSettings.routing.slugGeneration"
-                      :items="llmServiceOptions"
-                      label="Preferred Service"
-                      variant="outlined"
-                      density="compact"
-                      hint="Generate SEO-friendly slugs from content"
-                      persistent-hint
-                    />
+                    <v-row dense>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="slugGenerationService"
+                          :items="availableServices"
+                          label="Service"
+                          variant="outlined"
+                          density="compact"
+                          @update:model-value="updateTaskService('slugGeneration')"
+                        />
+                      </v-col>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="slugGenerationModel"
+                          :items="getModelsForService(slugGenerationService)"
+                          label="Model"
+                          variant="outlined"
+                          density="compact"
+                          :disabled="!slugGenerationService || slugGenerationService === 'auto'"
+                          @update:model-value="updateTaskModel('slugGeneration')"
+                        />
+                      </v-col>
+                    </v-row>
+                    <div class="text-caption text-grey mt-1">Generate SEO-friendly slugs from content</div>
                   </v-list-item>
 
                   <v-divider class="my-2" />
@@ -76,15 +106,30 @@
                   <!-- Script Summarization -->
                   <v-list-item>
                     <v-list-item-title class="font-weight-bold mb-2">Script Summarization</v-list-item-title>
-                    <v-select
-                      v-model="localSettings.routing.scriptSummary"
-                      :items="llmServiceOptions"
-                      label="Preferred Service"
-                      variant="outlined"
-                      density="compact"
-                      hint="Generate summaries of scripts and segments"
-                      persistent-hint
-                    />
+                    <v-row dense>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="scriptSummaryService"
+                          :items="availableServices"
+                          label="Service"
+                          variant="outlined"
+                          density="compact"
+                          @update:model-value="updateTaskService('scriptSummary')"
+                        />
+                      </v-col>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="scriptSummaryModel"
+                          :items="getModelsForService(scriptSummaryService)"
+                          label="Model"
+                          variant="outlined"
+                          density="compact"
+                          :disabled="!scriptSummaryService || scriptSummaryService === 'auto'"
+                          @update:model-value="updateTaskModel('scriptSummary')"
+                        />
+                      </v-col>
+                    </v-row>
+                    <div class="text-caption text-grey mt-1">Generate summaries of scripts and segments</div>
                   </v-list-item>
 
                   <v-divider class="my-2" />
@@ -92,15 +137,30 @@
                   <!-- Title Generation -->
                   <v-list-item>
                     <v-list-item-title class="font-weight-bold mb-2">Title Generation</v-list-item-title>
-                    <v-select
-                      v-model="localSettings.routing.titleGeneration"
-                      :items="llmServiceOptions"
-                      label="Preferred Service"
-                      variant="outlined"
-                      density="compact"
-                      hint="Generate compelling titles for episodes and segments"
-                      persistent-hint
-                    />
+                    <v-row dense>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="titleGenerationService"
+                          :items="availableServices"
+                          label="Service"
+                          variant="outlined"
+                          density="compact"
+                          @update:model-value="updateTaskService('titleGeneration')"
+                        />
+                      </v-col>
+                      <v-col cols="6">
+                        <v-select
+                          v-model="titleGenerationModel"
+                          :items="getModelsForService(titleGenerationService)"
+                          label="Model"
+                          variant="outlined"
+                          density="compact"
+                          :disabled="!titleGenerationService || titleGenerationService === 'auto'"
+                          @update:model-value="updateTaskModel('titleGeneration')"
+                        />
+                      </v-col>
+                    </v-row>
+                    <div class="text-caption text-grey mt-1">Generate compelling titles for episodes and segments</div>
                   </v-list-item>
 
                   <v-divider class="my-2" />
@@ -290,20 +350,30 @@
             </v-card>
           </v-tabs-window-item>
 
-          <!-- Prompt Library -->
+          <!-- Custom User Prompts -->
           <v-tabs-window-item value="prompt-library">
             <h3 class="text-h6 mb-4">
               <v-icon left>mdi-message-text</v-icon>
-              Prompt Library
+              Custom User Prompts
             </h3>
-            <p class="text-body-2 mb-4">Create and manage reusable prompts for different AI tasks.</p>
+            <p class="text-body-2 mb-4">Create and manage your own reusable prompt templates for AI tasks. These are stored locally and specific to your user account.</p>
+
+            <v-alert type="info" variant="tonal" class="mb-4">
+              <strong>Note:</strong> This is different from <strong>LLM Prompts</strong> in the AI & LLM section.
+              Custom User Prompts are personal templates you create for your own use, while LLM Prompts (admin-only) override system-wide AI operations.
+
+              <div class="mt-2">
+                <strong>⚠️ Work in Progress:</strong> Custom prompt invocation via keyboard shortcuts (Ctrl+Alt+Shift+[1-9]) is not yet implemented.
+                Currently, these templates are stored but cannot be triggered in the editor.
+              </div>
+            </v-alert>
 
             <!-- Prompt List -->
             <v-row>
               <v-col cols="12">
                 <v-btn color="primary" @click="showNewPromptDialog = true" class="mb-4">
                   <v-icon left>mdi-plus</v-icon>
-                  New Prompt
+                  New Custom Prompt
                 </v-btn>
               </v-col>
             </v-row>
@@ -534,10 +604,10 @@
       </v-btn>
     </v-card-actions>
 
-    <!-- New Prompt Dialog -->
+    <!-- New Custom Prompt Dialog -->
     <v-dialog v-model="showNewPromptDialog" max-width="800">
       <v-card>
-        <v-card-title>Create New Prompt</v-card-title>
+        <v-card-title>Create New Custom Prompt</v-card-title>
         <v-card-text>
           <v-text-field
             v-model="newPrompt.name"
@@ -650,6 +720,14 @@ export default {
       socialSearchModel: null,
       tweetComposingService: 'auto',
       tweetComposingModel: null,
+      quoteSplittingService: 'auto',
+      quoteSplittingModel: null,
+      slugGenerationService: 'auto',
+      slugGenerationModel: null,
+      scriptSummaryService: 'auto',
+      scriptSummaryModel: null,
+      titleGenerationService: 'auto',
+      titleGenerationModel: null,
       fallbackOrderOptions: [
         { title: 'Ollama (Local)', value: 'ollama' },
         { title: 'OpenAI', value: 'openai' },

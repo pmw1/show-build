@@ -123,7 +123,9 @@
             variant="flat"
             size="small"
             rounded="0"
-            class="full-cell-chip"
+            class="full-cell-chip status-chip-clickable"
+            @click="openStatusModal(item)"
+            :title="`Click to change status for episode ${item.episode_number}`"
           >
             {{ item.status || 'Unknown' }}
           </v-chip>
@@ -680,6 +682,58 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Status Change Modal -->
+    <v-dialog
+      v-model="statusModalOpen"
+      max-width="500px"
+      persistent
+    >
+      <v-card>
+        <v-card-title class="text-h5 bg-primary">
+          Manually Change Status
+        </v-card-title>
+        <v-card-text class="pa-6">
+          <div v-if="selectedEpisodeForStatus" class="mb-4">
+            <div class="text-body-2 text-grey mb-2">Episode:</div>
+            <div class="text-h6">
+              {{ formatEpisodeNumber(selectedEpisodeForStatus.episode_number) }} - {{ selectedEpisodeForStatus.title }}
+            </div>
+            <div class="text-caption text-grey mt-1">
+              Current Status: <strong>{{ selectedEpisodeForStatus.status || 'Unknown' }}</strong>
+            </div>
+          </div>
+
+          <v-divider class="my-4"></v-divider>
+
+          <div class="text-body-2 text-grey mb-3">Select New Status:</div>
+          <div class="status-buttons-grid">
+            <v-btn
+              v-for="status in statusOptions"
+              :key="status"
+              :color="getStatusColor(status)"
+              variant="flat"
+              size="large"
+              block
+              class="mb-2"
+              @click="changeEpisodeStatus(status)"
+              :disabled="selectedEpisodeForStatus?.status === status"
+            >
+              {{ status.toUpperCase() }}
+            </v-btn>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn
+            variant="text"
+            @click="closeStatusModal"
+          >
+            Cancel
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 
@@ -708,6 +762,8 @@ export default {
     const episodeToDelete = ref(null);
     const assetIdInfoDialog = ref(false);
     const selectedEpisodeForAssetId = ref(null);
+    const statusModalOpen = ref(false);
+    const selectedEpisodeForStatus = ref(null);
     const episodeForm = ref({
       episode_number: '',
       template_id: null,
@@ -1012,7 +1068,7 @@ export default {
           rundown_id: response.data.info.rundown_id || parseInt(episode.episode_number + '000'),
           title: response.data.info.title || '',
           subtitle: response.data.info.subtitle || '',
-          airdate: response.data.info.airdate || '',
+          airdate: response.data.info.air_date || response.data.info.airdate || '',  // Backend uses air_date
           status: response.data.info.status || 'draft',
           duration: response.data.info.duration || '01:00:00',
           guest: response.data.info.guest || '',
@@ -1053,6 +1109,42 @@ export default {
     const deleteEpisode = (episode) => {
       episodeToDelete.value = episode;
       deleteDialog.value = true;
+    };
+
+    const openStatusModal = (episode) => {
+      selectedEpisodeForStatus.value = episode;
+      statusModalOpen.value = true;
+    };
+
+    const closeStatusModal = () => {
+      statusModalOpen.value = false;
+      selectedEpisodeForStatus.value = null;
+    };
+
+    const changeEpisodeStatus = async (newStatus) => {
+      if (!selectedEpisodeForStatus.value) return;
+
+      try {
+        const episodeNumber = String(selectedEpisodeForStatus.value.episode_number).padStart(4, '0');
+
+        await axios.put(`/api/episodes/${episodeNumber}/info`, {
+          status: newStatus
+        });
+
+        // Update local episode status
+        selectedEpisodeForStatus.value.status = newStatus;
+
+        // Update in episodes list
+        const index = episodes.value.findIndex(ep => ep.id === selectedEpisodeForStatus.value.id);
+        if (index !== -1) {
+          episodes.value[index].status = newStatus;
+        }
+
+        closeStatusModal();
+      } catch (error) {
+        console.error('Failed to update episode status:', error);
+        alert('Failed to update status: ' + (error.response?.data?.detail || error.message));
+      }
     };
 
     const confirmDelete = async () => {
@@ -1110,7 +1202,7 @@ export default {
             episode_number: episodeForm.value.episode_number,
             title: episodeForm.value.title || '',
             subtitle: episodeForm.value.subtitle || '',
-            airdate: episodeForm.value.airdate || '',
+            air_date: episodeForm.value.airdate || '',  // Backend expects air_date
             status: episodeForm.value.status || 'draft',
             duration: episodeForm.value.duration || '01:00:00',
             guest: episodeForm.value.guest || '',
@@ -1139,7 +1231,7 @@ export default {
             template_id: episodeForm.value.template_id, // Use selected template
             title: episodeForm.value.title || null,
             episode_metadata: {
-              airdate: episodeForm.value.airdate || '',
+              air_date: episodeForm.value.airdate || '',  // Backend expects air_date
               status: 'draft',
               duration: '00:00:00',
               template_type: 'sunday_show'
@@ -1266,6 +1358,8 @@ export default {
       episodeForm,
       assetIdInfoDialog,
       selectedEpisodeForAssetId,
+      statusModalOpen,
+      selectedEpisodeForStatus,
       headers,
       statusOptions,
       dateFilterOptions,
@@ -1285,6 +1379,9 @@ export default {
       duplicateEpisode,
       deleteEpisode,
       confirmDelete,
+      openStatusModal,
+      closeStatusModal,
+      changeEpisodeStatus,
       closeEpisodeDialog,
       saveEpisode,
       loadNextEpisodeNumber,
@@ -1516,6 +1613,28 @@ export default {
 
 .v-chip {
   font-weight: 500;
+}
+
+/* Clickable status chip */
+.status-chip-clickable {
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.status-chip-clickable:hover {
+  opacity: 0.8;
+  transform: scale(1.05);
+}
+
+.status-chip-clickable:active {
+  transform: scale(0.98);
+}
+
+/* Status buttons grid in modal */
+.status-buttons-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 /* Fix label positioning in episode form */

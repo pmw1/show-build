@@ -19,7 +19,8 @@ export function useEditorUtils() {
 
   // Theme and styling utilities
   const resolveTypeClass = (type) => {
-    const colorMapping = themeColorMap[type] || themeColorMap.unknown
+    // Color mapping loaded from themeColorMap
+    themeColorMap[type] || themeColorMap.unknown
     return `type-${type.toLowerCase()}-bg`
   }
 

@@ -387,7 +387,7 @@ const createEpisode = async () => {
     console.log(`Episode ${createdEpisode.episode_number} created successfully!`)
     
     // Navigate to the new episode
-    router.push(`/episodes/${createdEpisode.episode_number}`)
+    router.push(`/content-editor/${createdEpisode.episode_number}`)
     
     // Close dialog
     closeDialog()

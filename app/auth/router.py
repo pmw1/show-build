@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.security import OAuth2PasswordRequestForm
 from .utils import verify_password, create_access_token, get_current_user, get_current_user_or_key, get_password_hash
 from .db_service import AuthService
@@ -7,6 +7,9 @@ from datetime import timedelta
 from typing import List, Optional
 from secrets import token_urlsafe
 import logging
+import os
+import uuid
+from pathlib import Path
 
 # Pydantic models for API responses
 class UserLogin(BaseModel):
@@ -18,6 +21,7 @@ class UserUpdate(BaseModel):
     last_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    profile_picture: Optional[str] = None
     access_level: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
@@ -119,6 +123,82 @@ async def login_form(form_data: OAuth2PasswordRequestForm = Depends()):
             "access_level": user['access_level']
         }
     )
+
+@router.post("/upload-profile-picture")
+async def upload_profile_picture(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload profile picture for current user"""
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/png", "image/jpg", "image/gif", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid file type. Allowed types: {', '.join(allowed_types)}"
+        )
+
+    # Create profile pictures directory if it doesn't exist
+    profile_pics_dir = Path("/home/profile_pictures")
+    profile_pics_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate unique filename
+    file_extension = file.filename.split(".")[-1]
+    unique_filename = f"{current_user['username']}_{uuid.uuid4()}.{file_extension}"
+    file_path = profile_pics_dir / unique_filename
+
+    # Save file
+    try:
+        contents = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(contents)
+    except Exception as e:
+        logger.error(f"Error saving profile picture: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save profile picture"
+        )
+
+    # Update user's profile_picture field in database
+    profile_picture_url = f"/api/profile-pictures/{unique_filename}"
+    user = AuthService.update_user(
+        current_user["username"],
+        profile_picture=profile_picture_url
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user profile"
+        )
+
+    return {
+        "success": True,
+        "profile_picture": profile_picture_url,
+        "message": "Profile picture uploaded successfully"
+    }
+
+@router.get("/me")
+async def get_current_user_profile(current_user: dict = Depends(get_current_user)):
+    """Get current user's profile information"""
+    user = AuthService.get_user(current_user["username"])
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "first_name": user["first_name"],
+        "last_name": user["last_name"],
+        "email": user["email"],
+        "phone": user["phone"],
+        "profile_picture": user["profile_picture"],
+        "access_level": user["access_level"],
+        "is_active": user["is_active"]
+    }
 
 @router.get("/test-auth")
 async def test_protected_route():
@@ -282,6 +362,8 @@ async def update_user(
         update_data['email'] = user_update.email
     if user_update.phone is not None:
         update_data['phone'] = user_update.phone
+    if user_update.profile_picture is not None:
+        update_data['profile_picture'] = user_update.profile_picture
     if user_update.access_level is not None:
         update_data['access_level'] = user_update.access_level
     if user_update.is_active is not None:

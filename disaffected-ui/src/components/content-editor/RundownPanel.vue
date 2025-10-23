@@ -95,7 +95,7 @@
             <v-icon size="small" class="mr-1">{{ showRegions ? 'mdi-view-grid' : 'mdi-view-list' }}</v-icon>
             <span class="btn-text-tiny">Regions</span>
             <v-tooltip activator="parent" location="bottom">
-              {{ showRegions ? 'Hide Regions (Ctrl+Shift+R)' : 'Show Regions (Ctrl+Shift+R)' }}
+              {{ showRegions ? 'Hide Regions (Alt+Shift+R)' : 'Show Regions (Alt+Shift+R)' }}
             </v-tooltip>
           </v-btn>
 
@@ -298,25 +298,29 @@
                     @change="handleItemChange"
                   >
                     <template #item="{ element: item }">
-                      <div class="rundown-item-wrapper">
-                        <v-card
-                          flat
-                          :class="[
-                            'rundown-item-card',
-                            { 'selected-item': getItemGlobalIndex(item) === selectedItemIndex },
-                            { 'multi-selected-item': selectedItemIndices.has(getItemGlobalIndex(item)) },
-                            { 'editing-item': getItemGlobalIndex(item) === editingItemIndex },
-                            { 'placeholder-item': item.isPlaceholder },
-                            { 'region-item-selected': isItemRegionSelected(item) }
-                          ]"
-                          :style="{
+                      <v-card
+                        flat
+                        :class="[
+                          'rundown-item-card',
+                          { 'selected-item': getItemGlobalIndex(item) === selectedItemIndex },
+                          { 'multi-selected-item': selectedItemIndices.has(getItemGlobalIndex(item)) },
+                          { 'editing-item': getItemGlobalIndex(item) === editingItemIndex },
+                          { 'placeholder-item': item.isPlaceholder },
+                          { 'region-item-selected': isItemRegionSelected(item) },
+                          { 'generating-item': getItemGlobalIndex(item) === generatingItemIndex },
+                          llmState ? llmState.getVisualClass('item', item.id) : ''
+                        ]"
+                        :style="Object.assign({},
+                          {
                             backgroundColor: getItemGlobalIndex(item) === selectedItemIndex ? getSelectionColor() : getBackgroundColorForItem(item?.type || 'unknown'),
                             color: getItemGlobalIndex(item) === selectedItemIndex ? getSelectionTextColor() : getTextColorForItem(item?.type || 'unknown')
-                          }"
-                          @click="handleItemSelect(item, $event)"
-                          @dblclick="handleItemDoubleClick(item)"
-                        >
-                          <div class="compact-rundown-row">
+                          },
+                          llmState ? llmState.getVisualStyle('item', item.id) : {}
+                        )"
+                        @click="handleItemSelect(item, $event)"
+                        @dblclick="handleItemDoubleClick(item)"
+                      >
+                        <div class="compact-rundown-row">
                             <!-- Index Number Cell -->
                             <div class="index-number-cell">
                               <!-- Red bar for non-production status -->
@@ -376,7 +380,6 @@
                             </v-menu>
                           </div>
                         </v-card>
-                      </div>
                     </template>
                   </draggable>
                 </div>
@@ -710,6 +713,14 @@ export default {
         isDisabled: true,
         tooltip: 'Episode is synchronized - no changes to save'
       })
+    },
+    generatingItemIndex: {
+      type: Number,
+      default: -1
+    },
+    llmState: {
+      type: Object,
+      default: null
     }
   },
   data() {
@@ -2076,8 +2087,16 @@ export default {
 
     // Keyboard event handler
     handleKeydown(event) {
-      // Ctrl+Shift+R - Toggle regions visibility
+      // Ctrl+Shift+R - Refresh/Reload rundown data
       if (event.ctrlKey && event.shiftKey && event.key === 'R') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.$emit('refresh');
+        return;
+      }
+
+      // Alt+Shift+R - Toggle regions visibility
+      if (event.altKey && event.shiftKey && event.key === 'R') {
         event.preventDefault();
         event.stopPropagation();
         this.toggleRegionsVisibility();
@@ -2490,11 +2509,14 @@ export default {
   /* Keep existing list view styles */
 }
 .rundown-panel {
+  position: sticky !important;
+  top: 0 !important;
   height: 100vh; /* Full viewport height - reach bottom no matter what */
   border-right: none; /* Remove border */
   overflow: hidden; /* Prevent any overflow issues */
   display: flex;
   flex-direction: column;
+  z-index: 5 !important; /* Ensure it stays above scrolling content */
 }
 
 .rundown-title {
@@ -2715,6 +2737,23 @@ export default {
 .rundown-panel.narrow .selected-item {
   width: calc(100% + 15px) !important; /* Extend width to compensate for narrow mode leftward movement */
   margin-right: -15px !important; /* Pull right edge back to original position for narrow mode */
+}
+
+/* Generating item - purple throbbing border */
+.generating-item {
+  border: 7px solid #9C27B0 !important; /* Purple border */
+  animation: throb 1.5s ease-in-out infinite !important;
+}
+
+@keyframes throb {
+  0%, 100% {
+    border-color: #9C27B0;
+    box-shadow: 0 0 0 0 rgba(156, 39, 176, 0.7);
+  }
+  50% {
+    border-color: #BA68C8;
+    box-shadow: 0 0 20px 5px rgba(156, 39, 176, 0.4);
+  }
 }
 
 .editing-item {

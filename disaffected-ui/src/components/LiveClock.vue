@@ -2,7 +2,7 @@
   <div class="clock-display countdown-display">
     <div class="label-primary">COUNTDOWN</div>
     <div class="countdown-time" :class="countdownClass">{{ countdownTime }}</div>
-    <div class="label-secondary">HOURS UNTIL DISAFFECTED</div>
+    <div class="label-secondary">{{ statusMessage }}</div>
   </div>
 </template>
 
@@ -12,6 +12,7 @@ import axios from 'axios'
 
 const countdownTime = ref('--:--:--')
 const countdownClass = ref('countdown-green')
+const statusMessage = ref('HOURS UNTIL DISAFFECTED')
 
 let clockInterval = null
 let episodeData = null
@@ -39,8 +40,11 @@ const updateCountdown = () => {
   if (!episodeData || !episodeData.air_date) {
     countdownTime.value = '--:--:--'
     countdownClass.value = 'countdown-green'
+    statusMessage.value = 'NO EPISODE SCHEDULED'
     return
   }
+
+  statusMessage.value = 'HOURS UNTIL DISAFFECTED'
 
   const now = new Date()
   const nyNow = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}))

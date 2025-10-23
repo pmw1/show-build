@@ -66,7 +66,8 @@ module.exports = defineConfig({
       '/api': {
         target: 'http://server:80',
         changeOrigin: true,
-        secure: false
+        secure: false,
+        timeout: 300000  // 5 minutes for long-running LLM operations
       },
       '/assetid': {
         target: 'http://server:80',
@@ -87,6 +88,15 @@ module.exports = defineConfig({
         target: 'http://server:80',
         changeOrigin: true,
         secure: false
+      },
+      '/asterisk-ws': {
+        target: 'ws://192.168.51.223:8088/ws',
+        changeOrigin: true,
+        ws: true,
+        secure: false,
+        pathRewrite: {
+          '^/asterisk-ws': ''
+        }
       }
     }
   }

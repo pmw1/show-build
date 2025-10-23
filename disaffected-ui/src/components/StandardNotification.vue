@@ -5,16 +5,14 @@
         v-if="isVisible"
         class="standard-notification"
         :style="{
-          backgroundColor: currentColor,
+          '--notification-color': currentColor,
           '--fade-duration': `${fadeDuration}ms`,
           top: `${positionTop}px`,
           left: `${positionLeft}px`,
           transform: dynamicTransform
         }"
       >
-        <div class="notification-content">
-          {{ message }}
-        </div>
+        <div class="notification-content" v-html="message"></div>
       </div>
     </transition>
   </teleport>
@@ -31,7 +29,7 @@ const positionTop = ref(70)
 const positionLeft = ref(50)
 const dynamicTransform = ref('translateX(-50%)')
 
-const notifyUserStandard = (text, color = '#2196F3', duration = 2000, targetElement = null, attachToPanel = false) => {
+const notifyUserStandard = (text, color = '#2196F3', duration = 3000, targetElement = null, attachToPanel = false) => {
   message.value = text
   currentColor.value = color
 
@@ -57,10 +55,10 @@ const notifyUserStandard = (text, color = '#2196F3', duration = 2000, targetElem
 
   isVisible.value = true
 
-  // Auto-dismiss after specified duration
+  // Auto-dismiss after specified duration + 1 second
   setTimeout(() => {
     isVisible.value = false
-  }, duration)
+  }, duration + 1000)
 }
 
 // Expose the function to parent components
@@ -74,57 +72,74 @@ defineExpose({
   position: fixed;
   /* Position set dynamically via inline styles */
   z-index: 99999; /* Above everything including modals and their overlays */
-  min-width: 300px;
-  max-width: 600px;
-  padding: 16px 24px;
-  border-radius: 8px;
+  min-width: 800px;
+  max-width: 1400px;
+  padding: 32px 48px;
+  border-radius: 16px;
+  /* High contrast box with dark background and colored left border */
+  background: linear-gradient(135deg, rgba(30, 30, 30, 0.98), rgba(20, 20, 20, 0.98));
+  border-left: 8px solid var(--notification-color, #2196F3);
   box-shadow:
-    0 6px 12px rgba(0, 0, 0, 0.2),
-    0 12px 24px rgba(0, 0, 0, 0.25);
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 16px 48px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
   pointer-events: none;
-  /* Overlay effect - lays on top without displacing content */
   will-change: transform, opacity;
 }
 
 .notification-content {
-  color: white;
-  font-size: 16px;
-  font-weight: 500;
-  text-align: center;
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: 600;
+  text-align: left;
   letter-spacing: 0.02em;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
   user-select: none;
+  line-height: 1.4;
 }
 
-/* Slide in/out animations - slides from BOTTOM-LEFT corner */
+.notification-content :deep(small) {
+  display: block;
+  font-size: 20px;
+  font-weight: 400;
+  opacity: 0.85;
+  margin-top: 8px;
+}
+
+/* Drop down from top, pause, then fall with gravity */
 .notification-slide-enter-active {
-  animation: notificationSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: notificationDropIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .notification-slide-leave-active {
-  animation: notificationSlideOut var(--fade-duration, 300ms) cubic-bezier(0.4, 0, 1, 1);
+  animation: notificationFallOut 0.8s cubic-bezier(0.55, 0.085, 0.68, 0.53);
 }
 
-@keyframes notificationSlideIn {
+@keyframes notificationDropIn {
   from {
     opacity: 0;
-    transform: translateX(-120%) translateY(30px);
+    transform: translateX(-50%) translateY(-150px);
   }
   to {
     opacity: 1;
-    transform: translateX(0) translateY(0);
+    transform: translateX(-50%) translateY(0);
   }
 }
 
-@keyframes notificationSlideOut {
-  from {
+/* Fall with gravity acceleration (ease-in = acceleration) */
+@keyframes notificationFallOut {
+  0% {
     opacity: 1;
-    transform: translateX(0) translateY(0);
+    transform: translateX(-50%) translateY(0);
   }
-  to {
+  20% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(20px);
+  }
+  100% {
     opacity: 0;
-    transform: translateX(-120%) translateY(30px);
+    transform: translateX(-50%) translateY(calc(100vh + 200px));
   }
 }
 

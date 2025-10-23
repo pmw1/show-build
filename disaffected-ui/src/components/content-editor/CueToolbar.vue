@@ -101,6 +101,18 @@
           </v-btn>
           <div class="cue-label red-darken-4">PKG</div>
         </div>
+
+        <div class="cue-btn-wrapper">
+          <v-btn
+            @click="$emit('show-modal', 'dir')"
+            color="amber-darken-3"
+            variant="elevated"
+            class="cue-btn"
+          >
+            <v-icon size="small">mdi-clipboard-text-outline</v-icon>
+          </v-btn>
+          <div class="cue-label amber-darken-4">DIR</div>
+        </div>
       </div>
 
       <!-- Second Row of Hotkeys Below Cue Buttons -->
@@ -112,6 +124,7 @@
         <div class="cue-shortcut deep-orange-darken-4">Alt+V</div>
         <div class="cue-shortcut teal-darken-4">Alt+N</div>
         <div class="cue-shortcut red-darken-4">Alt+P</div>
+        <div class="cue-shortcut amber-darken-4">Alt+D</div>
       </div>
     </div>
 

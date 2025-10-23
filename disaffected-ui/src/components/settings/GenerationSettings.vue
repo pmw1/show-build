@@ -12,11 +12,11 @@
           <v-tab value="fsq-generator" prepend-icon="mdi-format-quote-close">
             FSQ Quote Generator
           </v-tab>
+          <v-tab value="scripts" prepend-icon="mdi-script-text">
+            Scripts
+          </v-tab>
           <v-tab value="llm-routing" prepend-icon="mdi-robot">
             AI/LLM Routing
-          </v-tab>
-          <v-tab value="templates" prepend-icon="mdi-file-document-multiple">
-            Templates Library
           </v-tab>
           <v-tab value="media-assets" prepend-icon="mdi-folder-image">
             Media Assets
@@ -42,7 +42,7 @@
                 Preview Background Video
               </h4>
               <v-text-field
-                v-model="localSettings.fsqBackgroundVideo"
+                v-model="localSettings.fsq_background_video"
                 label="Background Video Path"
                 placeholder="/assets/preview-background.mp4"
                 variant="outlined"
@@ -54,7 +54,7 @@
               <v-alert type="info" variant="tonal" class="mt-4">
                 <v-alert-title>Compressed Preview</v-alert-title>
                 The preview uses an ultra-compressed version of your branded background.
-                Current: <code>{{ localSettings.fsqBackgroundVideo }}</code>
+                Current: <code>{{ localSettings.fsq_background_video }}</code>
               </v-alert>
             </v-card>
 
@@ -66,7 +66,7 @@
               <v-row>
                 <v-col cols="6">
                   <v-select
-                    v-model="localSettings.fsqDefaultAlignment"
+                    v-model="localSettings.fsq_default_alignment"
                     :items="alignmentOptions"
                     label="Default Text Alignment"
                     variant="outlined"
@@ -75,7 +75,7 @@
                 </v-col>
                 <v-col cols="6">
                   <v-select
-                    v-model="localSettings.fsqDefaultFont"
+                    v-model="localSettings.fsq_default_font"
                     :items="fontOptions"
                     label="Default Font Family"
                     variant="outlined"
@@ -85,7 +85,7 @@
               </v-row>
 
               <v-slider
-                v-model="localSettings.fsqDefaultFontSize"
+                v-model="localSettings.fsq_default_font_size"
                 label="Default Font Size"
                 min="10"
                 max="50"
@@ -96,7 +96,7 @@
               >
                 <template v-slot:append>
                   <v-chip size="small" color="primary">
-                    {{ localSettings.fsqDefaultFontSize }}px
+                    {{ localSettings.fsq_default_font_size }}px
                   </v-chip>
                 </template>
               </v-slider>
@@ -108,12 +108,60 @@
                 Generation Options
               </h4>
               <v-checkbox
-                v-model="localSettings.fsqIncludeAttributionByDefault"
+                v-model="localSettings.fsq_include_attribution_by_default"
                 label="Include attribution by default"
                 hint="When enabled, the attribution radio button will be pre-selected to 'Include Attribution'"
                 persistent-hint
                 density="comfortable"
               />
+            </v-card>
+
+            <v-card variant="outlined" class="pa-4 mb-4">
+              <h4 class="text-subtitle-1 mb-3 d-flex align-center">
+                <v-icon left class="mr-2">mdi-format-quote-close</v-icon>
+                Quote Formatting Rules
+              </h4>
+
+              <v-checkbox
+                v-model="localSettings.fsq_strip_exterior_quotes"
+                label="Strip exterior quotes during processing"
+                hint="Remove surrounding quotation marks from input text (recommended for consistency)"
+                persistent-hint
+                density="comfortable"
+                class="mb-2"
+              />
+
+              <v-checkbox
+                v-model="localSettings.fsq_regenerate_exterior_quotes"
+                label="Regenerate exterior quotes at render"
+                hint="Add quotation marks back when rendering the quote (usually not needed for FSQ graphics)"
+                persistent-hint
+                density="comfortable"
+                class="mb-2"
+              />
+
+              <v-checkbox
+                v-model="localSettings.fsq_normalize_interior_quotes"
+                label="Normalize interior quotes to single quotes"
+                hint="Convert nested quotes inside the text to single quotes (American English style)"
+                persistent-hint
+                density="comfortable"
+                class="mb-8"
+              />
+
+              <v-select
+                v-model="localSettings.fsq_attribution_dash_style"
+                label="Attribution Dash Style"
+                :items="attributionDashOptions"
+                variant="outlined"
+                density="comfortable"
+                hint="Character used before attribution/source"
+                persistent-hint
+              >
+                <template v-slot:prepend-inner>
+                  <v-icon>mdi-minus</v-icon>
+                </template>
+              </v-select>
             </v-card>
 
             <v-card elevation="2" class="mb-4">
@@ -133,7 +181,7 @@
                 <v-row>
                   <v-col cols="6">
                     <v-text-field
-                      v-model.number="localSettings.fsqMaxLines"
+                      v-model.number="localSettings.fsq_max_lines"
                       label="Max Lines Per Screen"
                       type="number"
                       min="3"
@@ -174,7 +222,7 @@
 
                   <v-col cols="6">
                     <v-text-field
-                      v-model.number="localSettings.fsqCharsPerLine"
+                      v-model.number="localSettings.fsq_chars_per_line"
                       label="Characters Per Line"
                       type="number"
                       min="40"
@@ -223,7 +271,7 @@
                 <v-row>
                   <v-col cols="6">
                     <v-text-field
-                      v-model.number="localSettings.fsqMinSecondScreen"
+                      v-model.number="localSettings.fsq_min_second_screen"
                       label="Minimum Second Screen Length"
                       type="number"
                       min="40"
@@ -274,7 +322,7 @@
 
                   <v-col cols="6">
                     <v-select
-                      v-model="localSettings.fsqSplitStrategy"
+                      v-model="localSettings.fsq_split_strategy"
                       label="Split Strategy"
                       :items="splitStrategyOptions"
                       variant="outlined"
@@ -333,7 +381,7 @@
                       <v-row>
                         <v-col cols="6">
                           <v-text-field
-                            v-model.number="localSettings.fsqBalanceThresholdPercent"
+                            v-model.number="localSettings.fsq_balance_threshold_percent"
                             label="Balance Threshold"
                             type="number"
                             min="10"
@@ -385,7 +433,7 @@
                         <v-col cols="6">
                           <div class="d-flex align-center">
                             <v-switch
-                              v-model="localSettings.fsqPreferSentenceBoundaries"
+                              v-model="localSettings.fsq_prefer_sentence_boundaries"
                               label="Prefer Sentence Boundaries"
                               color="primary"
                               density="compact"
@@ -426,7 +474,7 @@
                         <v-col cols="6">
                           <div class="d-flex align-center">
                             <v-switch
-                              v-model="localSettings.fsqAllowMidSentenceSplit"
+                              v-model="localSettings.fsq_allow_mid_sentence_split"
                               label="Allow Mid-Sentence Splits"
                               color="primary"
                               density="compact"
@@ -465,7 +513,7 @@
 
                         <v-col cols="6">
                           <v-select
-                            v-model="localSettings.fsqOverflowHandling"
+                            v-model="localSettings.fsq_overflow_handling"
                             label="Overflow Handling"
                             :items="overflowOptions"
                             variant="outlined"
@@ -537,7 +585,7 @@
                     <v-col cols="4">
                       <div class="text-caption text-grey">Min Screen 2</div>
                       <div class="text-h6 text-green">
-                        {{ localSettings.fsqMinSecondScreen || 80 }}
+                        {{ localSettings.fsq_min_second_screen || 80 }}
                         <span class="text-caption">chars</span>
                       </div>
                     </v-col>
@@ -612,71 +660,230 @@
             </v-card>
           </v-tabs-window-item>
 
+          <!-- Scripts -->
+          <v-tabs-window-item value="scripts">
+            <h3 class="text-h6 mb-4">
+              <v-icon left>mdi-script-text</v-icon>
+              Script Generation Settings
+            </h3>
+            <p class="text-body-2 mb-4">Configure settings for different script format outputs.</p>
+
+            <v-expansion-panels variant="accordion" multiple>
+              <!-- Host/Anchor Script Settings -->
+              <v-expansion-panel>
+                <v-expansion-panel-title>
+                  <div class="d-flex align-center">
+                    <v-icon class="mr-2" color="primary">mdi-microphone</v-icon>
+                    <span class="text-subtitle-1">Host/Anchor Script</span>
+                  </div>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <p class="text-caption mb-3">Settings for the primary on-camera talent script format</p>
+
+                  <v-row>
+                    <v-col cols="6">
+                      <v-switch
+                        v-model="localSettings.script_host_include_cues"
+                        label="Include Cue Blocks"
+                        hint="Show [[CUE:...]] blocks in host script"
+                        persistent-hint
+                        density="comfortable"
+                        color="primary"
+                      />
+                    </v-col>
+                    <v-col cols="6">
+                      <v-switch
+                        v-model="localSettings.script_host_include_timestamps"
+                        label="Include Timestamps"
+                        hint="Show timing markers for segments"
+                        persistent-hint
+                        density="comfortable"
+                        color="primary"
+                      />
+                    </v-col>
+                  </v-row>
+
+                  <v-row>
+                    <v-col cols="6">
+                      <v-select
+                        v-model="localSettings.script_host_font_size"
+                        :items="fontSizeOptions"
+                        label="Default Font Size"
+                        variant="outlined"
+                        density="comfortable"
+                        hint="Font size for exported host scripts"
+                        persistent-hint
+                      />
+                    </v-col>
+                    <v-col cols="6">
+                      <v-select
+                        v-model="localSettings.script_host_line_height"
+                        :items="lineHeightOptions"
+                        label="Line Height"
+                        variant="outlined"
+                        density="comfortable"
+                        hint="Line spacing for readability"
+                        persistent-hint
+                      />
+                    </v-col>
+                  </v-row>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+
+              <!-- Director Script Settings -->
+              <v-expansion-panel>
+                <v-expansion-panel-title>
+                  <div class="d-flex align-center">
+                    <v-icon class="mr-2" color="secondary">mdi-video-vintage</v-icon>
+                    <span class="text-subtitle-1">Director Script</span>
+                  </div>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <p class="text-caption mb-3">Settings for technical direction and production notes</p>
+
+                  <v-row>
+                    <v-col cols="6">
+                      <v-switch
+                        v-model="localSettings.script_director_include_technical_notes"
+                        label="Include Technical Notes"
+                        hint="Show camera angles, lighting cues, etc."
+                        persistent-hint
+                        density="comfortable"
+                        color="secondary"
+                      />
+                    </v-col>
+                    <v-col cols="6">
+                      <v-switch
+                        v-model="localSettings.script_director_include_timecodes"
+                        label="Include Timecodes"
+                        hint="Show precise timing for all segments"
+                        persistent-hint
+                        density="comfortable"
+                        color="secondary"
+                      />
+                    </v-col>
+                  </v-row>
+
+                  <v-row>
+                    <v-col cols="12">
+                      <v-switch
+                        v-model="localSettings.script_director_include_media_list"
+                        label="Include Media Asset List"
+                        hint="Append full list of media assets referenced in show"
+                        persistent-hint
+                        density="comfortable"
+                        color="secondary"
+                      />
+                    </v-col>
+                  </v-row>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+
+              <!-- Prompter Operator Script Settings -->
+              <v-expansion-panel>
+                <v-expansion-panel-title>
+                  <div class="d-flex align-center">
+                    <v-icon class="mr-2" color="info">mdi-monitor-eye</v-icon>
+                    <span class="text-subtitle-1">Prompter Operator Script</span>
+                  </div>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <p class="text-caption mb-3">Settings for teleprompter display and operation</p>
+
+                  <v-row>
+                    <v-col cols="6">
+                      <v-switch
+                        v-model="localSettings.script_prompter_strip_all_cues"
+                        label="Strip All Cues"
+                        hint="Remove [[CUE:...]] blocks for clean prompter display"
+                        persistent-hint
+                        density="comfortable"
+                        color="info"
+                      />
+                    </v-col>
+                    <v-col cols="6">
+                      <v-switch
+                        v-model="localSettings.script_prompter_large_text"
+                        label="Large Text Mode"
+                        hint="Optimize for large display readability"
+                        persistent-hint
+                        density="comfortable"
+                        color="info"
+                      />
+                    </v-col>
+                  </v-row>
+
+                  <v-row>
+                    <v-col cols="6">
+                      <v-select
+                        v-model="localSettings.script_prompter_scroll_speed"
+                        :items="scrollSpeedOptions"
+                        label="Default Scroll Speed"
+                        variant="outlined"
+                        density="comfortable"
+                        hint="Recommended scroll speed (WPM based)"
+                        persistent-hint
+                      />
+                    </v-col>
+                    <v-col cols="6">
+                      <v-switch
+                        v-model="localSettings.script_prompter_pause_markers"
+                        label="Include Pause Markers"
+                        hint="Show [PAUSE] indicators for timing"
+                        persistent-hint
+                        density="comfortable"
+                        color="info"
+                      />
+                    </v-col>
+                  </v-row>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+
+              <!-- Future Generic Scripts (Greyed Out) -->
+              <v-expansion-panel disabled>
+                <v-expansion-panel-title>
+                  <div class="d-flex align-center text-grey">
+                    <v-icon class="mr-2" color="grey">mdi-file-document-outline</v-icon>
+                    <span class="text-subtitle-1">Generic Script 1</span>
+                  </div>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <p class="text-caption text-grey-lighten-1">Custom script format (Coming Soon)</p>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+
+              <v-expansion-panel disabled>
+                <v-expansion-panel-title>
+                  <div class="d-flex align-center text-grey">
+                    <v-icon class="mr-2" color="grey">mdi-file-document-outline</v-icon>
+                    <span class="text-subtitle-1">Generic Script 2</span>
+                  </div>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <p class="text-caption text-grey-lighten-1">Custom script format (Coming Soon)</p>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+
+              <v-expansion-panel disabled>
+                <v-expansion-panel-title>
+                  <div class="d-flex align-center text-grey">
+                    <v-icon class="mr-2" color="grey">mdi-file-document-outline</v-icon>
+                    <span class="text-subtitle-1">Generic Script 3</span>
+                  </div>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <p class="text-caption text-grey-lighten-1">Custom script format (Coming Soon)</p>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+            </v-expansion-panels>
+          </v-tabs-window-item>
+
           <!-- LLM Routing -->
           <v-tabs-window-item value="llm-routing">
             <LLMRoutingSettings
               v-model="llmSettings"
               @save="handleLLMSave"
             />
-          </v-tabs-window-item>
-
-          <!-- Templates Library -->
-          <v-tabs-window-item value="templates">
-            <h3 class="text-h6 mb-4">
-              <v-icon left>mdi-file-document-multiple</v-icon>
-              Templates Library
-            </h3>
-            <p class="text-body-2 mb-4">Manage paths to reusable content templates stored on the media drive.</p>
-
-            <v-card variant="tonal" color="primary" class="pa-4 mb-4">
-              <h4 class="text-subtitle-1 mb-3 d-flex align-center">
-                <v-icon left class="mr-2">mdi-folder-multiple</v-icon>
-                Template Library Root
-              </h4>
-              <v-text-field
-                v-model="localSettings.templateLibraryPath"
-                label="Template Library Path"
-                placeholder="/mnt/sync/disaffected/templates"
-                variant="outlined"
-                density="comfortable"
-                hint="Root path for all template categories"
-                persistent-hint
-              />
-            </v-card>
-
-            <v-card variant="outlined" class="pa-4 mb-4">
-              <h4 class="text-subtitle-1 mb-3">Template Categories</h4>
-              <v-list density="compact">
-                <v-list-item>
-                  <template #prepend>
-                    <v-icon>mdi-text-box</v-icon>
-                  </template>
-                  <v-list-item-title>Rundown Templates</v-list-item-title>
-                  <v-list-item-subtitle>{{ localSettings.templateLibraryPath }}/rundown/</v-list-item-subtitle>
-                </v-list-item>
-
-                <v-list-item>
-                  <template #prepend>
-                    <v-icon>mdi-script-text</v-icon>
-                  </template>
-                  <v-list-item-title>Script Templates</v-list-item-title>
-                  <v-list-item-subtitle>{{ localSettings.templateLibraryPath }}/scripts/</v-list-item-subtitle>
-                </v-list-item>
-
-                <v-list-item>
-                  <template #prepend>
-                    <v-icon>mdi-image-multiple</v-icon>
-                  </template>
-                  <v-list-item-title>Graphic Templates</v-list-item-title>
-                  <v-list-item-subtitle>{{ localSettings.templateLibraryPath }}/graphics/</v-list-item-subtitle>
-                </v-list-item>
-              </v-list>
-            </v-card>
-
-            <v-alert type="info" variant="tonal">
-              <v-alert-title>Storage Location</v-alert-title>
-              Templates are stored on the media drive (<code>/mnt/sync/disaffected/</code>) for persistence and backup via Syncthing.
-            </v-alert>
           </v-tabs-window-item>
 
           <!-- Media Assets -->
@@ -835,13 +1042,30 @@ export default {
       generationSubTab: 'fsq-generator',
       localSettings: {
         ...this.modelValue,
-        // Initialize new FSQ split settings with defaults if not present
-        fsqMinSecondScreen: this.modelValue.fsqMinSecondScreen || 80,
-        fsqSplitStrategy: this.modelValue.fsqSplitStrategy || 'smart',
-        fsqBalanceThresholdPercent: this.modelValue.fsqBalanceThresholdPercent || 30,
-        fsqPreferSentenceBoundaries: this.modelValue.fsqPreferSentenceBoundaries !== undefined ? this.modelValue.fsqPreferSentenceBoundaries : true,
-        fsqAllowMidSentenceSplit: this.modelValue.fsqAllowMidSentenceSplit !== undefined ? this.modelValue.fsqAllowMidSentenceSplit : false,
-        fsqOverflowHandling: this.modelValue.fsqOverflowHandling || 'multi_segment'
+        // Initialize new FSQ split settings with defaults if not present (using snake_case to match backend)
+        fsq_min_second_screen: this.modelValue.fsq_min_second_screen || 80,
+        fsq_split_strategy: this.modelValue.fsq_split_strategy || 'smart',
+        fsq_balance_threshold_percent: this.modelValue.fsq_balance_threshold_percent || 30,
+        fsq_prefer_sentence_boundaries: this.modelValue.fsq_prefer_sentence_boundaries !== undefined ? this.modelValue.fsq_prefer_sentence_boundaries : true,
+        fsq_allow_mid_sentence_split: this.modelValue.fsq_allow_mid_sentence_split !== undefined ? this.modelValue.fsq_allow_mid_sentence_split : false,
+        fsq_overflow_handling: this.modelValue.fsq_overflow_handling || 'multi_segment',
+        // Initialize new FSQ formatting settings with defaults
+        fsq_strip_exterior_quotes: this.modelValue.fsq_strip_exterior_quotes !== undefined ? this.modelValue.fsq_strip_exterior_quotes : true,
+        fsq_regenerate_exterior_quotes: this.modelValue.fsq_regenerate_exterior_quotes !== undefined ? this.modelValue.fsq_regenerate_exterior_quotes : false,
+        fsq_normalize_interior_quotes: this.modelValue.fsq_normalize_interior_quotes !== undefined ? this.modelValue.fsq_normalize_interior_quotes : true,
+        fsq_attribution_dash_style: this.modelValue.fsq_attribution_dash_style || 'regular',
+        // Initialize Script settings with defaults
+        script_host_include_cues: this.modelValue.script_host_include_cues !== undefined ? this.modelValue.script_host_include_cues : true,
+        script_host_include_timestamps: this.modelValue.script_host_include_timestamps !== undefined ? this.modelValue.script_host_include_timestamps : false,
+        script_host_font_size: this.modelValue.script_host_font_size || '14pt',
+        script_host_line_height: this.modelValue.script_host_line_height || '1.5',
+        script_director_include_technical_notes: this.modelValue.script_director_include_technical_notes !== undefined ? this.modelValue.script_director_include_technical_notes : true,
+        script_director_include_timecodes: this.modelValue.script_director_include_timecodes !== undefined ? this.modelValue.script_director_include_timecodes : true,
+        script_director_include_media_list: this.modelValue.script_director_include_media_list !== undefined ? this.modelValue.script_director_include_media_list : true,
+        script_prompter_strip_all_cues: this.modelValue.script_prompter_strip_all_cues !== undefined ? this.modelValue.script_prompter_strip_all_cues : true,
+        script_prompter_large_text: this.modelValue.script_prompter_large_text !== undefined ? this.modelValue.script_prompter_large_text : true,
+        script_prompter_scroll_speed: this.modelValue.script_prompter_scroll_speed || '160',
+        script_prompter_pause_markers: this.modelValue.script_prompter_pause_markers !== undefined ? this.modelValue.script_prompter_pause_markers : false
       },
       llmSettings: {
         routing: {
@@ -876,10 +1100,36 @@ export default {
         { title: 'Strict Limit', value: 'strict_limit' },
         { title: 'AI Decides', value: 'ai_only' }
       ],
+      attributionDashOptions: [
+        { title: 'Regular Dash (—)', value: 'regular' },
+        { title: 'Em Dash (—)', value: 'emdash' },
+        { title: 'No Dash (just space)', value: 'none' }
+      ],
       overflowOptions: [
         { title: 'Multiple Segments', value: 'multi_segment' },
         { title: 'Compress Text', value: 'compress' },
         { title: 'Truncate with Ellipsis', value: 'truncate' }
+      ],
+      fontSizeOptions: [
+        { title: '12pt (Small)', value: '12pt' },
+        { title: '14pt (Medium)', value: '14pt' },
+        { title: '16pt (Large)', value: '16pt' },
+        { title: '18pt (Extra Large)', value: '18pt' },
+        { title: '20pt (Huge)', value: '20pt' }
+      ],
+      lineHeightOptions: [
+        { title: 'Single (1.0)', value: '1.0' },
+        { title: 'Compact (1.2)', value: '1.2' },
+        { title: 'Normal (1.5)', value: '1.5' },
+        { title: 'Double (2.0)', value: '2.0' },
+        { title: 'Triple (3.0)', value: '3.0' }
+      ],
+      scrollSpeedOptions: [
+        { title: 'Very Slow (120 WPM)', value: '120' },
+        { title: 'Slow (140 WPM)', value: '140' },
+        { title: 'Normal (160 WPM)', value: '160' },
+        { title: 'Fast (180 WPM)', value: '180' },
+        { title: 'Very Fast (200 WPM)', value: '200' }
       ],
       testQuote: '',
       splitPreview: null
@@ -887,12 +1137,12 @@ export default {
   },
   computed: {
     maxCharsScreen1() {
-      return (this.localSettings.fsqMaxLines || 5) * (this.localSettings.fsqCharsPerLine || 50)
+      return (this.localSettings.fsq_max_lines || 5) * (this.localSettings.fsq_chars_per_line || 50)
     },
     balanceThreshold() {
       const maxChars = this.maxCharsScreen1
-      const minSecond = this.localSettings.fsqMinSecondScreen || 80
-      const percent = (this.localSettings.fsqBalanceThresholdPercent || 30) / 100
+      const minSecond = this.localSettings.fsq_min_second_screen || 80
+      const percent = (this.localSettings.fsq_balance_threshold_percent || 30) / 100
       return Math.round(maxChars + (minSecond * percent))
     }
   },
@@ -953,7 +1203,7 @@ export default {
 
       const config = {
         maxChars: this.maxCharsScreen1,
-        minSecond: this.localSettings.fsqMinSecondScreen || 80,
+        minSecond: this.localSettings.fsq_min_second_screen || 80,
         balanceThreshold: this.balanceThreshold
       }
 
@@ -1010,7 +1260,7 @@ export default {
 
     // Find best split point near target position
     findSplitPoint(text, target) {
-      if (!this.localSettings.fsqPreferSentenceBoundaries) {
+      if (!this.localSettings.fsq_prefer_sentence_boundaries) {
         return target
       }
 
@@ -1024,7 +1274,7 @@ export default {
       }
 
       // If mid-sentence splits allowed, try commas/semicolons
-      if (this.localSettings.fsqAllowMidSentenceSplit) {
+      if (this.localSettings.fsq_allow_mid_sentence_split) {
         const clauses = [', ', '; ', ' - ']
         for (const punct of clauses) {
           const idx = text.lastIndexOf(punct, target)

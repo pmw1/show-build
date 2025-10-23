@@ -1,0 +1,452 @@
+/**
+ * LLM Visual Feedback - Global CSS Classes
+ *
+ * Universal visual feedback system for all LLM operations across Show-Build.
+ * Applied automatically by useLLMState composable based on scope and state.
+ *
+ * States:
+ * - analyzing: Purple - AI is thinking/analyzing
+ * - generating: Blue - AI is creating content
+ * - modifying: Orange - AI is changing content
+ * - approved: Green - AI approved/completed successfully
+ * - rejected: Red - AI rejected/failed
+ * - pending: Yellow - Awaiting user decision
+ *
+ * Scopes:
+ * - field: Individual form fields
+ * - card: Component cards
+ * - item: Rundown items
+ * - asset: Media assets
+ * - segment: Script segments
+ * - rundown: Entire rundown
+ * - episode: Episode-level
+ * - user: User-specific
+ * - system: System-wide
+ */
+
+/* ===== State Colors ===== */
+:root {
+  --llm-analyzing: #9C27B0;     /* Purple */
+  --llm-generating: #2196F3;    /* Blue */
+  --llm-modifying: #FF9800;     /* Orange */
+  --llm-approved: #4CAF50;      /* Green */
+  --llm-rejected: #F44336;      /* Red */
+  --llm-pending: #FFC107;       /* Yellow */
+}
+
+/* ===== Analyzing State (Purple) ===== */
+.llm-analyzing {
+  border-color: var(--llm-analyzing) !important;
+}
+
+.llm-analyzing.llm-scope-field {
+  border: 7px solid var(--llm-analyzing) !important;
+  border-radius: 0 !important;
+}
+
+.llm-analyzing.llm-scope-card {
+  border: 3px solid var(--llm-analyzing) !important;
+  border-radius: 0 !important;
+}
+
+.llm-analyzing.llm-scope-item {
+  border: 7px solid var(--llm-analyzing) !important;
+  border-radius: 0 !important;
+  margin: 7px !important;
+  animation: throb 1.5s ease-in-out infinite !important;
+}
+
+.llm-analyzing.llm-scope-asset {
+  border: 5px dashed var(--llm-analyzing) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-analyzing.llm-scope-segment {
+  border: 4px solid var(--llm-analyzing) !important;
+  border-radius: 0 !important;
+  animation: throb 1.5s ease-in-out infinite !important;
+}
+
+.llm-analyzing.llm-scope-rundown {
+  border: 8px double var(--llm-analyzing) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-analyzing.llm-scope-episode {
+  border: 6px solid var(--llm-analyzing) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-analyzing.llm-scope-user {
+  border: 3px solid var(--llm-analyzing) !important;
+  border-radius: 0 !important;
+}
+
+.llm-analyzing.llm-scope-system {
+  border: 10px double var(--llm-analyzing) !important;
+  border-radius: 0 !important;
+  animation: pulse 3s ease-in-out infinite !important;
+}
+
+/* ===== Generating State (Blue) ===== */
+.llm-generating {
+  border-color: var(--llm-generating) !important;
+}
+
+.llm-generating.llm-scope-field {
+  border: 7px solid var(--llm-generating) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-generating.llm-scope-card {
+  border: 3px solid var(--llm-generating) !important;
+  border-radius: 0 !important;
+}
+
+.llm-generating.llm-scope-item {
+  border: 7px solid var(--llm-generating) !important;
+  border-radius: 0 !important;
+  margin: 7px !important;
+  animation: throb 1.5s ease-in-out infinite !important;
+}
+
+.llm-generating.llm-scope-asset {
+  border: 5px dashed var(--llm-generating) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-generating.llm-scope-segment {
+  border: 4px solid var(--llm-generating) !important;
+  border-radius: 0 !important;
+  animation: throb 1.5s ease-in-out infinite !important;
+}
+
+.llm-generating.llm-scope-rundown {
+  border: 8px double var(--llm-generating) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-generating.llm-scope-episode {
+  border: 6px solid var(--llm-generating) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-generating.llm-scope-user {
+  border: 3px solid var(--llm-generating) !important;
+  border-radius: 0 !important;
+}
+
+.llm-generating.llm-scope-system {
+  border: 10px double var(--llm-generating) !important;
+  border-radius: 0 !important;
+  animation: pulse 3s ease-in-out infinite !important;
+}
+
+/* ===== Modifying State (Orange) ===== */
+.llm-modifying {
+  border-color: var(--llm-modifying) !important;
+}
+
+.llm-modifying.llm-scope-field {
+  border: 7px solid var(--llm-modifying) !important;
+  border-radius: 0 !important;
+}
+
+.llm-modifying.llm-scope-card {
+  border: 3px solid var(--llm-modifying) !important;
+  border-radius: 0 !important;
+}
+
+.llm-modifying.llm-scope-item {
+  border: 7px solid var(--llm-modifying) !important;
+  border-radius: 0 !important;
+  margin: 7px !important;
+  animation: throb 1.5s ease-in-out infinite !important;
+}
+
+.llm-modifying.llm-scope-asset {
+  border: 5px dashed var(--llm-modifying) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-modifying.llm-scope-segment {
+  border: 4px solid var(--llm-modifying) !important;
+  border-radius: 0 !important;
+  animation: throb 1.5s ease-in-out infinite !important;
+}
+
+.llm-modifying.llm-scope-rundown {
+  border: 8px double var(--llm-modifying) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-modifying.llm-scope-episode {
+  border: 6px solid var(--llm-modifying) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-modifying.llm-scope-user {
+  border: 3px solid var(--llm-modifying) !important;
+  border-radius: 0 !important;
+}
+
+.llm-modifying.llm-scope-system {
+  border: 10px double var(--llm-modifying) !important;
+  border-radius: 0 !important;
+  animation: pulse 3s ease-in-out infinite !important;
+}
+
+/* ===== Approved State (Green) ===== */
+.llm-approved {
+  border-color: var(--llm-approved) !important;
+}
+
+.llm-approved.llm-scope-field {
+  border: 7px solid var(--llm-approved) !important;
+  border-radius: 0 !important;
+}
+
+.llm-approved.llm-scope-card {
+  border: 3px solid var(--llm-approved) !important;
+  border-radius: 0 !important;
+}
+
+.llm-approved.llm-scope-item {
+  border: 7px solid var(--llm-approved) !important;
+  border-radius: 0 !important;
+}
+
+.llm-approved.llm-scope-asset {
+  border: 5px dashed var(--llm-approved) !important;
+  border-radius: 0 !important;
+}
+
+.llm-approved.llm-scope-segment {
+  border: 4px solid var(--llm-approved) !important;
+  border-radius: 0 !important;
+}
+
+.llm-approved.llm-scope-rundown {
+  border: 8px double var(--llm-approved) !important;
+  border-radius: 0 !important;
+}
+
+.llm-approved.llm-scope-episode {
+  border: 6px solid var(--llm-approved) !important;
+  border-radius: 0 !important;
+}
+
+.llm-approved.llm-scope-user {
+  border: 3px solid var(--llm-approved) !important;
+  border-radius: 0 !important;
+}
+
+.llm-approved.llm-scope-system {
+  border: 10px double var(--llm-approved) !important;
+  border-radius: 0 !important;
+}
+
+/* ===== Rejected State (Red) ===== */
+.llm-rejected {
+  border-color: var(--llm-rejected) !important;
+}
+
+.llm-rejected.llm-scope-field {
+  border: 7px solid var(--llm-rejected) !important;
+  border-radius: 0 !important;
+}
+
+.llm-rejected.llm-scope-card {
+  border: 3px solid var(--llm-rejected) !important;
+  border-radius: 0 !important;
+}
+
+.llm-rejected.llm-scope-item {
+  border: 7px solid var(--llm-rejected) !important;
+  border-radius: 0 !important;
+}
+
+.llm-rejected.llm-scope-asset {
+  border: 5px dashed var(--llm-rejected) !important;
+  border-radius: 0 !important;
+}
+
+.llm-rejected.llm-scope-segment {
+  border: 4px solid var(--llm-rejected) !important;
+  border-radius: 0 !important;
+}
+
+.llm-rejected.llm-scope-rundown {
+  border: 8px double var(--llm-rejected) !important;
+  border-radius: 0 !important;
+}
+
+.llm-rejected.llm-scope-episode {
+  border: 6px solid var(--llm-rejected) !important;
+  border-radius: 0 !important;
+}
+
+.llm-rejected.llm-scope-user {
+  border: 3px solid var(--llm-rejected) !important;
+  border-radius: 0 !important;
+}
+
+.llm-rejected.llm-scope-system {
+  border: 10px double var(--llm-rejected) !important;
+  border-radius: 0 !important;
+}
+
+/* ===== Pending State (Yellow) ===== */
+.llm-pending {
+  border-color: var(--llm-pending) !important;
+}
+
+.llm-pending.llm-scope-field {
+  border: 7px solid var(--llm-pending) !important;
+  border-radius: 0 !important;
+}
+
+.llm-pending.llm-scope-card {
+  border: 3px solid var(--llm-pending) !important;
+  border-radius: 0 !important;
+}
+
+.llm-pending.llm-scope-item {
+  border: 7px solid var(--llm-pending) !important;
+  border-radius: 0 !important;
+  margin: 7px !important;
+  animation: throb 1.5s ease-in-out infinite !important;
+}
+
+.llm-pending.llm-scope-asset {
+  border: 5px dashed var(--llm-pending) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-pending.llm-scope-segment {
+  border: 4px solid var(--llm-pending) !important;
+  border-radius: 0 !important;
+  animation: throb 1.5s ease-in-out infinite !important;
+}
+
+.llm-pending.llm-scope-rundown {
+  border: 8px double var(--llm-pending) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-pending.llm-scope-episode {
+  border: 6px solid var(--llm-pending) !important;
+  border-radius: 0 !important;
+  animation: pulse 2s ease-in-out infinite !important;
+}
+
+.llm-pending.llm-scope-user {
+  border: 3px solid var(--llm-pending) !important;
+  border-radius: 0 !important;
+}
+
+.llm-pending.llm-scope-system {
+  border: 10px double var(--llm-pending) !important;
+  border-radius: 0 !important;
+  animation: pulse 3s ease-in-out infinite !important;
+}
+
+/* ===== Animations ===== */
+@keyframes throb {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(156, 39, 176, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 20px 5px rgba(156, 39, 176, 0.4);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 20px 8px rgba(33, 150, 243, 0.8);
+  }
+  50% {
+    opacity: 0.5;
+    box-shadow: 0 0 30px 12px rgba(33, 150, 243, 0.5);
+  }
+}
+
+/* ===== Rotating Icon (for brain/loading icons) ===== */
+.llm-rotating-icon {
+  animation: rotate 2s linear infinite;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ===== Model Badge (for displaying which AI model is working) ===== */
+.llm-model-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  z-index: 100;
+  pointer-events: none;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  line-height: 1.2;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  border-radius: 2px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.llm-model-badge.analyzing {
+  border-left: 3px solid var(--llm-analyzing);
+}
+
+.llm-model-badge.generating {
+  border-left: 3px solid var(--llm-generating);
+}
+
+.llm-model-badge.modifying {
+  border-left: 3px solid var(--llm-modifying);
+}
+
+.llm-model-badge.approved {
+  border-left: 3px solid var(--llm-approved);
+}
+
+.llm-model-badge.rejected {
+  border-left: 3px solid var(--llm-rejected);
+}
+
+.llm-model-badge.pending {
+  border-left: 3px solid var(--llm-pending);
+}
+
+.llm-model-badge .badge-service {
+  font-weight: bold;
+  text-transform: uppercase;
+  opacity: 0.8;
+  font-size: 8px;
+}
+
+.llm-model-badge .badge-model {
+  font-weight: normal;
+  color: #00ff00;
+}

@@ -8,6 +8,7 @@ import { createPinia } from 'pinia'
 import Toast from 'vue-toastification'
 import 'vue-toastification/dist/index.css'
 import './styles/vuetify-fixes.css'
+import './assets/styles/llm-visual-feedback.css'
 import { initializeXtts } from '@/composables/useXtts'
 
 loadFonts()
@@ -23,13 +24,27 @@ if (appElement.__vue_app__) {
 
 const app = createApp(App)
 
+// Suppress known vuedraggable errors (library bug, doesn't affect functionality)
+app.config.errorHandler = (err, instance, info) => {
+  // Filter out vuedraggable internal errors
+  if (err.message && err.message.includes("Cannot read properties of undefined (reading 'updated')")) {
+    // Silently ignore this known vuedraggable bug
+    return
+  }
+  // Log all other errors normally
+  console.error('Error:', err)
+  console.error('Info:', info)
+}
+
 app.use(router)
 app.use(vuetify)
 app.use(createPinia())
 app.use(Toast, {
   transition: "Vue-Toastification__bounce",
   maxToasts: 20,
-  newestOnTop: true
+  newestOnTop: true,
+  timeout: 4000,  // Increased from default 3000ms to 4000ms (1 second longer)
+  containerClassName: "toast-container-high-z"  // Custom class for z-index override
 });
 
 const axiosInstance = axios.create({

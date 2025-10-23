@@ -8,191 +8,229 @@
         </p>
       </v-col>
     </v-row>
-    
-    <!-- Episode Management Tools -->
+
+    <!-- Active Tools - Always Visible -->
     <v-row class="ma-0">
       <v-col cols="12" class="pa-4">
-        <v-card class="mb-4">
-          <v-card-title class="d-flex align-center">
-            <v-icon class="me-2" color="primary">mdi-television-play</v-icon>
-            <span>Episode Management</span>
+        <v-card class="mb-4 elevation-4">
+          <v-card-title class="d-flex align-center bg-primary text-white">
+            <v-icon class="me-2">mdi-star-circle</v-icon>
+            <span>Active Tools</span>
           </v-card-title>
-          <v-card-text>
-            <v-row>
-              <!-- Episode Scaffolding -->
-              <v-col cols="12" md="6" lg="4">
-                <v-card variant="outlined" class="h-100">
-                  <v-card-text class="text-center pa-6">
-                    <v-icon size="48" color="primary" class="mb-3">mdi-plus-circle-outline</v-icon>
-                    <h3 class="text-h6 mb-2">Create New Episode</h3>
-                    <p class="text-body-2 text-grey-darken-1 mb-4">
-                      Scaffold a new episode with the complete directory structure and template files
-                    </p>
+          <v-list lines="two">
+            <v-list-item>
+              <template v-slot:prepend>
+                <v-icon color="primary">mdi-plus-circle-outline</v-icon>
+              </template>
+              <v-list-item-title class="font-weight-bold">Create New Episode</v-list-item-title>
+              <v-list-item-subtitle>Scaffold new episode with directory structure</v-list-item-subtitle>
+              <template v-slot:append>
+                <EpisodeScaffoldModal @episode-created="handleEpisodeCreated" />
+              </template>
+            </v-list-item>
+
+            <v-divider></v-divider>
+
+            <v-list-item to="/consolidation">
+              <template v-slot:prepend>
+                <v-icon color="primary">mdi-folder-sync</v-icon>
+              </template>
+              <v-list-item-title class="font-weight-bold">Episode Consolidation</v-list-item-title>
+              <v-list-item-subtitle>Sync episode files between Google Drive and Syncthing</v-list-item-subtitle>
+              <template v-slot:append>
+                <v-btn variant="outlined" size="small" color="primary">Open Tool</v-btn>
+              </template>
+            </v-list-item>
+          </v-list>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- All Tools (Collapsible Sections) -->
+    <v-row class="ma-0">
+      <v-col cols="12" class="pa-4">
+        <v-expansion-panels variant="accordion">
+          <!-- Episode Management Tools -->
+          <v-expansion-panel>
+            <v-expansion-panel-title>
+              <div class="d-flex align-center">
+                <v-icon class="me-2" color="primary">mdi-television-play</v-icon>
+                <span class="text-h6">Episode Management</span>
+              </div>
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <v-list lines="two">
+                <v-list-item>
+                  <template v-slot:prepend>
+                    <v-icon color="primary">mdi-plus-circle-outline</v-icon>
+                  </template>
+                  <v-list-item-title class="font-weight-bold">Create New Episode</v-list-item-title>
+                  <v-list-item-subtitle>Scaffold new episode with directory structure</v-list-item-subtitle>
+                  <template v-slot:append>
                     <EpisodeScaffoldModal @episode-created="handleEpisodeCreated" />
-                  </v-card-text>
-                </v-card>
-              </v-col>
-              
-              <!-- Episode Processing (Future) -->
-              <v-col cols="12" md="6" lg="4">
-                <v-card variant="outlined" class="h-100" disabled>
-                  <v-card-text class="text-center pa-6">
-                    <v-icon size="48" color="grey" class="mb-3">mdi-cogs</v-icon>
-                    <h3 class="text-h6 mb-2">Process Episode</h3>
-                    <p class="text-body-2 text-grey-darken-1 mb-4">
-                      Run complete episode processing workflow: quotes, media compilation, video preprocessing
-                    </p>
-                    <v-btn variant="outlined" disabled>
-                      Coming Soon
-                    </v-btn>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-              
-              <!-- Episode Validation (Future) -->
-              <v-col cols="12" md="6" lg="4">
-                <v-card variant="outlined" class="h-100" disabled>
-                  <v-card-text class="text-center pa-6">
-                    <v-icon size="48" color="grey" class="mb-3">mdi-check-circle-outline</v-icon>
-                    <h3 class="text-h6 mb-2">Validate Episode</h3>
-                    <p class="text-body-2 text-grey-darken-1 mb-4">
-                      Check episode structure, validate cue blocks, and ensure content integrity
-                    </p>
-                    <v-btn variant="outlined" disabled>
-                      Coming Soon
-                    </v-btn>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-            </v-row>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
+                  </template>
+                </v-list-item>
 
-    <!-- Content Processing Tools -->
-    <v-row class="ma-0">
-      <v-col cols="12" class="pa-4">
-        <v-card class="mb-4">
-          <v-card-title class="d-flex align-center">
-            <v-icon class="me-2" color="primary">mdi-file-multiple</v-icon>
-            <span>Content Processing</span>
-          </v-card-title>
-          <v-card-text>
-            <v-row>
-              <!-- Quote Generation (Future) -->
-              <v-col cols="12" md="6" lg="4">
-                <v-card variant="outlined" class="h-100" disabled>
-                  <v-card-text class="text-center pa-6">
-                    <v-icon size="48" color="grey" class="mb-3">mdi-format-quote-close</v-icon>
-                    <h3 class="text-h6 mb-2">Generate Quotes</h3>
-                    <p class="text-body-2 text-grey-darken-1 mb-4">
-                      Extract and generate quote images from episode rundown files
-                    </p>
-                    <v-btn variant="outlined" disabled>
-                      Coming Soon
-                    </v-btn>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-              
-              <!-- Media Processing (Future) -->
-              <v-col cols="12" md="6" lg="4">
-                <v-card variant="outlined" class="h-100" disabled>
-                  <v-card-text class="text-center pa-6">
-                    <v-icon size="48" color="grey" class="mb-3">mdi-video-box</v-icon>
-                    <h3 class="text-h6 mb-2">Process Media</h3>
-                    <p class="text-body-2 text-grey-darken-1 mb-4">
-                      Convert and optimize video/audio files for broadcast compatibility
-                    </p>
-                    <v-btn variant="outlined" disabled>
-                      Coming Soon
-                    </v-btn>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-              
-              <!-- Cue Management (Future) -->
-              <v-col cols="12" md="6" lg="4">
-                <v-card variant="outlined" class="h-100" disabled>
-                  <v-card-text class="text-center pa-6">
-                    <v-icon size="48" color="grey" class="mb-3">mdi-playlist-edit</v-icon>
-                    <h3 class="text-h6 mb-2">Fix Cue Blocks</h3>
-                    <p class="text-body-2 text-grey-darken-1 mb-4">
-                      Validate and fix malformed cue block syntax in rundown files
-                    </p>
-                    <v-btn variant="outlined" disabled>
-                      Coming Soon
-                    </v-btn>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-            </v-row>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-cogs</v-icon>
+                  </template>
+                  <v-list-item-title>Process Episode</v-list-item-title>
+                  <v-list-item-subtitle>Complete episode processing workflow</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Coming Soon</v-chip>
+                  </template>
+                </v-list-item>
 
-    <!-- Distribution Tools -->
-    <v-row class="ma-0">
-      <v-col cols="12" class="pa-4">
-        <v-card class="mb-4">
-          <v-card-title class="d-flex align-center">
-            <v-icon class="me-2" color="primary">mdi-cloud-upload</v-icon>
-            <span>Distribution & Publishing</span>
-          </v-card-title>
-          <v-card-text>
-            <v-row>
-              <!-- Distribution Orchestration (Future) -->
-              <v-col cols="12" md="6" lg="4">
-                <v-card variant="outlined" class="h-100" disabled>
-                  <v-card-text class="text-center pa-6">
-                    <v-icon size="48" color="grey" class="mb-3">mdi-rocket-launch</v-icon>
-                    <h3 class="text-h6 mb-2">Distribute Episode</h3>
-                    <p class="text-body-2 text-grey-darken-1 mb-4">
-                      Orchestrate multi-platform distribution and publishing workflows
-                    </p>
-                    <v-btn variant="outlined" disabled>
-                      Coming Soon
-                    </v-btn>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-              
-              <!-- Platform Upload (Future) -->
-              <v-col cols="12" md="6" lg="4">
-                <v-card variant="outlined" class="h-100" disabled>
-                  <v-card-text class="text-center pa-6">
-                    <v-icon size="48" color="grey" class="mb-3">mdi-upload-network</v-icon>
-                    <h3 class="text-h6 mb-2">Platform Upload</h3>
-                    <p class="text-body-2 text-grey-darken-1 mb-4">
-                      Upload episodes to podcast platforms, YouTube, and social media
-                    </p>
-                    <v-btn variant="outlined" disabled>
-                      Coming Soon
-                    </v-btn>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-              
-              <!-- Transcription (Future) -->
-              <v-col cols="12" md="6" lg="4">
-                <v-card variant="outlined" class="h-100" disabled>
-                  <v-card-text class="text-center pa-6">
-                    <v-icon size="48" color="grey" class="mb-3">mdi-transcribe</v-icon>
-                    <h3 class="text-h6 mb-2">Transcribe Audio</h3>
-                    <p class="text-body-2 text-grey-darken-1 mb-4">
-                      Generate transcripts from audio files using AI speech recognition
-                    </p>
-                    <v-btn variant="outlined" disabled>
-                      Coming Soon
-                    </v-btn>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-            </v-row>
-          </v-card-text>
-        </v-card>
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-check-circle-outline</v-icon>
+                  </template>
+                  <v-list-item-title>Validate Episode</v-list-item-title>
+                  <v-list-item-subtitle>Check structure and content integrity</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Coming Soon</v-chip>
+                  </template>
+                </v-list-item>
+              </v-list>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+
+          <!-- Content Processing Tools -->
+          <v-expansion-panel>
+            <v-expansion-panel-title>
+              <div class="d-flex align-center">
+                <v-icon class="me-2" color="primary">mdi-file-multiple</v-icon>
+                <span class="text-h6">Content Processing</span>
+              </div>
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <v-list lines="two">
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-format-quote-close</v-icon>
+                  </template>
+                  <v-list-item-title>Generate Quotes</v-list-item-title>
+                  <v-list-item-subtitle>Extract quote images from rundown</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Coming Soon</v-chip>
+                  </template>
+                </v-list-item>
+
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-video-box</v-icon>
+                  </template>
+                  <v-list-item-title>Process Media</v-list-item-title>
+                  <v-list-item-subtitle>Convert and optimize media files</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Coming Soon</v-chip>
+                  </template>
+                </v-list-item>
+
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-playlist-edit</v-icon>
+                  </template>
+                  <v-list-item-title>Fix Cue Blocks</v-list-item-title>
+                  <v-list-item-subtitle>Validate and fix cue block syntax</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Coming Soon</v-chip>
+                  </template>
+                </v-list-item>
+              </v-list>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+
+          <!-- Distribution Tools -->
+          <v-expansion-panel>
+            <v-expansion-panel-title>
+              <div class="d-flex align-center">
+                <v-icon class="me-2" color="primary">mdi-cloud-upload</v-icon>
+                <span class="text-h6">Distribution & Publishing</span>
+              </div>
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <v-list lines="two">
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-rocket-launch</v-icon>
+                  </template>
+                  <v-list-item-title>Distribute Episode</v-list-item-title>
+                  <v-list-item-subtitle>Multi-platform distribution workflows</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Coming Soon</v-chip>
+                  </template>
+                </v-list-item>
+
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-upload-network</v-icon>
+                  </template>
+                  <v-list-item-title>Platform Upload</v-list-item-title>
+                  <v-list-item-subtitle>Upload to podcast platforms and social media</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Coming Soon</v-chip>
+                  </template>
+                </v-list-item>
+
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-transcribe</v-icon>
+                  </template>
+                  <v-list-item-title>Transcribe Audio</v-list-item-title>
+                  <v-list-item-subtitle>Generate transcripts using AI</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Coming Soon</v-chip>
+                  </template>
+                </v-list-item>
+              </v-list>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+
+          <!-- File System Management -->
+          <v-expansion-panel>
+            <v-expansion-panel-title>
+              <div class="d-flex align-center">
+                <v-icon class="me-2" color="primary">mdi-folder-cog</v-icon>
+                <span class="text-h6">File System Management</span>
+              </div>
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <v-list lines="two">
+                <v-list-item to="/consolidation">
+                  <template v-slot:prepend>
+                    <v-icon color="primary">mdi-folder-sync</v-icon>
+                  </template>
+                  <v-list-item-title class="font-weight-bold">Episode Consolidation</v-list-item-title>
+                  <v-list-item-subtitle>Sync episode files between Google Drive and Syncthing</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-btn variant="outlined" size="small" color="primary">Open Tool</v-btn>
+                  </template>
+                </v-list-item>
+
+                <v-divider class="my-2" />
+
+                <!-- Utilities Subsection -->
+                <v-list-subheader class="text-subtitle-2 font-weight-bold text-grey-darken-2">
+                  <v-icon size="small" class="me-2">mdi-wrench</v-icon>
+                  Utilities
+                </v-list-subheader>
+
+                <v-list-item>
+                  <template v-slot:prepend>
+                    <v-icon color="primary">mdi-folder-edit</v-icon>
+                  </template>
+                  <v-list-item-title class="font-weight-bold">Normalize Episode Names</v-list-item-title>
+                  <v-list-item-subtitle>Fix episode folder names in Google Drive (remove date suffixes, extra text)</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <EpisodeNameNormalizerModal />
+                  </template>
+                </v-list-item>
+              </v-list>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
       </v-col>
     </v-row>
 
@@ -219,6 +257,7 @@
 <script setup>
 import { ref } from 'vue'
 import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'
+import EpisodeNameNormalizerModal from '@/components/EpisodeNameNormalizerModal.vue'
 
 // Reactive data
 const showSuccessMessage = ref(false)

@@ -7,6 +7,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, APIKeyHeader
 from .db_service import AuthService
 import logging
+from database import get_db
+from sqlalchemy.orm import Session
 
 # Password hashing setup
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -88,9 +90,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except jwt.ExpiredSignatureError as e:
         logger.warning(f"JWT token expired: {e}")
         raise credentials_exception
-    except jwt.InvalidSignatureError as e:
-        logger.error(f"JWT invalid signature (wrong SECRET_KEY?): {e}")
-        raise credentials_exception
     except JWTError as e:
         logger.error(f"JWT validation error: {type(e).__name__} - {e}")
         raise credentials_exception
@@ -118,6 +117,7 @@ async def get_current_user_or_key(
             print("✅ API key found and authenticated!")
             logger.info("✅ API key found and authenticated!")
             return {
+                "id": api_key_record['id'],
                 "username": api_key_record['client_name'],
                 "access_level": api_key_record['access_level']
             }
@@ -141,3 +141,41 @@ async def get_current_user_or_key(
         detail="Not authenticated",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+async def require_admin(
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+) -> dict:
+    """
+    Dependency that requires admin privileges.
+    Checks API key access_level OR RBAC for admin.* permission.
+    """
+    from rbac_service import RBACService
+
+    user_id = current_user.get("id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+
+    # Check if this is an API key with admin access_level
+    if current_user.get("access_level") == "admin":
+        logger.info(f"Admin access granted to API key: {current_user.get('username')}")
+        return current_user
+
+    # Otherwise, check RBAC user permissions
+    rbac = RBACService(db)
+    user_permissions = rbac.get_user_permissions(user_id)
+
+    # Check for admin.* or * (wildcard) permissions
+    if "admin.*" not in user_permissions and "*" not in user_permissions:
+        logger.warning(f"User {current_user.get('username')} attempted admin-only action without permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+
+    logger.info(f"Admin access granted to user {current_user.get('username')}")
+    return current_user
