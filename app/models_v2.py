@@ -636,6 +636,14 @@ class SOTProcessingJob(Base):
     final_video_path = Column(Text, nullable=True)
     final_audio_path = Column(Text, nullable=True)
     final_thumbnail_path = Column(Text, nullable=True)
+
+    # Enhanced processing metadata (added in migration 1013)
+    thumbnail_candidates = Column(JSON, nullable=True)  # Array of thumbnail filenames for user selection
+    selected_thumbnail = Column(String(255), nullable=True)  # User-selected thumbnail
+    pre_analysis = Column(JSON, nullable=True)  # Technical analysis of uploaded raw file
+    post_analysis = Column(JSON, nullable=True)  # Technical analysis of final processed file
+    processing_report = Column(JSON, nullable=True)  # Comprehensive success/failure/warning report
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
