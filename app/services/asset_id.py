@@ -43,7 +43,12 @@ class AssetIDService:
         "script": "SCR",
         "element": "ELM",
         "cue": "CUE",
-        "generic": "AST"  # Generic asset
+        "generic": "AST",  # Generic asset
+        "whiteboard_media": "WTB",  # Whiteboard-sourced media
+        "whiteboard_image": "WTB",
+        "whiteboard_video": "WTB",
+        "whiteboard_audio": "WTB",
+        "whiteboard_document": "WTB"
     }
     
     @classmethod

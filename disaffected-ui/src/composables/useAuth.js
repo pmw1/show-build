@@ -61,12 +61,56 @@ export function useAuth() {
     axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
   }
 
-  return { 
-    isAuthenticated, 
-    currentUser, 
-    checkAuthStatus, 
-    handleLogout, 
-    clearAuthData, 
-    setAuth 
+  const checkUserGroup = async (groupSlug) => {
+    try {
+      if (!currentUser.value || !currentUser.value.id) {
+        return false
+      }
+
+      const response = await axios.get(`/api/rbac/users/${currentUser.value.id}/groups`)
+      if (response.data.success) {
+        const userGroups = response.data.groups || []
+        return userGroups.some(group => group.slug === groupSlug)
+      }
+      return false
+    } catch (error) {
+      console.error('Failed to check user groups:', error)
+      return false
+    }
+  }
+
+  const refreshUserProfile = async () => {
+    try {
+      const token = localStorage.getItem('auth-token')
+      if (!token) return false
+
+      const baseUrl = process.env.VUE_APP_API_BASE_URL || 'http://192.168.51.210:8888'
+      const response = await axios.get(`${baseUrl}/api/auth/me`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.data) {
+        currentUser.value = response.data
+        localStorage.setItem('user-data', JSON.stringify(response.data))
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error('Failed to refresh user profile:', error)
+      return false
+    }
+  }
+
+  return {
+    isAuthenticated,
+    currentUser,
+    checkAuthStatus,
+    handleLogout,
+    clearAuthData,
+    setAuth,
+    checkUserGroup,
+    refreshUserProfile
   }
 }

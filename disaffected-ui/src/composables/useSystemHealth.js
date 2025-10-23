@@ -26,6 +26,24 @@ export function useSystemHealth(pollInterval = 10000) {
         status: 'unknown',
         workers: [],
         error: null
+      },
+      asterisk: {
+        status: 'unknown',
+        connected: false,
+        host: null,
+        error: null
+      },
+      google_drive: {
+        status: 'unknown',
+        connected: false,
+        can_list: false,
+        can_write: false,
+        error: null
+      },
+      xtts: {
+        status: 'unknown',
+        host: null,
+        error: null
       }
     }
   })
@@ -99,6 +117,123 @@ export function useSystemHealth(pollInterval = 10000) {
 
   const celeryStatusIcon = computed(() => {
     switch (celeryStatus.value) {
+      case 'success': return 'mdi-check-circle'
+      case 'warning': return 'mdi-alert-circle'
+      case 'error': return 'mdi-close-circle'
+      default: return 'mdi-help-circle'
+    }
+  })
+
+  // SIP/Asterisk computed properties
+  const sipConnected = computed(() => health.value.services.asterisk?.connected || false)
+  const sipHost = computed(() => health.value.services.asterisk?.host || null)
+  const sipError = computed(() => health.value.services.asterisk?.error || null)
+
+  const sipStatus = computed(() => {
+    if (sipError.value) return 'error'
+    if (!sipConnected.value) return 'warning'
+    return 'success'
+  })
+
+  const sipStatusText = computed(() => {
+    if (sipError.value) return 'Disconnected'
+    if (!sipConnected.value) return 'Unknown'
+    return 'Connected'
+  })
+
+  const sipStatusColor = computed(() => {
+    switch (sipStatus.value) {
+      case 'success': return 'success'
+      case 'warning': return 'warning'
+      case 'error': return 'error'
+      default: return 'grey'
+    }
+  })
+
+  const sipStatusIcon = computed(() => {
+    switch (sipStatus.value) {
+      case 'success': return 'mdi-check-circle'
+      case 'warning': return 'mdi-alert-circle'
+      case 'error': return 'mdi-close-circle'
+      default: return 'mdi-help-circle'
+    }
+  })
+
+  // Google Drive computed properties
+  const driveConnected = computed(() => health.value.services.google_drive?.connected || false)
+  const driveCanList = computed(() => health.value.services.google_drive?.can_list || false)
+  const driveCanWrite = computed(() => health.value.services.google_drive?.can_write || false)
+  const driveError = computed(() => health.value.services.google_drive?.error || null)
+
+  const driveStatus = computed(() => {
+    const status = health.value.services.google_drive?.status || 'unknown'
+    if (status === 'error') return 'error'
+    if (status === 'not_configured') return 'warning'
+    if (status === 'warning') return 'warning'
+    if (status === 'connected' && driveCanList.value && driveCanWrite.value) return 'success'
+    return 'warning'
+  })
+
+  const driveStatusText = computed(() => {
+    const status = health.value.services.google_drive?.status || 'unknown'
+    if (status === 'error') return 'Error'
+    if (status === 'not_configured') return 'Not Configured'
+    if (status === 'warning') return 'Degraded'
+    if (status === 'connected') return 'Connected'
+    return 'Unknown'
+  })
+
+  const driveStatusColor = computed(() => {
+    switch (driveStatus.value) {
+      case 'success': return 'success'
+      case 'warning': return 'warning'
+      case 'error': return 'error'
+      default: return 'grey'
+    }
+  })
+
+  const driveStatusIcon = computed(() => {
+    switch (driveStatus.value) {
+      case 'success': return 'mdi-check-circle'
+      case 'warning': return 'mdi-alert-circle'
+      case 'error': return 'mdi-close-circle'
+      default: return 'mdi-help-circle'
+    }
+  })
+
+  // XTTS computed properties
+  const xttsHost = computed(() => health.value.services.xtts?.host || null)
+  const xttsError = computed(() => health.value.services.xtts?.error || null)
+
+  const xttsStatus = computed(() => {
+    const status = health.value.services.xtts?.status || 'unknown'
+    if (status === 'error') return 'error'
+    if (status === 'not_configured') return 'warning'
+    if (status === 'warning') return 'warning'
+    if (status === 'connected') return 'success'
+    return 'warning'
+  })
+
+  const xttsStatusText = computed(() => {
+    const status = health.value.services.xtts?.status || 'unknown'
+    if (status === 'error') return 'Error'
+    if (status === 'not_configured') return 'Not Configured'
+    if (status === 'warning') return 'Warning'
+    if (status === 'connected') return 'Connected'
+    return 'Unknown'
+  })
+
+  const xttsStatusColor = computed(() => {
+    switch (xttsStatus.value) {
+      case 'success': return 'success'
+      case 'warning': return 'warning'
+      case 'error': return 'error'
+      default: return 'grey'
+    }
+  })
+
+  const xttsStatusIcon = computed(() => {
+    switch (xttsStatus.value) {
       case 'success': return 'mdi-check-circle'
       case 'warning': return 'mdi-alert-circle'
       case 'error': return 'mdi-close-circle'
@@ -357,6 +492,30 @@ export function useSystemHealth(pollInterval = 10000) {
     celeryStatusText,
     celeryStatusColor,
     celeryStatusIcon,
+    // SIP/Asterisk computed properties
+    sipConnected,
+    sipHost,
+    sipError,
+    sipStatus,
+    sipStatusText,
+    sipStatusColor,
+    sipStatusIcon,
+    // Google Drive computed properties
+    driveConnected,
+    driveCanList,
+    driveCanWrite,
+    driveError,
+    driveStatus,
+    driveStatusText,
+    driveStatusColor,
+    driveStatusIcon,
+    // XTTS computed properties
+    xttsHost,
+    xttsError,
+    xttsStatus,
+    xttsStatusText,
+    xttsStatusColor,
+    xttsStatusIcon,
     loading
   }
 }

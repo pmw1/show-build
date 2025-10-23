@@ -1,0 +1,66 @@
+# GitHub Actions Workflow: Deploy to Windows Worker
+# Automatically syncs code to Windows Celery worker on push to dev-fork
+#
+# Requirements:
+#   - GitHub repository secrets:
+#     - WINDOWS_HOST: IP or hostname
+#     - WINDOWS_USER: SSH username
+#     - WINDOWS_SSH_KEY: Private SSH key for authentication
+
+name: Deploy to Windows Worker
+
+on:
+  push:
+    branches:
+      - dev-fork
+      - main
+    paths:
+      - 'app/**'
+      - 'services/**'
+      - 'models*.py'
+      - 'platform_utils.py'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.WINDOWS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.WINDOWS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Sync files to Windows worker
+        env:
+          WINDOWS_HOST: ${{ secrets.WINDOWS_HOST }}
+          WINDOWS_USER: ${{ secrets.WINDOWS_USER }}
+        run: |
+          rsync -avz --delete \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='venv' \
+            --exclude='backups' \
+            -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" \
+            ./app/ \
+            ${WINDOWS_USER}@${WINDOWS_HOST}:J:/show-build/app/
+
+      - name: Restart Windows worker
+        env:
+          WINDOWS_HOST: ${{ secrets.WINDOWS_HOST }}
+          WINDOWS_USER: ${{ secrets.WINDOWS_USER }}
+        run: |
+          ssh -i ~/.ssh/id_rsa ${WINDOWS_USER}@${WINDOWS_HOST} \
+            "cd J:/show-build && taskkill /F /IM celery.exe 2>nul; timeout 2; start cmd /c start_worker.bat"
+
+      - name: Verify deployment
+        run: |
+          echo "✅ Code deployed to Windows worker"
+          echo "⏳ Worker restart initiated (takes ~30 seconds)"

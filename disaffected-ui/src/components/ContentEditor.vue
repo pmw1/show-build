@@ -14,34 +14,6 @@
       </v-toolbar-items>
     </v-toolbar>
 
-    <!-- Show Info Header (restored) -->
-    <ShowInfoHeader
-      :title="currentShowTitle"
-      :episode-info="currentEpisodeInfoText"
-      :episode-number="currentEpisodeNumber"
-      :episode-asset-id="currentEpisodeAssetId"
-      :slug="currentEpisodeSlug"
-      :episode-title="currentEpisodeTitle"
-      :subtitle="currentEpisodeSubtitle"
-      :guest="currentEpisodeGuest"
-      :description="currentEpisodeDescription"
-      :is-dummy="currentEpisodeIsDummy"
-      :air-date="currentAirDate"
-      :production-status="currentProductionStatus"
-      :duration="duration"
-      :episodes="episodes"
-      :production-statuses="productionStatuses"
-      @update:airDate="handleAirDateChange"
-      @update:productionStatus="handleProductionStatusChange"
-      @update:title="handleTitleChange"
-      @update:slug="handleSlugChange"
-      @update:episodeTitle="handleEpisodeTitleChange"
-      @update:subtitle="handleSubtitleChange"
-      @update:guest="handleGuestChange"
-      @update:description="handleDescriptionChange"
-      @episode-changed="handleEpisodeChange"
-    />
-
     <!-- Main Content Area -->
     <div class="main-content-area">
       <!-- Rundown Panel -->
@@ -51,6 +23,7 @@
         :episode="currentEpisode"
         :items="rundownItems"
         :selected-item-index="selectedItemIndex"
+        :llm-state="llmState"
         :loading="loadingRundown"
         :panel-width="rundownPanelWidth"
         :collapse-break-regions="interfaceSettings.collapseBreakRegions"
@@ -89,6 +62,32 @@
 
       <!-- Editor Panel -->
       <div class="editor-panel">
+        <!-- Show Info Header (scrollable) -->
+        <ShowInfoHeader
+          :title="currentShowTitle"
+          :episode-info="currentEpisodeInfoText"
+          :episode-number="currentEpisodeNumber"
+          :episode-asset-id="currentEpisodeAssetId"
+          :slug="currentEpisodeSlug"
+          :episode-title="currentEpisodeTitle"
+          :subtitle="currentEpisodeSubtitle"
+          :guest="currentEpisodeGuest"
+          :description="currentEpisodeDescription"
+          :is-dummy="currentEpisodeIsDummy"
+          :air-date="currentAirDate"
+          :production-status="currentProductionStatus"
+          :duration="duration"
+          :production-statuses="productionStatuses"
+          @update:airDate="handleAirDateChange"
+          @update:productionStatus="handleProductionStatusChange"
+          @update:title="handleTitleChange"
+          @update:slug="handleSlugChange"
+          @update:episodeTitle="handleEpisodeTitleChange"
+          @update:subtitle="handleSubtitleChange"
+          @update:guest="handleGuestChange"
+          @update:description="handleDescriptionChange"
+        />
+
         <EditorPanel
           ref="editorPanel"
           :item="currentRundownItem"
@@ -114,9 +113,13 @@
           @show-gfx-modal="handleShowGfxModal"
           @show-fsq-modal="handleShowFsqModal"
           @show-sot-modal="handleShowSotModal"
+          @edit-sot-cue="handleShowSotModal"
           @show-vo-modal="handleShowVoModal"
           @show-nat-modal="handleShowNatModal"
           @show-pkg-modal="handleShowPkgModal"
+          @show-dir-modal="handleShowDirModal"
+          @show-bump-modal="handleShowBumpModal"
+          @show-sting-modal="handleShowStingModal"
           @show-vox-modal="handleShowVoxModal"
           @show-mus-modal="handleShowMusModal"
           @show-live-modal="handleShowLiveModal"
@@ -195,11 +198,16 @@
       v-model:show="showSotModal"
       :episode-number="currentEpisodeNumber"
       :segment-name="currentItemMetadata?.title || currentItemMetadata?.slug || 'Segment'"
+      :edit-mode="!!editingSotCueData"
+      :initial-data="editingSotCueData"
       @submit="submitSot"
     />
     <VoModal v-model:show="showVoModal" @submit="submitVo" />
     <NatModal v-model:show="showNatModal" @submit="submitNat" />
     <PkgModal v-model:show="showPkgModal" @submit="submitPkg" />
+    <DirModal v-model:show="showDirModal" @submit="submitDir" />
+    <BumpModal v-model:show="showBumpModal" @submit="submitBump" />
+    <StingModal v-model:show="showStingModal" @submit="submitSting" />
     <VoxModal v-model:show="showVoxModal" @submit="submitVox" />
     <MusModal v-model:show="showMusModal" @submit="submitMus" />
     <LiveModal v-model:show="showLiveModal" @submit="submitLive" />
@@ -243,6 +251,27 @@
       @speaker-saved="handleSpeakerSaved"
       @show-message="showMessage"
     />
+
+    <!-- Loading Overlay -->
+    <v-overlay
+      v-model="loadingRundown"
+      persistent
+      class="content-editor-loading-overlay"
+      :scrim="false"
+      :contained="false"
+    >
+      <div class="loading-content">
+        <v-progress-circular
+          indeterminate
+          size="64"
+          width="6"
+          color="primary"
+        ></v-progress-circular>
+        <div class="loading-text" v-if="currentEpisodeNumber">Loading {{ currentEpisodeNumber }}</div>
+        <div class="loading-subtitle" v-if="currentEpisodeTitle">{{ currentEpisodeTitle }}</div>
+        <div class="loading-text" v-else>Loading Episode Content...</div>
+      </div>
+    </v-overlay>
   </div>
 </template>
 
@@ -260,6 +289,9 @@ import SotModal from './modals/SotModal.vue';
 import VoModal from './modals/VoModal.vue';
 import NatModal from './modals/NatModal.vue';
 import PkgModal from './modals/PkgModal.vue';
+import DirModal from './modals/DirModal.vue';
+import BumpModal from './modals/BumpModal.vue';
+import StingModal from './modals/StingModal.vue';
 import VoxModal from './modals/VoxModal.vue';
 import MusModal from './modals/MusModal.vue';
 import LiveModal from './modals/LiveModal.vue';
@@ -275,6 +307,8 @@ import { debounce } from 'lodash-es';
 import { getItemTypesForDropdown } from '../config/itemTypes';
 import { notifyUserStandard, NOTIFICATION_COLORS } from '../composables/useStandardNotification';
 import { useLLM } from '../composables/useLLM';
+import { useLLMState } from '../composables/useLLMState';
+import { useSOTProcessing } from '../composables/useSOTProcessing';
 
 export default {
   name: 'ContentEditor',
@@ -290,6 +324,9 @@ export default {
     SotModal,
     VoModal,
     NatModal,
+    DirModal,
+    BumpModal,
+    StingModal,
     LiveModal,
     MusModal,
     VoxModal,
@@ -343,11 +380,24 @@ export default {
     console.log('Current episode from prop:', this.episode);
     console.log('Current episode from data:', this.currentEpisodeNumber);
     console.log('Mounted complete, episode loading handled by fetchEpisodes()');
+
+    // Watch for episode changes from App.vue toolbar selector via sessionStorage
+    this.checkEpisodeInterval = setInterval(() => {
+      const currentEpisode = sessionStorage.getItem('currentEpisode');
+      if (currentEpisode && currentEpisode !== this.currentEpisodeNumber) {
+        console.log(`Episode changed from ${this.currentEpisodeNumber} to ${currentEpisode} - reloading...`);
+        this.handleEpisodeChange(currentEpisode);
+      }
+    }, 500);
   },
 
   beforeUnmount() {
     // Clean up keyboard event listener
     document.removeEventListener('keydown', this.handleKeydown);
+    // Clean up episode check interval
+    if (this.checkEpisodeInterval) {
+      clearInterval(this.checkEpisodeInterval);
+    }
   },
 
   created() {
@@ -407,7 +457,7 @@ export default {
         }
       },
       deep: true
-    },
+    }
     // Removed currentEpisodeNumber watcher to prevent race conditions
     // Episode changes should only be handled explicitly via handleEpisodeChange
   },
@@ -419,6 +469,12 @@ export default {
   },
   data() {
     return {
+      // Universal LLM state management
+      llmState: useLLMState(),
+
+      // SOT processing tracking
+      sotProcessing: useSOTProcessing(),
+
       // Layout state
       showRundownPanel: true,
       rundownPanelWidth: 'wide', // 'narrow' or 'wide'
@@ -435,10 +491,12 @@ export default {
       selectedItemIndex: -1, // Start with no selection
       selectedRegion: null, // Currently selected region for item placement
       editingItemIndex: -1, // Index of item being edited (grows by 2%)
+      generatingItemIndex: -1, // DEPRECATED - Use llmState instead
       hasUnsavedChanges: false,
-      loadingRundown: false, // Start ready to load
+      loadingRundown: true, // Start with loading overlay visible until episode loads
       loadingEpisode: false, // Prevent duplicate episode loading
       rundownError: null,
+      checkEpisodeInterval: null, // Interval for checking episode changes from toolbar
       
       // Show Information
       showInfo: {},
@@ -746,13 +804,23 @@ Good night!
       showGfxModal: false,
       showFsqModal: false,
       showSotModal: false,
+      editingSotCueData: null,  // For editing existing SOT cues
       showVoModal: false,
       showNatModal: false,
+      showDirModal: false,
+      showBumpModal: false,
+      showStingModal: false,
       showPkgModal: false,
       showVoxModal: false,
       showMusModal: false,
       showLiveModal: false,
-      
+
+      // FSQ insertion snapshot (captured when hotkey pressed)
+      fsqInsertionIndex: null,
+
+      // SOT insertion snapshot (captured when modal opened)
+      sotInsertionIndex: null,
+
       // Rundown management state
       showNewItemModal: false,
       showNewGFXModal: false,
@@ -1058,6 +1126,54 @@ Try dropping an image or video file here!`
     }
   },
   methods: {
+    /**
+     * Get authentication headers for API requests
+     * Uses JWT token from localStorage
+     * @returns {object} Headers object with Content-Type and Authorization
+     */
+    getAuthHeaders() {
+      const token = localStorage.getItem('auth-token');
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      };
+    },
+
+    // ===== LLM Generation State Management =====
+    // Generic methods to indicate LLM work is being performed on a rundown item
+
+    /**
+     * Start LLM generation indicator for a specific rundown item
+     * @param {number} itemIndex - Index of the item in rundownItems array (-1 to use selectedItemIndex)
+     */
+    startLLMGeneration(itemIndex = -1) {
+      this.generatingItemIndex = itemIndex === -1 ? this.selectedItemIndex : itemIndex;
+      console.log('🤖 LLM generation started for item:', this.generatingItemIndex);
+    },
+
+    /**
+     * Stop LLM generation indicator
+     */
+    stopLLMGeneration() {
+      console.log('✅ LLM generation completed for item:', this.generatingItemIndex);
+      this.generatingItemIndex = -1;
+    },
+
+    /**
+     * Wrapper for async LLM operations with automatic state management
+     * @param {Function} llmOperation - Async function that performs LLM work
+     * @param {number} itemIndex - Index of the item (-1 to use selectedItemIndex)
+     * @returns {Promise} Result of the LLM operation
+     */
+    async withLLMGeneration(llmOperation, itemIndex = -1) {
+      this.startLLMGeneration(itemIndex);
+      try {
+        return await llmOperation();
+      } finally {
+        this.stopLLMGeneration();
+      }
+    },
+
     // Get color for segment type from theme settings
     getTypeColor(segmentType) {
       // Map segment types to color keys in themeColorMap
@@ -1077,12 +1193,41 @@ Try dropping an image or video file here!`
     },
     handleShowFsqModal() {
       if (!this.showFsqModal) {
+        // Snapshot the cursor position when FSQ hotkey is pressed
+        this.fsqInsertionIndex = this.$refs.editorPanel?.focusedParagraphIndex;
+        console.log('📍 FSQ hotkey pressed - captured cursor position:', this.fsqInsertionIndex);
+
+        // If no paragraph is focused, use last segment as fallback
+        if (this.fsqInsertionIndex === null || this.fsqInsertionIndex === undefined) {
+          const segments = this.$refs.editorPanel?.scriptSegments || [];
+          this.fsqInsertionIndex = segments.length > 0 ? segments.length - 1 : null;
+          console.log('📍 No focus detected at hotkey press, using last segment:', this.fsqInsertionIndex);
+        }
+
         this.showFsqModal = true;
       }
     },
-    handleShowSotModal() {
-      console.error('🚨 Opening SotModal via handleShowSotModal');
+    handleShowSotModal(cueData = null) {
+      console.error('🚨 Opening SotModal via handleShowSotModal', cueData ? '(Edit mode)' : '(New)');
       if (!this.showSotModal) {
+        // If editing, store cue data; otherwise clear it
+        this.editingSotCueData = cueData;
+
+        if (!cueData) {
+          // New SOT - snapshot the cursor position
+          this.sotInsertionIndex = this.$refs.editorPanel?.focusedParagraphIndex;
+          console.log('📍 SOT modal opened - captured cursor position:', this.sotInsertionIndex);
+
+          // If no paragraph is focused, use last segment as fallback
+          if (this.sotInsertionIndex === null || this.sotInsertionIndex === undefined) {
+            const segments = this.$refs.editorPanel?.scriptSegments || [];
+            this.sotInsertionIndex = segments.length > 0 ? segments.length - 1 : null;
+            console.log('📍 No focus detected, using last segment:', this.sotInsertionIndex);
+          }
+        } else {
+          console.log('📝 Editing existing SOT cue:', cueData.slug);
+        }
+
         this.showSotModal = true;
         console.error('✅ SotModal opened - showSotModal set to true');
       }
@@ -1100,6 +1245,21 @@ Try dropping an image or video file here!`
     handleShowPkgModal() {
       if (!this.showPkgModal) {
         this.showPkgModal = true;
+      }
+    },
+    handleShowDirModal() {
+      if (!this.showDirModal) {
+        this.showDirModal = true;
+      }
+    },
+    handleShowBumpModal() {
+      if (!this.showBumpModal) {
+        this.showBumpModal = true;
+      }
+    },
+    handleShowStingModal() {
+      if (!this.showStingModal) {
+        this.showStingModal = true;
       }
     },
     handleShowVoxModal() {
@@ -1123,6 +1283,10 @@ Try dropping an image or video file here!`
       console.log('📥 ContentEditor.updateScriptContent called with:', newScriptContent?.substring(0, 100));
       const parsed = this.parsedContent;
 
+      // CRITICAL: Remove any standalone "---" lines from script content to prevent corruption
+      // These would be interpreted as frontmatter delimiters
+      const sanitizedScript = newScriptContent ? newScriptContent.replace(/^---\s*$/gm, '- - -') : '';
+
       // Rebuild frontmatter YAML
       const frontmatterLines = Object.entries(parsed.frontmatter)
         .map(([key, value]) => `${key}: ${value}`)
@@ -1130,29 +1294,103 @@ Try dropping an image or video file here!`
 
       // Rebuild full markdown content
       if (frontmatterLines) {
-        this.rawMarkdownContent = `---\n${frontmatterLines}\n---\n\n${newScriptContent}`;
+        this.rawMarkdownContent = `---\n${frontmatterLines}\n---\n\n${sanitizedScript}`;
       } else {
-        this.rawMarkdownContent = newScriptContent;
+        this.rawMarkdownContent = sanitizedScript;
       }
 
       console.log('✅ rawMarkdownContent updated, new scriptContent computed:', this.scriptContent?.substring(0, 100));
     },
 
     // SINGLE SOURCE HELPER: Append to script content
-    appendToScriptContent(textToAppend) {
+    appendToScriptContent(textToAppend, insertAfterParagraph = null) {
       console.log('📥 appendToScriptContent called');
       console.log('📄 Text to append length:', textToAppend.length);
       console.log('📝 Text to append preview:', textToAppend.substring(0, 100));
+      console.log('📍 Insert after paragraph:', insertAfterParagraph);
 
       const currentScript = this.parsedContent.scriptContent || '';
       console.log('📊 Current script length:', currentScript.length);
 
-      const newScript = currentScript + textToAppend;
+      let newScript;
+      let isAtEnd = false;
+
+      // If insertAfterParagraph is specified, insert after that paragraph
+      if (insertAfterParagraph !== null && this.$refs.editorPanel) {
+        const segments = this.$refs.editorPanel.scriptSegments || [];
+        console.log('📋 Total segments:', segments.length);
+
+        // Find the insertion point by counting segments up to the specified index
+        let insertionPoint = 0;
+        let charCount = 0;
+
+        for (let i = 0; i <= insertAfterParagraph && i < segments.length; i++) {
+          const segment = segments[i];
+          if (segment.type === 'text' && segment.content) {
+            charCount += segment.content.length;
+          } else if (segment.type === 'cue' && segment.raw) {
+            charCount += segment.raw.length;
+          }
+          insertionPoint = charCount;
+        }
+
+        console.log('📍 Insertion point calculated:', insertionPoint);
+
+        // Check if we're inserting at the end
+        isAtEnd = (insertionPoint >= currentScript.length);
+
+        // Insert at the calculated position
+        newScript = currentScript.slice(0, insertionPoint) + textToAppend + currentScript.slice(insertionPoint);
+        console.log('✅ Inserted after paragraph', insertAfterParagraph);
+      } else {
+        // Default behavior: append to end
+        newScript = currentScript + textToAppend;
+        isAtEnd = true;
+        console.log('✅ Appended to end (no insertion point specified)');
+      }
+
+      // If cue was inserted at the end of the script, add empty paragraph for writer to continue
+      if (isAtEnd && textToAppend.includes('<!-- Begin Cue -->')) {
+        console.log('🎯 Cue inserted at end of script - adding empty paragraph for continuation');
+        // Extract last speaker from script content
+        const lastSpeaker = this.getLastSpeakerFromScript(newScript);
+        console.log('📢 Last speaker detected:', lastSpeaker);
+        newScript += `\n<p class="${lastSpeaker}"></p>\n`;
+      }
+
       console.log('📊 New script length:', newScript.length);
       console.log('🔄 Calling updateScriptContent...');
 
       this.updateScriptContent(newScript);
       console.log('✅ appendToScriptContent complete');
+    },
+
+    /**
+     * Extract the last speaker class from script HTML content
+     * @param {string} scriptHtml - The HTML script content
+     * @returns {string} The last speaker class name (e.g., 'HOST', 'GUEST', 'JOSH')
+     */
+    getLastSpeakerFromScript(scriptHtml) {
+      if (!scriptHtml) {
+        return this.currentRundownItem?.speaker || this.currentItemMetadata?.speaker || 'HOST';
+      }
+
+      // Find all <p class="SPEAKER"> tags and extract the last one
+      const paragraphRegex = /<p\s+class="([^"]+)"/g;
+      let lastSpeaker = null;
+      let match;
+
+      while ((match = paragraphRegex.exec(scriptHtml)) !== null) {
+        lastSpeaker = match[1];
+      }
+
+      // If we found a speaker, return it; otherwise use fallback
+      if (lastSpeaker) {
+        return lastSpeaker;
+      }
+
+      // Fallback to item metadata or default
+      return this.currentRundownItem?.speaker || this.currentItemMetadata?.speaker || 'HOST';
     },
 
     // Load interface settings from database
@@ -1368,9 +1606,28 @@ Try dropping an image or video file here!`
           if (lastEpisode && this.episodes.some(e => e.value === lastEpisode)) {
             episodeToLoad = lastEpisode;
           } else if (this.episodes.length > 0) {
-            // Default to the latest episode
-            const sortedEpisodes = [...this.episodes].sort((a, b) => b.value - a.value);
-            episodeToLoad = sortedEpisodes[0].value;
+            // Default to the next upcoming episode (by air date)
+            const now = new Date();
+            const episodesWithDates = this.episodes
+              .filter(e => e.air_date)
+              .map(e => ({
+                ...e,
+                parsedDate: new Date(e.air_date)
+              }));
+
+            // Find upcoming episodes (air date in future or today)
+            const upcomingEpisodes = episodesWithDates
+              .filter(e => e.parsedDate >= now)
+              .sort((a, b) => a.parsedDate - b.parsedDate);
+
+            if (upcomingEpisodes.length > 0) {
+              // Load the soonest upcoming episode
+              episodeToLoad = upcomingEpisodes[0].value;
+            } else {
+              // No upcoming episodes, default to the latest episode number
+              const sortedEpisodes = [...this.episodes].sort((a, b) => b.value - a.value);
+              episodeToLoad = sortedEpisodes[0].value;
+            }
           }
         }
         
@@ -1481,6 +1738,20 @@ Try dropping an image or video file here!`
           console.error('Failed to load episode info:', infoResponse.reason);
         }
 
+        // Start polling for SOT processing updates
+        this.sotProcessing.startPolling(
+          paddedNumber,
+          (job) => {
+            // On update: just log for now
+            console.log(`🎬 SOT job update: ${job.slug} - ${job.current_phase}`)
+          },
+          async (job) => {
+            // On complete: reload the current item if it contains this asset_id
+            console.log(`✅ SOT job completed: ${job.slug}`)
+            await this.reloadCurrentItemContent()
+          }
+        )
+
       } catch (error) {
         console.error('Failed to load episode:', error);
         this.rundownError = `Failed to load episode ${paddedNumber}`;
@@ -1500,10 +1771,7 @@ Try dropping an image or video file here!`
       this.saving = true;
       try {
         const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
-        const headers = {
-          'Content-Type': 'application/json',
-          'X-API-Key': 'nSudN-zXynaRm04RXTJJBeZi0OZNGMf9dtxlm1fKLNY'
-        };
+        const headers = this.getAuthHeaders();
 
         // Save only the current item's content without touching order
         // IMPORTANT: Spread rundownItems first, then override with current editor content
@@ -1519,11 +1787,37 @@ Try dropping an image or video file here!`
         // Get the AssetID for this item
         const assetId = currentItem.asset_id || currentItem.AssetID || currentItem.id;
 
+        // CRITICAL VALIDATION: Check for corruption before saving
+        // Check rawMarkdownContent (not scriptContent) for multiple YAML frontmatter blocks
+        const rawToCheck = this.rawMarkdownContent || '';
+        const frontmatterPattern = /^---\s*$/gm;
+        const frontmatterMatches = rawToCheck.match(frontmatterPattern);
+        const frontmatterCount = frontmatterMatches ? frontmatterMatches.length : 0;
+
+        console.log('🔍 Corruption check:', {
+          frontmatterCount,
+          rawLength: rawToCheck.length,
+          matches: frontmatterMatches,
+          rawPreview: rawToCheck.substring(0, 500)
+        });
+
+        // Should have exactly 2 occurrences of "---" (opening and closing frontmatter)
+        // More than 2 means multiple segments were concatenated
+        if (frontmatterCount > 2) {
+          console.error('🚨🚨🚨 SAVE BLOCKED: Raw content contains multiple segments!');
+          console.error('Frontmatter occurrences:', frontmatterCount);
+          console.error('Expected: 2 (opening and closing)');
+          console.error('Raw content preview:', rawToCheck.substring(0, 500));
+          console.error('All matches:', frontmatterMatches);
+          throw new Error('Cannot save: Multiple segments detected in script content. This would corrupt the database.');
+        }
+
         console.log('💾 Autosaving current item:', {
           title: currentItem.title,
           assetId: assetId,
           selectedIndex: this.selectedItemIndex,
-          scriptPreview: this.parsedContent.scriptContent?.substring(0, 50)
+          scriptLength: this.parsedContent.scriptContent?.length || 0,
+          scriptPreview: this.parsedContent.scriptContent?.substring(0, 50) || ''
         });
 
         // Use save-rundown endpoint in single-item mode
@@ -1623,7 +1917,8 @@ Try dropping an image or video file here!`
       const {
         showSuccessMessage = true,
         includCurrentEditorContent = true,
-        customMessage = null
+        customMessage = null,
+        recalculateOrder = false  // Only recalculate on drag-drop or new item creation
       } = options;
 
       const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
@@ -1634,15 +1929,43 @@ Try dropping an image or video file here!`
 
       try {
         console.log('🔄 CENTRALIZED RUNDOWN SAVE - Starting...');
-        console.log(`Episode: ${paddedId}, Items: ${this.rundownItems.length}`);
+        console.log(`Episode: ${paddedId}, Items: ${this.rundownItems.length}, Recalculate Order: ${recalculateOrder}`);
 
-        // STEP 1: CRITICAL INDEX-TO-ORDER SYNCHRONIZATION
+        // STEP 1: CONDITIONAL INDEX-TO-ORDER SYNCHRONIZATION
         const processedItems = this.rundownItems.map((item, index) => {
           const processedItem = { ...item };
 
-          // 🔥 CRITICAL: Override order field with current array index
-          processedItem.index = (index + 1) * 10;  // Frontend index (10, 20, 30, 40...)
-          processedItem.order = processedItem.index;  // Database order field
+          // Only recalculate order if explicitly requested (drag-drop or new item creation)
+          if (recalculateOrder) {
+            // 🔥 RECALCULATE: Override order field with current array index
+            // 🚨 CRITICAL: Cold Open always gets index = 1, regardless of position
+            if (item.type === 'coldopen') {
+              processedItem.index = 1;
+              processedItem.order = 1;
+              console.log(`❄️ COLD OPEN Item ${index}: ${item.title} -> Index: 1, Order: 1 (FIXED)`);
+            } else {
+              processedItem.index = (index + 1) * 10;  // Frontend index (10, 20, 30, 40...)
+              processedItem.order = processedItem.index;  // Database order field
+              console.log(`🔢 RECALC Item ${index}: ${item.title} -> Index: ${processedItem.index}, Order: ${processedItem.order}`);
+            }
+          } else {
+            // 🔒 PRESERVE: Keep existing order values from database
+            // 🚨 CRITICAL: Cold Open always gets index = 1, even in preserve mode
+            if (item.type === 'coldopen') {
+              processedItem.index = 1;
+              processedItem.order = 1;
+              console.log(`❄️ COLD OPEN Item ${index}: ${item.title} -> Index: 1, Order: 1 (PRESERVED)`);
+            } else {
+              // Use !== undefined to handle 0 as valid value (0 is falsy but valid!)
+              processedItem.index = (item.index !== undefined && item.index !== null) ? item.index :
+                                    (item.order !== undefined && item.order !== null) ? item.order :
+                                    (index + 1) * 10;
+              processedItem.order = (item.order !== undefined && item.order !== null) ? item.order :
+                                    (item.index !== undefined && item.index !== null) ? item.index :
+                                    (index + 1) * 10;
+              console.log(`🔒 PRESERVE Item ${index}: ${item.title} -> Index: ${processedItem.index}, Order: ${processedItem.order}`);
+            }
+          }
 
           // Include current editor content if this is the selected item
           if (includCurrentEditorContent && index === this.selectedItemIndex) {
@@ -1658,15 +1981,11 @@ Try dropping an image or video file here!`
             delete processedItem.rawMarkdown;
           }
 
-          console.log(`🔢 Item ${index}: ${item.title} -> Index: ${processedItem.index}, Order: ${processedItem.order}`);
           return processedItem;
         });
 
         // STEP 2: Send to database-first save endpoint
-        const headers = {
-          'Content-Type': 'application/json',
-          'X-API-Key': 'nSudN-zXynaRm04RXTJJBeZi0OZNGMf9dtxlm1fKLNY'
-        };
+        const headers = this.getAuthHeaders();
 
         const rundownPayload = {
           items: processedItems,
@@ -1754,10 +2073,7 @@ Try dropping an image or video file here!`
       }
 
       try {
-        const headers = {
-          'Content-Type': 'application/json',
-          'X-API-Key': 'nSudN-zXynaRm04RXTJJBeZi0OZNGMf9dtxlm1fKLNY'
-        };
+        const headers = this.getAuthHeaders();
 
         const episodeData = {
           title: this.currentEpisodeTitle,
@@ -1860,7 +2176,35 @@ Try dropping an image or video file here!`
       console.log('✅ Loaded metadata - AssetID:', this.currentItemMetadata.AssetID, 'Title:', this.currentItemMetadata.title, 'Order:', this.currentItemMetadata.order);
       console.log('Loaded raw content length:', this.rawMarkdownContent.length);
     },
-    
+
+    async reloadCurrentItemContent() {
+      // Reload the currently selected item from the server (for processing updates)
+      if (this.selectedItemIndex < 0 || !this.currentEpisodeNumber) {
+        console.log('Cannot reload - no valid item selected')
+        return
+      }
+
+      try {
+        console.log('🔄 Reloading current item content from server...')
+        const response = await axios.get(`/api/episodes/${this.currentEpisodeNumber}/rundown`)
+        const items = response.data.items || []
+
+        if (this.selectedItemIndex < items.length) {
+          const updatedItem = items[this.selectedItemIndex]
+
+          // Update in rundownItems array
+          this.rundownItems[this.selectedItemIndex] = updatedItem
+
+          // Reload into editor
+          this.loadItemContent(updatedItem)
+
+          console.log('✅ Current item content reloaded')
+        }
+      } catch (error) {
+        console.error('Failed to reload current item:', error)
+      }
+    },
+
     loadRawMarkdownContent(item) {
       // Build raw markdown content combining frontmatter and script
       try {
@@ -1933,6 +2277,20 @@ Try dropping an image or video file here!`
             // Take content after the closing frontmatter
             scriptContent = lines.slice(frontmatterEndIndex + 1).join('\n').trim();
             console.warn('✅ Stripped frontmatter, remaining content length:', scriptContent.length);
+
+            // CRITICAL FIX: Check if the remaining content contains ANOTHER frontmatter block
+            // This happens when multiple segments got mixed together in corrupted data
+            if (scriptContent.includes('---\n\nAssetID:') || scriptContent.includes('---\n\nid:')) {
+              console.error('🚨🚨🚨 CRITICAL: Detected multiple segments mixed in script content!');
+              console.error('This indicates database corruption. Truncating to first segment only.');
+
+              // Find the start of the next segment and cut it off
+              const nextSegmentStart = scriptContent.search(/---\s*\n\s*(AssetID|id):/);
+              if (nextSegmentStart > 0) {
+                scriptContent = scriptContent.substring(0, nextSegmentStart).trim();
+                console.warn('✅ Truncated to first segment, new length:', scriptContent.length);
+              }
+            }
           } else {
             console.warn('⚠️  Could not find closing frontmatter, using original content');
           }
@@ -1959,13 +2317,10 @@ Try dropping an image or video file here!`
         }));
         
         const payload = { segments };
-        
+
         // Call the reorder endpoint with authentication
-        const reorderHeaders = {
-          'Content-Type': 'application/json',
-          'X-API-Key': 'nSudN-zXynaRm04RXTJJBeZi0OZNGMf9dtxlm1fKLNY'
-        };
-        
+        const reorderHeaders = this.getAuthHeaders();
+
         await axios.post(`/rundown/${paddedId}/reorder`, payload, { headers: reorderHeaders });
         console.log('Rundown order saved successfully');
         this.hasUnsavedChanges = false;
@@ -2019,7 +2374,8 @@ Try dropping an image or video file here!`
         await this.saveRundownItems({
           showSuccessMessage: true,
           includCurrentEditorContent: false,
-          customMessage: 'Rundown reorder saved successfully'
+          customMessage: 'Rundown reorder saved successfully',
+          recalculateOrder: true  // Recalculate order after drag-drop
         });
         console.log('Rundown reorder saved successfully');
         
@@ -2036,7 +2392,7 @@ Try dropping an image or video file here!`
         
         // Show success feedback attached to rundown panel
         const panelElement = this.$refs.rundownPanelRef?.$el;
-        notifyUserStandard("Rundown reordered", NOTIFICATION_COLORS.SUCCESS, 1500, panelElement, true);
+        notifyUserStandard("Rundown order updated", NOTIFICATION_COLORS.SUCCESS, 1500, panelElement, true);
         
       } catch (error) {
         console.error('Failed to save rundown reorder:', error);
@@ -2054,6 +2410,18 @@ Try dropping an image or video file here!`
       console.log('Current selectedItemIndex before update:', this.selectedItemIndex);
       console.log('Total rundown items:', this.rundownItems.length);
 
+      // CRITICAL: Save current item before switching to prevent data loss
+      if (this.selectedItemIndex >= 0 && this.selectedItemIndex !== index && this.hasUnsavedChanges) {
+        console.log('💾 Saving current item before switching...');
+        try {
+          await this.saveCurrentItem();
+          console.log('✅ Successfully saved before switching');
+        } catch (error) {
+          console.error('❌ Failed to save before switching:', error);
+          // Continue with switch even if save fails - user will see unsaved changes warning
+        }
+      }
+
       // Unregister previous active edit
       if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
         const prevAssetId = this.rundownItems[this.selectedItemIndex].asset_id;
@@ -2061,7 +2429,7 @@ Try dropping an image or video file here!`
           try {
             await axios.post('/api/housekeeping/active-edit/unregister',
               { asset_id: prevAssetId },
-              { headers: { 'X-API-Key': 'nSudN-zXynaRm04RXTJJBeZi0OZNGMf9dtxlm1fKLNY' } }
+              { headers: this.getAuthHeaders() }
             );
           } catch (err) {
             console.warn('Failed to unregister active edit:', err);
@@ -2101,7 +2469,7 @@ Try dropping an image or video file here!`
           try {
             await axios.post('/api/housekeeping/active-edit/register',
               { asset_id: newAssetId },
-              { headers: { 'X-API-Key': 'nSudN-zXynaRm04RXTJJBeZi0OZNGMf9dtxlm1fKLNY' } }
+              { headers: this.getAuthHeaders() }
             );
             console.log('✅ Registered active edit for', newAssetId);
           } catch (err) {
@@ -2257,12 +2625,42 @@ Try dropping an image or video file here!`
         this.handleNewItemClick();
         return;
       }
-      // Handle Alt+D for deleting cue at cursor
-      if (event.altKey && event.key === 'd' && !event.ctrlKey && !event.metaKey) {
+      // Handle Shift+Delete for deleting cue at cursor (changed from Alt+D to free up Alt+D for DIR cue)
+      if (event.shiftKey && event.key === 'Delete' && !event.ctrlKey && !event.metaKey && !event.altKey) {
         // Only trigger if in a textarea (text editor)
         if (event.target.tagName === 'TEXTAREA') {
           event.preventDefault();
           this.deleteCueAtCursor(event.target);
+        }
+      }
+      // Handle Alt+D for DIR (Director Note) cue
+      else if (event.altKey && event.key === 'd' && !event.ctrlKey && !event.metaKey && !isInTextField) {
+        event.preventDefault();
+        // If in textarea, insert cue directly, otherwise show modal
+        if (event.target.tagName === 'TEXTAREA') {
+          this.$refs.editorPanel?.insertCue('DIR');
+        } else {
+          this.showDirModal = true;
+        }
+      }
+      // Handle Alt+B for BUMP (Bumper) cue
+      else if (event.altKey && event.key === 'b' && !event.ctrlKey && !event.metaKey && !isInTextField) {
+        event.preventDefault();
+        // If in textarea, insert cue directly, otherwise show modal
+        if (event.target.tagName === 'TEXTAREA') {
+          this.$refs.editorPanel?.insertCue('BUMP');
+        } else {
+          this.showBumpModal = true;
+        }
+      }
+      // Handle Alt+R for STING (Stinger) cue
+      else if (event.altKey && event.key === 'r' && !event.ctrlKey && !event.metaKey && !isInTextField) {
+        event.preventDefault();
+        // If in textarea, insert cue directly, otherwise show modal
+        if (event.target.tagName === 'TEXTAREA') {
+          this.$refs.editorPanel?.insertCue('STING');
+        } else {
+          this.showStingModal = true;
         }
       }
       // Handle Alt+G for creating new GFX item
@@ -2486,6 +2884,14 @@ Try dropping an image or video file here!`
           }
 
           console.log(`Deleted item: ${item.slug || item.title}`);
+
+          // Recalculate order for remaining items after deletion
+          await this.saveRundownItems({
+            showSuccessMessage: false,
+            includCurrentEditorContent: false,
+            recalculateOrder: true  // Recalculate order after deletion
+          });
+          console.log('✅ Rundown order recalculated after deletion');
         } else {
           const error = await response.text();
           console.error('Failed to delete item:', error);
@@ -2771,7 +3177,8 @@ Try dropping an image or video file here!`
         const result = await this.saveRundownItems({
           showSuccessMessage: false,
           includCurrentEditorContent: false,
-          customMessage: null
+          customMessage: null,
+          recalculateOrder: true  // Recalculate order after drag-drop
         });
 
         if (result.success) {
@@ -2887,10 +3294,14 @@ Try dropping an image or video file here!`
       console.log('📝 Cue text preview:', cueText.substring(0, 100));
       console.log('📊 Current scriptContent length BEFORE:', this.scriptContent?.length || 0);
 
+      // Get the currently focused paragraph index from EditorPanel
+      const focusedIndex = this.$refs.editorPanel?.focusedParagraphIndex;
+      console.log('📍 Currently focused paragraph index:', focusedIndex);
+
       // Insert cue text into the appropriate content field based on editor mode
       if (editorMode === 'script') {
         console.log('✅ Calling appendToScriptContent...');
-        this.appendToScriptContent(`\n${cueText}\n`);
+        this.appendToScriptContent(`\n${cueText}\n`, focusedIndex);
         console.log('✅ appendToScriptContent returned');
       } else if (editorMode === 'scratch') {
         this.scratchContent += `\n${cueText}\n`;
@@ -2930,6 +3341,18 @@ Try dropping an image or video file here!`
     
     submitFsq(fsqCueData) {
       console.log('🎬 FSQ cue submitted:', fsqCueData);
+      console.log('🔍 Checking $refs.editorPanel:', this.$refs.editorPanel);
+      console.log('🔍 All $refs:', Object.keys(this.$refs));
+
+      // Verify editorPanel ref exists
+      if (!this.$refs.editorPanel) {
+        console.error('❌ EditorPanel ref not found');
+        console.error('❌ Available refs:', Object.keys(this.$refs));
+        alert('Error: Editor panel not ready. Please try again.');
+        return;
+      }
+
+      console.log('✅ EditorPanel ref found, proceeding...');
 
       // Format the FSQ cue block with all metadata
       let fsqCueBlock = `<!-- Begin Cue -->\n`;
@@ -2979,31 +3402,27 @@ Try dropping an image or video file here!`
 
       console.log(`🔢 Multipart check: ${currentPart}/${totalParts}, isLastPart: ${isLastPart}`);
 
-      // Only show placement overlay when we have ALL parts
+      // Only insert when we have ALL parts
       if (isLastPart) {
-        console.log(`✅ All ${totalParts} FSQ parts collected, activating placement overlay`);
+        console.log(`✅ All ${totalParts} FSQ parts collected, inserting at bottom`);
 
         // Close the modal
         this.showFsqModal = false;
 
-        // Store pending cue data for placement overlay (array of all parts)
-        if (this.$refs.editorPanel) {
-          console.log('📍 Activating FSQ placement overlay with', this.$refs.editorPanel.pendingCueDataArray.length, 'cues');
-          this.$refs.editorPanel.pendingCueData = this.$refs.editorPanel.pendingCueDataArray; // Store array
-          this.$refs.editorPanel.pendingCueType = 'FSQ';
-          this.$refs.editorPanel.showCuePlacement = true;
-        } else {
-          console.warn('⚠️ EditorPanel ref not available, falling back to direct insertion');
-          // Insert all parts
-          this.$refs.editorPanel.pendingCueDataArray.forEach(cueBlock => {
-            this.handleInsertCue({
-              cueType: 'FSQ',
-              cueText: cueBlock,
-              editorMode: this.editorMode
-            });
-          });
-          this.$toast.success(`${totalParts} FSQ cue(s) inserted successfully!`);
-        }
+        // Insert all parts at the end of the script (null = append to end)
+        const allCues = this.$refs.editorPanel.pendingCueDataArray.join('\n\n');
+        console.log(`📝 Inserting ${totalParts} FSQ cue(s) at bottom of script`);
+
+        this.appendToScriptContent(`\n${allCues}\n`, null);
+
+        // Clear the snapshot for next time
+        this.fsqInsertionIndex = null;
+        console.log('🧹 Cleared fsqInsertionIndex snapshot');
+
+        this.hasUnsavedChanges = true;
+        this.checkForUnsavedRundownChanges();
+
+        console.log(`✅ ${totalParts} FSQ cue(s) inserted successfully at bottom of script`);
 
         // Clear the array for next time
         this.$refs.editorPanel.pendingCueDataArray = [];
@@ -3038,7 +3457,7 @@ Try dropping an image or video file here!`
         console.log('📋 SOT data received:', data);
 
         // Build the SOT cue block
-        const sotCue = `<!-- Begin Cue -->
+        let sotCue = `<!-- Begin Cue -->
 [Type: SOT]
 [AssetID: ${data.assetId}]
 [Slug: ${data.slug}]
@@ -3046,7 +3465,17 @@ Try dropping an image or video file here!`
 [MediaURL: ${data.mediaUrl}]
 [Duration: ${data.duration}]
 [TrimStart: ${data.trimStart}]
-[TrimEnd: ${data.trimEnd}]
+[TrimEnd: ${data.trimEnd}]`;
+
+        // Add clipping info if present
+        if (data.clippingMethod && data.clippingMethod !== 'none') {
+          sotCue += `\n[ClippingMethod: ${data.clippingMethod}]`;
+        }
+        if (data.clips && data.clips.length > 0) {
+          sotCue += `\n[Clips: ${JSON.stringify(data.clips)}]`;
+        }
+
+        sotCue += `
 [Transcription: ${data.transcription}]
 [ThumbnailURL: ${data.thumbnailUrl}]
 [Credits: ${data.credits}]
@@ -3054,22 +3483,49 @@ Try dropping an image or video file here!`
 
 `;
 
-        console.log('📝 Built SOT cue block, sending to EditorPanel for placement insertion');
+        console.log('📝 Built SOT cue block');
 
         // Close modal first
         this.showSotModal = false;
 
-        // Send cue data to EditorPanel for placement-based insertion
-        // EditorPanel will activate placement overlay for user to click drop zone
-        // After user clicks, the cue will be inserted and we'll auto-save
-        if (this.$refs.editorPanel) {
-          await this.$refs.editorPanel.handleSotCueSubmit(sotCue);
-          console.log('✅ SOT cue data sent to EditorPanel - placement overlay now active');
-          console.log('📍 Waiting for user to click drop zone to insert SOT...');
-        }
+        // Check if processing mode (clipping method !== 'none')
+        const isProcessingMode = data.clippingMethod && data.clippingMethod !== 'none';
 
-        // NOTE: Database save will happen automatically after user clicks placement
-        // via the normal auto-save mechanism when scriptContent is updated
+        if (isProcessingMode) {
+          // Processing mode: Use snapshot pattern (like FSQ)
+          console.log('🎬 Processing mode detected - using snapshotted insertion position');
+
+          const insertionIndex = this.sotInsertionIndex;
+          console.log(`📍 Using snapshotted cursor position from modal open: ${insertionIndex}`);
+
+          // Insert directly at snapshotted position
+          this.appendToScriptContent(`\n${sotCue}\n`, insertionIndex);
+
+          // Clear the snapshot for next time
+          this.sotInsertionIndex = null;
+          console.log('🧹 Cleared sotInsertionIndex snapshot');
+
+          this.hasUnsavedChanges = true;
+          this.checkForUnsavedRundownChanges();
+
+          console.log(`✅ SOT cue inserted successfully at segment position ${insertionIndex}`);
+
+        } else {
+          // Standard mode: Use placement overlay pattern
+          console.log('📝 Standard mode - sending to EditorPanel for placement insertion');
+
+          // Send cue data to EditorPanel for placement-based insertion
+          // EditorPanel will activate placement overlay for user to click drop zone
+          // After user clicks, the cue will be inserted and we'll auto-save
+          if (this.$refs.editorPanel) {
+            await this.$refs.editorPanel.handleSotCueSubmit(sotCue);
+            console.log('✅ SOT cue data sent to EditorPanel - placement overlay now active');
+            console.log('📍 Waiting for user to click drop zone to insert SOT...');
+          }
+
+          // NOTE: Database save will happen automatically after user clicks placement
+          // via the normal auto-save mechanism when scriptContent is updated
+        }
 
       } catch (error) {
         console.error('❌ Error in submitSot:', error);
@@ -3167,7 +3623,76 @@ Try dropping an image or video file here!`
         }
       }
     },
-    
+
+    async submitDir(data) {
+      try {
+        console.log('🎬 DIR Modal Submit');
+        console.log('📋 DIR data received:', data);
+
+        // Close modal first
+        this.showDirModal = false;
+
+        // Send cue data to EditorPanel for placement-based insertion
+        if (this.$refs.editorPanel) {
+          await this.$refs.editorPanel.handleDirCueSubmit(data);
+          console.log('✅ DIR cue data sent to EditorPanel - placement overlay now active');
+          console.log('📍 Waiting for user to click drop zone to insert DIR...');
+        }
+
+      } catch (error) {
+        console.error('❌ Error in submitDir:', error);
+        if (this.$toast) {
+          this.$toast.error(`Failed to insert DIR cue: ${error.message}`);
+        }
+      }
+    },
+
+    async submitBump(data) {
+      try {
+        console.log('🎬 BUMP Modal Submit');
+        console.log('📋 BUMP data received:', data);
+
+        // Close modal first
+        this.showBumpModal = false;
+
+        // Send cue data to EditorPanel for placement-based insertion
+        if (this.$refs.editorPanel) {
+          await this.$refs.editorPanel.handleBumpCueSubmit(data);
+          console.log('✅ BUMP cue data sent to EditorPanel - placement overlay now active');
+          console.log('📍 Waiting for user to click drop zone to insert BUMP...');
+        }
+
+      } catch (error) {
+        console.error('❌ Error in submitBump:', error);
+        if (this.$toast) {
+          this.$toast.error(`Failed to insert BUMP cue: ${error.message}`);
+        }
+      }
+    },
+
+    async submitSting(data) {
+      try {
+        console.log('🎬 STING Modal Submit');
+        console.log('📋 STING data received:', data);
+
+        // Close modal first
+        this.showStingModal = false;
+
+        // Send cue data to EditorPanel for placement-based insertion
+        if (this.$refs.editorPanel) {
+          await this.$refs.editorPanel.handleStingCueSubmit(data);
+          console.log('✅ STING cue data sent to EditorPanel - placement overlay now active');
+          console.log('📍 Waiting for user to click drop zone to insert STING...');
+        }
+
+      } catch (error) {
+        console.error('❌ Error in submitSting:', error);
+        if (this.$toast) {
+          this.$toast.error(`Failed to insert STING cue: ${error.message}`);
+        }
+      }
+    },
+
     submitVox(data) {
       const voxCue = `[VOX: ${data.slug} | ${data.description} | ${data.duration}]\n`;
 
@@ -3319,6 +3844,14 @@ Try dropping an image or video file here!`
             this.selectedItemIndex = newItemIndex;
             this.selectRundownItem(newItemIndex);
             console.log('Successfully flashed and selected newly created item at index:', newItemIndex);
+
+            // Focus slug field for new items
+            this.$nextTick(() => {
+              const editorPanel = this.$refs.editorPanelRef
+              if (editorPanel && editorPanel.focusSlugField) {
+                editorPanel.focusSlugField()
+              }
+            });
           } else {
             console.warn('Could not find newly created item in rundown. Trying alternative search methods...');
 
@@ -3338,6 +3871,14 @@ Try dropping an image or video file here!`
               this.selectedItemIndex = slugIndex;
               this.selectRundownItem(slugIndex);
               console.log('Found by slug, flashed and selected item at index:', slugIndex);
+
+              // Focus slug field for new items
+              this.$nextTick(() => {
+                const editorPanel = this.$refs.editorPanelRef
+                if (editorPanel && editorPanel.focusSlugField) {
+                  editorPanel.focusSlugField()
+                }
+              });
             } else {
               console.error('Could not locate newly created item by asset_id or slug');
               // Still show success message even if we can't locate the item
@@ -3461,20 +4002,7 @@ Try dropping an image or video file here!`
       console.log('=== CALCULATE NEW ITEM INDEX ===');
       console.log('Item type:', itemType);
       console.log('Selected item index:', this.selectedItemIndex);
-      console.log('Selected region:', this.selectedRegion);
       console.log('Rundown items count:', this.rundownItems?.length || 0);
-
-      if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
-        console.log('Selected item data:', {
-          filename: this.rundownItems[this.selectedItemIndex].filename,
-          index: this.rundownItems[this.selectedItemIndex].index,
-          order: this.rundownItems[this.selectedItemIndex].order,
-          type: this.rundownItems[this.selectedItemIndex].type,
-          title: this.rundownItems[this.selectedItemIndex].title
-        });
-      } else {
-        console.log('No item selected or invalid selectedItemIndex');
-      }
 
       // Rule 1: Cold Open always gets index = 1
       if (itemType === 'coldopen') {
@@ -3482,149 +4010,51 @@ Try dropping an image or video file here!`
         return 1;
       }
 
-      // Get all existing indexes from rundown items
-      const existingIndexes = this.rundownItems
-        .map((item, arrayIndex) => {
-          // Try multiple approaches to get the index
-          let index = null;
+      // Get current order values from rundown items (they come sorted from backend)
+      const existingOrders = this.rundownItems
+        .map(item => item.order_in_rundown || item.order || item.index || 0)
+        .filter(order => order !== null && order !== undefined);
 
-          // Method 1: Extract from filename (format: "123 Title.md")
-          const filenameMatch = item.filename?.match(/^(\d+)\s/);
-          if (filenameMatch) {
-            index = parseInt(filenameMatch[1]);
-          }
-
-          // Method 2: Use item.index field if available
-          if (!index && item.index !== undefined) {
-            index = item.index;
-          }
-
-          // Method 3: Use item.order field if available
-          if (!index && item.order !== undefined) {
-            index = item.order;
-          }
-
-          // Method 4: Calculate from array position (fallback)
-          if (!index) {
-            index = (arrayIndex + 1) * 10;
-          }
-
-          console.log(`Item ${arrayIndex}: filename="${item.filename}", index=${item.index}, order=${item.order}, calculated=${index}`);
-          return index;
-        })
-        .filter(index => index !== null)
-        .sort((a, b) => a - b);
-
-      console.log('Existing indexes:', existingIndexes);
+      console.log('Existing orders:', existingOrders);
 
       let targetIndex;
 
-      // Rule 2: Place after currently selected item (takes priority over region selection)
+      // Rule 2: If an item is selected, insert directly below it
       if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
         const selectedItem = this.rundownItems[this.selectedItemIndex];
-        console.log('Selected item:', selectedItem);
+        const selectedOrder = selectedItem.order_in_rundown || selectedItem.order || selectedItem.index || 0;
 
-        // Get the selected item's index using the same multi-method approach
-        let selectedFileIndex = null;
+        console.log('Selected item order:', selectedOrder);
 
-        // Method 1: Extract from filename
-        const selectedMatch = selectedItem.filename?.match(/^(\d+)\s/);
-        if (selectedMatch) {
-          selectedFileIndex = parseInt(selectedMatch[1]);
-        }
+        // Check if there's an item immediately after the selected one
+        const nextItemIndex = this.selectedItemIndex + 1;
+        if (nextItemIndex < this.rundownItems.length) {
+          const nextItem = this.rundownItems[nextItemIndex];
+          const nextOrder = nextItem.order_in_rundown || nextItem.order || nextItem.index || 0;
 
-        // Method 2: Use item.index field
-        if (!selectedFileIndex && selectedItem.index !== undefined) {
-          selectedFileIndex = selectedItem.index;
-        }
+          // Place between selected and next item
+          targetIndex = Math.floor((selectedOrder + nextOrder) / 2);
 
-        // Method 3: Use item.order field
-        if (!selectedFileIndex && selectedItem.order !== undefined) {
-          selectedFileIndex = selectedItem.order;
-        }
-
-        // Method 4: Calculate from selectedItemIndex
-        if (!selectedFileIndex) {
-          selectedFileIndex = (this.selectedItemIndex + 1) * 10;
-        }
-
-        console.log('Selected item index determined as:', selectedFileIndex);
-
-        if (selectedFileIndex) {
-          // Find the next available index after the selected item that keeps it in the same region
-          // Look for the next gap in the sequence or use +10 if no nearby items
-          const nextItems = existingIndexes.filter(idx => idx > selectedFileIndex).sort((a, b) => a - b);
-
-          if (nextItems.length > 0 && nextItems[0] - selectedFileIndex > 5) {
-            // There's a gap, place item with +5 increment to stay in same region
-            targetIndex = selectedFileIndex + 5;
-            console.log('Gap found after selected item - using +5:', selectedFileIndex, '-> target:', targetIndex);
-          } else if (nextItems.length > 0) {
-            // Items are close together, place right before the next item
-            targetIndex = nextItems[0] - 1;
-            if (targetIndex <= selectedFileIndex) {
-              targetIndex = selectedFileIndex + 1;
-            }
-            console.log('Items close together - placing before next item:', targetIndex);
-          } else {
-            // No items after this one, safe to use +10
-            targetIndex = selectedFileIndex + 10;
-            console.log('No items after selected - using +10:', selectedFileIndex, '-> target:', targetIndex);
+          // If they're too close (difference of 1), place right after selected
+          if (targetIndex <= selectedOrder) {
+            targetIndex = selectedOrder + 1;
           }
+
+          console.log(`Inserting between ${selectedOrder} and ${nextOrder}, using ${targetIndex}`);
         } else {
-          console.warn('Could not determine selected item index, falling back to end placement');
+          // Selected item is last, place after it
+          targetIndex = selectedOrder + 10;
+          console.log(`Selected item is last, placing at ${targetIndex}`);
         }
+      } else {
+        // Rule 3: No selection - place at the bottom
+        const maxOrder = existingOrders.length > 0 ? Math.max(...existingOrders) : 0;
+        targetIndex = maxOrder + 10;
+        console.log(`No selection - placing at bottom: ${targetIndex}`);
       }
 
-      // Rule 3: Place at end of selected region (if no item is selected)
-      if (!targetIndex && this.selectedRegion) {
-        console.log('No item selected, but region selected:', this.selectedRegion.name);
-
-        // For now, when a region is selected but no specific item, place after highest existing index
-        // This ensures items go into the rundown, and the backend/frontend region logic will handle
-        // the proper region assignment based on the item's position and type
-        const highestIndex = existingIndexes.length > 0 ? Math.max(...existingIndexes) : 0;
-        targetIndex = highestIndex + 10;
-        console.log('Region selected - placing after highest index:', highestIndex, '-> target:', targetIndex);
-      }
-
-      // Rule 4: If no selection, place after highest existing index
-      if (!targetIndex) {
-        const highestIndex = existingIndexes.length > 0 ? Math.max(...existingIndexes) : 0;
-        targetIndex = highestIndex + 10;
-        console.log('No selection - using highest existing index:', highestIndex, '-> target:', targetIndex);
-      }
-      
-      // Rule 4: Check for conflicts and adjust
-      if (existingIndexes.includes(targetIndex)) {
-        // If +10 position is taken, try +5 from selected item
-        if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
-          const selectedItem = this.rundownItems[this.selectedItemIndex];
-          const selectedMatch = selectedItem.filename?.match(/^(\d+)\s/);
-          const selectedFileIndex = selectedMatch ? parseInt(selectedMatch[1]) : null;
-          
-          if (selectedFileIndex) {
-            targetIndex = selectedFileIndex + 5;
-            console.log('Conflict detected - trying +5 from selected:', selectedFileIndex, '-> target:', targetIndex);
-            
-            // If +5 is also taken, find next available slot
-            while (existingIndexes.includes(targetIndex)) {
-              targetIndex++;
-              console.log('Index', (targetIndex-1), 'also taken - trying:', targetIndex);
-            }
-          }
-        } else {
-          // Find next available slot after target
-          while (existingIndexes.includes(targetIndex)) {
-            targetIndex++;
-            console.log('Index', (targetIndex-1), 'taken - trying:', targetIndex);
-          }
-        }
-      }
-      
       console.log('=== FINAL RESULT ===');
       console.log('Final calculated index:', targetIndex);
-      console.log('Will place after item with index:', targetIndex - 10, 'to', targetIndex - 1);
       console.log('================');
       return targetIndex;
     },
@@ -4100,14 +4530,24 @@ Try dropping an image or video file here!`
     async generateTestSegment(paragraphCount) {
       console.log(`🧪 Generating test segment with ${paragraphCount} paragraphs...`);
 
-      // Get current item's duration or use default
-      const duration = this.currentRundownItem?.duration || '3';
-      const segmentType = this.currentRundownItem?.type || 'segment';
+      // ⚠️ CAPTURE TARGET ITEM IMMEDIATELY - Lock in the item at keypress time
+      // This prevents race condition where user switches items during generation
+      const targetItem = this.currentRundownItem;
+      const targetItemId = targetItem?.id;
+
+      if (!targetItem) {
+        notifyUserStandard('No rundown item selected', NOTIFICATION_COLORS.ERROR, 3000);
+        return;
+      }
+
+      // Get target item's duration or use default
+      const duration = targetItem.duration || '3';
+      const segmentType = targetItem.type || 'segment';
 
       // Get upcoming segments if this is a tease
       let upcomingSegments = '';
       if (segmentType === 'tease') {
-        const currentIndex = this.rundownItems.findIndex(item => item.id === this.currentRundownItem?.id);
+        const currentIndex = this.rundownItems.findIndex(item => item.id === targetItemId);
         if (currentIndex >= 0) {
           // Get next few segments (skip other teases/ads)
           const upcoming = this.rundownItems
@@ -4123,9 +4563,8 @@ Try dropping an image or video file here!`
         }
       }
 
-      // Show loading notification with type-specific color
-      const typeColor = this.getTypeColor(segmentType);
-      notifyUserStandard(`Generating ${paragraphCount}-paragraph ${segmentType}...`, typeColor, 2000);
+      // Show loading notification with LLM generating color
+      notifyUserStandard(`Generating ${paragraphCount}-paragraph ${segmentType}...`, NOTIFICATION_COLORS.GENERATING);
 
       try {
         // Check if user is authenticated
@@ -4136,6 +4575,8 @@ Try dropping an image or video file here!`
         }
 
         const { smartCall } = useLLM();
+
+        // Target item already captured at function start (lines 4212-4213)
 
         // Fetch prompt template from settings based on segment type
         let promptName;
@@ -4175,47 +4616,77 @@ Try dropping an image or video file here!`
           .replace('{segmentType}', segmentType);
 
         console.log('🎯 Calling smartCall with taskType: content-expansion');
-        // Use smartCall with routing
-        const generatedText = await smartCall(prompt, {
-          taskType: 'content-expansion',
-          temperature: 0.8,
-          max_tokens: 2000
-        });
 
-        // Insert into current script content
-        if (this.$refs.editorPanel) {
-          // Get current script content
-          const currentScript = this.scriptContent || '';
-
-          console.log('📝 Generated text length:', generatedText?.length, 'chars');
-          console.log('📝 Generated text preview:', generatedText?.substring(0, 100));
-
-          // Wrap each paragraph in <p class="josh"> tags for script mode parsing
-          const paragraphs = generatedText.split(/\n\s*\n/).filter(p => p.trim());
-          const wrappedParagraphs = paragraphs.map(p => `<p class="josh">${p.trim()}</p>`).join('\n\n');
-
-          // Append generated segment with spacing
-          const newScript = currentScript + (currentScript ? '\n\n' : '') + wrappedParagraphs;
-
-          console.log('📝 New script length:', newScript.length, 'chars');
-
-          // Update script content
-          this.updateScriptContent(newScript);
-
-          // Force Vue to re-render in case reactivity doesn't trigger
-          this.$nextTick(() => {
-            console.log('🔄 After nextTick, scriptContent:', this.scriptContent?.substring(0, 100));
-            // Force editor refresh if needed
-            if (this.$refs.editorPanel && this.$refs.editorPanel.$forceUpdate) {
-              this.$refs.editorPanel.$forceUpdate();
+        // Use Universal LLM Framework for visual feedback on rundown item
+        const generatedText = await this.llmState.withLLM(
+          'item',
+          targetItemId,
+          'generating',
+          async () => {
+            return await smartCall(prompt, {
+              taskType: 'content-expansion',
+              temperature: 0.8,
+              max_tokens: 2000
+            });
+          },
+          {
+            notify: false, // Already showing toast notification
+            metadata: {
+              component: 'Content Editor',
+              location: 'Test Segment Generator',
+              operation: `${paragraphCount}-paragraph ${segmentType}`
             }
+          }
+        );
+
+        // ⚠️ INSERT INTO TARGET ITEM - Not currently displayed item
+        // Get target item's current script content (might be different from displayed scriptContent)
+        const targetScript = targetItem?.script_content || '';
+
+        console.log('📝 Generated text length:', generatedText?.length, 'chars');
+        console.log('📝 Generated text preview:', generatedText?.substring(0, 100));
+        console.log('🎯 Target item ID:', targetItemId, 'Title:', targetItem?.title);
+
+        // Wrap each paragraph in <p class="josh"> tags for script mode parsing
+        const paragraphs = generatedText.split(/\n\s*\n/).filter(p => p.trim());
+        const wrappedParagraphs = paragraphs.map(p => `<p class="josh">${p.trim()}</p>`).join('\n\n');
+
+        // Append generated segment with spacing
+        const newScript = targetScript + (targetScript ? '\n\n' : '') + wrappedParagraphs;
+
+        console.log('📝 New script length:', newScript.length, 'chars');
+
+        // Update target item directly via API (not currently displayed item)
+        try {
+          await this.$axios.patch(`/episodes/${this.padEpisodeNumber(this.currentEpisodeNumber)}/item/${targetItemId}`, {
+            script_content: newScript
           });
 
-          notifyUserStandard('Test segment generated successfully!', NOTIFICATION_COLORS.SUCCESS, 3000);
-          console.log('✅ Test segment generated and inserted');
-        } else {
-          console.error('❌ EditorPanel ref not available');
-          notifyUserStandard('Failed to insert segment - editor not ready', NOTIFICATION_COLORS.ERROR, 3000);
+          // Update the target item in rundownItems array
+          const itemIndex = this.rundownItems.findIndex(item => item.id === targetItemId);
+          if (itemIndex !== -1) {
+            this.rundownItems[itemIndex].script_content = newScript;
+          }
+
+          // If target item is currently displayed, update the editor
+          if (this.currentRundownItem?.id === targetItemId) {
+            this.updateScriptContent(newScript);
+
+            // Force Vue to re-render in case reactivity doesn't trigger
+            this.$nextTick(() => {
+              console.log('🔄 After nextTick, scriptContent:', this.scriptContent?.substring(0, 100));
+              // Force editor refresh if needed
+              if (this.$refs.editorPanel && this.$refs.editorPanel.$forceUpdate) {
+                this.$refs.editorPanel.$forceUpdate();
+              }
+            });
+          }
+
+          notifyUserStandard(`Test segment generated into "${targetItem?.title || 'item'}"!`, NOTIFICATION_COLORS.SUCCESS, 3000);
+          console.log('✅ Test segment generated and inserted into target item');
+        } catch (updateError) {
+          console.error('❌ Failed to update target item:', updateError);
+          notifyUserStandard('Failed to save generated content', NOTIFICATION_COLORS.ERROR, 3000);
         }
 
       } catch (error) {
@@ -4232,6 +4703,57 @@ Try dropping an image or video file here!`
   display: flex;
   flex-direction: column;
   height: 100vh;
+  position: relative;
+  overflow: visible; /* Allow sticky positioning to work */
+}
+
+/* Content Editor Loading Overlay */
+.content-editor-loading-overlay :deep(.v-overlay__scrim) {
+  opacity: 0 !important;
+}
+
+.content-editor-loading-overlay {
+  background: rgba(255, 255, 255, 0.8) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 9999 !important;
+}
+
+.content-editor-loading-overlay :deep(.v-overlay__content) {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+.content-editor-loading-overlay .loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+
+.content-editor-loading-overlay .loading-text {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: #333;
+  text-align: center;
+}
+
+.content-editor-loading-overlay .loading-subtitle {
+  font-size: 1rem;
+  font-weight: 400;
+  color: #666;
+  text-align: center;
+  margin-top: -10px;
 }
 
 .main-toolbar {
@@ -4500,15 +5022,15 @@ Try dropping an image or video file here!`
   flex: 1;
   display: flex;
   flex-direction: column;
-  height: 100%; /* Ensure full height */
   min-height: 0;
+  overflow-y: auto; /* This is the scrolling container - ShowInfoHeader scrolls off, cue toolbar sticks */
 }
 
 .main-content-area {
   flex: 1;
   display: flex;
   min-height: 0; /* Allow flexbox to shrink properly */
-  /* Remove height constraints - let flex handle the sizing */
+  overflow: hidden; /* Prevent overflow, children handle their own scrolling */
 }
 
 .rundown-table-header {

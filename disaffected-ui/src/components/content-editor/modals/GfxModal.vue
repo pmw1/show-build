@@ -1,5 +1,5 @@
 <template>
-  <v-dialog v-model="show" max-width="600">
+  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="600">
     <v-card>
       <v-card-title>Add GFX</v-card-title>
       <v-card-text>

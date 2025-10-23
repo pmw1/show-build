@@ -21,12 +21,18 @@
   - Timeout errors
   - Mixed content blocking
   - Text not displaying
+  - ⚠️ **Note**: Uses legacy patterns, see [`UNIVERSAL_LLM_FRAMEWORK_UFDP.md`](../UNIVERSAL_LLM_FRAMEWORK_UFDP.md) for new approach
 
 ---
 
 ## System Guides
 
 ### Core Systems
+- **[`UNIVERSAL_LLM_FRAMEWORK_UFDP.md`](../UNIVERSAL_LLM_FRAMEWORK_UFDP.md)** ⭐ **Universal LLM Framework** - Unified AI state management (v1.0)
+  - Visual feedback system (54 scope/state combinations)
+  - Database-backed persistence
+  - Notification center
+  - Replaces fragmented `aiState`, `generatingItemIndex` patterns
 - [`ASSETID_SYSTEM_GUIDE.md`](ASSETID_SYSTEM_GUIDE.md) - AssetID generation, conversion, scanning
 - [`RBAC_AUTHENTICATION_GUIDE.md`](RBAC_AUTHENTICATION_GUIDE.md) - Role-based access control & authentication
 - [`TEST_DATA_MANAGEMENT.md`](TEST_DATA_MANAGEMENT.md) - Test data vs production data separation
@@ -34,6 +40,13 @@
 ### Feature Guides
 - [`CUE_BLOCK_INSERTION_PROTOCOL.md`](CUE_BLOCK_INSERTION_PROTOCOL.md) - Cue insertion UX (implemented)
 - [`HEALTH_CHECK_PROGRESSIVE_LOADING.md`](HEALTH_CHECK_PROGRESSIVE_LOADING.md) - Progressive health check system (implemented)
+- **[`PROMPT_OVERRIDE_SYSTEM.md`](PROMPT_OVERRIDE_SYSTEM.md)** - LLM Prompt Override System
+  - Customize LLM prompts without modifying code
+  - Database-backed override management
+  - Template variable substitution
+  - LLM route override (service/model selection)
+  - Web UI for prompt management
+- [`PROMPT_OVERRIDE_INTEGRATION_GUIDE.md`](PROMPT_OVERRIDE_INTEGRATION_GUIDE.md) - Integrating prompt overrides into code
 
 ---
 
@@ -73,6 +86,9 @@
 | API connectivity issues | `DEBUG_FIRST.md` | 99% of Frontend Issues |
 | Vue mounting problems | `VUE_APP_MOUNTING_WARNING.md` | Duplicate App Instances |
 | Reactivity breaks without cause | `VUE_TEMPLATE_REF_CONFLICTS.md` | Symptoms |
+| Customize LLM prompts | `PROMPT_OVERRIDE_SYSTEM.md` | Creating Overrides |
+| Override not working | `PROMPT_OVERRIDE_SYSTEM.md` | Troubleshooting |
+| Route LLM to specific model | `PROMPT_OVERRIDE_SYSTEM.md` | LLM Route Override |
 
 ---
 
@@ -127,6 +143,8 @@ show-build/
 │   ├── LLM_GENERATOR_TROUBLESHOOTING.md # ⭐ LLM generator debugging
 │   ├── RBAC_AUTHENTICATION_GUIDE.md      # Authentication & RBAC
 │   ├── TEST_DATA_MANAGEMENT.md           # Test data handling
+│   ├── PROMPT_OVERRIDE_SYSTEM.md         # ⭐ LLM prompt override system
+│   ├── PROMPT_OVERRIDE_INTEGRATION_GUIDE.md # Prompt override integration
 │   ├── VUE_TEMPLATE_REF_CONFLICTS.md     # Vue reactivity issues
 │   ├── VUE_APP_MOUNTING_WARNING.md       # Vue mounting issues
 │   ├── CUE_BLOCK_INSERTION_PROTOCOL.md   # Cue insertion UX
@@ -138,15 +156,18 @@ show-build/
 ├── app/                        # FastAPI backend
 │   ├── main.py                # Main application entry
 │   ├── llm_proxy_router.py    # LLM proxy endpoint
+│   ├── prompts_router.py      # Prompt override API
 │   ├── auth/                  # Authentication system
 │   └── ...
 │
 ├── disaffected-ui/            # Vue 3 frontend
 │   ├── src/
 │   │   ├── components/
-│   │   │   └── ContentEditor.vue  # Main editor component
+│   │   │   ├── ContentEditor.vue  # Main editor component
+│   │   │   └── PromptManager.vue  # Prompt override UI
 │   │   ├── composables/
-│   │   │   └── useLLM.js         # LLM integration
+│   │   │   ├── useLLM.js         # LLM integration
+│   │   │   └── useLLMPrompts.js  # Prompt override composable
 │   │   └── ...
 │   └── public/
 │       └── index.html            # HTTPS redirect
@@ -171,5 +192,22 @@ When adding new documentation:
 
 ---
 
-**Last Updated**: 2025-10-07
+## Quick Access: LLM Prompt Override System
+
+**Location**: Settings → AI & LLM → LLM Prompts
+
+**Key Features**:
+- Override any LLM prompt without code changes
+- Specify service/model routing per operation
+- Template variable substitution with {{variable}} syntax
+- View default prompts before overriding
+- Enable/disable overrides instantly
+
+**Documentation**:
+- Full guide: [`PROMPT_OVERRIDE_SYSTEM.md`](PROMPT_OVERRIDE_SYSTEM.md)
+- Integration: [`PROMPT_OVERRIDE_INTEGRATION_GUIDE.md`](PROMPT_OVERRIDE_INTEGRATION_GUIDE.md)
+
+---
+
+**Last Updated**: 2025-10-09
 **Maintained By**: Claude Code Development Team

@@ -1,5 +1,5 @@
 <template>
-  <v-dialog v-model="show" max-width="600">
+  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="600">
     <v-card>
       <v-card-title>Add {{ cueType.toUpperCase() }} ({{ cueTypeLabel }})</v-card-title>
       <v-card-text>
@@ -169,6 +169,23 @@
                 ></v-textarea>
               </v-col>
             </template>
+
+            <template v-if="cueType === 'dir'">
+              <v-col cols="12">
+                <v-textarea
+                  v-model="noteText"
+                  label="Director Note"
+                  variant="outlined"
+                  density="comfortable"
+                  rows="4"
+                  auto-grow
+                  hint="Special note or instruction for the director"
+                  persistent-hint
+                  required
+                  :rules="noteRules"
+                ></v-textarea>
+              </v-col>
+            </template>
           </v-row>
         </v-form>
         
@@ -222,7 +239,7 @@ export default {
     cueType: {
       type: String,
       required: true,
-      validator: (value) => ['fsq', 'sot', 'vo', 'nat', 'pkg'].includes(value)
+      validator: (value) => ['fsq', 'sot', 'vo', 'nat', 'pkg', 'dir'].includes(value)
     }
   },
   data() {
@@ -247,7 +264,9 @@ export default {
       reporter: '',
       pkgDuration: '',
       packageNotes: '',
-      
+      // DIR specific
+      noteText: '',
+
       // Validation rules
       slugRules: [
         v => !!v || 'Slug is required',
@@ -262,6 +281,9 @@ export default {
       ],
       quoteRules: [
         v => !!v || 'Quote text is required'
+      ],
+      noteRules: [
+        v => !!v || 'Director note is required'
       ],
       
       // Select options
@@ -292,7 +314,8 @@ export default {
         sot: 'Sound on Tape',
         vo: 'Voice Over',
         nat: 'Natural Sound',
-        pkg: 'Package'
+        pkg: 'Package',
+        dir: 'Director Note'
       }
       return labels[this.cueType] || this.cueType
     },
@@ -302,7 +325,8 @@ export default {
         sot: 'purple-darken-3',
         vo: 'deep-orange-darken-3',
         nat: 'teal-darken-3',
-        pkg: 'red-darken-3'
+        pkg: 'red-darken-3',
+        dir: 'amber-darken-3'
       }
       return colors[this.cueType] || 'grey'
     }
@@ -335,6 +359,8 @@ export default {
         typeSpecificData.reporter = this.reporter
         typeSpecificData.pkgDuration = this.pkgDuration
         typeSpecificData.notes = this.packageNotes
+      } else if (this.cueType === 'dir') {
+        typeSpecificData.noteText = this.noteText
       }
       
       this.$emit('submit', { ...baseData, ...typeSpecificData })
@@ -359,6 +385,7 @@ export default {
       this.reporter = ''
       this.pkgDuration = ''
       this.packageNotes = ''
+      this.noteText = ''
       this.formValid = false
     }
   },

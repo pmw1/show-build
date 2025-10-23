@@ -419,9 +419,12 @@ export default {
 
 <style scoped>
 .metadata-panel {
+  position: sticky !important;
+  top: 0 !important;
   height: 100vh;
   border-left: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
   overflow: hidden;
+  z-index: 5 !important; /* Ensure it stays above scrolling content */
 }
 
 .metadata-title {

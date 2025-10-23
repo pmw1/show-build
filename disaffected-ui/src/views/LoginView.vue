@@ -1,18 +1,17 @@
 <template>
-  <div class="login-page">
-    <div class="login-content">
-      <h1 class="app-title">Show Builder</h1>
-      <p class="copyright">© Copyrighted 2025 Polaris Broadcasting</p>
-      <v-btn
-        color="primary"
-        variant="outlined"
-        size="small"
-        @click="openLoginModal"
-        class="login-btn"
-      >
-        Login
-      </v-btn>
-    </div>
+  <div class="login-page" :style="{ backgroundImage: `url(${backgroundImage})` }">
+    <div class="login-overlay"></div>
+
+    <!-- Login Button -->
+    <v-btn
+      color="primary"
+      variant="elevated"
+      size="large"
+      @click="openLoginModal"
+      class="login-btn-centered"
+    >
+      Login
+    </v-btn>
 
     <!-- Login Modal -->
     <v-dialog
@@ -72,7 +71,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 
@@ -82,10 +81,16 @@ const { setAuth } = useAuth()
 const showLoginModal = ref(false)
 const loggingIn = ref(false)
 const loginError = ref('')
+const backgroundImage = ref('')
 
 const loginForm = ref({
   username: '',
   password: ''
+})
+
+// Load random background image on mount
+onMounted(() => {
+  backgroundImage.value = `/api/branding/random?t=${Date.now()}`
 })
 
 const openLoginModal = () => {
@@ -172,33 +177,30 @@ const handleLogin = async () => {
   left: 0;
   height: 100vh;
   width: 100vw;
-  background-color: white;
+  background-color: #000;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
 }
 
-.login-content {
-  text-align: center;
+.login-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 1;
 }
 
-.app-title {
-  font-size: 6rem;
-  font-weight: bold;
-  color: #1976d2;
-  margin-bottom: 1rem;
-  line-height: 1.1;
-}
-
-.copyright {
-  font-size: 0.875rem;
-  color: #666;
-  margin-bottom: 2rem;
-}
-
-.login-btn {
-  margin-top: 1rem;
+.login-btn-centered {
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
 }
 
 /* Ensure modal renders above the fixed login page */

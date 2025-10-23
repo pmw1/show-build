@@ -99,25 +99,6 @@
 
         <div class="fields-area">
           <v-select
-            label="Episode"
-            :model-value="episodeNumber"
-            :items="episodes"
-            item-title="title"
-            item-value="value"
-            variant="outlined"
-            density="compact"
-            class="showinfo-field episode-field"
-            :style="statusFieldStyle"
-            hide-details
-            @update:model-value="(newEpisode) => $emit('episode-changed', newEpisode)"
-            :item-props="episode => ({
-              title: (typeof episode.title === 'string')
-                ? episode.title.split(':')[0] + (episode.title.includes(':') ? ':' : '') + ' ' + (episode.title.split(':')[1] ? episode.title.split(':')[1].trim() : '')
-                : ''
-            })"
-          ></v-select>
-
-          <v-select
             label="Status"
             :model-value="productionStatus"
             :items="productionStatuses"
@@ -168,7 +149,7 @@ import { getColorValue, resolveVuetifyColor } from '../../utils/themeColorMap';
 
 export default {
   name: 'ShowInfoHeader',
-  emits: ['update:episodeNumber', 'update:airDate', 'update:productionStatus', 'episode-changed', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description'],
+  emits: ['update:airDate', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description'],
   props: {
     title: {
       type: String,
@@ -202,10 +183,6 @@ export default {
       type: String,
       default: ''
     },
-    episodeNumber: {
-      type: [String, Number],
-      default: ''
-    },
     airDate: {
       type: String,
       default: ''
@@ -217,10 +194,6 @@ export default {
     duration: {
       type: String,
       default: '00:00:00'
-    },
-    episodes: {
-      type: Array,
-      default: () => []
     },
     productionStatuses: {
       type: Array,
@@ -242,11 +215,9 @@ export default {
   },
   computed: {
     displayEpisodeInfo() {
-      // Show episode title if available, otherwise fall back to episode number info
+      // Show episode title if available, otherwise fall back to episodeInfo prop
       if (this.episodeTitle && this.episodeTitle.trim()) {
         return this.episodeTitle;
-      } else if (this.episodeNumber) {
-        return `Episode ${String(this.episodeNumber).padStart(4, '0')}`;
       } else {
         return this.episodeInfo || 'Episode Production Workspace';
       }
@@ -352,7 +323,7 @@ export default {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  position: relative;
+  background-color: white;
   transition: height 0.2s;
   padding-top: 0;
 }
@@ -373,10 +344,8 @@ export default {
 }
 
 .show-title-area {
-  width: 320px;
   min-width: 200px;
-  max-width: 400px;
-  flex: 0 0 320px;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -386,9 +355,8 @@ export default {
 .show-title-fit {
   width: 100%;
   display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-wrap: break-word;
   font-size: clamp(0.94rem, 2.1vw, 1.7rem) !important;
   font-weight: bold !important;
   text-transform: uppercase !important;
@@ -396,7 +364,7 @@ export default {
 
 .fields-area {
   display: grid;
-  grid-template-columns: 0 200px 0;
+  grid-template-columns: 200px;
   grid-gap: 0;
   row-gap: 0;
   flex: 2 1 600px;
@@ -406,7 +374,7 @@ export default {
 }
 
 .fields-area > * {
-  grid-column: 2;
+  grid-column: 1;
 }
 
 .showinfo-field {
@@ -441,14 +409,12 @@ export default {
 
 /* Status-themed field coloring using database colors */
 :deep(.status-field .v-field),
-:deep(.episode-field .v-field),
 :deep(.airdate-field .v-field),
 :deep(.duration-field .v-field) {
   background-color: var(--status-bg-color, transparent) !important;
 }
 
 :deep(.status-field .v-field__outline),
-:deep(.episode-field .v-field__outline),
 :deep(.airdate-field .v-field__outline),
 :deep(.duration-field .v-field__outline) {
   border-color: var(--status-border-color, currentColor) !important;
@@ -456,18 +422,15 @@ export default {
 
 /* Status-themed text coloring - darker variants for all field values */
 :deep(.status-field .v-field__input input),
-:deep(.episode-field .v-field__input input),
 :deep(.airdate-field .v-field__input input),
 :deep(.duration-field .v-field__input input),
-:deep(.status-field .v-select__selection),
-:deep(.episode-field .v-select__selection) {
+:deep(.status-field .v-select__selection) {
   color: var(--status-text-color, currentColor) !important;
   font-weight: 500 !important;
 }
 
 /* Status-themed labels - much darker variants */
 :deep(.status-field .v-field-label),
-:deep(.episode-field .v-field-label),
 :deep(.airdate-field .v-field-label),
 :deep(.duration-field .v-field-label) {
   color: var(--status-label-color, currentColor) !important;

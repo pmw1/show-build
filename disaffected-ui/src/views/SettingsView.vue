@@ -10,19 +10,46 @@
     <v-row>
       <v-col>
         <v-tabs v-model="activeTab" color="primary" class="mb-4">
-          <v-tab value="api">API Access</v-tab>
+          <v-tab value="ai-llm">AI & LLM</v-tab>
           <v-tab value="interface">Interface</v-tab>
-          <v-tab value="generation">Generation</v-tab>
           <v-tab value="system">System</v-tab>
         </v-tabs>
 
         <v-tabs-window v-model="activeTab">
-          <!-- API Access Tab -->
-          <v-tabs-window-item value="api">
-            <ApiAccessSettings
-              v-model="apiConfigs"
-              @save="handleApiSave"
-            />
+          <!-- AI & LLM Tab (consolidates API Access, Generation, Prompts) -->
+          <v-tabs-window-item value="ai-llm">
+            <v-card flat>
+              <v-card-text class="pa-0">
+                <v-tabs v-model="aiSubTab" direction="vertical" color="primary">
+                  <v-tab value="api-access" prepend-icon="mdi-key">API Access</v-tab>
+                  <v-tab value="generation" prepend-icon="mdi-creation">Generation</v-tab>
+                  <v-tab value="prompts" prepend-icon="mdi-brain">LLM Prompts</v-tab>
+                </v-tabs>
+
+                <v-tabs-window v-model="aiSubTab">
+                  <!-- API Access Sub-tab -->
+                  <v-tabs-window-item value="api-access">
+                    <ApiAccessSettings
+                      v-model="apiConfigs"
+                      @save="handleApiSave"
+                    />
+                  </v-tabs-window-item>
+
+                  <!-- Generation Sub-tab -->
+                  <v-tabs-window-item value="generation">
+                    <GenerationSettings
+                      v-model="generationSettings"
+                      @save="handleGenerationSave"
+                    />
+                  </v-tabs-window-item>
+
+                  <!-- LLM Prompts Sub-tab -->
+                  <v-tabs-window-item value="prompts">
+                    <PromptManager />
+                  </v-tabs-window-item>
+                </v-tabs-window>
+              </v-card-text>
+            </v-card>
           </v-tabs-window-item>
 
           <!-- Interface Tab -->
@@ -30,14 +57,6 @@
             <InterfaceSettings
               v-model="interfaceSettings"
               @save="handleInterfaceSave"
-            />
-          </v-tabs-window-item>
-
-          <!-- Generation Tab -->
-          <v-tabs-window-item value="generation">
-            <GenerationSettings
-              v-model="generationSettings"
-              @save="handleGenerationSave"
             />
           </v-tabs-window-item>
 
@@ -59,6 +78,7 @@ import InterfaceSettings from '@/components/settings/InterfaceSettings.vue'
 import ApiAccessSettings from '@/components/settings/ApiAccessSettings.vue'
 import GenerationSettings from '@/components/settings/GenerationSettings.vue'
 import SystemSettings from '@/components/settings/SystemSettings.vue'
+import PromptManager from '@/components/PromptManager.vue'
 
 export default {
   name: 'SettingsView',
@@ -66,11 +86,13 @@ export default {
     InterfaceSettings,
     ApiAccessSettings,
     GenerationSettings,
-    SystemSettings
+    SystemSettings,
+    PromptManager
   },
   data() {
     return {
-      activeTab: localStorage.getItem('settingsActiveTab') || 'api', // Restore last used tab or default to API
+      activeTab: localStorage.getItem('settingsActiveTab') || 'ai-llm', // Restore last used tab or default to AI & LLM
+      aiSubTab: localStorage.getItem('settingsAiSubTab') || 'api-access', // Sub-tab for AI & LLM section
       apiConfigs: {
         ollama: {
           host: '',
@@ -110,6 +132,12 @@ export default {
           accessToken: '',
           enabled: false
         },
+        twitter: {
+          bearerToken: '',
+          apiKey: '',
+          apiSecret: '',
+          enabled: false
+        },
         aws: {
           accessKeyId: '',
           secretAccessKey: '',
@@ -131,6 +159,15 @@ export default {
           accountSid: '',
           authToken: '',
           phoneNumber: '',
+          enabled: false
+        },
+        asterisk: {
+          host: '',
+          amiPort: '5038',
+          amiUsername: '',
+          amiSecret: '',
+          conferenceContext: 'conferences',
+          recordingsPath: '/var/spool/asterisk/monitor',
           enabled: false
         },
         email: {
@@ -196,6 +233,10 @@ export default {
     activeTab(newTab) {
       // Save the current tab to localStorage for persistence across page reloads
       localStorage.setItem('settingsActiveTab', newTab);
+    },
+    aiSubTab(newSubTab) {
+      // Save the AI sub-tab to localStorage for persistence
+      localStorage.setItem('settingsAiSubTab', newSubTab);
     }
   },
   methods: {
@@ -353,6 +394,12 @@ export default {
 
 .v-card {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Vertical tabs for AI & LLM section */
+.v-tabs--vertical {
+  min-width: 200px;
+  border-right: 1px solid rgba(0, 0, 0, 0.12);
 }
 
 .compact-color-selector {

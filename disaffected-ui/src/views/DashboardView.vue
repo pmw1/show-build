@@ -1,13 +1,97 @@
 <template>
-  <v-container fluid>
+  <v-container fluid class="pa-2">
     <v-row>
       <v-col>
         <h2 class="text-h4 font-weight-bold mb-4">Dashboard</h2>
 
-        <!-- Featured Row: Upcoming Episodes and Quick Actions -->
-        <v-row class="mb-6">
-          <!-- Upcoming Episodes Section -->
-          <v-col cols="12" lg="8">
+        <!-- All Dashboard Panels - Single Masonry Grid -->
+        <v-row dense class="mb-2 dashboard-row">
+          <!-- Next Show Panel - Featured -->
+          <v-col cols="12" lg="6" class="pa-1">
+            <NextShowPanel />
+          </v-col>
+
+          <!-- Active Tools Panel -->
+          <v-col cols="12" sm="6" lg="3" class="pa-1">
+            <v-card class="elevation-4">
+              <v-card-title class="d-flex align-center bg-primary text-white">
+                <v-icon class="me-2">mdi-star-circle</v-icon>
+                <span>Active Tools</span>
+              </v-card-title>
+              <v-card-text class="pa-2">
+                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/tools')">
+                  <v-card-text class="d-flex align-center pa-3">
+                    <v-icon color="primary" size="32" class="me-3">mdi-plus-circle-outline</v-icon>
+                    <div>
+                      <div class="text-subtitle-1 font-weight-bold">Create New Episode</div>
+                      <div class="text-caption text-grey">Scaffold episode directory</div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/consolidation')">
+                  <v-card-text class="d-flex align-center pa-3">
+                    <v-icon color="primary" size="32" class="me-3">mdi-folder-sync</v-icon>
+                    <div>
+                      <div class="text-subtitle-1 font-weight-bold">Episode Consolidation</div>
+                      <div class="text-caption text-grey">Sync Drive & Syncthing</div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+                <v-card variant="outlined" class="hover-card" @click="$router.push('/tools')">
+                  <v-card-text class="d-flex align-center pa-3">
+                    <v-icon color="grey" size="32" class="me-3">mdi-dots-horizontal-circle-outline</v-icon>
+                    <div>
+                      <div class="text-subtitle-1 font-weight-bold">More Tools</div>
+                      <div class="text-caption text-grey">View all available tools</div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+              </v-card-text>
+            </v-card>
+          </v-col>
+
+          <!-- Announcements -->
+          <v-col cols="12" sm="6" lg="3" class="pa-1">
+            <AnnouncementsPanel />
+          </v-col>
+
+          <!-- Todo Panel -->
+          <v-col cols="12" sm="6" lg="3" class="pa-1">
+            <TodoPanel />
+          </v-col>
+
+          <!-- Preshow Panel -->
+          <v-col cols="12" sm="6" lg="3" class="pa-1">
+            <v-card class="elevation-4">
+              <v-card-title class="d-flex align-center bg-purple text-white">
+                <v-icon class="me-2">mdi-lightbulb-on</v-icon>
+                <span>Preshow</span>
+              </v-card-title>
+              <v-card-text class="pa-2">
+                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/whiteboard')">
+                  <v-card-text class="d-flex align-center pa-3">
+                    <v-icon color="purple" size="32" class="me-3">mdi-notebook-edit</v-icon>
+                    <div>
+                      <div class="text-subtitle-1 font-weight-bold">Whiteboard</div>
+                      <div class="text-caption text-grey">Brainstorm ideas and links</div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+                <v-card variant="outlined" class="hover-card" @click="$router.push('/voice-meeting')">
+                  <v-card-text class="d-flex align-center pa-3">
+                    <v-icon color="purple" size="32" class="me-3">mdi-microphone</v-icon>
+                    <div>
+                      <div class="text-subtitle-1 font-weight-bold">Production Meeting</div>
+                      <div class="text-caption text-grey">Voice conference call</div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+              </v-card-text>
+            </v-card>
+          </v-col>
+
+          <!-- Upcoming Episodes Section - Only show if episodes exist -->
+          <v-col v-if="upcomingEpisodes.length > 0" cols="12" sm="6" lg="3" class="pa-1">
             <v-card class="current-episode-card" elevation="3">
               <v-card-title class="d-flex align-center">
                 <v-icon color="primary" class="me-2">mdi-television-classic</v-icon>
@@ -155,7 +239,7 @@
           </v-col>
 
           <!-- Quick Actions Panel -->
-          <v-col cols="12" lg="4">
+          <v-col cols="12" sm="6" lg="3" class="pa-1">
             <v-card class="quick-actions-card" elevation="3">
               <v-card-title class="d-flex align-center">
                 <v-icon color="primary" class="me-2">mdi-lightning-bolt</v-icon>
@@ -210,28 +294,9 @@
               </v-card-text>
             </v-card>
           </v-col>
-        </v-row>
 
-        <!-- Secondary Stats Row -->
-        <v-row>
-          <v-col cols="12" md="4">
-            <v-card>
-              <v-card-title>Recent Activity</v-card-title>
-              <v-card-text>
-                <v-list density="compact">
-                  <v-list-item
-                    v-for="n in 3"
-                    :key="n"
-                    :title="`Activity ${n}`"
-                    subtitle="Recent action performed"
-                    prepend-icon="mdi-history"
-                  />
-                </v-list>
-              </v-card-text>
-            </v-card>
-          </v-col>
-
-          <v-col cols="12" md="4">
+          <!-- System Health -->
+          <v-col cols="12" sm="6" lg="3" class="pa-1">
             <v-card>
               <v-card-title>System Health</v-card-title>
               <v-card-text>
@@ -316,7 +381,8 @@
             </v-card>
           </v-col>
 
-          <v-col cols="12" md="4">
+          <!-- Storage & Usage -->
+          <v-col cols="12" sm="6" lg="3" class="pa-1">
             <v-card>
               <v-card-title>Storage & Usage</v-card-title>
               <v-card-text>
@@ -356,6 +422,9 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { useSystemHealth } from '@/composables/useSystemHealth'
+import AnnouncementsPanel from '@/components/AnnouncementsPanel.vue'
+import TodoPanel from '@/components/TodoPanel.vue'
+import NextShowPanel from '@/components/NextShowPanel.vue'
 
 const router = useRouter()
 const { health } = useSystemHealth()
@@ -446,6 +515,30 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* Allow columns to have natural height instead of equal heights */
+.dashboard-row {
+  align-items: flex-start !important;
+}
+
+.dashboard-row > .v-col {
+  align-self: flex-start !important;
+  height: auto !important;
+}
+
+.dashboard-row .v-card {
+  height: 100% !important;
+}
+
+.hover-card {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.hover-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15) !important;
+}
+
 .current-episode-card {
   border-left: 4px solid #1976d2;
 }

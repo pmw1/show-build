@@ -18,7 +18,12 @@ RUN pip install --no-cache-dir \
     "asyncpg>=0.29.0" \
     "celery>=5.3.0" \
     "redis>=5.0.0" \
-    "websockets>=12.0"
+    "websockets>=12.0" \
+    "google-auth>=2.23.0" \
+    "google-auth-oauthlib>=1.1.0" \
+    "google-auth-httplib2>=0.1.1" \
+    "google-api-python-client>=2.100.0" \
+    "openai>=1.0.0"
 
 # Copy application code
 COPY ./app /app/

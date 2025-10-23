@@ -168,7 +168,19 @@ export class CueParser {
 
     while ((fieldMatch = fieldPattern.exec(cueContent)) !== null) {
       const fieldName = fieldMatch[1].trim();
-      const fieldValue = fieldMatch[2].trim();
+      let fieldValue = fieldMatch[2].trim();
+
+      // Strip surrounding quotes from Quote field (both single and double)
+      if (fieldName.toLowerCase() === 'quote' && fieldValue) {
+        // Remove leading quote
+        if (fieldValue.startsWith('"') || fieldValue.startsWith("'")) {
+          fieldValue = fieldValue.substring(1);
+        }
+        // Remove trailing quote
+        if (fieldValue.endsWith('"') || fieldValue.endsWith("'")) {
+          fieldValue = fieldValue.substring(0, fieldValue.length - 1);
+        }
+      }
 
       // Convert field names to camelCase and store values
       const camelFieldName = this.toCamelCase(fieldName);
@@ -328,6 +340,8 @@ export class CueParser {
       imageSrc: cueData.imageSrc,
       imageTag: cueData.imageTag,
       duration: cueData.duration,
+      quote: cueData.quote,
+      attribution: cueData.attribution,
       isImageType: this.isImageCueType(cueData.type),
       analysisState: cueData.analysisState,
       analysisField: cueData.analysisField,

@@ -34,9 +34,9 @@ from enhanced_reorder import reorder_rundown_with_rename
 from database import engine, Base, get_db
 from sqlalchemy.orm import Session
 # from models import ProcessingJob  # REMOVED - models.py deleted
-from models_episode import BlueprintTemplate, BlueprintNode, Blueprint  
+from models_episode import BlueprintTemplate, BlueprintNode, Blueprint
 from models_assetid import AssetIDRegistry, AssetIDRelationship, AssetIDPendingMessage
-from models_v2 import Organization, Show, Season, Episode, Break, Rundown, RundownItem, Segment, Script, Element, Cue, AssetLink, AssetMessage
+from models_v2 import Organization, Show, Season, Episode, Break, Rundown, RundownItem, Segment, Script, Element, Cue, AssetLink, AssetMessage, Speaker
 from services.script_compilation import compile_episode_script
 from websocket import websocket_endpoint, manager
 from celery_app import celery_app
@@ -81,6 +81,18 @@ try:
     from housekeeping_router import router as housekeeping_router
     from sot_router import router as sot_router
     from llm_proxy_router import router as llm_proxy_router
+    from llm_state_router import router as llm_state_router
+    from prompts_router import router as prompts_router
+    from voice_conference_router import router as voice_conference_router
+    from google_drive_router import router as google_drive_router
+    from announcements_router import router as announcements_router
+    from todos_router import router as todos_router
+    from consolidation_router import router as consolidation_router
+    from file_inventory_router import router as file_inventory_router
+    from whiteboard_router import router as whiteboard_router
+    from twitter_oauth_router import router as twitter_oauth_router
+    from repo_router import router as repo_router
+    from workers_router import router as workers_router
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Current directory: {os.getcwd()}")
@@ -111,6 +123,14 @@ app.add_middleware(
 
 # Mount static files for episode assets (images, etc.)
 app.mount("/episodes", StaticFiles(directory="/home/episodes"), name="episodes")
+
+# Mount static files for profile pictures
+profile_pics_dir = Path("/home/profile_pictures")
+try:
+    profile_pics_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/api/profile-pictures", StaticFiles(directory="/home/profile_pictures"), name="profile_pictures")
+except (PermissionError, OSError) as e:
+    logger.warning(f"Could not create profile pictures directory: {e}")
 
 # Include the auth router with /api prefix
 app.include_router(auth_router, prefix="/api")
@@ -193,6 +213,42 @@ app.include_router(sot_router)
 
 # Include LLM proxy router (for mixed content avoidance)
 app.include_router(llm_proxy_router)
+
+# Include LLM state management router
+app.include_router(llm_state_router)
+
+# Include prompt override management router
+app.include_router(prompts_router)
+
+# Include voice conference router
+app.include_router(voice_conference_router)
+
+# Include Google Drive router
+app.include_router(google_drive_router, prefix="/api", tags=["google-drive"])
+
+# Include announcements router
+app.include_router(announcements_router)
+
+# Include todos router
+app.include_router(todos_router)
+
+# Include consolidation router
+app.include_router(consolidation_router, prefix="/api", tags=["consolidation"])
+
+# Include file inventory router
+app.include_router(file_inventory_router)
+
+# Include scratchpad router
+app.include_router(whiteboard_router)
+
+# Include Twitter OAuth router
+app.include_router(twitter_oauth_router)
+
+# Include the media repository router (bumpers, stingers, ads, promos, etc.)
+app.include_router(repo_router)
+
+# Include the workers monitoring router (cross-platform Celery worker status)
+app.include_router(workers_router)
 
 # Include the media analysis router
 from media_analysis_router import router as media_analysis_router
@@ -280,11 +336,152 @@ async def listen_endpoint(topic: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/branding/random")
+async def random_branding_image():
+    """Serve a random branding image from docs/branding/"""
+    import os
+    import random
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+
+    branding_dir = Path("/app/docs/branding")
+    if not branding_dir.exists():
+        branding_dir = Path("docs/branding")
+
+    # Get all image files
+    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+    images = [f for f in branding_dir.iterdir() if f.suffix.lower() in image_extensions]
+
+    if not images:
+        raise HTTPException(status_code=404, detail="No branding images found")
+
+    # Select random image
+    random_image = random.choice(images)
+
+    return FileResponse(random_image)
+
+@app.get("/outline", response_class=HTMLResponse)
+async def show_outline():
+    """Temporary route to display show outline HTML"""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Show Outline (Highlighted)</title>
+<style>
+  :root{
+    --bg:#0b0d10;
+    --card:#141820;
+    --text:#e8eef5;
+    --muted:#a8b3c0;
+    --accent:#ffd54a;
+    --rule:#222833;
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;line-height:1.45}
+  .wrap{max-width:920px;margin:32px auto;padding:0 20px 64px}
+  h1,h2,h3{line-height:1.2;margin:0 0 12px}
+  h1{font-size:28px;margin-top:8px}
+  h2{font-size:22px;margin-top:24px;color:var(--text)}
+  h3{font-size:18px;margin-top:18px;color:var(--text)}
+  p{margin:8px 0;color:var(--muted)}
+  ul{margin:8px 0 16px 20px}
+  li{margin:6px 0}
+  mark{background:var(--accent);color:#111;padding:0 .18em;border-radius:.2em}
+  .card{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:18px;margin:16px 0}
+  .note{font-size:13px;color:var(--muted)}
+  .kicker{font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-size:12px;margin-bottom:6px}
+  .hr{height:1px;background:var(--rule);margin:24px 0}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Phone Call Brainstorm → Show Episode (Tight Outline)</h1>
+
+    <div class="card">
+      <div class="kicker">I. Cold Open / Hook</div>
+      <ul>
+        <li><mark>Lead tease: "Young Republicans chat leak"</mark> → <mark>privacy vs public morality</mark> → <mark>conservative pile-on ("hall monitor" vibe)</mark></li>
+        <li><mark>Literacy crisis (Shaw's "Joshua"→"Joanne")</mark> → <mark>whole-language vs phonics</mark> → <mark>patient safety stakes (dosage/decimals)</mark></li>
+        <li><mark>Sean Duffy $40M cut to CA DOT over non-English drivers</mark></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="kicker">II. Primary Story — Young Republicans Chat Scandal</div>
+      <ul>
+        <li><mark>Politico 24-page exposé</mark> on <mark>NY Young Republicans private chats</mark> (nationwide members).</li>
+        <li>Content at issue: <mark>racist/sexist/rape/gas-chamber jokes (private banter)</mark> leaked by <mark>internal mole</mark>.</li>
+        <li>Consequences: <mark>firings</mark>; <mark>long-term unemployability (~10 yrs)</mark>.</li>
+        <li>Right-side reaction: <mark>conservatives cooperating in public shaming</mark> → <mark>"feminization / hall-monitor" culture</mark>.</li>
+        <li>On-air stance: <mark>private candor ≠ secret immorality</mark>; <mark>men's ribald banter is common</mark>; <mark>defend private sphere</mark>.</li>
+        <li>Packaging: <mark>Thumbnail/title: "The Secret Nazi," "Being Jennifer Rubin"</mark> (<mark>Rubin stare</mark> visual gag).</li>
+        <li>Tone note: <mark>calm, surgical, not outraged</mark>.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="kicker">III. Literacy Anecdote → Education Critique (B-Block Opener)</div>
+      <ul>
+        <li>Anecdote: <mark>Cashier reads "Joshua" as "Joanne" on correct loyalty record</mark>.</li>
+        <li>Diagnosis: <mark>Whole-language / sight-word teaching</mark> → <mark>no syllable decoding / phonics</mark> → <mark>can't "learn" new words</mark>.</li>
+        <li>Broader stakes: <mark>decimal/dosage errors in healthcare</mark>; <mark>functional illiteracy across services</mark>.</li>
+        <li>Analogy set: <mark>words treated like traffic signs / plus sign</mark> vs <mark>phonics decoding toolset</mark>.</li>
+        <li>Bridge back to safety: <mark>ties to Duffy road-safety theme</mark> (language proficiency + literacy).</li>
+        <li>Delivery: <mark>"spooky unease" (eyebrow), not frustration</mark>.</li>
+        <li>Placement: <mark>B-block top</mark> with strong A-block tee-ups.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="kicker">IV. Other Segments (Shorter hits; order flexible)</div>
+      <ul>
+        <li><b>A. Vulgarity of Modern Women (media critique):</b> <mark>Substack piece w/ explicit crotch promo</mark> → compare <mark>Madonna "Like a Prayer" era vs now</mark>.</li>
+        <li><b>B. Generational Myths:</b> <mark>"Need consent to film in public"</mark>; <mark>YouTube policy ≠ copyright law</mark>.</li>
+        <li><b>C. COVID Booster Lament:</b> <mark>woman claims 11 infections despite boosters</mark> → <mark>counter graphic "ding" counter</mark>.</li>
+        <li><b>D. Voting Rights Act case (SCOTUS):</b> <mark>state challenges federal gerrymander mandates</mark>; pull <mark>Ketanji Brown Jackson remark clip</mark> (<mark>"accommodations/disabled" framing</mark>).</li>
+        <li><b>E. Canadian School Policy:</b> <mark>no ham/bacon in lunches (to avoid discrimination)</mark> → quick cultural satire (<mark>maple syrup line</mark>).</li>
+        <li><b>F. Portland Naked Bike Ride:</b> <mark>decline of protest; hygiene gag</mark>; include <mark>Queens-accent mockery clip (towel on bike seat)</mark>.</li>
+        <li><b>G. Short Mockeries / Button:</b> <mark>In Living Color "Menopause" bits</mark> (<mark>"Get the bag, sweetie" / essential oils</mark>) under fair-use commentary.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="kicker">V. Production Plan</div>
+      <ul>
+        <li>Segment order: <mark>A-block anchor: Young Republicans</mark> → <mark>B-block opener: Literacy</mark> → shorts interleaved.</li>
+        <li>Teases/Hooks: <mark>"What if your nurse can't read your chart?"</mark>; <mark>"Private jokes = public heresy?"</mark></li>
+        <li>Visuals: <mark>Rubin stare / "Secret Nazi" title</mark>; <mark>COVID ding counter</mark>; <mark>public-filming freakout clips</mark>; <mark>voting how-to satire</mark>.</li>
+        <li>Scripting notes: <mark>Josh: calm, precise</mark>; <mark>Kevin: receipts/graphics</mark>.</li>
+        <li>Assets list: <mark>Politico article</mark>; <mark>cashier anecdote notes</mark>; <mark>education/phonics references</mark>; <mark>SCOTUS audio</mark>; <mark>Canadian letter</mark>; <mark>Naked Bike parody clip</mark>; <mark>ILC sketch timestamps</mark>.</li>
+        <li>Ops: <mark>Voice diarization enabled (separate speakers)</mark>; <mark>clip rights/fair-use framing in lower-thirds</mark>; <mark>content warnings as needed</mark>.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="kicker">VI. Quick QA / Risk</div>
+      <ul>
+        <li><mark>Avoid slur repetition on-air (bleep/blur)</mark> while discussing context.</li>
+        <li><mark>Fair-use: short, transformative, commented clips</mark>.</li>
+        <li><mark>Confirm Politico specifics & SCOTUS quote accuracy before final scripting</mark>.</li>
+      </ul>
+      <p class="note">Yellow = key beats to hit on-air or in graphics.</p>
+    </div>
+
+    <div class="hr"></div>
+    <p class="note">Exported for display. Colors tuned for dark-stage monitors; <mark>mark</mark> highlights will appear yellow.</p>
+  </div>
+</body>
+</html>
+"""
+    return html
+
 @app.get("/health")
 async def health():
     from datetime import datetime
     import httpx
 
+    # Initialize health status with all service structures
     health_status = {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -306,10 +503,22 @@ async def health():
                 "workers": [],
                 "error": None
             },
-            "xtts": {
+            "asterisk": {
                 "status": "unknown",
                 "connected": False,
-                "quota_remaining": None,
+                "host": None,
+                "error": None
+            },
+            "google_drive": {
+                "status": "unknown",
+                "connected": False,
+                "can_list": False,
+                "can_write": False,
+                "error": None
+            },
+            "xtts": {
+                "status": "unknown",
+                "host": None,
                 "error": None
             }
         }
@@ -355,6 +564,72 @@ async def health():
     except Exception as e:
         health_status["services"]["database"] = f"error: {str(e)[:50]}"
 
+    # Check XTTS connectivity (from database config)
+    try:
+        from sqlalchemy import text
+        from database import SessionLocal
+
+        with SessionLocal() as db:
+            # Query XTTS config from database
+            result = db.execute(text("""
+                SELECT config_key, config_value
+                FROM api_configs
+                WHERE service = 'xtts' AND is_enabled = true
+            """))
+            rows = result.fetchall()
+
+            if rows:
+                xtts_config = {row[0]: row[1] for row in rows}
+
+                if xtts_config.get('enabled') == 'true' and xtts_config.get('host'):
+                    # Test XTTS connectivity
+                    xtts_host = xtts_config['host']
+                    try:
+                        async with httpx.AsyncClient(timeout=2.0) as client:
+                            response = await client.get(f"{xtts_host}/health")
+                            if response.status_code == 200:
+                                health_status["services"]["xtts"] = {
+                                    "status": "connected",
+                                    "host": xtts_host
+                                }
+                            else:
+                                health_status["services"]["xtts"] = {
+                                    "status": "error",
+                                    "host": xtts_host,
+                                    "error": f"HTTP {response.status_code}"
+                                }
+                    except httpx.ConnectError:
+                        health_status["services"]["xtts"] = {
+                            "status": "error",
+                            "host": xtts_host,
+                            "error": "Connection refused"
+                        }
+                    except httpx.TimeoutException:
+                        health_status["services"]["xtts"] = {
+                            "status": "warning",
+                            "host": xtts_host,
+                            "error": "Timeout"
+                        }
+                    except Exception as e:
+                        health_status["services"]["xtts"] = {
+                            "status": "error",
+                            "host": xtts_host,
+                            "error": str(e)[:50]
+                        }
+                else:
+                    health_status["services"]["xtts"] = {
+                        "status": "not_configured"
+                    }
+            else:
+                health_status["services"]["xtts"] = {
+                    "status": "not_configured"
+                }
+    except Exception as e:
+        health_status["services"]["xtts"] = {
+            "status": "error",
+            "error": str(e)[:50]
+        }
+
     # Test Ollama connectivity (load from database)
     try:
         from sqlalchemy import text
@@ -387,8 +662,8 @@ async def health():
                     health_status["services"]["ollama"]["url"] = ollama_host
                     health_status["services"]["ollama"]["model"] = ollama_model
 
-                    # Ping Ollama API (1s timeout for health check speed)
-                    async with httpx.AsyncClient(timeout=1.0) as client:
+                    # Ping Ollama API (5s timeout for reliability)
+                    async with httpx.AsyncClient(timeout=5.0) as client:
                         response = await client.get(f"{ollama_host}/api/tags")
                         if response.status_code == 200:
                             health_status["services"]["ollama"]["status"] = "connected"
@@ -590,8 +865,8 @@ async def health():
                     "error": "No host configured"
                 }
             else:
-                # Test XTTS connectivity using /health endpoint (1s timeout)
-                async with httpx.AsyncClient(timeout=1.0) as client:
+                # Test XTTS connectivity using /health endpoint (5s timeout)
+                async with httpx.AsyncClient(timeout=5.0) as client:
                     response = await client.get(f"{host}/health")
                     if response.status_code == 200:
                         data = response.json()
@@ -637,6 +912,106 @@ async def health():
             "connected": False,
             "error": f"Error: {str(e)[:30]}"
         }
+
+    # Test Asterisk AMI connectivity
+    try:
+        from sqlalchemy import text
+        from database import SessionLocal
+        import socket
+
+        with SessionLocal() as db:
+            # Query Asterisk config from database
+            result = db.execute(text("""
+                SELECT config_key, config_value, is_enabled
+                FROM api_configs
+                WHERE service = 'asterisk' AND category = 'communication' AND is_enabled = true
+            """))
+            rows = result.fetchall()
+
+            if rows:
+                asterisk_config = {}
+                is_enabled = False
+
+                for row in rows:
+                    key, value, enabled = row
+                    if key == 'enabled':
+                        is_enabled = enabled
+                    else:
+                        asterisk_config[key] = value
+
+                if is_enabled and asterisk_config.get("host"):
+                    asterisk_host = asterisk_config.get("host")
+                    asterisk_port = int(asterisk_config.get("amiPort", 5038))
+
+                    health_status["services"]["asterisk"]["host"] = asterisk_host
+
+                    # Quick socket test (1s timeout)
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(1)
+                    try:
+                        sock.connect((asterisk_host, asterisk_port))
+                        health_status["services"]["asterisk"]["status"] = "connected"
+                        health_status["services"]["asterisk"]["connected"] = True
+                        sock.close()
+                    except (socket.timeout, ConnectionRefusedError):
+                        health_status["services"]["asterisk"]["status"] = "error"
+                        health_status["services"]["asterisk"]["error"] = "Connection refused"
+                else:
+                    # Asterisk not enabled - remove from status
+                    health_status["services"].pop("asterisk", None)
+            else:
+                # No Asterisk config - remove from status
+                health_status["services"].pop("asterisk", None)
+
+    except Exception as e:
+        # Config error - remove from status
+        health_status["services"].pop("asterisk", None)
+
+    # Test Google Drive API connectivity
+    try:
+        from services.google_drive_service import get_drive_service_from_config
+        from api_config import APIConfigManager
+
+        # Initialize health status for Google Drive
+        health_status["services"]["google_drive"] = {
+            "status": "unknown",
+            "connected": False,
+            "can_list": False,
+            "can_write": False,
+            "error": None
+        }
+
+        # Try to get drive service from config
+        api_config_manager = APIConfigManager()
+        drive_service = get_drive_service_from_config(api_config_manager)
+
+        if drive_service:
+            # Test listing capability (read access)
+            try:
+                files = drive_service.list_files(page_size=1)
+                health_status["services"]["google_drive"]["connected"] = True
+                health_status["services"]["google_drive"]["can_list"] = True
+
+                # Test write capability by checking if we can create folders
+                # (We won't actually create one, just verify the service is initialized)
+                if drive_service.service:
+                    health_status["services"]["google_drive"]["can_write"] = True
+                    health_status["services"]["google_drive"]["status"] = "connected"
+                else:
+                    health_status["services"]["google_drive"]["status"] = "warning"
+                    health_status["services"]["google_drive"]["error"] = "Service initialized but may have limited permissions"
+
+            except Exception as list_error:
+                health_status["services"]["google_drive"]["status"] = "warning"
+                health_status["services"]["google_drive"]["connected"] = True
+                health_status["services"]["google_drive"]["error"] = f"Connected but listing failed: {str(list_error)[:50]}"
+        else:
+            health_status["services"]["google_drive"]["status"] = "not_configured"
+            health_status["services"]["google_drive"]["error"] = "No credentials configured"
+
+    except Exception as e:
+        health_status["services"]["google_drive"]["status"] = "error"
+        health_status["services"]["google_drive"]["error"] = str(e)[:100]
 
     # Set overall status based on CRITICAL services only (database)
     # Ollama is non-critical - it has its own status indicator

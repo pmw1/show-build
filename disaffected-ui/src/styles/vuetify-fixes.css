@@ -128,19 +128,33 @@ input[type="number"]::-webkit-inner-spin-button {
   align-items: center !important;
 }
 
-/* Fix floating label positioning - prevent overlap */
+/* Fix floating label positioning - prevent overlap with border */
 .v-label {
   line-height: 1.5 !important;
   transform-origin: left center !important;
   pointer-events: none !important;
   z-index: 1 !important;
-  transform: translateY(0.4em) !important;
+  /* Move label UP to prevent intersection with bottom border */
+  transform: translateY(-0.5em) !important;
 }
 
-/* Ensure labels don't interfere with input text */
+/* Ensure labels don't interfere with input text and move up higher when focused/dirty */
 .v-field--focused .v-label,
 .v-field--dirty .v-label {
-  transform: translateY(-0.35rem) scale(0.75) !important;
+  /* Move label significantly higher when active */
+  transform: translateY(-1.5rem) scale(0.75) !important;
+}
+
+/* Fix label background for outlined variant to prevent overlap with border */
+.v-field--variant-outlined.v-field--focused .v-label,
+.v-field--variant-outlined.v-field--dirty .v-label {
+  background: white !important;
+  padding: 0 4px !important;
+}
+
+.v-theme--dark .v-field--variant-outlined.v-field--focused .v-label,
+.v-theme--dark .v-field--variant-outlined.v-field--dirty .v-label {
+  background: #1e1e1e !important;
 }
 
 /* Fix label positioning for different field variants */
@@ -221,7 +235,8 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 /* Fix any transform issues that might cause positioning problems */
-.v-field__input * {
+/* IMPORTANT: Do NOT apply to .v-label - labels need transforms for floating behavior */
+.v-field__input *:not(.v-label) {
   transform: none !important;
 }
 
@@ -235,4 +250,14 @@ input[type="number"]::-webkit-inner-spin-button {
 .v-field__input,
 .v-field__input * {
   box-sizing: border-box !important;
+}
+
+/* Toast notification z-index override - place above modal overlays */
+.toast-container-high-z {
+  z-index: 10000 !important;  /* Above modal overlay (9999) */
+}
+
+/* Ensure individual toast notifications inherit high z-index */
+.toast-container-high-z .Vue-Toastification__toast {
+  z-index: 10001 !important;
 }

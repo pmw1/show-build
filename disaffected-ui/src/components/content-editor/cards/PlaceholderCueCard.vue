@@ -11,11 +11,12 @@
   >
     <!-- Card Header -->
     <v-card-title class="cue-card-header" :style="headerStyle">
+      <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 8px;">mdi-drag-vertical</v-icon>
       <div class="cue-type-badge" :style="badgeStyle">
         {{ cueData.type }}
       </div>
       <div class="cue-title-text">
-        {{ cueData.title }}
+        {{ cueData.slug || cueData.title }}
       </div>
       <v-spacer></v-spacer>
       <div class="cue-actions">
@@ -44,8 +45,19 @@
 
     <!-- Card Content -->
     <v-card-text class="cue-card-content">
-      <!-- Placeholder Display -->
-      <div class="placeholder-container">
+      <!-- FSQ-specific Display -->
+      <div v-if="cueData.type === 'FSQ' && cueData.quote" class="fsq-container">
+        <div class="fsq-quote-section">
+          <v-icon size="48" :color="cueTypeColor" class="quote-icon">mdi-format-quote-close</v-icon>
+          <div class="fsq-quote-text">{{ cueData.quote }}</div>
+        </div>
+        <div v-if="cueData.attribution" class="fsq-attribution">
+          — {{ cueData.attribution }}
+        </div>
+      </div>
+
+      <!-- Generic Placeholder Display for non-FSQ or FSQ without quote -->
+      <div v-else class="placeholder-container">
         <div class="placeholder-icon-section">
           <v-icon size="48" :color="cueTypeColor" class="placeholder-icon">
             {{ getCueIcon(cueData.type) }}
@@ -54,7 +66,7 @@
 
         <div class="placeholder-message">
           <div class="primary-message">
-            {{ cueData.type }} / {{ cueData.slug || 'No Slug' }}
+            {{ cueData.slug || 'No Slug' }}
           </div>
           <div class="secondary-message">
             Display not yet implemented
@@ -62,13 +74,8 @@
         </div>
       </div>
 
-      <!-- Cue Information -->
-      <div class="cue-info">
-        <div v-if="cueData.slug" class="cue-slug">
-          <v-icon size="small" class="info-icon">mdi-tag</v-icon>
-          <span class="slug-text">{{ cueData.slug }}</span>
-        </div>
-
+      <!-- Cue Information (hidden for FSQ) -->
+      <div v-if="cueData.type !== 'FSQ'" class="cue-info">
         <div v-if="cueData.description" class="cue-description">
           <v-icon size="small" class="info-icon">mdi-text</v-icon>
           <span class="description-text">{{ cueData.description }}</span>
@@ -79,11 +86,6 @@
           <span class="asset-id-text">{{ cueData.assetId }}</span>
         </div>
 
-        <div v-if="cueData.duration" class="cue-duration">
-          <v-icon size="small" class="info-icon">mdi-timer</v-icon>
-          <span class="duration-text">{{ cueData.duration }}</span>
-        </div>
-
         <div v-if="cueData.mediaUrl" class="cue-media-url">
           <v-icon size="small" class="info-icon">mdi-link</v-icon>
           <span class="media-url-text">{{ truncateUrl(cueData.mediaUrl) }}</span>
@@ -91,16 +93,12 @@
       </div>
     </v-card-text>
 
-    <!-- Card Footer with Order Number -->
-    <v-card-actions class="cue-card-footer">
-      <div class="order-display">
-        <v-icon size="small">mdi-numeric</v-icon>
-        <span class="order-text">{{ orderNumber || 'No Order' }}</span>
+    <!-- Card Footer with Duration -->
+    <v-card-actions class="cue-card-footer" :style="footerStyle">
+      <div class="duration-display">
+        <v-icon size="small" color="white">mdi-timer-outline</v-icon>
+        <span class="duration-text-footer">{{ cueData.duration || '00:00:00:00' }}</span>
       </div>
-      <v-spacer></v-spacer>
-      <v-chip size="small" variant="tonal" :color="cueTypeColor">
-        {{ cueData.type }}
-      </v-chip>
     </v-card-actions>
   </v-card>
 </template>
@@ -157,6 +155,14 @@ export default {
         : baseColor;
       return {
         backgroundColor: lighterColor || '#666',
+        color: 'white'
+      };
+    },
+
+    footerStyle() {
+      const backgroundColor = this.cueTypeColor;
+      return {
+        backgroundColor: backgroundColor,
         color: 'white'
       };
     },
@@ -435,23 +441,61 @@ export default {
   word-break: break-all;
 }
 
+/* FSQ-specific Styling */
+.fsq-container {
+  padding: 16px;
+  background-color: rgba(var(--v-theme-surface-variant), 0.05);
+  border-radius: 0;
+}
+
+.fsq-quote-section {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.quote-icon {
+  flex-shrink: 0;
+  opacity: 0.6;
+  margin-top: 4px;
+}
+
+.fsq-quote-text {
+  flex: 1;
+  font-size: calc(1rem + 2pt);
+  line-height: 1.5;
+  color: rgba(var(--v-theme-on-surface), 0.95);
+  font-style: italic;
+}
+
+.fsq-attribution {
+  font-size: 0.95rem;
+  color: rgba(var(--v-theme-on-surface), 0.75);
+  font-weight: 500;
+  margin-left: 64px;
+  font-style: normal;
+}
+
 /* Footer Styling */
 .cue-card-footer {
   padding: 8px 16px !important;
-  background-color: rgba(var(--v-theme-surface-variant), 0.1);
-  border-top: 1px solid rgba(var(--v-theme-outline), 0.1);
+  border-top: none;
+  justify-content: flex-start;
 }
 
-.order-display {
+.duration-display {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 0.8rem;
-  color: rgba(var(--v-theme-on-surface), 0.6);
+  gap: 8px;
+  font-size: 0.9rem;
+  color: white;
+  font-weight: 500;
 }
 
-.order-text {
-  font-weight: 500;
+.duration-text-footer {
+  font-family: 'Roboto Mono', monospace;
+  letter-spacing: 0.5px;
 }
 
 /* Responsive Design */

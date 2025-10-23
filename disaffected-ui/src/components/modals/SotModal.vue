@@ -18,7 +18,7 @@
 
       <!-- Header with Title and Close Buttons -->
       <div class="modal-header d-flex justify-space-between align-center pa-3" style="padding: 10px 15px;">
-        <h2 class="text-uppercase font-weight-bold ma-0" style="font-size: 1.2em;">NEW SOT CUE</h2>
+        <h2 class="text-uppercase font-weight-bold ma-0" style="font-size: 1.2em;">{{ editMode ? 'EDIT SOT CUE' : 'NEW SOT CUE' }}</h2>
         <div class="d-flex" style="gap: 5px;">
           <v-btn
             @click="cancel"
@@ -132,11 +132,29 @@
               </div>
             </div>
 
+            <!-- Upload Progress Bar (Subtle 5px green bar) -->
+            <div
+              v-if="uploadProgress > 0 && uploadProgress < 100"
+              class="upload-progress-bar"
+              style="width: 100%; height: 5px; background: #e0e0e0; border-radius: 4px 4px 0 0; overflow: hidden; position: relative; z-index: 16; margin-bottom: 0;"
+            >
+              <div
+                class="progress-fill"
+                :style="{
+                  width: uploadProgress + '%',
+                  height: '100%',
+                  background: '#4caf50',
+                  transition: 'width 0.3s ease'
+                }"
+              ></div>
+            </div>
+
             <!-- Live Timecode Display (Black Bar Above Video) -->
             <div
               ref="timecodeDisplay"
               class="timecode-display"
-              style="width: 100%; background: #000; border: 2px solid #ccc; border-bottom: none; border-radius: 4px 4px 0 0; position: relative; z-index: 15; margin-bottom: 0;"
+              style="width: 100%; background: #000; border: 2px solid #ccc; border-bottom: none; position: relative; z-index: 15; margin-bottom: 0;"
+              :style="{ borderRadius: uploadProgress > 0 && uploadProgress < 100 ? '0' : '4px 4px 0 0' }"
             >
               <div class="d-flex justify-space-between align-center pa-2" style="padding: 5px 15px;">
                 <div style="font-size: 18px; font-weight: bold; font-family: monospace; color: white;">{{ currentTimecode }}</div>
@@ -373,31 +391,123 @@
             </div>
           </div>
 
-          <!-- Trim Start and Trim End (Side by Side) -->
-          <div class="d-flex mb-3" style="gap: 15px;">
-            <div style="flex: 1;">
-              <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Trim Start:</label>
-              <input
-                ref="trimStartInputRef"
-                v-model="trimStart"
-                class="cue-modal-input"
-                type="text"
-                placeholder="HH:MM:SS"
-                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
-              />
+          <!-- ============================================================ -->
+          <!-- CLIPPING TOOLS SECTION -->
+          <!-- ============================================================ -->
+          <div style="border-top: 2px solid #999; margin: 25px 0 20px 0;"></div>
+
+          <div class="clipping-tools-section mb-4">
+            <h3 class="text-uppercase font-weight-bold mb-3" style="font-size: 1.1em; color: #333;">CLIPPING TOOLS</h3>
+
+            <!-- Clipping Method Radio Buttons -->
+            <div class="mb-3">
+              <label class="cue-modal-label mb-2 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Clipping Method:</label>
+              <div class="d-flex" style="gap: 15px; flex-wrap: wrap;">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                  <input type="radio" v-model="clippingMethod" value="none" style="margin-right: 6px;" />
+                  <span style="font-size: 14px;">None</span>
+                </label>
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                  <input type="radio" v-model="clippingMethod" value="single-trim" style="margin-right: 6px;" />
+                  <span style="font-size: 14px;">Single Trim</span>
+                </label>
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                  <input type="radio" v-model="clippingMethod" value="individual-clips" style="margin-right: 6px;" />
+                  <span style="font-size: 14px;">Individual Clips</span>
+                </label>
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                  <input type="radio" v-model="clippingMethod" value="montage" style="margin-right: 6px;" />
+                  <span style="font-size: 14px;">Montage</span>
+                </label>
+              </div>
             </div>
-            <div style="flex: 1;">
-              <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Trim End:</label>
-              <input
-                ref="trimEndInputRef"
-                v-model="trimEnd"
-                class="cue-modal-input"
-                type="text"
-                placeholder="HH:MM:SS"
-                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
-              />
+
+            <!-- Clip Slug, Time Start, Time End, and Take Button (Inline) -->
+            <div class="d-flex mb-3" style="gap: 10px; align-items: flex-end;">
+              <!-- Clip Slug -->
+              <div style="flex: 2;">
+                <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Clip Slug:</label>
+                <input
+                  v-model="clipSlug"
+                  class="cue-modal-input"
+                  type="text"
+                  placeholder="clip-name (auto-generated if empty)"
+                  :disabled="clippingMethod === 'none'"
+                  style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+                />
+              </div>
+
+              <!-- Time Start -->
+              <div style="flex: 1;">
+                <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Time Start:</label>
+                <input
+                  ref="trimStartInputRef"
+                  v-model="trimStart"
+                  class="cue-modal-input"
+                  type="text"
+                  placeholder="HH:MM:SS"
+                  :disabled="clippingMethod === 'none'"
+                  style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+                />
+              </div>
+
+              <!-- Time End -->
+              <div style="flex: 1;">
+                <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Time End:</label>
+                <input
+                  ref="trimEndInputRef"
+                  v-model="trimEnd"
+                  class="cue-modal-input"
+                  type="text"
+                  placeholder="HH:MM:SS"
+                  :disabled="clippingMethod === 'none'"
+                  style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+                />
+              </div>
+
+              <!-- Take Button -->
+              <div style="flex: 0 0 80px;">
+                <button
+                  @click="handleTakeClip"
+                  :disabled="clippingMethod === 'none' || clippingMethod === 'single-trim'"
+                  class="cue-modal-button-small"
+                  type="button"
+                  style="width: 100%; height: 38px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: background-color 0.2s;"
+                  :style="{ opacity: (clippingMethod === 'none' || clippingMethod === 'single-trim') ? 0.5 : 1, cursor: (clippingMethod === 'none' || clippingMethod === 'single-trim') ? 'not-allowed' : 'pointer' }"
+                  title="Take clip (Ctrl+Enter)"
+                >TAKE</button>
+              </div>
+            </div>
+
+            <!-- Clips Collection Display (Badges) -->
+            <div v-if="clips.length > 0" class="mb-3">
+              <label class="cue-modal-label mb-2 d-block" style="font-size: 14px; font-weight: 500; color: #555;">
+                Clips ({{ clips.length }}):
+              </label>
+              <div class="clips-badges" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                <div
+                  v-for="(clip, index) in clips"
+                  :key="`clip-${index}`"
+                  class="clip-badge"
+                  style="display: inline-flex; align-items: center; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 16px; padding: 6px 12px; font-size: 13px; gap: 8px;"
+                >
+                  <span style="font-weight: 500; color: #1976d2;">{{ clip.slug }}</span>
+                  <span style="color: #666; font-family: monospace; font-size: 11px;">{{ clip.time_start }} → {{ clip.time_end }}</span>
+                  <button
+                    @click="removeClip(index)"
+                    type="button"
+                    style="background: none; border: none; color: #f44336; cursor: pointer; font-size: 16px; line-height: 1; padding: 0; margin-left: 4px;"
+                    title="Remove clip"
+                  >×</button>
+                </div>
+              </div>
             </div>
           </div>
+
+          <div style="border-bottom: 2px solid #999; margin: 20px 0 25px 0;"></div>
+          <!-- ============================================================ -->
+          <!-- END CLIPPING TOOLS SECTION -->
+          <!-- ============================================================ -->
 
           <!-- Credits/Lower Thirds (Dynamic Key-Value) -->
           <div class="mb-3">
@@ -478,7 +588,7 @@
               @click="handleAddCue"
               class="cue-modal-button"
               style="flex: 1; padding: 20px 40px; font-size: 16px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
-            >Add SOT Cue</button>
+            >{{ clippingMethod !== 'none' ? 'Begin Processing' : 'Add SOT Cue' }}</button>
           </div>
         </v-form>
       </v-card-text>
@@ -487,16 +597,33 @@
 </template>
 
 <script>
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useToast } from 'vue-toastification'
 import axios from 'axios'
+
+// SOT Processing Job Types
+// These define what type of processing the backend should perform
+const SOT_JOB_TYPES = {
+  SINGLE_TRIM: 'single_trim',           // Standard SOT with optional trim
+  INDIVIDUAL_CLIPS: 'individual_clips', // Extract multiple separate clips
+  MONTAGE: 'montage',                   // Combine clips into single video
+  FULL_PROCESS: 'full_process'          // Complete normalization pipeline
+}
 
 export default {
   name: 'SotModal',
   props: {
     show: Boolean,
     episodeNumber: String,
-    segmentName: String
+    segmentName: String,
+    editMode: {
+      type: Boolean,
+      default: false
+    },
+    initialData: {
+      type: Object,
+      default: null
+    }
   },
   emits: ['update:show', 'submit'],
   setup(props, { emit }) {
@@ -551,6 +678,17 @@ export default {
     const blobUrl = ref('')
     const fileExtension = ref('')
     const originalFile = ref(null)
+
+    // Background upload state
+    const uploadProgress = ref(0)
+    const tempJobId = ref(null)
+    const uploadComplete = ref(false)
+
+    // Clipping tools state
+    const clippingMethod = ref('none')
+    const clipSlug = ref('')
+    const clips = ref([])
+    const clipCounter = ref(1)
 
     // Keyboard handler
     const keyboardHandler = ref(null)
@@ -947,6 +1085,73 @@ export default {
       }
 
       toast.success(`Video selected: ${file.name}`)
+
+      // Start background upload immediately
+      startBackgroundUpload(file)
+    }
+
+    const startBackgroundUpload = async (file) => {
+      try {
+        uploadProgress.value = 1 // Show progress bar
+        uploadComplete.value = false
+
+        const formData = new FormData()
+        formData.append('file', file)
+
+        const xhr = new XMLHttpRequest()
+
+        // Track upload progress
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            uploadProgress.value = Math.round((e.loaded / e.total) * 100)
+          }
+        })
+
+        // Handle completion
+        xhr.addEventListener('load', () => {
+          if (xhr.status === 200) {
+            const response = JSON.parse(xhr.responseText)
+            tempJobId.value = response.temp_job_id
+            uploadComplete.value = true
+            uploadProgress.value = 100
+
+            // Hide progress bar after 1 second
+            setTimeout(() => {
+              uploadProgress.value = 0
+            }, 1000)
+
+            toast.success('Upload complete - ready to process')
+          } else {
+            uploadProgress.value = 0
+            toast.error('Upload failed: ' + xhr.statusText)
+          }
+        })
+
+        // Handle errors
+        xhr.addEventListener('error', () => {
+          uploadProgress.value = 0
+          toast.error('Upload failed - network error')
+        })
+
+        // Get auth token
+        const token = localStorage.getItem('auth-token')
+        const apiKey = localStorage.getItem('api_key')
+
+        xhr.open('POST', '/api/sot/upload/background', true)
+
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+        } else if (apiKey) {
+          xhr.setRequestHeader('X-API-Key', apiKey)
+        }
+
+        xhr.send(formData)
+
+      } catch (error) {
+        console.error('Background upload error:', error)
+        uploadProgress.value = 0
+        toast.error('Upload failed: ' + error.message)
+      }
     }
 
     const clearVideo = () => {
@@ -960,12 +1165,89 @@ export default {
       duration.value = ''
       originalFile.value = null
 
+      // Clear upload state
+      uploadProgress.value = 0
+      tempJobId.value = null
+      uploadComplete.value = false
+
       if (previewInterval.value) {
         clearInterval(previewInterval.value)
         previewInterval.value = null
       }
 
       toast.info('Video cleared')
+    }
+
+    // Clipping tools functions
+    const handleTakeClip = () => {
+      // Validate time inputs
+      if (!trimStart.value || !trimEnd.value) {
+        toast.warning('Please set both time start and time end')
+        return
+      }
+
+      // Validate time end is after time start
+      const startSec = timecodeToSeconds(trimStart.value)
+      const endSec = timecodeToSeconds(trimEnd.value)
+
+      if (endSec <= startSec) {
+        toast.warning('Time end must be after time start')
+        return
+      }
+
+      // Get frame-accurate timecodes (with frames)
+      let timeStartWithFrames = trimStart.value
+      let timeEndWithFrames = trimEnd.value
+
+      // If using video player, get exact frame-accurate timecodes
+      if (videoPlayerRef.value) {
+        // Already has frame info if in format HH:MM:SS:FF
+        if (trimStart.value.split(':').length < 4) {
+          timeStartWithFrames = secondsToTimecode(startSec, true)
+        }
+        if (trimEnd.value.split(':').length < 4) {
+          timeEndWithFrames = secondsToTimecode(endSec, true)
+        }
+      }
+
+      // Auto-generate clip slug if empty
+      let finalClipSlug = clipSlug.value.trim()
+
+      if (!finalClipSlug) {
+        const baseSlug = slug.value.trim() || 'clip'
+
+        if (clippingMethod.value === 'individual-clips') {
+          finalClipSlug = `${baseSlug}_CLIP_${clipCounter.value}`
+          clipCounter.value++
+        } else if (clippingMethod.value === 'montage') {
+          finalClipSlug = `${baseSlug}_MONTAGE`
+        }
+      }
+
+      // Add clip to collection
+      clips.value.push({
+        slug: finalClipSlug,
+        time_start: timeStartWithFrames,
+        time_end: timeEndWithFrames,
+        duration_seconds: endSec - startSec
+      })
+
+      toast.success(`Clip "${finalClipSlug}" added`)
+
+      // Clear fields for next clip
+      if (clippingMethod.value === 'individual-clips') {
+        clipSlug.value = '' // Clear to auto-generate next
+      }
+      // For montage, keep the slug
+
+      trimStart.value = '00:00:00'
+      trimEnd.value = '00:00:00'
+    }
+
+    const removeClip = (index) => {
+      const removedClip = clips.value[index]
+      clips.value.splice(index, 1)
+      toast.info(`Removed clip "${removedClip.slug}"`)
     }
 
     // Credits management
@@ -1062,14 +1344,46 @@ export default {
         return
       }
 
-      // Video is now optional - allow cue insertion without video
-      // if (!mediaUrl.value.trim()) {
-      //   showTopError('ERROR: Please select a video file')
-      //   return
-      // }
+      // Determine job type based on clipping method
+      let jobType = SOT_JOB_TYPES.FULL_PROCESS // Default to full processing
+      if (clippingMethod.value === 'none' || clippingMethod.value === 'single-trim') {
+        jobType = SOT_JOB_TYPES.SINGLE_TRIM
+      } else if (clippingMethod.value === 'individual-clips') {
+        jobType = SOT_JOB_TYPES.INDIVIDUAL_CLIPS
+      } else if (clippingMethod.value === 'montage') {
+        jobType = SOT_JOB_TYPES.MONTAGE
+      }
 
-      // Generate AssetID
+      // Generate AssetID early (needed for both cue creation and processing)
       const generatedAssetId = await generateAssetId()
+
+      // Check if we have a background upload that needs processing
+      if (tempJobId.value && uploadComplete.value) {
+        // Trigger multi-phase processing
+        try {
+          toast.info('Starting video processing...')
+
+          const response = await axios.post('/api/sot/process/multi-phase', {
+            temp_job_id: tempJobId.value,
+            episode: props.episodeNumber,
+            slug: slug.value.trim(),
+            asset_id: generatedAssetId,  // Pass AssetID for cue block updates
+            trim_start: trimStart.value,
+            trim_end: trimEnd.value,
+            job_type: jobType,
+            clips: clips.value.length > 0 ? clips.value : null
+          })
+
+          toast.success('Video processing started - check status for progress')
+          console.log('Processing started:', response.data)
+
+          // Continue with normal SOT cue creation
+        } catch (error) {
+          console.error('Failed to start processing:', error)
+          toast.error('Failed to start video processing: ' + error.message)
+          return
+        }
+      }
 
       // Format credits as JSON
       const creditsFormatted = credits.value
@@ -1090,7 +1404,11 @@ export default {
         trimEnd: trimEnd.value,
         transcription: transcription.value,
         thumbnailUrl: thumbnailUrl.value,
-        credits: JSON.stringify(creditsFormatted)
+        credits: JSON.stringify(creditsFormatted),
+        tempJobId: tempJobId.value,  // Include job ID for tracking
+        clippingMethod: clippingMethod.value,
+        clips: clips.value.length > 0 ? JSON.stringify(clips.value) : null,
+        jobType: jobType  // Backend will use this to route processing
       }
 
       console.log('SOT cue data:', sotData)
@@ -1118,6 +1436,12 @@ export default {
       credits.value = []
       originalFile.value = null
 
+      // Reset clipping tools
+      clippingMethod.value = 'none'
+      clipSlug.value = ''
+      clips.value = []
+      clipCounter.value = 1
+
       if (videoPlayerRef.value) {
         videoPlayerRef.value.pause()
         videoPlayerRef.value.src = ''
@@ -1133,6 +1457,42 @@ export default {
     onMounted(() => {
       setupKeyboardShortcuts()
     })
+
+    // Watch for edit mode - pre-populate form with initialData
+    watch(
+      () => props.initialData,
+      (newData) => {
+        if (newData && props.editMode) {
+          console.log('📝 Pre-populating SOT modal with:', newData)
+
+          // Populate basic fields
+          if (newData.assetId) assetId.value = newData.assetId
+          if (newData.slug) slug.value = newData.slug
+          if (newData.description) description.value = newData.description
+          if (newData.duration) duration.value = newData.duration
+
+          // Populate URLs
+          if (newData.mediaUrl) mediaUrl.value = newData.mediaUrl
+          if (newData.thumbnailUrl) thumbnailUrl.value = newData.thumbnailUrl
+
+          // Populate trim times if available
+          if (newData.trimStart) trimStart.value = newData.trimStart
+          if (newData.trimEnd) trimEnd.value = newData.trimEnd
+
+          // Populate transcription if available
+          if (newData.transcription) transcription.value = newData.transcription
+
+          // Populate credits if available
+          if (newData.credits && Array.isArray(newData.credits)) {
+            credits.value = [...newData.credits]
+          }
+
+          // Note: We don't populate clipping data since editing should work on the existing clip
+          console.log('✅ SOT modal pre-populated')
+        }
+      },
+      { immediate: true }
+    )
 
     onBeforeUnmount(() => {
       if (keyboardHandler.value) {
@@ -1193,10 +1553,22 @@ export default {
       durationTimecode,
       remainingTimecode,
 
+      // Upload state
+      uploadProgress,
+      tempJobId,
+      uploadComplete,
+
+      // Clipping tools state
+      clippingMethod,
+      clipSlug,
+      clips,
+
       // Actions
       triggerFileInput,
       handleFileUpload,
       clearVideo,
+      handleTakeClip,
+      removeClip,
       addCredit,
       removeCredit,
       handleAddCue,

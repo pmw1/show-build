@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from datetime import datetime
 
 class BlueprintTemplate(Base):
-    """Blueprint templates for episode scaffolding"""
+    """Blueprint templates for episode scaffolding with cascading inheritance"""
     __tablename__ = "blueprint_templates"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -20,12 +20,69 @@ class BlueprintTemplate(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     is_default = Column(Boolean, default=False, nullable=False)
     template_metadata = Column(JSON, nullable=True)
+
+    # Cascading inheritance support
+    parent_template_id = Column(Integer, ForeignKey("blueprint_templates.id", ondelete="SET NULL"), nullable=True, index=True)
+    inheritance_mode = Column(String(20), default="merge", nullable=False)  # 'merge', 'override', 'extend'
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
     nodes = relationship("BlueprintNode", back_populates="template", cascade="all, delete-orphan")
     episodes = relationship("Blueprint", back_populates="template")
+
+    # Self-referential relationship for template inheritance
+    parent_template = relationship("BlueprintTemplate", remote_side=[id], foreign_keys=[parent_template_id], backref="child_templates")
+
+    def get_resolved_nodes(self, db_session):
+        """
+        Resolve complete node structure with cascading inheritance.
+
+        Inheritance modes:
+        - 'merge': Combine parent and child nodes (child wins on conflicts)
+        - 'override': Replace parent nodes entirely with child nodes
+        - 'extend': Keep all parent nodes + add child nodes
+        """
+        nodes = {}
+
+        # Recursively collect parent nodes first (breadth-first traversal)
+        if self.parent_template_id and self.parent_template:
+            parent_nodes = self.parent_template.get_resolved_nodes(db_session)
+            nodes.update(parent_nodes)
+
+        # Apply current template's nodes based on inheritance mode
+        current_nodes = {node.name: node for node in self.nodes}
+
+        if self.inheritance_mode == "override":
+            # Replace all parent nodes
+            nodes = current_nodes
+        elif self.inheritance_mode == "extend":
+            # Add to parent nodes (keep both)
+            nodes.update(current_nodes)
+        else:  # Default: "merge"
+            # Merge: child overrides parent on name collision
+            nodes.update(current_nodes)
+
+        return nodes
+
+    def get_resolved_metadata(self):
+        """
+        Resolve metadata with cascading inheritance.
+        Child metadata overrides parent on key collision.
+        """
+        metadata = {}
+
+        # Recursively collect parent metadata
+        if self.parent_template_id and self.parent_template:
+            parent_metadata = self.parent_template.get_resolved_metadata()
+            metadata.update(parent_metadata)
+
+        # Merge current template metadata
+        if self.template_metadata:
+            metadata.update(self.template_metadata)
+
+        return metadata
 
 class BlueprintNode(Base):
     """Hierarchical structure for blueprint templates"""
@@ -34,11 +91,14 @@ class BlueprintNode(Base):
     id = Column(Integer, primary_key=True, index=True)
     template_id = Column(Integer, ForeignKey("blueprint_templates.id", ondelete="CASCADE"), nullable=False)
     parent_id = Column(Integer, ForeignKey("blueprint_nodes.id", ondelete="CASCADE"), nullable=True)
-    node_type = Column(String(20), nullable=False)  # 'directory', 'file'
+    node_type = Column(String(20), nullable=False)  # 'directory', 'file', 'rundown_item'
     name = Column(String(255), nullable=False)
-    content = Column(Text, nullable=True)  # File content for file nodes
+    content = Column(Text, nullable=True)  # File content for file nodes, script content for rundown items
     sort_order = Column(Integer, default=0, nullable=False)
     is_required = Column(Boolean, default=True, nullable=False)
+
+    # Rundown item metadata (for node_type = 'rundown_item')
+    rundown_item_metadata = Column(JSON, nullable=True)  # {item_type, duration, status, etc.}
 
     # Relationships
     template = relationship("BlueprintTemplate", back_populates="nodes")

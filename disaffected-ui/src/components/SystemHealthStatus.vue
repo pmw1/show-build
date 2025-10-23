@@ -27,42 +27,141 @@
     </v-tooltip>
 
     <!-- Celery Workers Status -->
+    <div
+      class="health-item"
+      :class="{ 'health-error': celeryStatus === 'error', 'health-warning': celeryStatus === 'warning' }"
+      @click="showCeleryModal = true"
+    >
+      <v-icon
+        :color="celeryStatusColor"
+        size="small"
+        class="health-icon"
+      >
+        {{ celeryStatusIcon }}
+      </v-icon>
+      <span class="health-label">Workers</span>
+      <v-chip
+        v-if="workerCount > 0"
+        size="x-small"
+        :color="celeryStatusColor"
+        class="ml-1"
+        style="height: 16px; min-width: 20px; padding: 0 4px;"
+      >
+        {{ workerCount }}
+      </v-chip>
+    </div>
+
+    <!-- Celery Workers Modal -->
+    <v-dialog v-model="showCeleryModal" max-width="500">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon :color="celeryStatusColor" class="mr-2">{{ celeryStatusIcon }}</v-icon>
+          Celery Workers
+        </v-card-title>
+        <v-card-text>
+          <div class="mb-3">
+            <strong>Status:</strong> {{ celeryStatusText }}
+          </div>
+          <div v-if="workerCount > 0" class="mb-3">
+            <strong>Active Workers:</strong> {{ workerCount }}
+            <v-list density="compact" class="mt-2">
+              <v-list-item
+                v-for="worker in workers"
+                :key="worker"
+                :title="worker"
+                prepend-icon="mdi-cog"
+              />
+            </v-list>
+          </div>
+          <div v-if="celeryError">
+            <v-alert type="error" density="compact" class="mt-2">
+              {{ celeryError }}
+            </v-alert>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn color="primary" @click="showCeleryModal = false">Close</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- SIP/Asterisk Status -->
     <v-tooltip location="bottom">
       <template v-slot:activator="{ props }">
         <div
           v-bind="props"
           class="health-item"
-          :class="{ 'health-error': celeryStatus === 'error', 'health-warning': celeryStatus === 'warning' }"
+          :class="{ 'health-error': sipStatus === 'error', 'health-warning': sipStatus === 'warning' }"
         >
           <v-icon
-            :color="celeryStatusColor"
+            :color="sipStatusColor"
             size="small"
             class="health-icon"
           >
-            {{ celeryStatusIcon }}
+            {{ sipStatusIcon }}
           </v-icon>
-          <span class="health-label">Workers</span>
-          <v-chip
-            v-if="workerCount > 0"
-            size="x-small"
-            :color="celeryStatusColor"
-            class="ml-1"
-            style="height: 16px; min-width: 20px; padding: 0 4px;"
-          >
-            {{ workerCount }}
-          </v-chip>
+          <span class="health-label">SIP</span>
         </div>
       </template>
       <div>
-        <strong>Celery Workers</strong><br>
-        Status: {{ celeryStatusText }}<br>
-        <span v-if="workerCount > 0">
-          Active Workers: {{ workerCount }}<br>
-          <span v-for="worker in workers" :key="worker" class="text-caption">
-            • {{ worker }}<br>
-          </span>
-        </span>
-        <span v-if="celeryError" class="text-error">{{ celeryError }}</span>
+        <strong>Asterisk SIP/AMI</strong><br>
+        Status: {{ sipStatusText }}<br>
+        <span v-if="sipHost">Host: {{ sipHost }}</span>
+        <span v-if="sipError" class="text-error">{{ sipError }}</span>
+      </div>
+    </v-tooltip>
+
+    <!-- Google Drive Status -->
+    <v-tooltip location="bottom">
+      <template v-slot:activator="{ props }">
+        <div
+          v-bind="props"
+          class="health-item"
+          :class="{ 'health-error': driveStatus === 'error', 'health-warning': driveStatus === 'warning' }"
+        >
+          <v-icon
+            :color="driveStatusColor"
+            size="small"
+            class="health-icon"
+          >
+            {{ driveStatusIcon }}
+          </v-icon>
+          <span class="health-label">Goog</span>
+        </div>
+      </template>
+      <div>
+        <strong>Google Drive API</strong><br>
+        Status: {{ driveStatusText }}<br>
+        <span v-if="driveConnected && driveCanList">✓ Can list files</span><br v-if="driveConnected && driveCanList">
+        <span v-if="driveConnected && driveCanWrite">✓ Can write files</span><br v-if="driveConnected && driveCanWrite">
+        <span v-if="driveError" class="text-error">{{ driveError }}</span>
+      </div>
+    </v-tooltip>
+
+    <!-- XTTS Status -->
+    <v-tooltip location="bottom">
+      <template v-slot:activator="{ props }">
+        <div
+          v-bind="props"
+          class="health-item"
+          :class="{ 'health-error': xttsStatus === 'error', 'health-warning': xttsStatus === 'warning' }"
+        >
+          <v-icon
+            :color="xttsStatusColor"
+            size="small"
+            class="health-icon"
+          >
+            {{ xttsStatusIcon }}
+          </v-icon>
+          <span class="health-label">XTTS</span>
+        </div>
+      </template>
+      <div>
+        <strong>XTTS TTS Service</strong><br>
+        Status: {{ xttsStatusText }}<br>
+        <span v-if="xttsHost">Host: {{ xttsHost }}</span>
+        <span v-if="xttsError" class="text-error">{{ xttsError }}</span>
       </div>
     </v-tooltip>
 
@@ -98,9 +197,32 @@ const {
   workerCount,
   workers,
   celeryError,
+  sipStatus,
+  sipStatusText,
+  sipStatusColor,
+  sipStatusIcon,
+  sipHost,
+  sipError,
+  driveStatus,
+  driveStatusText,
+  driveStatusColor,
+  driveStatusIcon,
+  driveConnected,
+  driveCanList,
+  driveCanWrite,
+  driveError,
+  xttsStatus,
+  xttsStatusText,
+  xttsStatusColor,
+  xttsStatusIcon,
+  xttsHost,
+  xttsError,
   loading,
   checkHealth
 } = useSystemHealth()
+
+// Modal state
+const showCeleryModal = ref(false)
 
 let healthInterval = null
 

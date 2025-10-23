@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '999_consolidate_episode_tables'
-down_revision: Union[str, None] = '0e73074190a2_add_rbac_system'
+down_revision: Union[str, None] = 'b3e162fbdbed'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -31,9 +31,9 @@ def upgrade() -> None:
     - blueprint_templates: Actual reusable templates
     """
 
-    # Step 1: Drop episodes_legacy table (already removed from code)
-    print("Dropping episodes_legacy table...")
-    op.drop_table('episodes_legacy')
+    # Step 1: Drop episodes_legacy table (already removed from code) - skip if doesn't exist
+    print("Dropping episodes_legacy table if exists...")
+    op.execute("DROP TABLE IF EXISTS episodes_legacy")
 
     # Step 2: Rename episode_templates to blueprints
     print("Renaming episode_templates to blueprints...")

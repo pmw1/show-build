@@ -479,7 +479,7 @@ export default {
     return {
       rundownTypes: ['segment', 'ad', 'promo', 'cta', 'live', 'tease', 'tag'],
       rundownRegionsTypes: ['break', 'block', 'block-a', 'block-b', 'block-c', 'block-d', 'block-e', 'block-f', 'block-g', 'block-h'],
-      elementsCuesTypes: ['trans', 'pkg', 'vo', 'sot', 'interview', 'music', 'reader', 'gfx', 'fsq', 'nat', 'img'],
+      elementsCuesTypes: ['trans', 'pkg', 'vo', 'sot', 'interview', 'music', 'reader', 'gfx', 'fsq', 'nat', 'img', 'dir', 'bump', 'sting'],
       interfaceTypes: ['Selection', 'Hover', 'Highlight', 'Dropline', 'DragLight', 'LocatorFlash'],
       scriptStatusTypes: ['Draft', 'Approved', 'Production', 'Promotion', 'Completed'],
       typeColors: {},

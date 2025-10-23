@@ -4,6 +4,8 @@ Episodes as flagship units, Segments as portable value units.
 Every entity has an AssetID from central service.
 """
 from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, JSON, Float, Enum, BigInteger
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -131,6 +133,72 @@ class Show(Base):
     speakers = relationship("Speaker", back_populates="show", cascade="all, delete-orphan")
 
 
+class Speaker(Base):
+    """Speaker model for managing show hosts, guests, and voice talent"""
+    __tablename__ = "speakers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    slug = Column(String, unique=True, nullable=False, index=True)
+
+    # Speech metrics
+    wpm = Column(Float, default=150.0, nullable=False)  # Words per minute
+    wpm_min = Column(Float, default=130.0)  # Minimum comfortable WPM
+    wpm_max = Column(Float, default=180.0)  # Maximum comfortable WPM
+
+    # Speaker metadata
+    role = Column(String, default="host")  # host, guest, narrator, voice_talent
+    voice_type = Column(String)  # male, female, neutral
+    language = Column(String, default="en")
+    accent = Column(String)  # american, british, australian, etc.
+
+    # AI/TTS integration
+    xtts_speaker_name = Column(String)  # XTTS speaker ID for voice synthesis
+    voice_sample_path = Column(String)  # Path to voice sample file
+
+    # Status and metadata
+    is_active = Column(Boolean, default=True)
+    is_test_data = Column(Boolean, default=False)
+
+    # Show/Organization relationship
+    organization_id = Column(Integer, ForeignKey("organizations.id"))
+    show_id = Column(Integer, ForeignKey("shows.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))  # Link to logged-in user
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", back_populates="speakers")
+    show = relationship("Show", back_populates="speakers")
+    user = relationship("User", back_populates="speaker_profile")
+
+    def __repr__(self):
+        return f"<Speaker(id={self.id}, name='{self.name}', wpm={self.wpm})>"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "slug": self.slug,
+            "wpm": self.wpm,
+            "wpm_min": self.wpm_min,
+            "wpm_max": self.wpm_max,
+            "role": self.role,
+            "voice_type": self.voice_type,
+            "language": self.language,
+            "accent": self.accent,
+            "xtts_speaker_name": self.xtts_speaker_name,
+            "voice_sample_path": self.voice_sample_path,
+            "is_active": self.is_active,
+            "organization_id": self.organization_id,
+            "show_id": self.show_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
 class Season(Base):
     """Season/Series - flexible grouping of episodes."""
     __tablename__ = "seasons"
@@ -196,6 +264,12 @@ class Episode(Base):
 
     # Duration in original format (preserves "00:00:00" format from filesystem)
     duration_formatted = Column(String(10), nullable=True)  # "HH:MM:SS" format
+
+    # Media - Poster images for different aspect ratios (promotional needs)
+    poster_16x9 = Column(String(500), nullable=True)  # Widescreen (16:9) - YouTube, web, TV
+    poster_1x1 = Column(String(500), nullable=True)   # Square (1:1) - Instagram feed, profile
+    poster_9x16 = Column(String(500), nullable=True)  # Vertical (9:16) - Stories, TikTok, Reels
+    poster_4x5 = Column(String(500), nullable=True)   # Portrait (4:5) - Facebook, Twitter cards
 
     # Relationships
     season = relationship("Season", back_populates="episodes")
@@ -540,3 +614,49 @@ class Settings(Base):
     description = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class SOTProcessingJob(Base):
+    """Tracks multi-phase SOT video processing pipeline."""
+    __tablename__ = "sot_processing_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    temp_job_id = Column(String(50), unique=True, nullable=False, index=True)
+    episode = Column(String(10), nullable=True)
+    slug = Column(String(255), nullable=True)
+    asset_id = Column(String(50), nullable=True)  # AssetID for linking to cue block
+    current_phase = Column(String(20), nullable=False, server_default='upload')
+    status = Column(String(20), nullable=False, server_default='pending')
+    job_type = Column(String(30), nullable=False, server_default='full_process')  # single_trim, individual_clips, montage, full_process
+    clips_data = Column(Text, nullable=True)  # JSON string of clips array
+    error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, nullable=False, server_default='0')
+    celery_task_id = Column(String(50), nullable=True)
+    working_directory = Column(Text, nullable=True)
+    final_video_path = Column(Text, nullable=True)
+    final_audio_path = Column(Text, nullable=True)
+    final_thumbnail_path = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PromptOverride(Base):
+    """LLM prompt overrides for customizing generation behavior."""
+    __tablename__ = "prompt_overrides"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    category = Column(String(50), nullable=False)  # generate, analyze, extract, refactor, compose, inventory
+    operation_key = Column(String(100), nullable=False)  # e.g., generate-segment-script, inventory-batch-match-slots
+    system_prompt = Column(Text, nullable=True)  # Override system prompt
+    user_prompt_template = Column(Text, nullable=True)  # Override user prompt template with {{variable}} placeholders
+    is_enabled = Column(Boolean, nullable=False, server_default='true')
+    notes = Column(Text, nullable=True)
+    created_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Note: 'metadata' is reserved by SQLAlchemy Base but works in table with name='metadata' mapped to column
+    prompt_metadata = Column('metadata', JSON, nullable=True)  # Maps to 'metadata' column in database
+    suggested_service = Column(String(50), nullable=True)
+    suggested_model = Column(String(100), nullable=True)
+    temperature = Column(Float, nullable=True)
+    max_tokens = Column(Integer, nullable=True)

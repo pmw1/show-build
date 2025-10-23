@@ -1000,18 +1000,21 @@ async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)
             items = db.query(RundownItem).filter(RundownItem.rundown_id == rundown.id).order_by(RundownItem.order_in_rundown).all()
 
             for item in items:
+                order_value = item.order_in_rundown or 0
                 rundown_item_dict = {
                     "id": item.asset_id,
                     "type": item.item_type or 'segment',
                     "slug": item.slug or '',
                     "duration": item.duration or '00:00:00',
                     "script": item.script_content or '',  # Script content from new field
-                    "order": item.order_in_rundown or 0,
+                    "order": order_value,
+                    "order_in_rundown": order_value,  # Explicit field for frontend
+                    "index": order_value,  # Explicit field for frontend
                     "status": item.status or 'draft',
                     "title": item.title or item.slug or 'Untitled',
                     "subtitle": item.subtitle or '',
                     "description": item.description or '',  # Metadata description
-                    "filename": f"{item.order_in_rundown:03d}-{item.slug}.md",  # Generate filename for compatibility
+                    "filename": f"{order_value:03d}-{item.slug}.md",  # Generate filename for compatibility
                     "asset_id": item.asset_id,
                     "airdate": item.airdate.isoformat() if item.airdate else '',
                     "guests": item.guests or '',
@@ -1579,9 +1582,10 @@ async def create_rundown_item(
         logger.info(f"Extracted index: {item_index} (type: {type(item_index)})")
         logger.info(f"Raw index from request: {item_data.get('index')} (type: {type(item_data.get('index'))})")
 
-        # Generate slug if not provided
+        # Don't auto-generate slug - let user fill it in
+        # Frontend will highlight the slug field yellow for user attention
         if not slug:
-            slug = title.lower().replace(' ', '-').replace('[^a-z0-9-]', '')
+            slug = ''  # Keep empty, don't generate from title
 
         # Get or create rundown for this episode
         rundown = db.query(Rundown).filter(Rundown.episode_id == episode.id).first()
@@ -1670,9 +1674,56 @@ created_at: "{creation_timestamp.isoformat()}"
         raise HTTPException(status_code=500, detail=f"Failed to create rundown item: {str(e)}")
 
 
+@router.patch("/{episode_number}/item/{item_id}")
+async def update_rundown_item(
+    episode_number: str,
+    item_id: str,
+    item_data: Dict[str, Any] = Body(...),
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """Update a rundown item's fields (for test segment generation, etc.)"""
+    try:
+        from models_v2 import RundownItem
+
+        # Find the item by asset_id
+        item = db.query(RundownItem).filter(RundownItem.asset_id == item_id).first()
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Rundown item {item_id} not found")
+
+        # Update fields that are provided
+        if 'script_content' in item_data:
+            item.script_content = item_data['script_content']
+        if 'title' in item_data:
+            item.title = item_data['title']
+        if 'slug' in item_data:
+            item.slug = item_data['slug']
+        if 'duration' in item_data:
+            item.duration = item_data['duration']
+        if 'status' in item_data:
+            item.status = item_data['status']
+
+        item.updated_at = datetime.now()
+        db.commit()
+
+        logger.info(f"Updated rundown item: {item_id}")
+        return {
+            "success": True,
+            "message": f"Updated item {item_id}",
+            "asset_id": item_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update rundown item: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update rundown item: {str(e)}")
+
+
 @router.post("/{episode_number}/rundown/{item_filename}/autosave")
 async def autosave_rundown_item(
-    episode_number: str, 
+    episode_number: str,
     item_filename: str,
     content_data: dict,
     current_user: dict = Depends(get_current_user_or_key)
@@ -2065,7 +2116,9 @@ async def save_rundown_items(
 
                 if rundown_item:
                     # Update existing item
-                    rundown_item.order_in_rundown = item_data.get('order', 0)  # From synced index
+                    # Use proper null checking - 0 is a valid order value!
+                    order_value = item_data.get('order') if item_data.get('order') is not None else item_data.get('index')
+                    rundown_item.order_in_rundown = order_value if order_value is not None else 0
                     rundown_item.title = item_data.get('title', rundown_item.title)
                     rundown_item.item_type = item_data.get('type', rundown_item.item_type)
                     rundown_item.duration = item_data.get('duration', rundown_item.duration)
@@ -2103,7 +2156,7 @@ async def save_rundown_items(
                     new_item = RundownItem(
                         asset_id=str(asset_id),
                         rundown_id=rundown.id,
-                        order_in_rundown=item_data.get('order', 0),
+                        order_in_rundown=item_data.get('order') if item_data.get('order') is not None else (item_data.get('index') if item_data.get('index') is not None else 0),
                         title=title,
                         slug=slug,
                         item_type=item_data.get('type', 'segment'),
@@ -2142,7 +2195,7 @@ async def save_rundown_items(
                 new_item = RundownItem(
                     asset_id=str(new_asset_id),
                     rundown_id=rundown.id,
-                    order_in_rundown=item_data.get('order', 0),
+                    order_in_rundown=item_data.get('order') or item_data.get('index', 0),
                     title=title,
                     slug=slug,
                     item_type=item_data.get('type', 'segment'),

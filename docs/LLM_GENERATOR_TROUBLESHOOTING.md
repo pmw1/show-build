@@ -4,6 +4,8 @@
 
 **File**: `/disaffected-ui/src/components/ContentEditor.vue:4031` (function `generateTestSegment()`)
 
+**⚠️ MIGRATION NOTE**: This document describes the legacy LLM test generator which uses older state management patterns. For new LLM features, use the **Universal LLM Framework** instead. See [`UNIVERSAL_LLM_FRAMEWORK_UFDP.md`](../UNIVERSAL_LLM_FRAMEWORK_UFDP.md) for the modern approach with automatic visual feedback, database persistence, and notification center integration.
+
 ---
 
 ## Common Issues and Solutions
@@ -441,9 +443,10 @@ https://192.168.51.210:8091
 
 ---
 
-**Last Updated**: 2025-10-07
+**Last Updated**: 2025-10-09 (Migration Note Added)
 **Maintained By**: Claude Code Session Continuation
 **Related Docs**:
+- **[`UNIVERSAL_LLM_FRAMEWORK_UFDP.md`](../UNIVERSAL_LLM_FRAMEWORK_UFDP.md)** - ⭐ Modern LLM framework (use for new features)
 - `DEBUG_FIRST.md` - General frontend debugging
 - `DEBUGGING_STANDARDS.md` - Systematic debugging checklist
 - `VUE_TEMPLATE_REF_CONFLICTS.md` - Vue reactivity issues

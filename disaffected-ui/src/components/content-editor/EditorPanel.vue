@@ -1,5 +1,5 @@
 <template>
-  <div :class="['editor-panel', !showRundownPanel ? 'full-width' : '']">
+  <div :class="['editor-panel-content', !showRundownPanel ? 'full-width' : '']">
     <!-- Flash Message for Cue Insertion -->
     <v-snackbar
       v-model="flashMessage.show"
@@ -46,11 +46,6 @@
             Script
           </v-btn>
           <v-divider vertical class="mode-separator"></v-divider>
-          <v-btn value="scratch" size="small" class="mode-btn" rounded="0">
-            <v-icon left size="small">mdi-pencil</v-icon>
-            Scratch
-          </v-btn>
-          <v-divider vertical class="mode-separator"></v-divider>
           <v-btn value="code" size="small" class="mode-btn" rounded="0">
             <v-icon left size="small">mdi-code-braces</v-icon>
             Code
@@ -58,12 +53,6 @@
         </v-btn-toggle>
 
         <v-spacer></v-spacer>
-
-        <!-- Asset Management Buttons -->
-        <v-btn size="small" @click="$emit('show-asset-browser')" v-if="editorMode === 'scratch'" rounded="0">
-          <v-icon left>mdi-paperclip</v-icon>
-          Assets
-        </v-btn>
 
         <v-divider vertical class="mx-2"></v-divider>
 
@@ -282,6 +271,48 @@
                 </div>
                 <v-tooltip activator="parent" location="bottom">Package</v-tooltip>
               </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex dir-btn"
+                :style="getCueButtonStyle('DIR')"
+                @click="insertCue('DIR')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-clipboard-text-outline</v-icon>
+                  <span class="cue-label">DIR</span>
+                  <span class="hotkey-display">[ALT+D]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Director Note</v-tooltip>
+              </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex bump-btn"
+                :style="getCueButtonStyle('BUMP')"
+                @click="insertCue('BUMP')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-movie-open-play</v-icon>
+                  <span class="cue-label">BUMP</span>
+                  <span class="hotkey-display">[ALT+B]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Bumper</v-tooltip>
+              </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex sting-btn"
+                :style="getCueButtonStyle('STING')"
+                @click="insertCue('STING')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-movie-open-star</v-icon>
+                  <span class="cue-label">STING</span>
+                  <span class="hotkey-display">[ALT+T]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Stinger</v-tooltip>
+              </v-btn>
             </div>
           </div>
 
@@ -356,8 +387,38 @@
 
             <!-- Enhanced Script Content with Visual Cue Cards -->
             <div v-if="useVisualScriptMode && !hasNoItem" class="visual-script-container">
-              <div v-for="(segment, index) in scriptSegments" :key="`segment-${index}`" class="content-segment">
-                <!-- Speaker Paragraph Segment -->
+              <draggable
+                v-model="draggableSegments"
+                tag="div"
+                :item-key="getSegmentKey"
+                :animation="200"
+                handle=".drag-handle"
+                ghost-class="ghost-segment"
+                chosen-class="chosen-segment"
+                drag-class="drag-segment"
+                @start="handleSegmentDragStart"
+                @end="handleSegmentDragEnd"
+              >
+                <template #item="{ element: segment, index }">
+                  <div class="segment-wrapper">
+                    <!-- Drop Zone Indicator (before each segment) -->
+                    <div
+                      v-if="dropZoneActive"
+                      class="cue-drop-zone"
+                      :class="{ 'drop-zone-selected': selectedDropZone === index }"
+                      @click="selectDropZone(index)"
+                      @mouseenter="hoveredDropZone = index"
+                      @mouseleave="hoveredDropZone = null"
+                    >
+                      <div class="drop-zone-line"></div>
+                      <div class="drop-zone-label">
+                        <v-icon size="small">mdi-plus-circle</v-icon>
+                        Insert {{ pendingCueType }} here
+                      </div>
+                    </div>
+
+                    <div class="content-segment">
+                    <!-- Speaker Paragraph Segment -->
                 <div v-if="segment.type === 'text'" class="text-segment">
                   <div
                     v-if="segment.needsParagraphTags"
@@ -377,6 +438,7 @@
                     <!-- Speaker Header -->
                     <div v-if="shouldShowSpeakerHeader(index, segment.speaker)" class="speaker-header" :style="getSpeakerHeaderStyle(segment.speaker)">
                       <div class="speaker-info">
+                        <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 4px;">mdi-drag-vertical</v-icon>
                         <v-icon size="small" class="speaker-icon">mdi-account-voice</v-icon>
                         <span class="speaker-name">{{ getSpeakerDisplayName(segment.speaker) }}</span>
                       </div>
@@ -482,7 +544,7 @@
                 </div>
 
                 <!-- Cue Card Segment -->
-                <div v-else-if="segment.type === 'cue'" class="cue-segment">
+                <div v-else-if="segment.type === 'cue'" class="cue-segment" :data-pending="segment.isPending || null">
                   <ImageCueCard
                     v-if="segment.data.isImageType"
                     :cue-data="segment.data"
@@ -503,7 +565,10 @@
                     @delete="deleteCue(index)"
                   />
                 </div>
-              </div>
+                    </div>
+                  </div>
+                </template>
+              </draggable>
 
             </div>
 
@@ -645,6 +710,48 @@
                 </div>
                 <v-tooltip activator="parent" location="bottom">Package</v-tooltip>
               </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex dir-btn"
+                :style="getCueButtonStyle('DIR')"
+                @click="insertCue('DIR')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-clipboard-text-outline</v-icon>
+                  <span class="cue-label">DIR</span>
+                  <span class="hotkey-display">[ALT+D]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Director Note</v-tooltip>
+              </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex bump-btn"
+                :style="getCueButtonStyle('BUMP')"
+                @click="insertCue('BUMP')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-movie-open-play</v-icon>
+                  <span class="cue-label">BUMP</span>
+                  <span class="hotkey-display">[ALT+B]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Bumper</v-tooltip>
+              </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex sting-btn"
+                :style="getCueButtonStyle('STING')"
+                @click="insertCue('STING')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-movie-open-star</v-icon>
+                  <span class="cue-label">STING</span>
+                  <span class="hotkey-display">[ALT+T]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Stinger</v-tooltip>
+              </v-btn>
             </div>
           </div>
 
@@ -757,12 +864,16 @@
                 <v-row>
                   <v-col cols="12" md="6">
                     <v-text-field
+                      ref="slugFieldRef"
                       :model-value="currentItemMetadata.slug"
                       @update:model-value="updateMetadata('slug', $event)"
-                      label="Slug"
+                      label="Enter slug first"
+                      placeholder="my-segment-slug"
                       variant="outlined"
                       density="comfortable"
                       :rules="slugRules"
+                      :class="{ 'slug-needs-attention': slugNeedsAttention }"
+                      :style="slugNeedsAttention ? `--highlight-color: ${highlightColor}` : ''"
                     ></v-text-field>
                   </v-col>
                   <v-col cols="12" md="6">
@@ -1065,6 +1176,48 @@
                 </div>
                 <v-tooltip activator="parent" location="bottom">Package</v-tooltip>
               </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex dir-btn"
+                :style="getCueButtonStyle('DIR')"
+                @click="insertCue('DIR')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-clipboard-text-outline</v-icon>
+                  <span class="cue-label">DIR</span>
+                  <span class="hotkey-display">[ALT+D]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Director Note</v-tooltip>
+              </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex bump-btn"
+                :style="getCueButtonStyle('BUMP')"
+                @click="insertCue('BUMP')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-movie-open-play</v-icon>
+                  <span class="cue-label">BUMP</span>
+                  <span class="hotkey-display">[ALT+B]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Bumper</v-tooltip>
+              </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex sting-btn"
+                :style="getCueButtonStyle('STING')"
+                @click="insertCue('STING')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-movie-open-star</v-icon>
+                  <span class="cue-label">STING</span>
+                  <span class="hotkey-display">[ALT+T]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Stinger</v-tooltip>
+              </v-btn>
             </div>
           </div>
 
@@ -1141,23 +1294,24 @@
     </v-card>
   </v-dialog>
 
-  <!-- Cue Placement Overlay -->
-  <CuePlacementOverlay
+  <!-- Cue Placement Overlay - DISABLED: Using draggable ghost segment instead -->
+  <!-- <CuePlacementOverlay
     v-model:show="showCuePlacement"
     :cue-type="pendingCueType"
     @place-cue="handleCuePlacement"
     @cancel="cancelCuePlacement"
-  />
+  /> -->
 </template>
 
 <script>
-import { getColorValue, resolveVuetifyColor } from '../../utils/themeColorMap.js';
+import { getColorValue, resolveVuetifyColor, loadColorsFromDatabase } from '../../utils/themeColorMap.js';
+import draggable from 'vuedraggable';
 import ImgCueModal from './modals/ImgCueModal.vue';
 import DeleteImgCueModal from './modals/DeleteImgCueModal.vue';
 import ImageCueCard from './cards/ImageCueCard.vue';
 import PlaceholderCueCard from './cards/PlaceholderCueCard.vue';
 import SpeakerSelectorModal from './modals/SpeakerSelectorModal.vue';
-import CuePlacementOverlay from './CuePlacementOverlay.vue';
+// import CuePlacementOverlay from './CuePlacementOverlay.vue'; // DISABLED: Using draggable ghost segment instead
 import CueParser from '../../utils/cueParser.js';
 import { useXtts } from '../../composables/useXtts.js';
 import { useAsyncAnalysis } from '../../composables/useAsyncAnalysis.js';
@@ -1165,12 +1319,13 @@ import { useAsyncAnalysis } from '../../composables/useAsyncAnalysis.js';
 export default {
   name: 'EditorPanel',
   components: {
+    draggable,
     ImgCueModal,
     DeleteImgCueModal,
     ImageCueCard,
     PlaceholderCueCard,
-    SpeakerSelectorModal,
-    CuePlacementOverlay
+    SpeakerSelectorModal
+    // CuePlacementOverlay // DISABLED: Using draggable ghost segment instead
   },
   data() {
     return {
@@ -1202,6 +1357,7 @@ export default {
       typingBuffer: '', // Buffer for auto-expanding text input
       autoformatTimer: null, // Timer for periodic autoformat
       autoformatDebounceTimer: null, // Debounce timer for content changes
+      slugNeedsAttention: false, // Track if slug field needs user attention (yellow highlight)
       segmentUpdateTimer: null, // Timer for debouncing segment updates
       lastAutoformatTime: null, // Timestamp of last autoformat run
       altKeyPressed: false, // Manual ALT key tracking for better browser compatibility
@@ -1229,7 +1385,8 @@ export default {
       currentReadingIndex: 0, // Current paragraph index being read
       audioElement: null, // Audio element for playback
       xttsInstance: null, // XTTS composable instance
-      segmentLineCounts: {} // Cache of line counts per segment for reactivity
+      segmentLineCounts: {}, // Cache of line counts per segment for reactivity
+      isDragging: false // Track if segment is being dragged
     }
   },
   mounted() {
@@ -1280,6 +1437,24 @@ export default {
 
     // Start periodic autoformat (every 30 seconds)
     this.startAutoformatTimer();
+
+    // Load colors from database and set drag/drop CSS variables
+    loadColorsFromDatabase().then(() => {
+      const draglightColorName = getColorValue('draglight') || 'cyan-lighten-4';
+      const droplineColorName = getColorValue('dropline') || 'green-lighten-4';
+      const draglightColor = resolveVuetifyColor(draglightColorName);
+      const droplineColor = resolveVuetifyColor(droplineColorName);
+
+      console.log('🎨 Setting drag/drop colors:', {
+        draglightColorName,
+        droplineColorName,
+        draglightColor,
+        droplineColor
+      });
+
+      document.documentElement.style.setProperty('--draglight-color', draglightColor);
+      document.documentElement.style.setProperty('--dropline-color', droplineColor);
+    });
 
     // Add global hotkey listeners
     console.log('🎪 Adding global hotkey listeners');
@@ -1431,7 +1606,8 @@ export default {
     'showAssetBrowserModal',
     'showTemplateManagerModal',
     'update:item',
-    'duration-calculated'
+    'duration-calculated',
+    'save-current'
   ],
   props: {
     showRundownPanel: {
@@ -1547,63 +1723,177 @@ export default {
     },
 
     // Parse content into segments ONLY for Script mode display (no reactive loops)
-    scriptSegments() {
-      console.log('🔄 scriptSegments computed property called');
-      console.log('  rawScriptContent length:', this.rawScriptContent?.length);
-      console.log('  editorMode:', this.editorMode);
-      console.log('  useVisualScriptMode:', this.useVisualScriptMode);
+    scriptSegments: {
+      get() {
+        console.log('🔄 scriptSegments getter called');
+        console.log('  rawScriptContent length:', this.rawScriptContent?.length);
+        console.log('  editorMode:', this.editorMode);
+        console.log('  useVisualScriptMode:', this.useVisualScriptMode);
 
-      if (!this.rawScriptContent || this.editorMode !== 'script' || !this.useVisualScriptMode) {
-        console.log('  → Returning empty array (early exit)');
-        return [];
-      }
+        if (!this.rawScriptContent || this.editorMode !== 'script' || !this.useVisualScriptMode) {
+          console.log('  → Returning empty array (early exit)');
+          return [];
+        }
 
-      try {
-        // Strip YAML frontmatter for parsing
-        const contentWithoutFrontmatter = this.stripYamlFrontmatter(this.rawScriptContent);
-        console.log('  contentWithoutFrontmatter:', contentWithoutFrontmatter?.substring(0, 100));
+        try {
+          // Strip YAML frontmatter for parsing
+          const contentWithoutFrontmatter = this.stripYamlFrontmatter(this.rawScriptContent);
+          console.log('  contentWithoutFrontmatter:', contentWithoutFrontmatter?.substring(0, 100));
 
-        // If content is empty or only whitespace, return empty paragraph segment
-        // (initialization will be handled by mounted/watch)
-        if (!contentWithoutFrontmatter || contentWithoutFrontmatter.trim() === '') {
-          console.log('  → Returning single empty text segment');
+          // If content is empty or only whitespace, return empty paragraph segment
+          // (initialization will be handled by mounted/watch)
+          if (!contentWithoutFrontmatter || contentWithoutFrontmatter.trim() === '') {
+            console.log('  → Returning single empty text segment');
+            return [{
+              type: 'text',
+              content: '',
+              speaker: 'josh',
+              needsParagraphTags: true,
+              segmentIndex: 0
+            }];
+          }
+
+          const segments = CueParser.parseContent(contentWithoutFrontmatter);
+
+          return segments.map((segment, index) => {
+            if (segment.type === 'cue') {
+              // Format cue data for card display
+              const formattedCueData = CueParser.formatForCard(segment.data);
+              return {
+                type: 'cue',
+                data: formattedCueData,
+                segmentIndex: index
+              };
+            }
+            return {
+              ...segment,
+              segmentIndex: index
+            };
+          });
+        } catch (error) {
+          console.error('Error parsing script segments:', error);
+          // Fallback: treat as single text segment
+          const contentWithoutFrontmatter = this.stripYamlFrontmatter(this.rawScriptContent);
           return [{
             type: 'text',
-            content: '',
+            content: contentWithoutFrontmatter,
             speaker: 'josh',
             needsParagraphTags: true,
             segmentIndex: 0
           }];
         }
+      },
+      set(newSegments) {
+        console.log('🔄 scriptSegments setter called with', newSegments.length, 'segments');
 
-        const segments = CueParser.parseContent(contentWithoutFrontmatter);
+        // Reconstruct the script content from reordered segments
+        const frontmatter = this.extractYamlFrontmatter(this.rawScriptContent);
+        let newContent = '';
 
-        return segments.map((segment, index) => {
-          if (segment.type === 'cue') {
-            // Format cue data for card display
-            const formattedCueData = CueParser.formatForCard(segment.data);
-            return {
-              type: 'cue',
-              data: formattedCueData,
-              segmentIndex: index
-            };
+        newSegments.forEach((segment) => {
+          if (segment.type === 'text') {
+            // Add speaker paragraph - KEEP empty paragraphs for proper editing
+            const speaker = segment.speaker || 'josh';
+            const content = segment.content || '';
+            // Always add paragraph, even if empty (needed for new paragraph creation)
+            newContent += `<p class="${speaker}">${content}</p>\n\n`;
+          } else if (segment.type === 'cue') {
+            // Reconstruct cue block from rawData
+            if (segment.data && segment.data.rawData) {
+              newContent += CueParser.formatCueToMarkdown(segment.data.rawData);
+              newContent += '\n\n';
+            }
           }
-          return {
-            ...segment,
-            segmentIndex: index
-          };
         });
-      } catch (error) {
-        console.error('Error parsing script segments:', error);
-        // Fallback: treat as single text segment
-        const contentWithoutFrontmatter = this.stripYamlFrontmatter(this.rawScriptContent);
-        return [{
-          type: 'text',
-          content: contentWithoutFrontmatter,
-          speaker: 'josh',
-          needsParagraphTags: true,
-          segmentIndex: 0
-        }];
+
+        // Update rawScriptContent with frontmatter + reordered content
+        const newRawContent = frontmatter ? `${frontmatter}\n\n${newContent.trim()}` : newContent.trim();
+        this.$emit('update:scriptContent', newRawContent);
+      }
+    },
+
+    // Draggable segments - combines scriptSegments with pending cue ghost
+    draggableSegments: {
+      get() {
+        const segments = [...this.scriptSegments];
+
+        console.log('🔄 draggableSegments getter called:', {
+          pendingCueData: this.pendingCueData ? 'EXISTS' : 'NULL',
+          showCuePlacement: this.showCuePlacement,
+          pendingCueDataType: this.pendingCueData ? (Array.isArray(this.pendingCueData) ? 'ARRAY' : 'STRING') : 'N/A',
+          pendingCueDataLength: this.pendingCueData ? (Array.isArray(this.pendingCueData) ? this.pendingCueData.length : this.pendingCueData.length) : 0
+        });
+
+        // If there's a pending cue, add it as a ghost segment at the end
+        if (this.pendingCueData && this.showCuePlacement) {
+          console.log('✅ Adding pending cue(s) to draggable segments');
+          // Parse the cue block to create a segment
+          const cueBlocks = Array.isArray(this.pendingCueData) ? this.pendingCueData : [this.pendingCueData];
+
+          cueBlocks.forEach((cueBlock, idx) => {
+            console.log(`📦 Parsing cue block ${idx + 1}/${cueBlocks.length}:`, cueBlock.substring(0, 100));
+            const cueData = CueParser.parseCueBlock(cueBlock);
+            if (cueData) {
+              console.log('✅ Cue data parsed successfully:', cueData.type, cueData.slug);
+              segments.push({
+                type: 'cue',
+                data: CueParser.formatForCard(cueData),
+                isPending: true, // Mark as pending for special styling
+                segmentIndex: segments.length
+              });
+            } else {
+              console.error('❌ Failed to parse cue block:', cueBlock.substring(0, 100));
+            }
+          });
+          console.log('📊 Total segments after adding pending:', segments.length);
+        } else {
+          console.log('⏭️ No pending cues to add');
+        }
+
+        return segments;
+      },
+      set(newSegments) {
+        console.log('🔄 draggableSegments setter called with', newSegments.length, 'segments');
+
+        // Check if pending cue was moved (no longer at end)
+        const pendingIndex = newSegments.findIndex(seg => seg.isPending);
+
+        if (pendingIndex !== -1 && pendingIndex < newSegments.length - 1) {
+          console.log('📍 Pending cue dragged to position:', pendingIndex);
+
+          // Insert the pending cue at the dragged position
+          this.insertPendingCueAtIndex(pendingIndex);
+
+          // Clear pending state
+          this.pendingCueData = null;
+          this.showCuePlacement = false;
+        } else {
+          // Normal reorder without pending cue - use scriptSegments setter
+          const realSegments = newSegments.filter(seg => !seg.isPending);
+          console.log('📝 Normal reorder without pending cue');
+
+          // Reconstruct content and update
+          const frontmatter = this.extractYamlFrontmatter(this.rawScriptContent);
+          let newContent = '';
+
+          realSegments.forEach((segment) => {
+            if (segment.type === 'text') {
+              const speaker = segment.speaker || 'josh';
+              const content = segment.content || '';
+              // Always add paragraph, even if empty (needed for new paragraph creation)
+              newContent += `<p class="${speaker}">${content}</p>\n\n`;
+            } else if (segment.type === 'cue') {
+              if (segment.data && segment.data.rawData) {
+                newContent += CueParser.formatCueToMarkdown(segment.data.rawData);
+                newContent += '\n\n';
+              }
+            }
+          });
+
+          const newRawContent = frontmatter ? `${frontmatter}\n\n${newContent.trim()}` : newContent.trim();
+          this.$emit('update:scriptContent', newRawContent);
+          this.$emit('save-current');
+        }
       }
     },
 
@@ -1744,8 +2034,39 @@ export default {
         }));
     },
 
+    // Get highlight color from database for slug field attention
+    highlightColor() {
+      const colorName = getColorValue('highlight') || 'yellow-lighten-3';
+      const resolved = resolveVuetifyColor(colorName);
+      // Convert to rgba for animation
+      return resolved || '#FFF9C4';
+    },
+
   },
   methods: {
+    // Focus and highlight slug field for newly created items
+    focusSlugField() {
+      console.log('🎯 focusSlugField() called')
+      this.slugNeedsAttention = true
+      this.$nextTick(() => {
+        const slugField = this.$refs.slugFieldRef
+        console.log('🎯 slugFieldRef:', slugField)
+        if (slugField && slugField.$el) {
+          const input = slugField.$el.querySelector('input')
+          console.log('🎯 input element:', input)
+          if (input) {
+            input.focus()
+            input.select()
+            console.log('🎯 Slug field focused and selected, highlighted yellow')
+          } else {
+            console.warn('⚠️ Could not find input element in slug field')
+          }
+        } else {
+          console.warn('⚠️ Slug field ref not available')
+        }
+      })
+    },
+
     // Parse HH:MM:SS:FF duration format to total seconds
     parseDurationToSeconds(duration) {
       if (!duration || typeof duration !== 'string') return 0;
@@ -2145,6 +2466,16 @@ export default {
     },
 
     updateMetadata(field, value) {
+      // If slug is being updated, check if it's valid and clear attention highlight
+      if (field === 'slug' && value && value.trim().length > 0) {
+        // Check if slug passes validation rules
+        const isValid = this.slugRules.every(rule => rule(value) === true)
+        if (isValid) {
+          this.slugNeedsAttention = false
+          console.log('✅ Valid slug entered, clearing attention highlight')
+        }
+      }
+
       this.$emit('metadata-change', { field, value })
     },
 
@@ -2281,6 +2612,21 @@ export default {
           return;
         }
 
+        if (cueType === 'DIR') {
+          this.$emit('show-dir-modal');
+          return;
+        }
+
+        if (cueType === 'BUMP') {
+          this.$emit('show-bump-modal');
+          return;
+        }
+
+        if (cueType === 'STING') {
+          this.$emit('show-sting-modal');
+          return;
+        }
+
         // Fallback for other cue types
         const cueText = `**[${cueType}: ]**`;
         this.insertCueAtCursor(cueText);
@@ -2341,6 +2687,24 @@ export default {
         if (cueType === 'PKG') {
           this.$emit('show-pkg-modal');
           console.log('🎬 PKG modal opened - placement overlay will activate when modal closes');
+          return;
+        }
+
+        if (cueType === 'DIR') {
+          this.$emit('show-dir-modal');
+          console.log('🎬 DIR modal opened - placement overlay will activate when modal closes');
+          return;
+        }
+
+        if (cueType === 'BUMP') {
+          this.$emit('show-bump-modal');
+          console.log('🎬 BUMP modal opened - placement overlay will activate when modal closes');
+          return;
+        }
+
+        if (cueType === 'STING') {
+          this.$emit('show-sting-modal');
+          console.log('🎬 STING modal opened - placement overlay will activate when modal closes');
           return;
         }
 
@@ -2543,11 +2907,11 @@ export default {
         // Close the modal
         this.showImgModal = false;
 
-        // Simply append to the end of script content
+        // Simply append to the end of script content with blank paragraph
         const currentContent = this.scriptContent || '';
-        const newContent = currentContent + '\n\n' + imgCueBlock + '\n\n';
+        const newContent = currentContent + '\n\n' + imgCueBlock + '\n\n<p class="josh"></p>\n\n';
         this.$emit('update:scriptContent', newContent);
-        console.log('✅ IMG cue inserted at end of script');
+        console.log('✅ IMG cue inserted at end of script with blank paragraph');
 
         // Clear pending data
         this.pendingCueData = null;
@@ -2659,7 +3023,7 @@ export default {
         console.log('📝 Reconstructed raw content length:', newRawContent.length);
 
         // Update single source of truth
-        this.rawScriptContent = newRawContent;
+        this.$emit('update:scriptContent', newRawContent);
 
         // Clear buffer and timer
         delete this.segmentEditBuffer[segmentIndex];
@@ -2749,7 +3113,7 @@ export default {
 
       // Reconstruct raw content - this will create the new <p> tag in Code mode
       const newRawContent = this.reconstructRawContent(segments);
-      this.rawScriptContent = newRawContent;
+      this.$emit('update:scriptContent', newRawContent);
 
       // Focus the new empty paragraph for immediate typing
       this.$nextTick(() => {
@@ -2835,7 +3199,7 @@ export default {
 
       // Reconstruct and update Code mode
       const newRawContent = this.reconstructRawContent(segments);
-      this.rawScriptContent = newRawContent;
+      this.$emit('update:scriptContent', newRawContent);
 
       // Focus previous paragraph at merge point
       this.$nextTick(() => {
@@ -2872,7 +3236,7 @@ export default {
 
       // Reconstruct and update Code mode
       const newRawContent = this.reconstructRawContent(segments);
-      this.rawScriptContent = newRawContent;
+      this.$emit('update:scriptContent', newRawContent);
     },
 
     // Reconstruct raw markdown from segments
@@ -2936,6 +3300,9 @@ export default {
       if (cueData.type === 'IMG') {
         this.editingCueData = cueData;
         this.showImgModal = true;
+      } else if (cueData.type === 'SOT') {
+        // Emit event to parent (ContentEditor) to open SOT modal with cue data
+        this.$emit('edit-sot-cue', cueData);
       }
       // Add other cue type modals as needed
     },
@@ -2975,7 +3342,7 @@ export default {
 
       // Reconstruct raw content
       const newRawContent = this.reconstructRawContent(this.scriptSegments);
-      this.rawScriptContent = newRawContent;
+      this.$emit('update:scriptContent', newRawContent);
 
       console.log('Meta updated successfully');
     },
@@ -2999,7 +3366,7 @@ export default {
       // Remove the cue segment and update script content
       const updatedSegments = this.scriptSegments.filter((_, i) => i !== index);
       const newRawContent = this.reconstructRawContent(updatedSegments);
-      this.rawScriptContent = newRawContent;
+      this.$emit('update:scriptContent', newRawContent);
 
       // Clear selection if the deleted cue was selected
       if (this.selectedCueIndex === index) {
@@ -3117,7 +3484,7 @@ export default {
 
         // Update script content
         const newRawContent = this.reconstructRawContent(updatedSegments);
-        this.rawScriptContent = newRawContent;
+        this.$emit('update:scriptContent', newRawContent);
 
         console.log(`✅ Applied FSQ split: ${recommendations.splitRecommendations.length} quotes inserted`);
       }
@@ -3150,7 +3517,7 @@ export default {
 
         // Update script content
         const newRawContent = this.reconstructRawContent(updatedSegments);
-        this.rawScriptContent = newRawContent;
+        this.$emit('update:scriptContent', newRawContent);
 
         console.log('✅ Applied modifications to cue');
       }
@@ -3248,7 +3615,7 @@ export default {
 
       console.log('🗑️ Segments remaining after bulk delete:', updatedSegments.length);
       const newRawContent = this.reconstructRawContent(updatedSegments);
-      this.rawScriptContent = newRawContent;
+      this.$emit('update:scriptContent', newRawContent);
 
       // Clear all selections
       this.clearMultiSelection();
@@ -3280,7 +3647,7 @@ export default {
 
       // Update content
       const newRawContent = this.reconstructRawContent(updatedSegments);
-      this.rawScriptContent = newRawContent;
+      this.$emit('update:scriptContent', newRawContent);
 
       // Clear selection
       this.clearMultiSelection();
@@ -3451,6 +3818,66 @@ export default {
       }
 
       console.log('📄 Script mode: Activating placement overlay for PKG insertion');
+      this.showCuePlacement = true;
+      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+    },
+
+    async handleDirCueSubmit(dirCueText) {
+      console.log('🎬 DIR cue submitted to EditorPanel for placement-based insertion');
+
+      this.pendingCueData = dirCueText;
+      this.pendingCueType = 'DIR';
+
+      if (this.editorMode === 'code') {
+        console.log('📝 Code mode: Inserting DIR at cursor position');
+        this.insertCueAtCursor(dirCueText);
+        this.pendingCueData = null;
+        this.pendingCueType = null;
+        console.log('✅ DIR cue inserted in code mode');
+        return;
+      }
+
+      console.log('📄 Script mode: Activating placement overlay for DIR insertion');
+      this.showCuePlacement = true;
+      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+    },
+
+    async handleBumpCueSubmit(bumpCueText) {
+      console.log('🎬 BUMP cue submitted to EditorPanel for placement-based insertion');
+
+      this.pendingCueData = bumpCueText;
+      this.pendingCueType = 'BUMP';
+
+      if (this.editorMode === 'code') {
+        console.log('📝 Code mode: Inserting BUMP at cursor position');
+        this.insertCueAtCursor(bumpCueText);
+        this.pendingCueData = null;
+        this.pendingCueType = null;
+        console.log('✅ BUMP cue inserted in code mode');
+        return;
+      }
+
+      console.log('📄 Script mode: Activating placement overlay for BUMP insertion');
+      this.showCuePlacement = true;
+      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+    },
+
+    async handleStingCueSubmit(stingCueText) {
+      console.log('🎬 STING cue submitted to EditorPanel for placement-based insertion');
+
+      this.pendingCueData = stingCueText;
+      this.pendingCueType = 'STING';
+
+      if (this.editorMode === 'code') {
+        console.log('📝 Code mode: Inserting STING at cursor position');
+        this.insertCueAtCursor(stingCueText);
+        this.pendingCueData = null;
+        this.pendingCueType = null;
+        console.log('✅ STING cue inserted in code mode');
+        return;
+      }
+
+      console.log('📄 Script mode: Activating placement overlay for STING insertion');
       this.showCuePlacement = true;
       console.log('📍 Placement overlay activated - waiting for user to click drop zone');
     },
@@ -3668,12 +4095,12 @@ export default {
 
       console.log('📝 Inserting at position:', cursorPosition);
 
-      // Insert cue block at cursor position with proper spacing
+      // Insert cue block at cursor position with proper spacing and blank paragraph
       const beforeCursor = currentScript.slice(0, cursorPosition);
       const afterCursor = currentScript.slice(cursorPosition);
 
-      // Add newlines around cue block for proper formatting
-      const newScript = beforeCursor + '\n\n' + cueContent + '\n\n' + afterCursor;
+      // Add newlines around cue block and blank paragraph for proper formatting
+      const newScript = beforeCursor + '\n\n' + cueContent + '\n\n<p class="josh"></p>\n\n' + afterCursor;
 
       console.log('📝 New script length:', newScript.length);
 
@@ -3698,8 +4125,8 @@ export default {
       const paragraphMatches = [...currentScript.matchAll(/<p[^>]*class="[^"]*"[^>]*>.*?<\/p>/gs)];
 
       if (paragraphMatches.length === 0) {
-        // No paragraphs found, append at end
-        const newScript = currentScript + '\n\n' + cueContent + '\n\n';
+        // No paragraphs found, append at end with blank paragraph
+        const newScript = currentScript + '\n\n' + cueContent + '\n\n<p class="josh"></p>\n\n';
         this.$emit('update:scriptContent', newScript);
         return;
       }
@@ -3712,23 +4139,23 @@ export default {
       const betweenZoneIndex = placement.index;
 
       if (betweenZoneIndex === 0) {
-        // Insert before first paragraph
+        // Insert before first paragraph with blank paragraph after cue
         const firstParagraph = paragraphMatches[0];
         const insertPosition = firstParagraph.index;
 
         const beforeCue = currentScript.slice(0, insertPosition);
         const afterCue = currentScript.slice(insertPosition);
 
-        const newScript = beforeCue + cueContent + '\n\n' + afterCue;
+        const newScript = beforeCue + cueContent + '\n\n<p class="josh"></p>\n\n' + afterCue;
         this.$emit('update:scriptContent', newScript);
-        console.log('🎯 Inserted before first paragraph');
+        console.log('🎯 Inserted before first paragraph with blank paragraph');
       } else if (betweenZoneIndex > paragraphMatches.length) {
-        // Insert at end
-        const newScript = currentScript + '\n\n' + cueContent + '\n\n';
+        // Insert at end with blank paragraph after cue
+        const newScript = currentScript + '\n\n' + cueContent + '\n\n<p class="josh"></p>\n\n';
         this.$emit('update:scriptContent', newScript);
-        console.log('🎯 Inserted at end');
+        console.log('🎯 Inserted at end with blank paragraph');
       } else {
-        // Insert after paragraph[betweenZoneIndex - 1]
+        // Insert after paragraph[betweenZoneIndex - 1] with blank paragraph after cue
         const paragraphIndex = betweenZoneIndex - 1;
         const paragraphMatch = paragraphMatches[paragraphIndex];
         const insertPosition = paragraphMatch.index + paragraphMatch[0].length;
@@ -3736,9 +4163,9 @@ export default {
         const beforeCue = currentScript.slice(0, insertPosition);
         const afterCue = currentScript.slice(insertPosition);
 
-        const newScript = beforeCue + '\n\n' + cueContent + '\n\n' + afterCue;
+        const newScript = beforeCue + '\n\n' + cueContent + '\n\n<p class="josh"></p>\n\n' + afterCue;
         this.$emit('update:scriptContent', newScript);
-        console.log(`🎯 Inserted after paragraph ${paragraphIndex}`);
+        console.log(`🎯 Inserted after paragraph ${paragraphIndex} with blank paragraph`);
       }
     },
 
@@ -3779,6 +4206,9 @@ export default {
       }
 
       newParagraphContent += cueContent + '\n\n';
+
+      // Always add blank paragraph after cue
+      newParagraphContent += `<p class="${paragraphClass}"></p>\n\n`;
 
       if (afterText.trim()) {
         newParagraphContent += `<p class="${paragraphClass}">${afterText.trim()}</p>`;
@@ -3926,6 +4356,14 @@ export default {
         case 'p':
           event.preventDefault();
           this.insertCue('PKG');
+          break;
+        case 'b':
+          event.preventDefault();
+          this.insertCue('BUMP');
+          break;
+        case 't':
+          event.preventDefault();
+          this.insertCue('STING');
           break;
         default:
           console.log('❓ Unhandled hotkey:', event.key);
@@ -4128,7 +4566,7 @@ export default {
           if (segments[index] && segments[index].type === 'text') {
             segments[index].content = this.segmentEditBuffer[index];
             const newRawContent = this.reconstructRawContent(segments);
-            this.rawScriptContent = newRawContent;
+            this.$emit('update:scriptContent', newRawContent);
 
             // Clear buffer and timer
             delete this.segmentEditBuffer[index];
@@ -5700,19 +6138,94 @@ export default {
 
         this.audioElement.play().catch(reject);
       });
+    },
+
+    // Insert pending cue at specific index
+    insertPendingCueAtIndex(index) {
+      console.log('📍 Inserting pending cue at index:', index);
+
+      const cueBlocks = Array.isArray(this.pendingCueData) ? this.pendingCueData : [this.pendingCueData];
+      const frontmatter = this.extractYamlFrontmatter(this.rawScriptContent);
+      const contentWithoutFrontmatter = this.stripYamlFrontmatter(this.rawScriptContent);
+
+      // Parse current segments
+      const segments = CueParser.parseContent(contentWithoutFrontmatter);
+
+      // Insert cue blocks at the specified index
+      cueBlocks.forEach((cueBlock, i) => {
+        segments.splice(index + i, 0, {
+          type: 'cue',
+          content: cueBlock,
+          data: CueParser.parseCueBlock(cueBlock)
+        });
+      });
+
+      // Reconstruct content
+      const newContent = CueParser.reconstructContent(segments);
+      const newRawContent = frontmatter ? `${frontmatter}\n\n${newContent}` : newContent;
+
+      this.$emit('update:scriptContent', newRawContent);
+      this.$emit('save-current');
+    },
+
+    // Draggable handlers
+    getSegmentKey(segment) {
+      // For cue segments, use assetId or slug for stable key
+      if (segment.type === 'cue' && segment.data) {
+        return segment.data.assetId || segment.data.slug || `cue-${segment.data.type}-${Math.random()}`;
+      }
+      // For text segments, use content hash or first 50 chars as key
+      if (segment.type === 'text') {
+        const contentKey = segment.content ? segment.content.substring(0, 50) : 'empty';
+        return `text-${segment.speaker}-${contentKey}`;
+      }
+      return `segment-${Math.random()}`;
+    },
+
+    handleSegmentDragStart(evt) {
+      console.log('🎯 Drag started:', evt.oldIndex);
+      this.isDragging = true;
+    },
+
+    handleSegmentDragEnd(evt) {
+      console.log('🎯 Drag ended:', evt.oldIndex, '→', evt.newIndex);
+      this.isDragging = false;
+
+      if (evt.oldIndex !== evt.newIndex) {
+        console.log('📝 Segment reordered, syncing to backend');
+        this.$emit('save-current');
+      }
     }
   }
 }
 </script>
 
 <style scoped>
-.editor-panel {
+/* Yellow highlight for slug field that needs attention */
+.slug-needs-attention {
+  animation: slug-pulse 2s ease-in-out infinite;
+}
+
+@keyframes slug-pulse {
+  0%, 100% {
+    background-color: var(--highlight-color, rgba(255, 235, 59, 0.3));
+    opacity: 0.3;
+  }
+  50% {
+    background-color: var(--highlight-color, rgba(255, 235, 59, 0.6));
+    opacity: 0.6;
+  }
+}
+
+/* Editor panel content - no scrolling, parent wrapper handles it */
+.editor-panel-content {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
-.editor-panel.full-width {
+.editor-panel-content.full-width {
   width: 100%;
 }
 
@@ -5722,14 +6235,14 @@ export default {
   flex-direction: column !important;
   height: auto !important;
   max-height: none !important;
-  min-height: 100vh !important;
+  min-height: 0 !important;
 }
 
 /* Override any Vuetify fill-height constraints */
 .editor-card.fill-height {
   height: auto !important;
   max-height: none !important;
-  min-height: 100vh !important;
+  min-height: 0 !important;
 }
 
 .editor-card .v-card-text {
@@ -6238,7 +6751,7 @@ export default {
 /* Auto-sizing Cue Toolbar inside Editor Content */
 .editor-cues-toolbar {
   position: sticky !important;
-  top: 48px !important; /* Position below main toolbar */
+  top: 0 !important; /* Stick to top of scrolling container (.editor-panel) */
   z-index: 9 !important;
   width: 100% !important;
   background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%) !important;
@@ -6301,14 +6814,25 @@ export default {
 }
 
 .cue-btn-content-flex .hotkey-display {
-  font-size: 0.6rem !important;
-  opacity: 0.9 !important;
+  font-size: 0.65rem !important;
+  opacity: 1 !important;
   line-height: 1 !important;
-  font-weight: 500 !important;
+  font-weight: 700 !important;
+  color: #000000 !important;
+  text-shadow: 0 0 3px rgba(255, 255, 255, 0.9), 0 0 1px rgba(255, 255, 255, 1) !important;
+  letter-spacing: 0.3px !important;
 }
 
 .cue-btn-content-flex .v-icon {
   font-size: 16px !important;
+}
+
+/* DIR button - increase text contrast */
+.dir-btn .cue-label,
+.dir-btn .hotkey-display,
+.dir-btn .v-icon {
+  color: #000000 !important;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.8);
 }
 
 /* Script Slug Field Styling */
@@ -6365,7 +6889,7 @@ export default {
 
 /* Visual Script Mode Styling */
 .visual-script-container {
-  padding: 20px 40px 5em 40px;
+  padding: 20px 40px 20vh 40px; /* Large bottom padding ensures scrollable space */
   background-color: white;
   font-family: 'Times New Roman', serif;
   font-size: 14px;
@@ -6640,7 +7164,7 @@ export default {
 
 /* Clean textarea styling */
 .speaker-textarea {
-  font-family: 'Helvetica', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 16px;
   line-height: 1.5;
   padding: 0;
@@ -6695,7 +7219,7 @@ export default {
   box-sizing: border-box !important;
   background-color: #fafafa !important;
   color: #000000 !important;
-  font-family: 'Helvetica', sans-serif !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
   font-size: 16px !important;
   padding: 0 !important;
   line-height: 1.5 !important;
@@ -7037,5 +7561,87 @@ textarea.yellow-cursor-highlight {
   vertical-align: top !important;
   overflow: visible !important;
   min-height: auto !important;
+}
+
+/* Draggable states */
+.drag-handle {
+  transition: color 0.2s ease;
+  opacity: 0.5;
+}
+
+.drag-handle:hover {
+  opacity: 1;
+  color: rgb(var(--v-theme-primary)) !important;
+}
+
+.content-segment {
+  transition: opacity 0.2s ease, transform 0.2s ease, max-height 0.2s ease;
+}
+
+.ghost-segment {
+  height: 60px !important;
+  min-height: 60px !important;
+  background: var(--draglight-color) !important;
+  border: 3px dashed var(--dropline-color) !important;
+  border-radius: 0 !important;
+  display: block !important;
+  visibility: visible !important;
+}
+
+/* Hide the actual content inside the ghost placeholder */
+.ghost-segment > * {
+  visibility: hidden !important;
+}
+
+.chosen-segment {
+  opacity: 0.8;
+  cursor: grabbing !important;
+}
+
+.drag-segment {
+  opacity: 0.7;
+}
+
+/* Collapse cue cards to title bar only when actively being dragged (not on mousedown) */
+.drag-segment .cue-card .v-card-text,
+.drag-segment .cue-card .v-card-actions {
+  display: none !important;
+}
+
+.drag-segment .cue-card {
+  max-height: 60px !important;
+  overflow: hidden !important;
+}
+
+/* Also collapse speaker paragraph content when dragging */
+.drag-segment .paragraph-content {
+  max-height: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+}
+
+/* Keep chosen-segment visible but slightly dimmed */
+.chosen-segment {
+  opacity: 0.9;
+  cursor: grabbing !important;
+}
+
+/* Pending cue styling - highlight and pulse */
+.content-segment:has([data-pending="true"]) {
+  animation: pending-pulse 2s ease-in-out infinite;
+  border: 3px dashed rgb(var(--v-theme-primary));
+  border-radius: 8px;
+  background: rgba(var(--v-theme-primary), 0.05);
+}
+
+@keyframes pending-pulse {
+  0%, 100% {
+    border-color: rgb(var(--v-theme-primary));
+    box-shadow: 0 0 0 0 rgba(var(--v-theme-primary), 0.4);
+  }
+  50% {
+    border-color: rgba(var(--v-theme-primary), 0.6);
+    box-shadow: 0 0 0 8px rgba(var(--v-theme-primary), 0);
+  }
 }
 </style>

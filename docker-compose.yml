@@ -13,12 +13,16 @@ services:
       - /mnt/sync/disaffected/logs:/home/logs
       - /mnt/sync/shared_media:/shared_media
       - /mnt/sync/disaffected/episodes:/home/episodes
+      - /mnt/asterisk/recordings:/asterisk/recordings:ro
+      - /home/kevin/.claude/todos:/home/kevin/.claude/todos:ro
     networks:
       - video-post
     environment:
       - MODULE_NAME=main
       - VARIABLE_NAME=app
       - WEB_CONCURRENCY=1
+      - TIMEOUT=300
+      - GRACEFUL_TIMEOUT=300
       - JWT_SECRET_KEY=ea7GZD3mQy3EZYD4YZsFmr/9JwBgZFCaWyznnjhOyow=
       - JWT_ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=2880

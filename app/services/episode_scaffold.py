@@ -286,6 +286,9 @@ class EpisodeScaffoldService:
 
             logger.info(f"Created episode {episode_number} with AssetID {asset_id} using template {template.name} in episodes table")
 
+            # Create rundown items from template (with inheritance)
+            await self.create_rundown_items_from_template(template, episodes_record.id, episode_number)
+
             # Return response based on the episodes record
             return BlueprintResponse(
                 id=episodes_record.id,
@@ -361,3 +364,76 @@ class EpisodeScaffoldService:
                 updated_at=episode.updated_at
             ))
         return results
+
+    async def create_rundown_items_from_template(self, template: BlueprintTemplate, episode_id: int, episode_number: str):
+        """
+        Create rundown items from blueprint template nodes (with cascading inheritance support).
+
+        Args:
+            template: The blueprint template (may have parent templates)
+            episode_id: The episode record ID
+            episode_number: Episode number string
+        """
+        from models_v2 import RundownItem
+
+        # Get resolved nodes (includes inherited nodes from parent templates)
+        resolved_nodes = template.get_resolved_nodes(self.db)
+
+        # Filter for rundown_item type nodes only
+        rundown_nodes = [node for node in resolved_nodes.values() if node.node_type == 'rundown_item']
+
+        if not rundown_nodes:
+            logger.info(f"No rundown item templates found in template {template.name}")
+            return
+
+        # Sort by sort_order
+        rundown_nodes.sort(key=lambda n: n.sort_order)
+
+        # Create rundown items
+        created_count = 0
+        for idx, node in enumerate(rundown_nodes):
+            metadata = node.rundown_item_metadata or {}
+
+            # Build script content with YAML frontmatter
+            frontmatter_data = {
+                'slug': metadata.get('slug', node.name.lower().replace(' ', '-')),
+                'type': metadata.get('item_type', 'segment'),
+                'order': (idx + 1) * 10,  # Spacing of 10 for future insertions
+                'index': (idx + 1) * 10,
+                'duration': metadata.get('duration', '00:05:00'),
+                'status': metadata.get('status', 'draft'),
+                'title': node.name
+            }
+
+            # Add YAML frontmatter to content
+            script_content = "---\n"
+            for key, value in frontmatter_data.items():
+                if isinstance(value, str):
+                    script_content += f"{key}: \"{value}\"\n"
+                else:
+                    script_content += f"{key}: {value}\n"
+            script_content += "---\n\n"
+
+            # Add template content if provided
+            if node.content:
+                script_content += node.content
+            else:
+                script_content += f"# {node.name}\n\n[Content to be added]\n"
+
+            # Create rundown item
+            rundown_item = RundownItem(
+                episode_id=episode_id,
+                title=node.name,
+                slug=frontmatter_data['slug'],
+                item_type=frontmatter_data['type'],
+                order_in_rundown=frontmatter_data['order'],
+                duration=frontmatter_data['duration'],
+                status=frontmatter_data['status'],
+                script_content=script_content
+            )
+
+            self.db.add(rundown_item)
+            created_count += 1
+
+        self.db.commit()
+        logger.info(f"Created {created_count} rundown items for episode {episode_number} from template {template.name}")
