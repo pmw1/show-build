@@ -665,13 +665,22 @@ def process_sot_video_multi_phase(
     trim_end: str = "00:00:00",
     job_type: str = "full_process",
     clips: list = None,
-    asset_id: str = None
+    asset_id: str = None,
+    devel_mode: bool = False
 ):
     """
     Multi-phase SOT video processing pipeline with intermediate files.
 
-    Designed to be extensible - new phases can be added without breaking existing pipeline.
-    Job type determines which processing workflow to execute.
+    NEW PHASE ORDER (as of 2025-10-22):
+    - Phase 0: Pre-Analysis (analyze RAW uploaded file)
+    - Phase 1: Trimming (remove unwanted content FIRST - skip if no trim needed)
+    - Phase 1.5: Audio Extract + Whisper Transcription
+    - Phase 2: Video Normalization (aspect-aware: 16:9, 9:16, 1:1)
+    - Phase 2.5: Audio Channel Fix (dual-mono, channel mapping)
+    - Phase 3: Audio Normalization (EBU R128 loudness)
+    - Phase 4: Derivatives (10-15 thumbnails + MP3 extract)
+    - Phase 5: Final Move to Assets
+    - Phase 8: Post-Analysis (verify final output)
 
     Args:
         temp_job_id: Temporary job ID (e.g., "sot_20251011_143022_abc123")
@@ -681,9 +690,11 @@ def process_sot_video_multi_phase(
         trim_end: End time for trimming (HH:MM:SS)
         job_type: Processing workflow (single_trim, individual_clips, montage, full_process)
         clips: Array of clip objects for individual_clips/montage modes
+        asset_id: AssetID for linking to cue block
+        devel_mode: If True, keep all intermediate files and return paths in payload
 
     Returns:
-        dict: Final file paths and processing metadata
+        dict: Final file paths, processing metadata, and failure report
     """
     # Cross-platform working directory
     media_root = get_media_root()
@@ -695,13 +706,25 @@ def process_sot_video_multi_phase(
     worker_platform = platform.system()
 
     try:
-        logger.info(f"🎬 Starting multi-phase processing on {worker_name} ({worker_platform}) for {temp_job_id} (job_type: {job_type})")
+        logger.info(f"🎬 Starting multi-phase processing on {worker_name} ({worker_platform}) for {temp_job_id} (job_type: {job_type}, devel_mode: {devel_mode})")
 
-        # Update job record with job_type and clips_data
+        # Initialize failure tracking
         import json
         from database import SessionLocal
         from models_v2 import SOTProcessingJob  # Speaker now in models_v2, no import order issue
 
+        processing_report = {
+            "job_id": temp_job_id,
+            "overall_status": "in_progress",
+            "start_time": str(func.now()),
+            "phases": {},
+            "failures": [],
+            "warnings": [],
+            "devel_mode": devel_mode,
+            "intermediate_files": [] if devel_mode else None
+        }
+
+        # Update job record with job_type and clips_data
         db = SessionLocal()
         try:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
@@ -827,6 +850,33 @@ def process_sot_video_multi_phase(
         duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
         logger.info(f"Phase 0 analysis: {width}x{height} {orientation}, {frame_rate}fps, {audio_config}, {duration_formatted}")
+
+        # Store pre-analysis in database
+        pre_analysis_data = {
+            "duration": duration_formatted,
+            "duration_seconds": duration_seconds,
+            "resolution": f"{width}x{height}",
+            "width": width,
+            "height": height,
+            "aspect_ratio": round(width / height, 3) if height > 0 else 0,
+            "orientation": orientation,
+            "framerate": frame_rate,
+            "audio_channels": audio_channels,
+            "audio_layout": audio_layout,
+            "sample_rate": sample_rate,
+            "audio_config": audio_config
+        }
+
+        db = SessionLocal()
+        try:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.pre_analysis = pre_analysis_data
+                db.commit()
+        finally:
+            db.close()
+
+        processing_report["phases"]["phase0"] = {"status": "success", "data": pre_analysis_data}
 
         # Update cue block with technical metadata
         if asset_id:
@@ -1110,25 +1160,27 @@ def process_sot_video_multi_phase(
         )
         video_duration = float(duration_probe.stdout.strip())
 
-        # Generate 5 thumbnail options at evenly spaced intervals
+        # Generate 15 thumbnail options at evenly spaced intervals
         # Skip first 2 seconds and last 2 seconds to avoid fade/black
         start_offset = 2
         end_offset = max(2, video_duration - 2)
         usable_duration = end_offset - start_offset
+        num_thumbnails = 15  # Generate 15 options for user selection
 
         thumbnail_times = []
         if usable_duration > 0:
-            # Generate 5 evenly spaced timepoints
-            for i in range(5):
-                time_point = start_offset + (usable_duration * i / 4)
+            # Generate evenly spaced timepoints
+            for i in range(num_thumbnails):
+                time_point = start_offset + (usable_duration * i / (num_thumbnails - 1))
                 thumbnail_times.append(time_point)
         else:
-            # Video too short, just use 1 second
-            thumbnail_times = [1, 1, 1, 1, 1]
+            # Video too short, just use 1 second mark
+            thumbnail_times = [1] * num_thumbnails
 
         phase4_thumbs = []
+        thumbnail_filenames = []  # Store just filenames for database
         for i, time_point in enumerate(thumbnail_times, 1):
-            thumb_file = working_dir / f"{temp_job_id}_4_thumb_{i}.jpg"
+            thumb_file = working_dir / f"{temp_job_id}_4_thumb_{i:02d}.jpg"
             thumb_cmd = [
                 ffmpeg, "-y",
                 "-ss", str(time_point),
@@ -1139,7 +1191,22 @@ def process_sot_video_multi_phase(
             ]
             subprocess.run(thumb_cmd, check=True, capture_output=True)
             phase4_thumbs.append(thumb_file)
-            logger.info(f"Phase 4: Generated thumbnail {i}/5 at {time_point:.1f}s")
+            thumbnail_filenames.append(f"{temp_job_id}_4_thumb_{i:02d}.jpg")
+            logger.info(f"Phase 4: Generated thumbnail {i}/{num_thumbnails} at {time_point:.1f}s")
+
+        # Store thumbnail candidates in database for user selection
+        db = SessionLocal()
+        try:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.thumbnail_candidates = thumbnail_filenames
+                # Set first thumbnail as default selection
+                job.selected_thumbnail = thumbnail_filenames[7] if len(thumbnail_filenames) >= 8 else thumbnail_filenames[0]
+                db.commit()
+        finally:
+            db.close()
+
+        logger.info(f"Phase 4: Stored {len(thumbnail_filenames)} thumbnail candidates in database")
 
         # Audio extract (full segment)
         phase4_audio = working_dir / f"{temp_job_id}_4_audio.mp3"
@@ -1181,14 +1248,14 @@ def process_sot_video_multi_phase(
         shutil.move(str(phase3_output), str(final_video))
         shutil.move(str(phase4_audio), str(final_audio))
 
-        # Move all 5 thumbnails
+        # Move all 15 thumbnails
         final_thumbs = []
         for i, thumb_file in enumerate(phase4_thumbs, 1):
-            final_thumb = final_dir / f"{normalized_slug}-thumb-{i}.jpg"
+            final_thumb = final_dir / f"{normalized_slug}-thumb-{i:02d}.jpg"
             shutil.move(str(thumb_file), str(final_thumb))
             final_thumbs.append(final_thumb)
 
-        logger.info(f"Phase 5 complete: video, audio, and 5 thumbnails moved to {final_dir}")
+        logger.info(f"Phase 5 complete: video, audio, and {len(final_thumbs)} thumbnails moved to {final_dir}")
 
         # Get video duration for metadata
         duration_cmd = [
@@ -1222,30 +1289,81 @@ def process_sot_video_multi_phase(
         seconds = int(duration % 60)
         duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-        # Build thumbnail URLs for all 5 options
+        # Build thumbnail URLs for all 15 options
         thumbnail_urls = [
-            f"/episodes/{episode}/assets/sots/{normalized_slug}-thumb-{i}.jpg"
-            for i in range(1, 6)
+            f"/episodes/{episode}/assets/sots/{normalized_slug}-thumb-{i:02d}.jpg"
+            for i in range(1, 16)
         ]
+
+        # ================================================================
+        # PHASE 8: Post-Analysis (verify final output)
+        # ================================================================
+        logger.info(f"Phase 8: Post-analysis of final video for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase8', 'processing')
+
+        # Analyze final video
+        post_video_probe = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height,r_frame_rate,codec_name,bit_rate",
+             "-of", "json", str(final_video)],
+            capture_output=True, text=True, check=True
+        )
+        post_video_info = json.loads(post_video_probe.stdout)
+        post_video_stream = post_video_info['streams'][0] if post_video_info.get('streams') else {}
+
+        post_analysis_data = {
+            "duration": duration_formatted,
+            "duration_seconds": duration,
+            "resolution": f"{post_video_stream.get('width', 0)}x{post_video_stream.get('height', 0)}",
+            "codec": post_video_stream.get('codec_name', 'unknown'),
+            "bitrate": post_video_stream.get('bit_rate', 'unknown'),
+            "file_size_mb": round(final_video.stat().st_size / (1024 * 1024), 2)
+        }
+
+        db = SessionLocal()
+        try:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.post_analysis = post_analysis_data
+                db.commit()
+        finally:
+            db.close()
+
+        processing_report["phases"]["phase8"] = {"status": "success", "data": post_analysis_data}
+        processing_report["overall_status"] = "completed"
+        logger.info(f"Phase 8 complete: {post_analysis_data}")
 
         # Update cue block with final completion and all MediaURLs
         if asset_id:
             _update_sot_cue_block(episode, slug, asset_id, {
                 'ProcessingStatus': 'Complete',
                 'MediaURL': f"/episodes/{episode}/assets/sots/{normalized_slug}.mp4",
-                'ThumbnailURL': thumbnail_urls[0],  # Primary thumbnail
-                'Thumbnail2URL': thumbnail_urls[1],
-                'Thumbnail3URL': thumbnail_urls[2],
-                'Thumbnail4URL': thumbnail_urls[3],
-                'Thumbnail5URL': thumbnail_urls[4],
+                'ThumbnailURL': thumbnail_urls[7],  # Middle thumbnail (8/15) as primary
+                'ThumbnailOptions': thumbnail_urls,  # All 15 thumbnail URLs
                 'AudioURL': f"/episodes/{episode}/assets/sots/{normalized_slug}.mp3",
                 'Duration': duration_formatted
             })
 
-        # Clean up working directory
-        logger.info(f"Cleaning up working directory: {working_dir}")
-        import shutil
-        shutil.rmtree(working_dir)
+        # Store final processing report in database
+        db = SessionLocal()
+        try:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.processing_report = processing_report
+                db.commit()
+        finally:
+            db.close()
+
+        # Handle devel_mode: Keep or clean up working directory
+        if devel_mode:
+            logger.info(f"DEVEL MODE: Keeping working directory with intermediate files: {working_dir}")
+            processing_report["intermediate_files"] = [
+                str(f.relative_to(media_root)) for f in working_dir.glob("*")
+            ]
+        else:
+            logger.info(f"Cleaning up working directory: {working_dir}")
+            import shutil
+            shutil.rmtree(working_dir)
 
         logger.info(f"Multi-phase processing complete for {temp_job_id}")
 
@@ -1255,9 +1373,14 @@ def process_sot_video_multi_phase(
             "slug": normalized_slug,
             "video_path": str(final_video.relative_to("/home/episodes")),
             "audio_path": str(final_audio.relative_to("/home/episodes")),
-            "thumbnail_path": str(final_thumb.relative_to("/home/episodes")),
+            "thumbnail_path": str(final_thumbs[7].relative_to("/home/episodes")),  # Primary (middle) thumbnail
+            "thumbnail_options": [str(t.relative_to("/home/episodes")) for t in final_thumbs],
             "duration": duration,
-            "status": "completed"
+            "status": "completed",
+            "pre_analysis": pre_analysis_data,
+            "post_analysis": post_analysis_data,
+            "processing_report": processing_report,
+            "devel_mode": devel_mode
         }
 
     except subprocess.CalledProcessError as e:

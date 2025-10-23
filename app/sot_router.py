@@ -248,6 +248,7 @@ class MultiPhaseProcessRequest(BaseModel):
     trim_end: str = "00:00:00"
     job_type: str = "full_process"  # single_trim, individual_clips, montage, full_process
     clips: Optional[list] = None  # Array of clip objects for individual_clips/montage modes
+    devel_mode: bool = False  # If True, keep all intermediate files and return paths in payload
 
 
 @router.post("/process/multi-phase", response_model=SOTUploadResponse)
@@ -297,7 +298,8 @@ async def process_sot_multi_phase_endpoint(
                 request.trim_end,
                 request.job_type,
                 request.clips,
-                request.asset_id
+                request.asset_id,
+                request.devel_mode  # Pass devel_mode flag
             ],
             queue='media'
         )

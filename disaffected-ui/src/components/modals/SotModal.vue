@@ -167,6 +167,8 @@
               <video
                 ref="videoPlayerRef"
                 class="video-player"
+                controls
+                controlsList="nodownload"
                 style="width: 100% !important; height: 300px !important; max-width: 100% !important; position: relative; z-index: 11; display: block; border: none; border-radius: 0; object-fit: contain;"
                 preload="metadata"
                 @loadedmetadata="handleVideoMetadataLoaded"
