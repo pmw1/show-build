@@ -15,6 +15,25 @@
       </transition>
     </div>
 
+    <!-- Playback Speed Indicator (Top Right, appears on speed change) -->
+    <transition name="speed-fade">
+      <div v-if="showSpeedIndicator" class="speed-indicator" style="position: absolute; top: 20px; right: 50px; background: rgba(0, 0, 0, 0.9); padding: 20px; border-radius: 50%; width: 100px; height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 3px solid rgba(76, 175, 80, 0.8); box-shadow: 0 0 20px rgba(76, 175, 80, 0.5);">
+        <div style="color: #4CAF50; font-size: 32px; font-weight: bold; font-family: 'Roboto Mono', monospace; text-shadow: 0 0 10px rgba(76, 175, 80, 0.8);">{{ playbackSpeed.toFixed(2) }}×</div>
+        <div style="color: #81C784; font-size: 10px; font-weight: bold; margin-top: 4px; text-transform: uppercase; letter-spacing: 1px;">{{ speedLabel }}</div>
+      </div>
+    </transition>
+
+    <!-- Frame Counter (Bottom Center, appears during frame stepping) -->
+    <transition name="frame-counter-fade">
+      <div v-if="showFrameCounter" class="frame-counter" style="position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.9); padding: 15px 30px; border-radius: 8px; border: 2px solid rgba(156, 39, 176, 0.8); box-shadow: 0 0 20px rgba(156, 39, 176, 0.5);">
+        <div style="color: #9C27B0; font-size: 12px; font-weight: bold; margin-bottom: 4px; text-align: center; text-transform: uppercase; letter-spacing: 1px;">Frame</div>
+        <div style="color: white; font-size: 28px; font-weight: bold; font-family: 'Roboto Mono', monospace; text-shadow: 0 0 10px rgba(156, 39, 176, 0.8); text-align: center;">
+          {{ currentFrameNumber }} <span style="color: rgba(255,255,255,0.5); font-size: 18px;">/</span> {{ totalFrames }}
+        </div>
+        <div style="color: #CE93D8; font-size: 10px; font-weight: bold; margin-top: 4px; text-align: center; font-family: 'Helvetica', Arial, sans-serif;">{{ frameStepDirection }}</div>
+      </div>
+    </transition>
+
     <!-- Top Left: IN Point Display -->
     <div style="position: absolute; top: 150px; left: 50px;">
       <div class="in-point-display" style="background: rgba(33, 150, 243, 0.9); padding: 30px; border-radius: 12px; border-left: 8px solid #1976D2; margin-bottom: 15px;">
@@ -38,6 +57,8 @@
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">J / L</span><span>-1s / +1s</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">← / →</span><span>-1f / +1f</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">↑ / ↓</span><span>-10s / +10s</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #4CAF50; font-weight: bold;">[ / ]</span><span style="color: #4CAF50;">Speed -/+</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #4CAF50; font-weight: bold;">\</span><span style="color: #4CAF50;">Speed 1×</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #9C27B0; font-weight: bold;">ALT+T</span><span style="color: #9C27B0;">Mark Thumb</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #FF9800; font-weight: bold;">CTRL+ENTER</span><span style="color: #FF9800;">Take Clip</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2);"><span style="color: #4CAF50; font-weight: bold;">ALT+ENTER</span><span style="color: #4CAF50;">Submit</span></div>
@@ -881,6 +902,19 @@ export default {
     const currentActionDisplay = ref('READY')
     const thumbnailTimecode = ref('')
 
+    // Playback speed state
+    const playbackSpeed = ref(1.0)
+    const showSpeedIndicator = ref(false)
+    const speedIndicatorTimer = ref(null)
+    const SPEED_PRESETS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+
+    // Frame counter state
+    const showFrameCounter = ref(false)
+    const frameCounterTimer = ref(null)
+    const currentFrameNumber = ref(0)
+    const totalFrames = ref(0)
+    const frameStepDirection = ref('')
+
     // Computed: Clip duration display
     const clipDuration = computed(() => {
       if (!trimStart.value || !trimEnd.value) return null
@@ -889,6 +923,13 @@ export default {
       const durationSeconds = endSeconds - startSeconds
       if (durationSeconds <= 0) return null
       return secondsToTimecode(durationSeconds, true)
+    })
+
+    // Computed: Speed label
+    const speedLabel = computed(() => {
+      if (playbackSpeed.value < 1.0) return 'Slow Motion'
+      if (playbackSpeed.value > 1.0) return 'Fast Forward'
+      return 'Normal Speed'
     })
 
     // Utility functions
@@ -1092,6 +1133,7 @@ export default {
       videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - frameDuration)
       currentActionDisplay.value = 'REVERSE 1 FRAME ◄|'
       animateButtonPress(step1fBackBtn.value)
+      showFrameCounterBriefly('◄ BACKWARD')
     }
 
     const performStepForwardFrame = () => {
@@ -1100,6 +1142,7 @@ export default {
       videoPlayerRef.value.currentTime = Math.min(videoPlayerRef.value.duration || 0, videoPlayerRef.value.currentTime + frameDuration)
       currentActionDisplay.value = 'FORWARD 1 FRAME |►'
       animateButtonPress(step1fForwardBtn.value)
+      showFrameCounterBriefly('FORWARD ►')
     }
 
     const performStepBackSecond = () => {
@@ -1141,6 +1184,106 @@ export default {
         bodyClassName: 'thumbnail-toast-body',
       })
       currentActionDisplay.value = '📸 THUMBNAIL MARKED'
+    }
+
+    // Playback speed control functions
+    const setPlaybackSpeed = (speed) => {
+      if (!videoPlayerRef.value) return
+
+      // Clamp speed between 0.25x and 4.0x
+      const clampedSpeed = Math.max(0.25, Math.min(4.0, speed))
+      playbackSpeed.value = clampedSpeed
+      videoPlayerRef.value.playbackRate = clampedSpeed
+
+      // Show speed indicator with auto-hide
+      showSpeedIndicatorBriefly()
+
+      // Update action display
+      if (clampedSpeed < 1.0) {
+        currentActionDisplay.value = `SLOW MOTION ${clampedSpeed.toFixed(2)}×`
+      } else if (clampedSpeed > 1.0) {
+        currentActionDisplay.value = `FAST FORWARD ${clampedSpeed.toFixed(2)}×`
+      } else {
+        currentActionDisplay.value = 'NORMAL SPEED 1.00×'
+      }
+
+      console.log(`🎬 Playback speed set to ${clampedSpeed.toFixed(2)}×`)
+    }
+
+    const increasePlaybackSpeed = () => {
+      // Find next preset speed above current
+      const currentSpeed = playbackSpeed.value
+      const nextSpeed = SPEED_PRESETS.find(s => s > currentSpeed) || 4.0
+      setPlaybackSpeed(nextSpeed)
+      toast.info(`Speed: ${nextSpeed.toFixed(2)}×`, {
+        position: 'top-center',
+        timeout: 1500,
+        toastClassName: 'speed-toast'
+      })
+    }
+
+    const decreasePlaybackSpeed = () => {
+      // Find next preset speed below current
+      const currentSpeed = playbackSpeed.value
+      const previousSpeed = SPEED_PRESETS.slice().reverse().find(s => s < currentSpeed) || 0.25
+      setPlaybackSpeed(previousSpeed)
+      toast.info(`Speed: ${previousSpeed.toFixed(2)}×`, {
+        position: 'top-center',
+        timeout: 1500,
+        toastClassName: 'speed-toast'
+      })
+    }
+
+    const resetPlaybackSpeed = () => {
+      setPlaybackSpeed(1.0)
+      toast.success('Speed reset to 1.0×', {
+        position: 'top-center',
+        timeout: 1500,
+        toastClassName: 'speed-toast'
+      })
+    }
+
+    const showSpeedIndicatorBriefly = () => {
+      // Clear any existing timer
+      if (speedIndicatorTimer.value) {
+        clearTimeout(speedIndicatorTimer.value)
+      }
+
+      // Show indicator
+      showSpeedIndicator.value = true
+
+      // Hide after 2 seconds
+      speedIndicatorTimer.value = setTimeout(() => {
+        showSpeedIndicator.value = false
+        speedIndicatorTimer.value = null
+      }, 2000)
+    }
+
+    const showFrameCounterBriefly = (direction) => {
+      if (!videoPlayerRef.value) return
+
+      // Calculate current frame and total frames
+      const currentTime = videoPlayerRef.value.currentTime
+      const duration = videoPlayerRef.value.duration || 0
+      const fps = currentFramerate.value
+
+      currentFrameNumber.value = Math.floor(currentTime * fps)
+      totalFrames.value = Math.floor(duration * fps)
+      frameStepDirection.value = direction
+
+      // Clear any existing timer
+      if (frameCounterTimer.value) {
+        clearTimeout(frameCounterTimer.value)
+      }
+
+      // Show counter
+      showFrameCounter.value = true
+
+      // Hide after 1.5 seconds
+      frameCounterTimer.value = setTimeout(() => {
+        showFrameCounter.value = false
+        frameCounterTimer.value = null
+      }, 1500)
     }
 
     // Scroll to bottom of modal
@@ -1284,6 +1427,21 @@ export default {
             } else {
               handled = false
             }
+            break
+
+          case '[': // [ - Decrease playback speed
+            event.preventDefault()
+            decreasePlaybackSpeed()
+            break
+
+          case ']': // ] - Increase playback speed
+            event.preventDefault()
+            increasePlaybackSpeed()
+            break
+
+          case '\\': // \ - Reset playback speed to 1x
+            event.preventDefault()
+            resetPlaybackSpeed()
             break
 
           case 'PageDown': // Page Down - Scroll to bottom of modal
@@ -1874,6 +2032,14 @@ export default {
         clearInterval(previewInterval.value)
       }
 
+      if (speedIndicatorTimer.value) {
+        clearTimeout(speedIndicatorTimer.value)
+      }
+
+      if (frameCounterTimer.value) {
+        clearTimeout(frameCounterTimer.value)
+      }
+
       // Clean up blob URL
       if (blobUrl.value) {
         URL.revokeObjectURL(blobUrl.value)
@@ -1940,6 +2106,17 @@ export default {
       currentActionDisplay,
       thumbnailTimecode,
 
+      // Playback speed state
+      playbackSpeed,
+      showSpeedIndicator,
+      speedLabel,
+
+      // Frame counter state
+      showFrameCounter,
+      currentFrameNumber,
+      totalFrames,
+      frameStepDirection,
+
       // Actions
       triggerFileInput,
       handleFileUpload,
@@ -1967,6 +2144,9 @@ export default {
       performJumpBackTenSeconds,
       performJumpForwardTenSeconds,
       setThumbnailTimecode,
+      increasePlaybackSpeed,
+      decreasePlaybackSpeed,
+      resetPlaybackSpeed,
       scrollToBottomOfModal,
       updateTimecode,
       updatePlayPauseState,
@@ -2019,6 +2199,44 @@ export default {
 
 .clip-drop-move {
   transition: transform 0.4s ease;
+}
+
+/* Speed indicator fade animation */
+.speed-fade-enter-active {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.speed-fade-leave-active {
+  transition: all 0.3s ease-out;
+}
+
+.speed-fade-enter-from {
+  transform: scale(0.8);
+  opacity: 0;
+}
+
+.speed-fade-leave-to {
+  transform: scale(0.9);
+  opacity: 0;
+}
+
+/* Frame counter fade animation */
+.frame-counter-fade-enter-active {
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.frame-counter-fade-leave-active {
+  transition: all 0.2s ease-out;
+}
+
+.frame-counter-fade-enter-from {
+  transform: translateX(-50%) translateY(20px);
+  opacity: 0;
+}
+
+.frame-counter-fade-leave-to {
+  transform: translateX(-50%) translateY(10px);
+  opacity: 0;
 }
 
 /* Modal overlay with 70% transparency */

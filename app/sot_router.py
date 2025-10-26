@@ -26,6 +26,7 @@ from services.ffmpeg_tasks import process_sot_video, process_sot_video_multi_pha
 from auth.router import get_current_user_or_key
 from database import get_db
 from models_v2 import SOTProcessingJob
+from models_assetid import AssetIDRegistry, AssetRelationship
 from platform_utils import get_media_root  # Cross-platform path handling
 
 logger = logging.getLogger(__name__)
@@ -283,15 +284,48 @@ async def process_sot_multi_phase_endpoint(
                 detail=f"Job is in status '{job.status}', expected 'uploaded'"
             )
 
+        # Create source AssetID for parent/child architecture
+        # Source AssetID stores the original uploaded video
+        source_asset_id = f"{request.asset_id}-src" if request.asset_id else None
+
+        if source_asset_id:
+            # Check if source asset already exists
+            existing_source = db.query(AssetIDRegistry).filter_by(asset_id=source_asset_id).first()
+
+            if not existing_source:
+                # Create source asset registry entry
+                source_asset = AssetIDRegistry(
+                    asset_id=source_asset_id,
+                    entity_type='sot_source',
+                    request_reason='create',
+                    request_context={
+                        'episode': request.episode,
+                        'slug': request.slug,
+                        'original_asset_id': request.asset_id
+                    },
+                    asset_role='source',
+                    purge_policy='keep',  # Default to keeping sources
+                    meta_data={
+                        'temp_job_id': request.temp_job_id,
+                        'upload_date': datetime.now().isoformat(),
+                        'trim_start': request.trim_start,
+                        'trim_end': request.trim_end,
+                        'job_type': request.job_type
+                    }
+                )
+                db.add(source_asset)
+                logger.info(f"✅ Created source asset: {source_asset_id}")
+
         # Update job with episode, slug, and asset_id
         job.episode = request.episode
         job.slug = request.slug
         job.asset_id = request.asset_id
+        job.source_asset_id = source_asset_id
+        job.final_asset_id = request.asset_id  # This will be the final trimmed asset
         job.current_phase = 'phase1'
         job.status = 'processing'
 
         # Submit to Celery with job_type, clips, and asset_id
-        # Route to Windows worker specifically (kairo has outdated code)
         task = process_sot_video_multi_phase.apply_async(
             args=[
                 request.temp_job_id,

@@ -98,6 +98,30 @@ class AssetIDRelationship(Base):
     notes = Column(Text, nullable=True)
 
 
+class AssetRelationship(Base):
+    """
+    Parent/child asset relationships with processing metadata.
+    Used for tracking source assets and their derivatives (trims, clips, etc.)
+    """
+    __tablename__ = "asset_relationships"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Parent and child assets
+    parent_asset_id = Column(String(50), ForeignKey("asset_id_registry.asset_id", ondelete="CASCADE"), nullable=False, index=True)
+    child_asset_id = Column(String(50), ForeignKey("asset_id_registry.asset_id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Relationship type
+    relationship_type = Column(String(30), nullable=False)  # 'trimmed_from', 'clip_from', 'normalized_from'
+
+    # Processing metadata (trim markers, clip ranges, etc.)
+    processing_metadata = Column(JSON, default=dict)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class AssetIDPendingMessage(Base):
     """
     Messages that are pending for AssetIDs that don't exist yet.

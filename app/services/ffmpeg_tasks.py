@@ -1056,6 +1056,26 @@ def process_sot_video_multi_phase(
         if not input_file.exists():
             raise FileNotFoundError(f"Upload file not found: {input_file}")
 
+        # Copy source video to permanent storage if source asset exists
+        db = SessionLocal()
+        try:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job and job.source_asset_id:
+                # Create sources directory for original uploads
+                source_dir = media_root / "episodes" / episode / "assets" / "sots" / "sources"
+                source_dir.mkdir(parents=True, exist_ok=True)
+
+                # Copy uploaded video to source asset location
+                source_filename = f"{job.source_asset_id}.mp4"
+                source_path = source_dir / source_filename
+
+                if not source_path.exists():
+                    import shutil
+                    shutil.copy2(input_file, source_path)
+                    logger.info(f"✅ Saved source video: {source_path}")
+        finally:
+            db.close()
+
         # ================================================================
         # PHASE 0: Technical Analysis with FFprobe
         # - Extract duration, resolution, framerate, audio channels
@@ -1628,6 +1648,37 @@ def process_sot_video_multi_phase(
             job.final_audio_path = str(final_audio.relative_to("/home/episodes"))
             job.final_thumbnail_path = str(final_thumbs[0].relative_to("/home/episodes"))  # Store first thumbnail as primary
             db.commit()
+
+            # Create parent/child asset relationship if source asset exists
+            if job.source_asset_id and job.final_asset_id:
+                from models_assetid import AssetIDRegistry, AssetRelationship
+
+                # Update final asset with parent reference
+                final_asset = db.query(AssetIDRegistry).filter_by(asset_id=job.final_asset_id).first()
+                if final_asset:
+                    final_asset.parent_asset_id = job.source_asset_id
+                    final_asset.asset_role = 'final'
+                    final_asset.derivative_type = job_type or 'trimmed'
+                    db.commit()
+                    logger.info(f"✅ Updated final asset {job.final_asset_id} with parent {job.source_asset_id}")
+
+                # Create asset_relationship record with processing metadata
+                relationship = AssetRelationship(
+                    parent_asset_id=job.source_asset_id,
+                    child_asset_id=job.final_asset_id,
+                    relationship_type=f"{job_type}_from" if job_type else "trimmed_from",
+                    processing_metadata={
+                        'trim_start': trim_start,
+                        'trim_end': trim_end,
+                        'job_type': job_type,
+                        'temp_job_id': temp_job_id,
+                        'processing_date': str(func.now())
+                    }
+                )
+                db.add(relationship)
+                db.commit()
+                logger.info(f"✅ Created asset relationship: {job.source_asset_id} → {job.final_asset_id}")
+
         db.close()
 
         # Convert duration to HH:MM:SS format
