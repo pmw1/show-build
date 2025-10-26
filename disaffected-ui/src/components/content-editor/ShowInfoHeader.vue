@@ -1,6 +1,6 @@
 <template>
   <v-card class="show-info-header full-width-bg" flat>
-    <v-card-text class="pa-3">
+    <v-card-text class="pa-1">
       <div v-if="loadingRundown" style="margin-bottom: 8px;">
         <v-progress-linear indeterminate color="primary" height="4" rounded></v-progress-linear>
       </div>
@@ -21,123 +21,88 @@
             />
             <span v-if="isDummy" class="dummy-indicator"> (DUMMY)</span>
           </div>
-          
+
           <p class="text-caption text-medium-emphasis mb-0">{{ displayEpisodeInfo }}</p>
           <p v-if="episodeAssetId" class="text-caption text-medium-emphasis mb-0 asset-id-display">{{ episodeAssetId }}</p>
-          
-          <!-- Editable Slug -->
-          <v-text-field
-            :model-value="slug"
-            @update:model-value="$emit('update:slug', $event)"
-            variant="plain"
-            density="compact"
-            class="slug-input"
-            hide-details
-            single-line
-            @blur="saveSlug"
-            placeholder="episode-slug"
-            prepend-inner-icon="mdi-link-variant"
-          />
-          
-          <!-- Editable Episode Title -->
-          <v-text-field
-            :model-value="episodeTitle"
-            @update:model-value="$emit('update:episodeTitle', $event)"
-            variant="plain"
-            density="compact"
-            class="episode-title-input"
-            hide-details
-            single-line
-            @blur="saveEpisodeTitle"
-            placeholder="Episode title"
-            prepend-inner-icon="mdi-television-classic"
-          />
-
-          <!-- Editable Subtitle -->
-          <v-text-field
-            :model-value="subtitle"
-            @update:model-value="$emit('update:subtitle', $event)"
-            variant="plain"
-            density="compact"
-            class="subtitle-input"
-            hide-details
-            single-line
-            @blur="saveSubtitle"
-            placeholder="Episode subtitle"
-            prepend-inner-icon="mdi-text"
-          />
-
-          <!-- Editable Guest(s) -->
-          <v-text-field
-            :model-value="guest"
-            @update:model-value="$emit('update:guest', $event)"
-            variant="plain"
-            density="compact"
-            class="guest-input"
-            hide-details
-            single-line
-            @blur="saveGuest"
-            placeholder="Guest(s)"
-            prepend-inner-icon="mdi-account-multiple"
-          />
-
-          <!-- Editable Description -->
-          <v-textarea
-            :model-value="description"
-            @update:model-value="$emit('update:description', $event)"
-            variant="plain"
-            density="compact"
-            class="description-input"
-            hide-details
-            rows="2"
-            auto-grow
-            @blur="saveDescription"
-            placeholder="Episode description"
-            prepend-inner-icon="mdi-text-long"
-          />
         </div>
 
-        <div class="fields-area">
-          <v-select
-            label="Status"
-            :model-value="productionStatus"
-            :items="productionStatuses"
-            item-title="title"
-            item-value="value"
-            variant="outlined"
-            density="compact"
-            class="showinfo-field status-field"
-            :style="statusFieldStyle"
-            hide-details
-            @update:model-value="$emit('update:productionStatus', $event)"
-          ></v-select>
+        <!-- Action Buttons (right side) -->
+        <div class="action-buttons-area d-flex align-center gap-2">
+          <!-- Metadata Panel Toggle -->
+          <v-btn
+            size="small"
+            :color="showMetadataPanel ? 'secondary' : 'grey'"
+            :variant="showMetadataPanel ? 'elevated' : 'outlined'"
+            @click="$emit('toggle-metadata-panel')"
+            class="metadata-toggle-btn px-3"
+            rounded="0"
+          >
+            <v-icon size="small" class="mr-1">mdi-information-outline</v-icon>
+            Metadata
+            <v-tooltip activator="parent" location="bottom">{{ showMetadataPanel ? 'Hide Metadata Panel' : 'Show Metadata Panel' }}</v-tooltip>
+          </v-btn>
 
-          <v-text-field
-            label="Air Date"
-            :model-value="airDate"
-            variant="outlined"
-            density="compact"
-            class="showinfo-field airdate-field"
-            :style="statusFieldStyle"
-            hide-details
-            @update:model-value="$emit('update:airDate', $event)"
-          ></v-text-field>
+          <!-- Vertical Divider -->
+          <v-divider vertical class="mx-1"></v-divider>
 
-          <v-text-field
-            label="Duration"
-            :model-value="duration"
-            variant="outlined"
-            density="compact"
-            class="showinfo-field duration-field"
-            :style="statusFieldStyle"
-            hide-details
-            readonly
-          ></v-text-field>
-          
-          <!-- Status indicator directly below duration field -->
-          <div class="status-indicator" :style="statusFieldStyle">
-            {{ productionStatus ? productionStatus.toUpperCase() : 'DRAFT' }}
-          </div>
+          <!-- More Options Dropdown -->
+          <v-menu>
+            <template v-slot:activator="{ props }">
+              <v-btn
+                size="small"
+                color="grey"
+                variant="outlined"
+                class="more-options-btn px-3"
+                rounded="0"
+                v-bind="props"
+              >
+                <v-icon size="small" class="mr-1">mdi-dots-horizontal</v-icon>
+                More Options
+              </v-btn>
+            </template>
+            <v-list>
+              <v-list-item @click="$emit('toggle-script-reading')" :disabled="!isXttsConfigured">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2" :color="isReadingScript ? 'error' : 'primary'">{{ isReadingScript ? 'mdi-stop' : 'mdi-volume-high' }}</v-icon>
+                  {{ isReadingScript ? 'Stop Reading' : 'Read Script Aloud' }}
+                </v-list-item-title>
+                <v-list-item-subtitle>
+                  {{ isXttsConfigured ? 'Read with XTTS' : 'XTTS not configured' }}
+                </v-list-item-subtitle>
+              </v-list-item>
+              <v-divider></v-divider>
+              <v-list-item @click="$emit('request-new-episode-assetid')">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2">mdi-refresh</v-icon>
+                  Request New Episode AssetID
+                </v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="$emit('show-assetid-info')">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2">mdi-identifier</v-icon>
+                  Show AssetID Info
+                </v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
+
+          <!-- Vertical Divider -->
+          <v-divider vertical class="mx-1"></v-divider>
+
+          <!-- Save All Button (rightmost) -->
+          <v-btn
+            size="small"
+            :color="saveState?.buttonColor || 'success'"
+            variant="elevated"
+            @click="$emit('save-all')"
+            :disabled="saveState?.isDisabled ?? true"
+            class="save-all-btn"
+            rounded="0"
+          >
+            <v-icon size="small" class="mr-1">{{ saveState?.buttonIcon || 'mdi-check-circle' }}</v-icon>
+            Save All
+            <v-tooltip activator="parent" location="bottom">{{ saveState?.tooltip || 'Episode is synchronized - no changes to save' }}</v-tooltip>
+          </v-btn>
         </div>
       </div>
     </v-card-text>
@@ -149,7 +114,7 @@ import { getColorValue, resolveVuetifyColor } from '../../utils/themeColorMap';
 
 export default {
   name: 'ShowInfoHeader',
-  emits: ['update:airDate', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description'],
+  emits: ['update:airDate', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description', 'save-all', 'toggle-metadata-panel', 'toggle-script-reading', 'request-new-episode-assetid', 'show-assetid-info'],
   props: {
     title: {
       type: String,
@@ -209,6 +174,29 @@ export default {
       default: false
     },
     isDummy: {
+      type: Boolean,
+      default: false
+    },
+    saveState: {
+      type: Object,
+      default: () => ({
+        hasChanges: false,
+        buttonText: 'Synchronized',
+        buttonColor: 'success',
+        buttonIcon: 'mdi-check-circle',
+        isDisabled: true,
+        tooltip: 'Episode is synchronized - no changes to save'
+      })
+    },
+    showMetadataPanel: {
+      type: Boolean,
+      default: false
+    },
+    isXttsConfigured: {
+      type: Boolean,
+      default: false
+    },
+    isReadingScript: {
       type: Boolean,
       default: false
     }
@@ -326,6 +314,7 @@ export default {
   background-color: white;
   transition: height 0.2s;
   padding-top: 0;
+  position: relative !important; /* Override any Vuetify position: sticky */
 }
 
 .full-width-bg {
@@ -335,11 +324,10 @@ export default {
 
 .header-container {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: flex-start;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 16px;
-  align-content: flex-start;
   height: 100%;
 }
 
@@ -357,7 +345,7 @@ export default {
   display: block;
   white-space: normal;
   word-wrap: break-word;
-  font-size: clamp(0.94rem, 2.1vw, 1.7rem) !important;
+  font-size: clamp(0.7rem, 1.4vw, 1.1rem) !important;
   font-weight: bold !important;
   text-transform: uppercase !important;
 }
@@ -386,15 +374,15 @@ export default {
 
 /* Clean Vuetify component styling with consistent dimensions */
 :deep(.showinfo-field .v-field__input) {
-  padding: 10px 12px !important; /* Consistent internal padding */
-  min-height: 36px !important; /* Consistent height */
-  font-size: 0.8rem !important; /* 20% smaller font */
+  padding: 4px 8px !important; /* Reduced internal padding */
+  min-height: 24px !important; /* Reduced height */
+  font-size: 0.75rem !important; /* Smaller font */
   line-height: 1.2 !important;
 }
 
 :deep(.showinfo-field .v-field__field) {
-  height: 36px !important; /* Consistent height */
-  min-height: 36px !important;
+  height: 24px !important; /* Reduced height */
+  min-height: 24px !important;
 }
 
 :deep(.showinfo-field .v-field__outline) {
@@ -485,7 +473,7 @@ export default {
 .dummy-indicator {
   color: #ff0000 !important;
   font-weight: bold !important;
-  font-size: clamp(0.94rem, 2.1vw, 1.7rem) !important;
+  font-size: clamp(0.7rem, 1.4vw, 1.1rem) !important;
   text-transform: uppercase !important;
   margin-left: 4px;
   align-self: center;
@@ -495,11 +483,11 @@ export default {
 /* Editable field styling */
 .show-title-input {
   width: 100% !important;
-  margin-bottom: 4px !important;
+  margin-bottom: 2px !important;
 }
 
 .show-title-input :deep(.v-field__input) {
-  font-size: clamp(0.94rem, 2.1vw, 1.7rem) !important;
+  font-size: clamp(0.7rem, 1.4vw, 1.1rem) !important;
   font-weight: bold !important;
   text-transform: uppercase !important;
   padding: 0 !important;
@@ -531,15 +519,15 @@ export default {
 .episode-title-input :deep(.v-field__input),
 .subtitle-input :deep(.v-field__input),
 .guest-input :deep(.v-field__input) {
-  font-size: 0.875rem !important;
-  padding: 2px 0 !important;
+  font-size: 0.75rem !important;
+  padding: 1px 0 !important;
   min-height: auto !important;
   width: 100% !important;
 }
 
 .description-input :deep(.v-field__input) {
-  font-size: 0.875rem !important;
-  padding: 2px 0 !important;
+  font-size: 0.75rem !important;
+  padding: 1px 0 !important;
   min-height: auto !important;
   width: 100% !important;
 }
@@ -596,5 +584,42 @@ export default {
 .guest-input :deep(.v-field__prepend-inner .v-icon),
 .description-input :deep(.v-field__prepend-inner .v-icon) {
   font-size: 14px !important;
+}
+
+/* Action Buttons Area */
+.action-buttons-area {
+  flex-shrink: 0;
+  min-width: fit-content;
+}
+
+/* Button Styles - Match EditorPanel toolbar buttons */
+.save-all-btn {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
+  height: 48px !important;
+  min-height: 48px !important;
+}
+
+.save-all-btn:disabled {
+  background-color: rgb(var(--v-theme-success)) !important;
+  color: white !important;
+  opacity: 1 !important;
+}
+
+.metadata-toggle-btn {
+  height: 48px !important;
+  min-height: 48px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
+}
+
+.more-options-btn {
+  height: 48px !important;
+  min-height: 48px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
 }
 </style>

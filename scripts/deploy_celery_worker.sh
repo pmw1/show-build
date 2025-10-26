@@ -154,6 +154,9 @@ redis>=5.0.0
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.9
 
+# HTTP requests (for notifications)
+requests>=2.31.0
+
 # Media processing
 ffmpeg-python>=0.2.0
 
@@ -173,10 +176,11 @@ services:
     container_name: ${HOSTNAME}-${WORKER_NAME}
     command: celery -A celery_app worker -Q ${QUEUE_NAME} --hostname=${WORKER_NAME}@${HOSTNAME} --concurrency=${CONCURRENCY}
     volumes:
-      - /mnt/sync/disaffected/episodes:/home/episodes
-      - /mnt/sync/shared_media:/shared_media
+      - /mnt/sync:/mnt/sync
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/0
+      - MEDIA_ROOT=/mnt/sync
+      - DATABASE_URL=postgresql://showbuild:showbuild@192.168.51.210:5433/showbuild
     restart: unless-stopped
     logging:
       driver: "json-file"

@@ -567,8 +567,7 @@ export default {
 .image-cue-card {
   max-width: 75%;
   width: 75%;
-  margin-left: auto;
-  margin-right: auto;
+  /* Margins removed - alignment now controlled by parent .cue-segment flex container */
 }
 
 /* Header Styling */

@@ -3,7 +3,7 @@
     :class="['rundown-panel', panelWidth === 'narrow' ? 'narrow' : 'wide']"
     :style="{ width: panelWidthValue }"
   >
-    <v-card class="fill-height" flat>
+    <v-card class="h-auto" flat>
       <!-- Rundown Header -->
       <v-card-title class="d-flex align-center pa-2 rundown-title">
         <span class="text-h6">Rundown</span>
@@ -71,7 +71,7 @@
           <!-- Save Button -->
           <v-btn
             size="x-small"
-            :color="saveState?.buttonColor || 'success'"
+            :color="saveState?.hasChanges ? 'info' : (saveState?.buttonColor || 'success')"
             variant="elevated"
             @click="$emit('save')"
             :disabled="saveState?.isDisabled ?? true"
@@ -102,8 +102,9 @@
           <!-- Refresh Button -->
           <v-btn
             size="x-small"
-            variant="outlined"
-            @click="$emit('refresh')"
+            color="primary"
+            variant="elevated"
+            @click="handleRefresh"
             :loading="loading"
             class="toolbar-btn-tile"
           >
@@ -333,20 +334,19 @@
                             </div>
 
                             <!-- Type -->
-                            <div class="type-label">{{ (item?.type || 'UNKNOWN').toUpperCase() }}</div>
+                            <div class="type-label">{{ (item?.type || 'UNKNOWN').toUpperCase().substring(0, 3) }}</div>
 
-                            <!-- Slug (Bold) and AssetID for selected items -->
+                            <!-- Slug -->
                             <div class="slug-column">
-                              <div class="slug-text">{{ (item?.slug || '').toLowerCase() }}</div>
-                              <!-- AssetID under slug for selected items only -->
-                              <div v-if="getItemGlobalIndex(item) === selectedItemIndex" class="asset-id-text">
-                                {{ item?.asset_id || 'No AssetID' }}
+                              <div class="slug-text">{{ truncateSlug(item?.slug || '', panelWidth) }}</div>
+                              <div v-if="panelWidth === 'narrow' && getItemGlobalIndex(item) === selectedItemIndex" class="word-count-display">
+                                WC: {{ getWordCount(item) }}
                               </div>
                             </div>
 
                             <!-- Duration (Right side) -->
-                            <div v-if="panelWidth === 'wide'" class="duration-display">
-                              {{ formatDuration(item?.duration || '0:00') }}
+                            <div class="duration-display">
+                              {{ formatDurationShort(item?.duration || '0:00') }}
                             </div>
 
                             <!-- Hamburger menu for selected item -->
@@ -996,6 +996,20 @@ export default {
       console.log(`Regions ${this.showRegions ? 'shown' : 'hidden'}`);
     },
 
+    // Handle refresh with flash message
+    handleRefresh() {
+      // Show flash message
+      this.flashMessage = 'Refreshing';
+      this.showFlashMessage = true;
+
+      // Emit refresh event
+      this.$emit('refresh');
+
+      // Hide flash message after 2 seconds
+      setTimeout(() => {
+        this.showFlashMessage = false;
+      }, 2000);
+    },
 
     // NEW: Methods for hierarchical structure (future use)
     calculateRegionDuration(region) {
@@ -1115,6 +1129,113 @@ export default {
         return `${minutes}:${seconds.toString().padStart(2, '0')}`
       }
       return duration.toString()
+    },
+
+    formatDurationShort(duration) {
+      // Format duration as mm:ss only (4 digits + colon)
+      if (!duration) return '00:00'
+
+      let durationStr = duration
+      if (typeof duration === 'number') {
+        const minutes = Math.floor(duration / 60)
+        const seconds = duration % 60
+        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+      }
+
+      if (typeof duration === 'string') {
+        // Clean string - remove any non-numeric/non-colon characters
+        durationStr = durationStr.replace(/[^0-9:]/g, '')
+
+        const parts = durationStr.split(':').filter(p => p !== '')
+
+        if (parts.length === 0) return '00:00'
+
+        // Parse based on number of parts
+        let totalMinutes = 0
+        let seconds = 0
+
+        if (parts.length >= 3) {
+          // Format: hh:mm:ss (or more parts, take first 3)
+          const hours = parseInt(parts[0]) || 0
+          const minutes = parseInt(parts[1]) || 0
+          seconds = parseInt(parts[2]) || 0
+          totalMinutes = (hours * 60) + minutes
+        } else if (parts.length === 2) {
+          // Format: mm:ss
+          totalMinutes = parseInt(parts[0]) || 0
+          seconds = parseInt(parts[1]) || 0
+        } else if (parts.length === 1) {
+          // Format: just seconds
+          seconds = parseInt(parts[0]) || 0
+        }
+
+        return `${totalMinutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+      }
+
+      return '00:00'
+    },
+
+    truncateSlug(slug, panelWidth) {
+      // Truncate slug to 17 characters or nearest word boundary not exceeding 20 chars
+      if (!slug) return ''
+
+      const lowerSlug = slug.toLowerCase()
+
+      // In expanded mode, apply truncation logic
+      if (panelWidth === 'wide' && lowerSlug.length > 20) {
+        // Try to find word boundary (space or hyphen) near 17 chars, but not exceeding 20
+        let truncateAt = 17
+
+        // Look for word boundary between position 17 and 20
+        for (let i = 17; i <= 20 && i < lowerSlug.length; i++) {
+          if (lowerSlug[i] === ' ' || lowerSlug[i] === '-') {
+            truncateAt = i
+            break
+          }
+        }
+
+        // If no word boundary found between 17-20, look backwards from 17
+        if (truncateAt === 17) {
+          for (let i = 17; i >= 0; i--) {
+            if (lowerSlug[i] === ' ' || lowerSlug[i] === '-') {
+              truncateAt = i
+              break
+            }
+          }
+        }
+
+        return lowerSlug.substring(0, truncateAt) + '...'
+      }
+
+      return lowerSlug
+    },
+
+    getWordCount(item) {
+      // Calculate word count from script_content, excluding code blocks but counting FSQ quotes
+      if (!item?.script_content) return 0
+
+      let content = item.script_content
+
+      // Remove YAML frontmatter (everything between --- markers)
+      content = content.replace(/^---[\s\S]*?---\n?/m, '')
+
+      // Remove code blocks (fenced with ``` or indented)
+      content = content.replace(/```[\s\S]*?```/g, '')
+      content = content.replace(/^( {4}|\t).*$/gm, '')
+
+      // Remove HTML/XML tags
+      content = content.replace(/<[^>]*>/g, '')
+
+      // Remove markdown links but keep the text
+      content = content.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+
+      // Remove markdown image syntax
+      content = content.replace(/!\[([^\]]*)\]\([^)]+\)/g, '')
+
+      // Count words (split by whitespace and filter empty strings)
+      const words = content.trim().split(/\s+/).filter(w => w.length > 0)
+
+      return words.length
     },
 
     // Dropline color methods for ghost item styling
@@ -2499,6 +2620,12 @@ export default {
   border-radius: 0 !important;
 }
 
+/* Allow v-card to overflow horizontally for extended rows */
+.rundown-panel .v-card {
+  overflow-x: visible !important;
+  overflow-y: auto !important;
+}
+
 /* Also remove rounded corners from any child elements */
 .rundown-item-card *,
 .region-header-content * {
@@ -2513,10 +2640,11 @@ export default {
   top: 0 !important;
   height: 100vh; /* Full viewport height - reach bottom no matter what */
   border-right: none; /* Remove border */
-  overflow: hidden; /* Prevent any overflow issues */
+  overflow-y: hidden; /* Prevent vertical overflow issues */
+  overflow-x: visible; /* Allow items to extend beyond right edge */
   display: flex;
   flex-direction: column;
-  z-index: 5 !important; /* Ensure it stays above scrolling content */
+  z-index: 15 !important; /* Above editor panel (z-index: 10) so rows can overhang */
 }
 
 .rundown-title {
@@ -2530,7 +2658,7 @@ export default {
 
 .rundown-content {
   flex: 1; /* Take up remaining space */
-  overflow-y: auto;
+  overflow-y: visible; /* No internal scroll - page scrolls */
   overflow-x: hidden; /* Prevent horizontal scrolling during drag */
   min-height: 0; /* Allow flex item to shrink */
 }
@@ -2555,12 +2683,14 @@ export default {
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
+  text-align: left;
 }
 
 .rundown-panel.narrow .rundown-headers {
-  grid-template-columns: 40px 50px 1fr;
+  grid-template-columns: 40px 40px 1fr;
   padding: 6px 8px;
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: normal;
   gap: 6px;
   transform: translateX(15px); /* Match narrow mode data row positioning */
 }
@@ -2571,15 +2701,16 @@ export default {
   gap: 0px 8px;
   padding: 0px 90px 0px 0px; /* Right padding to make room for absolute duration and delete button */
   align-items: center;
-  font-size: 13px;
+  font-size: 11px;
+  font-family: 'Roboto Mono', monospace;
   height: 100%;
   min-height: 2.5em;
 }
 
 .rundown-panel.narrow .compact-rundown-row {
-  grid-template-columns: 40px 50px 1fr;
-  padding: 0px 70px 0px 0px; /* Right padding for absolute delete button in narrow mode */
-  font-size: 12px;
+  grid-template-columns: 40px 40px 1fr;
+  padding: 0px 50px 0px 0px; /* Right padding for duration display in narrow mode */
+  font-size: 11px;
   gap: 0px 6px;
   height: 100%;
   min-height: 2.5em;
@@ -2588,13 +2719,14 @@ export default {
 
 /* Index Number Cell with semi-transparent white background */
 .index-number-cell {
-  background-color: rgba(255, 255, 255, 0.10);
+  background-color: rgba(255, 255, 255, 0.09);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0;
   padding: 0;
   height: 100%;
+  align-self: stretch;
   border-left: none;
   border-top: none;
   border-bottom: none;
@@ -2619,69 +2751,66 @@ export default {
 }
 
 .index-number {
-  font-weight: 500;
+  font-weight: normal;
   text-align: center;
-  font-size: calc(11px + 0.2em); /* Increased by 0.2em */
+  font-size: calc(9px + 0.2em);
   color: inherit;
   line-height: 1;
 }
 
 .type-label {
-  font-weight: 600;
-  font-size: 10px;
-  text-align: center;
+  font-weight: normal;
+  font-size: 8px;
+  text-align: left;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   height: 100%;
+  padding-left: 4px;
+  margin-right: 10px;
+  width: 75px;
+  min-width: 75px;
+  max-width: 75px;
+  flex-shrink: 0;
 }
 
 .slug-column {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
+  height: auto; /* Allow height to grow with content */
+  overflow: visible; /* Show wrapping text */
 }
 .slug-text {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: normal;
+  overflow: visible;
+  white-space: normal; /* Allow wrapping */
+  word-wrap: break-word;
   line-height: 1.2;
-}
-.asset-id-text {
-  font-size: 10px;
-  font-weight: 400;
-  opacity: 0.8;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  line-height: 1.1;
-  margin-top: 1px;
-  font-family: 'Roboto Mono', monospace;
 }
 
 .duration-display {
   position: absolute;
-  right: calc(12px + 25px); /* Account for indentation */
+  right: 50px; /* Pulled left to be visible with row overhang */
   top: 50%;
   transform: translateY(-50%);
   font-family: 'Roboto Mono', monospace;
-  font-size: calc(11px + 0.2em);
+  font-size: calc(9px + 0.2em);
   color: inherit;
   white-space: nowrap;
   transition: right 0.3s ease;
+  z-index: 5;
 }
 
-/* Duration positioning for selected (non-indented) items */
+/* Duration positioning for selected items - keep same position */
 .selected-item .duration-display {
-  right: 12px;
+  right: 50px; /* Pulled left to be visible with row overhang */
 }
 
-/* During drag, all durations align with indented position */
+/* During drag, all durations maintain position */
 .rundown-items-container:has(.chosen-item) .duration-display {
-  right: calc(12px + 25px) !important;
+  right: 50px !important;
 }
 
 /* Ensure the row container can contain absolute positioned duration */
@@ -2696,6 +2825,8 @@ export default {
   margin: 0 !important; /* Force eliminate any margins */
   padding: 0 !important; /* Force eliminate any padding */
   border: none; /* Remove default card borders that add spacing */
+  width: calc(100% + 20px); /* Extend beyond region right edge */
+  max-width: none; /* Remove width constraints to allow overhang */
 }
 
 /* Force no indentation during any drag operation */
@@ -2712,10 +2843,10 @@ export default {
 .selected-item {
   border: 2px solid var(--v-primary-base) !important;
   transform: translateX(0) !important; /* No indent when selected */
-  width: calc(100% + 25px) !important; /* Extend width to compensate for leftward movement */
+  width: calc(100% + 20px) !important; /* Extend beyond region right edge */
   max-width: none !important; /* Override any container width restrictions */
-  margin-right: -25px !important; /* Pull right edge back to original position */
-  height: 60px;
+  margin-right: 0 !important;
+  height: 75px;
   transition:
     background-color 0.3s ease,
     height 0.3s ease 0.1s;
@@ -2724,7 +2855,7 @@ export default {
   margin-bottom: 0 !important; /* Remove bottom margin */
   margin-left: 0 !important; /* Remove left margin */
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   overflow: visible !important; /* Ensure extended width is visible */
 }
 
@@ -2737,6 +2868,122 @@ export default {
 .rundown-panel.narrow .selected-item {
   width: calc(100% + 15px) !important; /* Extend width to compensate for narrow mode leftward movement */
   margin-right: -15px !important; /* Pull right edge back to original position for narrow mode */
+}
+
+/* Narrow mode selected item text styling */
+.rundown-panel.narrow .selected-item .index-number {
+  font-weight: bold;
+}
+
+.rundown-panel.narrow .selected-item .type-label {
+  font-weight: bold;
+  align-self: start;
+  align-items: flex-start;
+  justify-content: flex-start;
+  text-decoration: underline;
+  margin-top: 3px;
+  margin-bottom: 3px;
+  padding-top: 0;
+  font-size: 10px;
+}
+
+.rundown-panel.narrow .selected-item .slug-column {
+  align-self: start;
+  margin-top: 3px;
+  margin-bottom: 3px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.rundown-panel.narrow .selected-item .slug-text {
+  font-size: 11px;
+  font-weight: bold;
+  text-decoration: underline;
+  align-self: flex-start;
+}
+
+.rundown-panel.narrow .selected-item .word-count-display {
+  font-size: 8px;
+  font-weight: normal;
+  color: #000000;
+  margin-top: 5px;
+  text-decoration: none;
+}
+
+.rundown-panel.narrow .selected-item .duration-display {
+  font-weight: bold;
+  top: 5px;
+  transform: translateY(0);
+  text-decoration: underline;
+  margin-bottom: 3px;
+}
+
+.rundown-panel.narrow .selected-item .compact-rundown-row {
+  align-items: start;
+}
+
+/* Wide mode (expanded) selected item text styling */
+.selected-item .index-number-cell {
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.39);
+}
+
+.selected-item .index-number {
+  font-weight: bold;
+  font-size: 15pt;
+  margin-top: 5px;
+}
+
+.selected-item .type-label {
+  align-self: flex-start;
+  align-items: flex-start;
+  justify-content: flex-start;
+  height: auto;
+  padding-top: 0;
+  font-weight: bold;
+  font-size: 10pt;
+  margin-top: 5px;
+  width: 106px;
+  min-width: 106px;
+  max-width: 106px;
+  text-decoration: underline;
+}
+
+.selected-item .slug-column {
+  align-self: flex-start;
+  justify-content: flex-start;
+  margin-top: 5px;
+}
+
+.selected-item .slug-text {
+  font-weight: bold;
+  font-size: 10pt;
+  margin-left: 20px;
+  text-transform: uppercase;
+  text-decoration: underline;
+}
+
+.selected-item .duration-display {
+  top: 5px;
+  transform: translateY(0);
+  font-weight: bold;
+  font-size: calc(9px + 0.2em);
+  margin-top: 5px;
+  text-decoration: underline;
+}
+
+.selected-item .compact-rundown-row {
+  align-items: flex-start;
+  padding-top: 5px;
+}
+
+.selected-item .item-menu-btn-right {
+  left: -10px;
+  right: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-right: 5px;
 }
 
 /* Generating item - purple throbbing border */
@@ -2763,7 +3010,7 @@ export default {
 .rundown-items-container {
   height: calc(100vh - 120px); /* Account for panel header and other UI elements */
   overflow-y: auto;
-  overflow-x: hidden; /* Prevent horizontal scrolling */
+  overflow-x: visible; /* Allow items to extend beyond right edge */
 }
 
 /* Enhanced narrow mode styling */
@@ -2777,21 +3024,29 @@ export default {
 
 .rundown-panel.narrow .index-number {
   font-size: 10px;
+  font-weight: normal;
 }
 
 .rundown-panel.narrow .type-label {
-  font-size: 9px;
+  font-size: 8px;
+  font-weight: normal;
+  width: 20px;
+  min-width: 20px;
+  max-width: 20px;
+  margin-right: 0;
 }
 
 .rundown-panel.narrow .slug-text {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 9px;
+  font-weight: normal;
 }
 
 .rundown-panel.narrow .rundown-item-card {
   margin: 0 !important; /* Eliminate all margins for seamless items */
   transform: translateX(15px); /* Restore narrow mode indentation */
   transition: background-color 0.3s ease;
+  width: calc(100% + 20px); /* Extend beyond region right edge */
+  max-width: none; /* Remove width constraints */
 }
 
 .rundown-panel.narrow .rundown-item-card:hover {
@@ -2808,18 +3063,6 @@ export default {
   transform: translateX(15px) !important;
 }
 
-/* Narrow mode duration positioning */
-.rundown-panel.narrow .duration-display {
-  right: calc(12px + 15px);
-}
-
-.rundown-panel.narrow .selected-item .duration-display {
-  right: 12px;
-}
-
-.rundown-panel.narrow .rundown-items-container:has(.chosen-item) .duration-display {
-  right: calc(12px + 15px) !important;
-}
 
 /* New Region Button Styling */
 .new-region-button-container {
@@ -2853,7 +3096,7 @@ export default {
   display: grid;
   gap: 3px;
   flex: 1;
-  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   align-items: stretch;
 }
 
@@ -2903,31 +3146,6 @@ export default {
   font-weight: 600;
 }
 
-/* Responsive breakpoints for main grid */
-@media (max-width: 400px) {
-  .toolbar-main-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (min-width: 401px) and (max-width: 600px) {
-  .toolbar-main-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (min-width: 601px) and (max-width: 800px) {
-  .toolbar-main-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-@media (min-width: 801px) {
-  .toolbar-main-grid {
-    grid-template-columns: repeat(5, 1fr);
-  }
-}
-
 /* Narrow panel adjustments */
 .rundown-panel.narrow .toolbar-main-grid {
   grid-template-columns: repeat(2, 1fr);
@@ -2954,33 +3172,10 @@ export default {
   font-size: 7px !important;
 }
 
-/* Duration display positioning - restored */
-.duration-display {
-  position: absolute;
-  right: calc(12px + 25px); /* Account for indentation */
-  top: 50%;
-  transform: translateY(-50%);
-  font-family: 'Roboto Mono', monospace;
-  font-size: calc(11px + 0.2em);
-  color: inherit;
-  white-space: nowrap;
-  z-index: 5;
-}
-
-/* Adjust duration position when item is selected (no indentation) */
-.selected-item .duration-display {
-  right: calc(12px + 35px); /* Leave room for delete button */
-}
-
-/* During drag, all durations align with indented position */
-.rundown-items-container:has(.chosen-item) .duration-display {
-  right: calc(12px + 25px) !important;
-}
-
-/* Hamburger menu button - positioned at far right edge */
+/* Hamburger menu button - positioned between duration and right edge */
 .item-menu-btn-right {
   position: absolute;
-  right: 4px; /* All the way to the right edge */
+  right: 12px; /* Moved left from edge */
   top: 50%;
   transform: translateY(-50%);
   z-index: 15; /* Above duration */
@@ -2988,7 +3183,7 @@ export default {
 /* Legacy delete button (backup) */
 .item-delete-btn-right {
   position: absolute;
-  right: 4px; /* All the way to the right edge */
+  right: 12px; /* Match hamburger menu position */
   top: 50%;
   transform: translateY(-50%);
   z-index: 15; /* Above duration */
@@ -2996,21 +3191,36 @@ export default {
 
 /* Narrow mode adjustments */
 .rundown-panel.narrow .duration-display {
-  right: calc(12px + 15px);
+  right: 12px; /* Position on far right in narrow mode */
+  font-size: 10px; /* Slightly larger for readability */
+  margin-right: 8px;
 }
 
 .rundown-panel.narrow .selected-item .duration-display {
-  right: calc(12px + 30px); /* Leave room for delete button in narrow mode */
+  right: 12px; /* Keep consistent in narrow mode */
+  font-size: 10px;
+  margin-right: 8px;
 }
 
 .rundown-panel.narrow .rundown-items-container:has(.chosen-item) .duration-display {
-  right: calc(12px + 15px) !important;
+  right: 12px !important;
+  font-size: 10px;
+  margin-right: 8px;
+}
+
+.rundown-panel.narrow .header-duration {
+  right: 70px; /* Align header with data in narrow mode */
+}
+
+.rundown-panel.narrow .item-menu-btn-right,
+.rundown-panel.narrow .item-delete-btn-right {
+  display: none; /* Hide menu buttons in narrow mode to make room for duration */
 }
 
 /* Legacy delete button (backup) */
 .item-delete-btn {
   position: absolute;
-  right: 8px;
+  right: 12px; /* Match updated position */
   top: 50%;
   transform: translateY(-50%);
   z-index: 10;
@@ -3340,6 +3550,7 @@ export default {
   border-left: 7px solid var(--region-color, #666) !important; /* Thinner left border spanning entire region */
   margin-left: 0; /* Ensure bar reaches left edge */
   padding-left: 0; /* Ensure bar reaches left edge */
+  overflow: visible !important; /* Allow items to overflow region boundary */
 }
 
 .region-container.region-break {
@@ -3435,6 +3646,7 @@ export default {
   padding: 0.5rem 1rem 1rem 1rem; /* Add internal padding: top, right, bottom, left */
   margin-left: 5px; /* Gap between sidebar and items content - align with header */
   background-color: color-mix(in srgb, var(--region-color, #f5f5f5) 8%, transparent) !important; /* Ensure consistent light background */
+  overflow: visible !important; /* Allow items to extend beyond region boundary */
 }
 
 .region-items.break-region-items {

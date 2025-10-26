@@ -64,6 +64,9 @@
         <!-- LLM Notification Center -->
         <NotificationCenter />
 
+        <!-- Job Monitor (Admin Only) -->
+        <JobMonitor v-if="userAccessLevel === 'admin'" class="ms-2" />
+
         <!-- User Menu -->
         <v-menu>
           <template v-slot:activator="{ props }">
@@ -336,6 +339,7 @@ import LiveClock from '@/components/LiveClock.vue'
 import StatusClock from '@/components/StatusClock.vue'
 import NfsStatusModal from '@/components/NfsStatusModal.vue'
 import NotificationCenter from '@/components/NotificationCenter.vue'
+import JobMonitor from '@/components/JobMonitor.vue'
 import axios from 'axios'
 import { useAuth } from '@/composables/useAuth'
 import { useUrgentFlash } from '@/composables/useUrgentFlash'
@@ -356,7 +360,8 @@ export default {
     LiveClock,
     StatusClock,
     NfsStatusModal,
-    NotificationCenter
+    NotificationCenter,
+    JobMonitor
   },
   setup() {
     const { isAuthenticated, currentUser, checkAuthStatus, handleLogout, setAuth } = useAuth()

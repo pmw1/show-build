@@ -17,7 +17,8 @@ celery_app = Celery(
         "services.script_compilation",
         "services.quote_extraction",
         "services.asset_processing",
-        "services.ffmpeg_tasks"
+        "services.ffmpeg_tasks",
+        "celery_cleanup"  # Orphaned job cleanup tasks
     ]
 )
 

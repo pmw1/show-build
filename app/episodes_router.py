@@ -22,6 +22,71 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/episodes", tags=["episodes"])
 
+# Content versioning configuration
+MAX_VERSIONS_PER_ITEM = 20  # Keep last 20 versions per rundown item
+
+def create_content_version(db: Session, rundown_item, change_type: str = "manual_save", username: str = None):
+    """
+    Create a version snapshot of rundown item content.
+
+    Args:
+        db: Database session
+        rundown_item: RundownItem object
+        change_type: Type of change ('manual_save', 'autosave', 'api_update', 'restore')
+        username: Username making the change
+
+    Returns:
+        ContentVersion object or None if content unchanged
+    """
+    import hashlib
+    import re
+    from models_v2 import ContentVersion
+
+    # Get content and calculate hash
+    content = rundown_item.script_content or ''
+    content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+    # Check if content changed from last version
+    last_version = db.query(ContentVersion).filter(
+        ContentVersion.rundown_item_id == rundown_item.id
+    ).order_by(ContentVersion.version_number.desc()).first()
+
+    if last_version and last_version.content_hash == content_hash:
+        logger.info(f"Content unchanged for {rundown_item.asset_id}, skipping version creation")
+        return None
+
+    # Get next version number
+    version_number = (last_version.version_number + 1) if last_version else 1
+
+    # Calculate content length (strip HTML tags for accurate count)
+    content_length = len(re.sub(r'<[^>]+>', '', content).strip())
+
+    # Create new version
+    new_version = ContentVersion(
+        rundown_item_id=rundown_item.id,
+        asset_id=rundown_item.asset_id,
+        version_number=version_number,
+        script_content=content,
+        content_hash=content_hash,
+        content_length=content_length,
+        change_type=change_type,
+        created_by=username
+    )
+
+    db.add(new_version)
+    db.flush()  # Get the ID
+
+    # Clean up old versions (keep only last MAX_VERSIONS_PER_ITEM)
+    old_versions = db.query(ContentVersion).filter(
+        ContentVersion.rundown_item_id == rundown_item.id
+    ).order_by(ContentVersion.version_number.desc()).offset(MAX_VERSIONS_PER_ITEM).all()
+
+    for old_version in old_versions:
+        db.delete(old_version)
+
+    logger.info(f"📸 Created version {version_number} for {rundown_item.asset_id} ({content_length} chars, {change_type})")
+    return new_version
+
 def check_episode_conflicts(episode_number: str, db: Session) -> Dict[str, Any]:
     """Check for episode conflicts across all tables and filesystem"""
     from models_v2 import Episode
@@ -1693,7 +1758,31 @@ async def update_rundown_item(
 
         # Update fields that are provided
         if 'script_content' in item_data:
-            item.script_content = item_data['script_content']
+            new_script = item_data['script_content']
+            existing_script = item.script_content or ''
+
+            # Calculate content lengths (strip HTML tags)
+            import re
+            new_content_length = len(re.sub(r'<[^>]+>', '', new_script or '').strip())
+            existing_content_length = len(re.sub(r'<[^>]+>', '', existing_script).strip())
+
+            # 🛡️ PROTECTION: Prevent destructive saves
+            if existing_content_length > 50 and new_content_length < 30:
+                logger.error(f"🚨 BLOCKED DESTRUCTIVE SAVE for {item_id}!")
+                logger.error(f"   Existing: {existing_content_length} chars, New: {new_content_length} chars")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Blocked destructive save: would delete {existing_content_length} characters"
+                )
+
+            item.script_content = new_script
+            logger.info(f"Updated script_content: {existing_content_length} -> {new_content_length} chars")
+
+            # 📸 Create version snapshot
+            try:
+                create_content_version(db, item, change_type="api_update")
+            except Exception as e:
+                logger.error(f"Failed to create content version: {e}")
         if 'title' in item_data:
             item.title = item_data['title']
         if 'slug' in item_data:
@@ -2127,8 +2216,35 @@ async def save_rundown_items(
                     # 🔥 CRITICAL: Only update script_content if explicitly provided
                     # Frontend sends script only for currently edited item
                     if 'script' in item_data:
-                        logger.info(f"💾 Saving script content for {asset_id}: {item_data['script'][:100] if item_data['script'] else 'EMPTY'}")
-                        rundown_item.script_content = item_data['script']
+                        new_script = item_data['script']
+                        existing_script = rundown_item.script_content or ''
+
+                        # Calculate content lengths (strip HTML tags for accurate word count)
+                        import re
+                        new_content_length = len(re.sub(r'<[^>]+>', '', new_script or '').strip())
+                        existing_content_length = len(re.sub(r'<[^>]+>', '', existing_script).strip())
+
+                        # 🛡️ PROTECTION: Prevent destructive saves
+                        # If existing content has >50 characters and new content is nearly empty (< 30 chars)
+                        if existing_content_length > 50 and new_content_length < 30:
+                            logger.error(f"🚨 BLOCKED DESTRUCTIVE SAVE for {asset_id}!")
+                            logger.error(f"   Existing content: {existing_content_length} chars")
+                            logger.error(f"   New content: {new_content_length} chars ({new_script[:100]})")
+                            logger.error(f"   This would delete {existing_content_length} characters!")
+                            logger.error(f"   Save operation BLOCKED to prevent data loss")
+                            # Skip this update but don't fail the whole operation
+                            continue
+
+                        logger.info(f"💾 Saving script content for {asset_id}: {new_script[:100] if new_script else 'EMPTY'}")
+                        logger.info(f"   Content length: {existing_content_length} -> {new_content_length} chars")
+                        rundown_item.script_content = new_script
+
+                        # 📸 Create version snapshot after successful save
+                        try:
+                            username = current_user.get('username') if isinstance(current_user, dict) else None
+                            create_content_version(db, rundown_item, change_type="manual_save", username=username)
+                        except Exception as e:
+                            logger.error(f"Failed to create content version for {asset_id}: {e}")
                     else:
                         logger.info(f"⚠️ No 'script' key in item_data for {asset_id}, not updating script_content")
 
@@ -2402,3 +2518,132 @@ async def delete_rundown_item(
     except Exception as e:
         logger.error(f"Error deleting rundown item: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to delete rundown item: {str(e)}")
+
+
+# ============================================================================
+# CONTENT VERSIONING ENDPOINTS
+# ============================================================================
+
+@router.get("/rundown-item/{asset_id}/versions")
+async def get_content_versions(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Get version history for a rundown item."""
+    from models_v2 import RundownItem, ContentVersion
+
+    # Find the rundown item
+    item = db.query(RundownItem).filter(RundownItem.asset_id == asset_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Rundown item {asset_id} not found")
+
+    # Get all versions
+    versions = db.query(ContentVersion).filter(
+        ContentVersion.rundown_item_id == item.id
+    ).order_by(ContentVersion.version_number.desc()).all()
+
+    return {
+        "asset_id": asset_id,
+        "total_versions": len(versions),
+        "versions": [
+            {
+                "id": v.id,
+                "version_number": v.version_number,
+                "content_length": v.content_length,
+                "change_type": v.change_type,
+                "change_summary": v.change_summary,
+                "created_by": v.created_by,
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+                "content_hash": v.content_hash
+            }
+            for v in versions
+        ]
+    }
+
+
+@router.get("/rundown-item/{asset_id}/versions/{version_number}")
+async def get_content_version_detail(
+    asset_id: str,
+    version_number: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Get full content of a specific version."""
+    from models_v2 import RundownItem, ContentVersion
+
+    # Find the rundown item
+    item = db.query(RundownItem).filter(RundownItem.asset_id == asset_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Rundown item {asset_id} not found")
+
+    # Get specific version
+    version = db.query(ContentVersion).filter(
+        ContentVersion.rundown_item_id == item.id,
+        ContentVersion.version_number == version_number
+    ).first()
+
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_number} not found")
+
+    return {
+        "id": version.id,
+        "asset_id": asset_id,
+        "version_number": version.version_number,
+        "script_content": version.script_content,
+        "content_length": version.content_length,
+        "content_hash": version.content_hash,
+        "change_type": version.change_type,
+        "change_summary": version.change_summary,
+        "created_by": version.created_by,
+        "created_at": version.created_at.isoformat() if version.created_at else None
+    }
+
+
+@router.post("/rundown-item/{asset_id}/versions/{version_number}/restore")
+async def restore_content_version(
+    asset_id: str,
+    version_number: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Restore a rundown item to a previous version."""
+    from models_v2 import RundownItem, ContentVersion
+    from datetime import datetime
+
+    # Find the rundown item
+    item = db.query(RundownItem).filter(RundownItem.asset_id == asset_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Rundown item {asset_id} not found")
+
+    # Get version to restore
+    version = db.query(ContentVersion).filter(
+        ContentVersion.rundown_item_id == item.id,
+        ContentVersion.version_number == version_number
+    ).first()
+
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_number} not found")
+
+    # Create a new version of the current content before restoring (safety snapshot)
+    create_content_version(db, item, change_type="pre_restore", username=current_user.get('username') if isinstance(current_user, dict) else None)
+
+    # Restore the old content
+    item.script_content = version.script_content
+    item.updated_at = datetime.now()
+
+    # Create a version entry for the restore action
+    username = current_user.get('username') if isinstance(current_user, dict) else None
+    create_content_version(db, item, change_type="restore", username=username)
+
+    db.commit()
+
+    logger.info(f"✨ Restored {asset_id} to version {version_number} by {username}")
+
+    return {
+        "success": True,
+        "message": f"Restored to version {version_number}",
+        "asset_id": asset_id,
+        "restored_version": version_number,
+        "content_length": version.content_length
+    }

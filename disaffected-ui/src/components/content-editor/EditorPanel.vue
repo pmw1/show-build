@@ -24,7 +24,7 @@
 
     <v-card class="editor-card" flat>
       <!-- Editor Mode and Controls Toolbar -->
-      <v-toolbar density="comfortable" color="grey-lighten-4" class="px-2 py-1 editor-toolbar-sticky" style="min-height: 48px;">
+      <v-toolbar density="comfortable" color="grey-lighten-4" class="editor-toolbar-sticky" style="min-height: 48px; padding: 6px 8px;">
         <v-btn
           icon
           size="small"
@@ -52,116 +52,55 @@
           </v-btn>
         </v-btn-toggle>
 
+        <div class="slug-field-toolbar-container">
+          <div class="slug-field-with-validation">
+            <v-text-field
+              :model-value="item?.slug || ''"
+              @update:model-value="$emit('update:slug', $event)"
+              @focus="slugFieldFocused = true"
+              @blur="handleSlugBlur"
+              label="Slug"
+              placeholder="slug required"
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="script-slug-field-inline"
+              :class="{
+                'slug-needs-attention': !item?.slug || item.slug.trim().length === 0,
+                'slug-filled-unfocused': item?.slug && item.slug.trim().length > 0 && !slugFieldFocused
+              }"
+              :disabled="hasNoItem"
+            ></v-text-field>
+            <v-icon
+              v-if="isSlugValid"
+              color="success"
+              size="small"
+              class="slug-validation-icon"
+            >
+              mdi-check-circle
+            </v-icon>
+          </div>
+          <v-text-field
+            :model-value="item?.title || ''"
+            @update:model-value="$emit('update:title', $event)"
+            @focus="titleFieldFocused = true"
+            @blur="titleFieldFocused = false"
+            label="Title"
+            placeholder="title required"
+            variant="outlined"
+            density="compact"
+            hide-details
+            class="script-title-field-inline"
+            :class="{
+              'title-needs-attention': !item?.title || item.title.trim().length === 0,
+              'title-filled-unfocused': item?.title && item.title.trim().length > 0 && !titleFieldFocused
+            }"
+            :disabled="hasNoItem"
+          ></v-text-field>
+        </div>
+
         <v-spacer></v-spacer>
 
-        <v-divider vertical class="mx-2"></v-divider>
-
-        <!-- Autosave Status and Save Buttons -->
-        <div class="save-controls d-flex align-center gap-2">
-          <!-- Autosave Status with Save Button Below -->
-          <div class="autosave-section d-flex flex-column align-center">
-            <div class="autosave-status text-caption text-medium-emphasis">
-              <div class="text-center">
-                <span>Autosave</span>
-                <div class="text-xs opacity-75">{{ formatTimestamp(new Date()) }}</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Autoformat Status -->
-          <div class="autoformat-section d-flex flex-column align-center">
-            <div class="autoformat-status text-caption text-medium-emphasis">
-              <div class="text-center">
-                <span>Autoformat</span>
-                <div class="text-xs opacity-75">
-                  {{ lastAutoformatTime ? formatTimestamp(lastAutoformatTime) : 'Not run' }}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Horizontal Divider -->
-          <v-divider vertical class="mx-2"></v-divider>
-
-          <!-- Save All Button -->
-          <v-btn
-            size="small"
-            :color="saveState?.buttonColor || 'success'"
-            variant="elevated"
-            @click="$emit('save-all')"
-            :disabled="saveState?.isDisabled ?? true"
-            class="save-all-btn"
-            rounded="0"
-            style="margin-top: -2px;"
-          >
-            <v-icon size="small" class="mr-1">{{ saveState?.buttonIcon || 'mdi-check-circle' }}</v-icon>
-            Save All
-            <v-tooltip activator="parent" location="bottom">{{ saveState?.tooltip || 'Episode is synchronized - no changes to save' }}</v-tooltip>
-          </v-btn>
-
-          <!-- Horizontal Divider -->
-          <v-divider vertical class="mx-2"></v-divider>
-
-          <!-- Metadata Panel Toggle -->
-          <v-btn
-            size="small"
-            :color="showMetadataPanel ? 'secondary' : 'grey'"
-            :variant="showMetadataPanel ? 'elevated' : 'outlined'"
-            @click="$emit('toggle-metadata-panel')"
-            class="metadata-toggle-btn px-3"
-            rounded="0"
-            style="margin-top: -2px;"
-          >
-            <v-icon size="small" class="mr-1">mdi-information-outline</v-icon>
-            Metadata
-            <v-tooltip activator="parent" location="bottom">{{ showMetadataPanel ? 'Hide Metadata Panel' : 'Show Metadata Panel' }}</v-tooltip>
-          </v-btn>
-
-          <!-- Horizontal Divider -->
-          <v-divider vertical class="mx-2"></v-divider>
-
-          <!-- More Options Dropdown -->
-          <v-menu>
-            <template v-slot:activator="{ props }">
-              <v-btn
-                size="small"
-                color="grey"
-                variant="outlined"
-                class="more-options-btn px-3"
-                rounded="0"
-                style="margin-top: -2px;"
-                v-bind="props"
-              >
-                <v-icon size="small" class="mr-1">mdi-dots-horizontal</v-icon>
-                More Options
-              </v-btn>
-            </template>
-            <v-list>
-              <v-list-item @click="toggleScriptReading" :disabled="!isXttsConfigured">
-                <v-list-item-title>
-                  <v-icon size="small" class="mr-2" :color="isReadingScript ? 'error' : 'primary'">{{ isReadingScript ? 'mdi-stop' : 'mdi-volume-high' }}</v-icon>
-                  {{ isReadingScript ? 'Stop Reading' : 'Read Script Aloud' }}
-                </v-list-item-title>
-                <v-list-item-subtitle>
-                  {{ isXttsConfigured ? 'Read with XTTS' : 'XTTS not configured' }}
-                </v-list-item-subtitle>
-              </v-list-item>
-              <v-divider></v-divider>
-              <v-list-item @click="requestNewEpisodeAssetID">
-                <v-list-item-title>
-                  <v-icon size="small" class="mr-2">mdi-refresh</v-icon>
-                  Request New Episode AssetID
-                </v-list-item-title>
-              </v-list-item>
-              <v-list-item @click="showAssetIDInfo">
-                <v-list-item-title>
-                  <v-icon size="small" class="mr-2">mdi-identifier</v-icon>
-                  Show AssetID Info
-                </v-list-item-title>
-              </v-list-item>
-            </v-list>
-          </v-menu>
-        </div>
       </v-toolbar>
 
       <!-- Editor Content Area -->
@@ -313,6 +252,20 @@
                 </div>
                 <v-tooltip activator="parent" location="bottom">Stinger</v-tooltip>
               </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex rif-btn"
+                :style="getCueButtonStyle('RIF')"
+                @click="insertCue('RIF')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-music-note</v-icon>
+                  <span class="cue-label">RIF</span>
+                  <span class="hotkey-display">[ALT+R]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Riff</v-tooltip>
+              </v-btn>
             </div>
           </div>
 
@@ -331,28 +284,6 @@
 
           <!-- Script Content Area with embedded fields -->
           <div class="script-content-container flex-grow-1">
-            <!-- Slug and Duration Fields at Top of Script -->
-            <div class="script-header-fields">
-              <v-text-field
-                :model-value="item?.slug || ''"
-                @update:model-value="$emit('update:slug', $event)"
-                placeholder="segment-slug"
-                variant="plain"
-                hide-details
-                class="script-slug-field-inline"
-                :disabled="hasNoItem"
-              ></v-text-field>
-              <v-text-field
-                :model-value="item?.duration || ''"
-                @update:model-value="$emit('update:duration', $event)"
-                placeholder="00:05:00"
-                variant="plain"
-                hide-details
-                class="script-duration-field-inline"
-                :disabled="hasNoItem"
-              ></v-text-field>
-            </div>
-
             <!-- Multi-Selection Actions -->
             <div v-if="multiSelectedSegments.size > 0" class="multi-selection-toolbar">
               <div class="selection-info">
@@ -544,7 +475,7 @@
                 </div>
 
                 <!-- Cue Card Segment -->
-                <div v-else-if="segment.type === 'cue'" class="cue-segment" :data-pending="segment.isPending || null">
+                <div v-else-if="segment.type === 'cue'" class="cue-segment" :class="`cue-align-${cueCardAlignment}`" :data-pending="segment.isPending || null">
                   <ImageCueCard
                     v-if="segment.data.isImageType"
                     :cue-data="segment.data"
@@ -752,6 +683,20 @@
                 </div>
                 <v-tooltip activator="parent" location="bottom">Stinger</v-tooltip>
               </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex rif-btn"
+                :style="getCueButtonStyle('RIF')"
+                @click="insertCue('RIF')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-music-note</v-icon>
+                  <span class="cue-label">RIF</span>
+                  <span class="hotkey-display">[ALT+R]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Riff</v-tooltip>
+              </v-btn>
             </div>
           </div>
 
@@ -872,8 +817,7 @@
                       variant="outlined"
                       density="comfortable"
                       :rules="slugRules"
-                      :class="{ 'slug-needs-attention': slugNeedsAttention }"
-                      :style="slugNeedsAttention ? `--highlight-color: ${highlightColor}` : ''"
+                      :class="{ 'slug-needs-attention': !currentItemMetadata.slug || currentItemMetadata.slug.trim().length === 0 }"
                     ></v-text-field>
                   </v-col>
                   <v-col cols="12" md="6">
@@ -1218,6 +1162,20 @@
                 </div>
                 <v-tooltip activator="parent" location="bottom">Stinger</v-tooltip>
               </v-btn>
+
+              <v-btn
+                variant="flat"
+                class="cue-btn-flex rif-btn"
+                :style="getCueButtonStyle('RIF')"
+                @click="insertCue('RIF')"
+              >
+                <div class="cue-btn-content-flex">
+                  <v-icon size="small" class="mb-1">mdi-music-note</v-icon>
+                  <span class="cue-label">RIF</span>
+                  <span class="hotkey-display">[ALT+R]</span>
+                </div>
+                <v-tooltip activator="parent" location="bottom">Riff</v-tooltip>
+              </v-btn>
             </div>
           </div>
 
@@ -1315,6 +1273,7 @@ import SpeakerSelectorModal from './modals/SpeakerSelectorModal.vue';
 import CueParser from '../../utils/cueParser.js';
 import { useXtts } from '../../composables/useXtts.js';
 import { useAsyncAnalysis } from '../../composables/useAsyncAnalysis.js';
+import { useRequireEpisode } from '../../composables/useRequireEpisode.js';
 
 export default {
   name: 'EditorPanel',
@@ -1327,6 +1286,11 @@ export default {
     SpeakerSelectorModal
     // CuePlacementOverlay // DISABLED: Using draggable ghost segment instead
   },
+  setup() {
+    // Episode requirement system
+    const { requireEpisode } = useRequireEpisode();
+    return { requireEpisode };
+  },
   data() {
     return {
       showImgModal: false,
@@ -1338,6 +1302,7 @@ export default {
       selectedSegmentIndex: null,
       multiSelectedSegments: new Set(),
       showSpeakerSelector: false,
+      cueCardAlignment: 'left', // Default alignment, loaded from settings
       currentSegmentSpeaker: 'josh',
       editingSpeakerSegmentIndex: null,
       showCuePlacement: false,
@@ -1346,6 +1311,7 @@ export default {
       blinkingParagraphs: new Set(), // Track paragraphs that are blinking after swap
       pendingCueType: null,
       pendingPlacement: null,
+      temporaryEpisode: null, // For episode requirement callback
       pendingCueData: null, // Store IMG cue data for post-modal placement
       useVisualScriptMode: true, // Toggle for visual cue cards vs traditional text - RE-ENABLED, fixing visibility issue
       hoveredParagraphIndex: null, // Track which paragraph is being hovered
@@ -1358,6 +1324,8 @@ export default {
       autoformatTimer: null, // Timer for periodic autoformat
       autoformatDebounceTimer: null, // Debounce timer for content changes
       slugNeedsAttention: false, // Track if slug field needs user attention (yellow highlight)
+      slugFieldFocused: false, // Track if slug field is currently focused
+      titleFieldFocused: false, // Track if title field is currently focused
       segmentUpdateTimer: null, // Timer for debouncing segment updates
       lastAutoformatTime: null, // Timestamp of last autoformat run
       altKeyPressed: false, // Manual ALT key tracking for better browser compatibility
@@ -1463,6 +1431,11 @@ export default {
 
     // Add keyboard listener for cursor character cleanup
     document.addEventListener('keydown', this.handleCursorCharacterKeydown);
+
+    // Load cue card alignment from settings (do this LAST to avoid reactivity loops)
+    this.$nextTick(() => {
+      this.loadCueCardAlignment();
+    });
   },
   unmounted() {
     // Clean up event listeners
@@ -1589,6 +1562,7 @@ export default {
     'update:scriptContent',
     'update:scratchContent',
     'update:slug',
+    'update:title',
     'asset-drop',
     'metadata-change',
     'insert-cue',
@@ -1598,6 +1572,7 @@ export default {
     'show-sot-modal',
     'show-vo-modal',
     'show-nat-modal',
+    'show-rif-modal',
     'show-pkg-modal',
     'show-vox-modal',
     'show-mus-modal',
@@ -2042,8 +2017,53 @@ export default {
       return resolved || '#FFF9C4';
     },
 
+    // Validate slug: must be lowercase and 4 words or less
+    isSlugValid() {
+      if (!this.item?.slug || this.item.slug.trim().length === 0) {
+        return false;
+      }
+
+      const slug = this.item.slug.trim();
+
+      // Check if slug is all lowercase (allowing hyphens, underscores, numbers)
+      const isLowercase = slug === slug.toLowerCase();
+
+      // Count words (split by spaces, hyphens, or underscores)
+      const words = slug.split(/[\s\-_]+/).filter(w => w.length > 0);
+      const wordCount = words.length;
+
+      return isLowercase && wordCount <= 4;
+    },
+
   },
   methods: {
+    /**
+     * Load cue card alignment from settings
+     */
+    async loadCueCardAlignment() {
+      try {
+        const response = await fetch('/api/settings/', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        });
+
+        if (response.ok) {
+          const settings = await response.json();
+          // Backend returns snake_case, check both formats
+          const alignment = settings.interface?.cue_card_alignment || settings.interface?.cueCardAlignment;
+          if (alignment) {
+            this.cueCardAlignment = alignment;
+            console.log('✅ Loaded cue card alignment:', this.cueCardAlignment);
+          } else {
+            console.log('⚠️ No cue card alignment found in settings, using default:', this.cueCardAlignment);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load cue card alignment:', error);
+      }
+    },
+
     // Focus and highlight slug field for newly created items
     focusSlugField() {
       console.log('🎯 focusSlugField() called')
@@ -2065,6 +2085,20 @@ export default {
           console.warn('⚠️ Slug field ref not available')
         }
       })
+    },
+
+    // Handle slug field blur - normalize to lowercase
+    handleSlugBlur() {
+      this.slugFieldFocused = false;
+
+      if (this.item?.slug && this.item.slug.trim().length > 0) {
+        const normalized = this.item.slug.toLowerCase().trim();
+
+        // Only emit update if the slug actually changed
+        if (normalized !== this.item.slug) {
+          this.$emit('update:slug', normalized);
+        }
+      }
     },
 
     // Parse HH:MM:SS:FF duration format to total seconds
@@ -2607,6 +2641,11 @@ export default {
           return;
         }
 
+        if (cueType === 'RIF') {
+          this.$emit('show-rif-modal');
+          return;
+        }
+
         if (cueType === 'PKG') {
           this.$emit('show-pkg-modal');
           return;
@@ -2681,6 +2720,12 @@ export default {
         if (cueType === 'NAT') {
           this.$emit('show-nat-modal');
           console.log('🎬 NAT modal opened - placement overlay will activate when modal closes');
+          return;
+        }
+
+        if (cueType === 'RIF') {
+          this.$emit('show-rif-modal');
+          console.log('🎬 RIF modal opened - placement overlay will activate when modal closes');
           return;
         }
 
@@ -2848,10 +2893,35 @@ export default {
         const fileExtension = this.getFileExtension(imgCueData.imageFile);
         const newFilename = `${filenameSlug}.${fileExtension}`;
 
+        // Get episode (required for upload)
+        // Check if we have a temporary episode from callback first
+        let episode = this.temporaryEpisode;
+        if (episode) {
+          console.log('✅ Using temporary episode from callback:', episode);
+          this.temporaryEpisode = null; // Clear it
+        } else {
+          episode = this.requireEpisode(
+            this.currentEpisode,
+            'Upload Image',
+            (selectedEpisode) => {
+              // Callback: retry upload after episode selection
+              console.log('📺 Episode selected, retrying IMG cue creation with:', selectedEpisode);
+              // Store episode temporarily and retry
+              this.temporaryEpisode = selectedEpisode;
+              this.handleImgCueSubmit(imgCueData);
+            }
+          );
+
+          if (!episode) {
+            console.log('⏸️ IMG cue creation paused - waiting for episode selection');
+            return; // Modal will show, callback will retry
+          }
+        }
+
         // Upload and relocate image to episode-specific location
         const formData = new FormData();
         formData.append('file', imgCueData.imageFile);
-        formData.append('episode', this.currentEpisode || '0243');
+        formData.append('episode', episode);
         formData.append('filename', newFilename);
 
         const uploadResponse = await fetch('/api/upload/image', {
@@ -2865,7 +2935,7 @@ export default {
 
         await uploadResponse.json();
         // Episode-specific MediaURL path
-        const episodeSpecificMediaUrl = `episodes/${this.currentEpisode || '0243'}/assets/images/${newFilename}`;
+        const episodeSpecificMediaUrl = `episodes/${episode}/assets/images/${newFilename}`;
 
         // Generate the IMG cue block with episode-specific MediaURL
         const imgCueBlock = `<!-- Begin Cue -->
@@ -3744,6 +3814,19 @@ export default {
       // CODE MODE: Insert directly at cursor position
       if (this.editorMode === 'code') {
         console.log('📝 Code mode: Inserting SOT at cursor position');
+
+        // CRITICAL FIX: Get FRESH cursor position at submission time, not stale position from button click
+        const codeTextarea = document.querySelector('.code-textarea textarea');
+        if (codeTextarea && document.activeElement === codeTextarea) {
+          // Only use current cursor if textarea is still focused
+          this.pendingCursorPosition = codeTextarea.selectionStart;
+          console.log('📝 Using current cursor position:', this.pendingCursorPosition);
+        } else {
+          // Textarea not focused (user clicked in modal) - insert at end
+          this.pendingCursorPosition = null;
+          console.log('📝 Textarea not focused - inserting at end');
+        }
+
         this.insertCueAtCursor(sotCueText);
         this.pendingCueData = null;
         this.pendingCueType = null;
@@ -3770,6 +3853,17 @@ export default {
 
       if (this.editorMode === 'code') {
         console.log('📝 Code mode: Inserting VO at cursor position');
+
+        // CRITICAL FIX: Get FRESH cursor position at submission time
+        const codeTextarea = document.querySelector('.code-textarea textarea');
+        if (codeTextarea && document.activeElement === codeTextarea) {
+          this.pendingCursorPosition = codeTextarea.selectionStart;
+          console.log('📝 Using current cursor position:', this.pendingCursorPosition);
+        } else {
+          this.pendingCursorPosition = null;
+          console.log('📝 Textarea not focused - inserting at end');
+        }
+
         this.insertCueAtCursor(voCueText);
         this.pendingCueData = null;
         this.pendingCueType = null;
@@ -3790,6 +3884,17 @@ export default {
 
       if (this.editorMode === 'code') {
         console.log('📝 Code mode: Inserting NAT at cursor position');
+
+        // CRITICAL FIX: Get FRESH cursor position at submission time
+        const codeTextarea = document.querySelector('.code-textarea textarea');
+        if (codeTextarea && document.activeElement === codeTextarea) {
+          this.pendingCursorPosition = codeTextarea.selectionStart;
+          console.log('📝 Using current cursor position:', this.pendingCursorPosition);
+        } else {
+          this.pendingCursorPosition = null;
+          console.log('📝 Textarea not focused - inserting at end');
+        }
+
         this.insertCueAtCursor(natCueText);
         this.pendingCueData = null;
         this.pendingCueType = null;
@@ -3802,6 +3907,25 @@ export default {
       console.log('📍 Placement overlay activated - waiting for user to click drop zone');
     },
 
+    async handleRifCueSubmit(rifCueText) {
+      console.log('🎬 RIF cue submitted to EditorPanel for cursor insertion');
+
+      // CRITICAL FIX: Get FRESH cursor position at submission time
+      const codeTextarea = document.querySelector('.code-textarea textarea');
+      if (codeTextarea && document.activeElement === codeTextarea) {
+        this.pendingCursorPosition = codeTextarea.selectionStart;
+        console.log('📝 Using current cursor position:', this.pendingCursorPosition);
+      } else {
+        this.pendingCursorPosition = null;
+        console.log('📝 Textarea not focused - inserting at end');
+      }
+
+      // Always insert at cursor position for immediate rendering
+      console.log('📝 Inserting RIF at cursor position');
+      this.insertCueAtCursor(rifCueText);
+      console.log('✅ RIF cue inserted at cursor - will render immediately in script mode');
+    },
+
     async handlePkgCueSubmit(pkgCueText) {
       console.log('🎬 PKG cue submitted to EditorPanel for placement-based insertion');
 
@@ -3810,6 +3934,17 @@ export default {
 
       if (this.editorMode === 'code') {
         console.log('📝 Code mode: Inserting PKG at cursor position');
+
+        // CRITICAL FIX: Get FRESH cursor position at submission time
+        const codeTextarea = document.querySelector('.code-textarea textarea');
+        if (codeTextarea && document.activeElement === codeTextarea) {
+          this.pendingCursorPosition = codeTextarea.selectionStart;
+          console.log('📝 Using current cursor position:', this.pendingCursorPosition);
+        } else {
+          this.pendingCursorPosition = null;
+          console.log('📝 Textarea not focused - inserting at end');
+        }
+
         this.insertCueAtCursor(pkgCueText);
         this.pendingCueData = null;
         this.pendingCueType = null;
@@ -3830,6 +3965,17 @@ export default {
 
       if (this.editorMode === 'code') {
         console.log('📝 Code mode: Inserting DIR at cursor position');
+
+        // CRITICAL FIX: Get FRESH cursor position at submission time
+        const codeTextarea = document.querySelector('.code-textarea textarea');
+        if (codeTextarea && document.activeElement === codeTextarea) {
+          this.pendingCursorPosition = codeTextarea.selectionStart;
+          console.log('📝 Using current cursor position:', this.pendingCursorPosition);
+        } else {
+          this.pendingCursorPosition = null;
+          console.log('📝 Textarea not focused - inserting at end');
+        }
+
         this.insertCueAtCursor(dirCueText);
         this.pendingCueData = null;
         this.pendingCueType = null;
@@ -3850,6 +3996,17 @@ export default {
 
       if (this.editorMode === 'code') {
         console.log('📝 Code mode: Inserting BUMP at cursor position');
+
+        // CRITICAL FIX: Get FRESH cursor position at submission time
+        const codeTextarea = document.querySelector('.code-textarea textarea');
+        if (codeTextarea && document.activeElement === codeTextarea) {
+          this.pendingCursorPosition = codeTextarea.selectionStart;
+          console.log('📝 Using current cursor position:', this.pendingCursorPosition);
+        } else {
+          this.pendingCursorPosition = null;
+          console.log('📝 Textarea not focused - inserting at end');
+        }
+
         this.insertCueAtCursor(bumpCueText);
         this.pendingCueData = null;
         this.pendingCueType = null;
@@ -3870,6 +4027,17 @@ export default {
 
       if (this.editorMode === 'code') {
         console.log('📝 Code mode: Inserting STING at cursor position');
+
+        // CRITICAL FIX: Get FRESH cursor position at submission time
+        const codeTextarea = document.querySelector('.code-textarea textarea');
+        if (codeTextarea && document.activeElement === codeTextarea) {
+          this.pendingCursorPosition = codeTextarea.selectionStart;
+          console.log('📝 Using current cursor position:', this.pendingCursorPosition);
+        } else {
+          this.pendingCursorPosition = null;
+          console.log('📝 Textarea not focused - inserting at end');
+        }
+
         this.insertCueAtCursor(stingCueText);
         this.pendingCueData = null;
         this.pendingCueType = null;
@@ -4334,6 +4502,7 @@ export default {
           this.insertCue('IMG');
           break;
         case 'g':
+          console.log('✅ ALT+G triggered - calling insertCue(GFX)');
           event.preventDefault();
           this.insertCue('GFX');
           break;
@@ -4352,6 +4521,11 @@ export default {
         case 'n':
           event.preventDefault();
           this.insertCue('NAT');
+          break;
+        case 'r':
+          console.log('✅ ALT+R triggered - calling insertCue(RIF)');
+          event.preventDefault();
+          this.insertCue('RIF');
           break;
         case 'p':
           event.preventDefault();
@@ -4708,8 +4882,10 @@ export default {
     runAutoformat() {
       const wasFormatted = this.autoformatContent();
 
-      // YAML frontmatter validation and synchronization
-      const yamlUpdated = this.validateAndSyncYamlFrontmatter();
+      // YAML frontmatter validation and synchronization - DISABLED
+      // Frontmatter is only generated during export, not during editing
+      // const yamlUpdated = this.validateAndSyncYamlFrontmatter();
+      const yamlUpdated = false;
 
       // Smart cleanup of orphaned cursor markers (only when safe)
       const cleanedMarkers = this.smartCleanupOrphanedCursorMarkers();
@@ -6202,19 +6378,12 @@ export default {
 
 <style scoped>
 /* Yellow highlight for slug field that needs attention */
-.slug-needs-attention {
-  animation: slug-pulse 2s ease-in-out infinite;
+.slug-needs-attention :deep(.v-field) {
+  background-color: rgba(255, 235, 59, 0.25) !important;
 }
 
-@keyframes slug-pulse {
-  0%, 100% {
-    background-color: var(--highlight-color, rgba(255, 235, 59, 0.3));
-    opacity: 0.3;
-  }
-  50% {
-    background-color: var(--highlight-color, rgba(255, 235, 59, 0.6));
-    opacity: 0.6;
-  }
+.slug-needs-attention :deep(.v-field__outline) {
+  border-color: rgba(255, 235, 59, 0.6) !important;
 }
 
 /* Editor panel content - no scrolling, parent wrapper handles it */
@@ -6254,11 +6423,12 @@ export default {
   display: flex;
   flex-direction: column;
   overflow: visible;
+  min-height: calc(100vh - 180px);
   /* Remove overflow: hidden to allow proper scrolling */
 }
 
 .editor-content .fill-height {
-  min-height: calc(100vh - 150px);
+  min-height: 0; /* Allow content to expand naturally */
   height: auto;
   max-height: none;
   overflow: visible;
@@ -6285,27 +6455,81 @@ export default {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: calc(100vh - 180px);
 }
 
-.script-header-fields {
+.slug-field-toolbar-container {
+  margin-left: 16px;
   display: flex;
-  gap: 8px;
-  padding: 8px 16px 4px 16px;
-  margin: 0 8px;
-  background-color: transparent;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-  align-items: stretch;
+  gap: 12px;
+}
+
+.slug-field-with-validation {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+}
+
+.slug-validation-icon {
+  position: absolute;
+  right: -20px;
+  top: 50%;
+  transform: translateY(-50%) scale(0.75);
 }
 
 .script-slug-field-inline,
-.script-duration-field-inline {
-  background-color: #f8f8f8 !important;
-  border-radius: 0 !important;
-  border: none !important;
+.script-title-field-inline {
+  flex: 0 0 auto;
+  max-width: 300px;
+  min-width: 188px;
+  transform: scale(0.75);
+  transform-origin: left center;
 }
 
-.script-slug-field-inline {
-  flex: 2;
+/* Remove rounded corners */
+.script-slug-field-inline :deep(.v-field),
+.script-title-field-inline :deep(.v-field) {
+  border-radius: 0 !important;
+}
+
+/* Disable all label transitions */
+.script-slug-field-inline :deep(.v-label),
+.script-title-field-inline :deep(.v-label) {
+  transition: none !important;
+}
+
+/* Make floating label larger when floated and move down */
+.script-slug-field-inline :deep(.v-label--floating),
+.script-title-field-inline :deep(.v-label--floating) {
+  font-size: 15px !important;
+  transform: translateY(-0.3em) scale(0.85) !important;
+  transition: none !important;
+}
+
+/* Also target the label in focused state */
+.script-slug-field-inline :deep(.v-field--focused .v-label),
+.script-title-field-inline :deep(.v-field--focused .v-label) {
+  transform: translateY(-0.3em) scale(0.85) !important;
+  transition: none !important;
+}
+
+/* Specifically target title field label in all states */
+.script-title-field-inline :deep(.v-field--focused .v-label--floating),
+.script-title-field-inline :deep(.v-field .v-label--floating) {
+  font-size: 15px !important;
+  transform: translateY(-0.3em) scale(0.85) !important;
+  transition: none !important;
+}
+
+/* Yellow highlight when inline slug field is empty */
+.script-slug-field-inline.slug-needs-attention :deep(.v-field) {
+  background-color: rgba(255, 235, 59, 0.25) !important;
+}
+
+/* Yellow highlight when inline title field is empty */
+.script-title-field-inline.title-needs-attention :deep(.v-field) {
+  background-color: rgba(255, 235, 59, 0.25) !important;
 }
 
 .script-duration-field-inline {
@@ -6331,28 +6555,6 @@ export default {
   justify-content: center;
 }
 
-.script-slug-field-inline :deep(.v-field__input),
-.script-duration-field-inline :deep(.v-field__input) {
-  font-size: 100% !important;
-  color: #555555 !important;
-  font-weight: 500 !important;
-  padding: 6px 8px !important;
-  background-color: #f8f8f8 !important;
-  border-radius: 0 !important;
-}
-
-.script-slug-field-inline :deep(.v-field__field),
-.script-duration-field-inline :deep(.v-field__field) {
-  background-color: #f8f8f8 !important;
-  border-radius: 0 !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-
-.script-slug-field-inline :deep(.v-field__outline),
-.script-duration-field-inline :deep(.v-field__outline) {
-  display: none !important;
-}
 
 .script-textarea-with-header {
   padding-top: 8px !important;
@@ -6496,21 +6698,25 @@ export default {
   z-index: 10 !important;
   background-color: #f5f5f5 !important;
   border-bottom: 1px solid #e0e0e0 !important;
+  padding: 6px 8px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
 }
 
 /* Sticky Cues Toolbar */
 .cues-toolbar-sticky {
   position: sticky !important;
-  top: 48px !important; /* Position below the main toolbar */
+  top: 60px !important; /* Position below the main toolbar (48px height + 12px padding) */
   z-index: 9 !important;
-  background-color: white !important;
+  background-color: #f5f5f5 !important;
   border-bottom: 1px solid #e0e0e0 !important;
+  padding: 6px 8px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
 }
 
 /* Sticky Text Formatting Box */
 .text-formatting-sticky {
   position: sticky !important;
-  top: 108px !important; /* Position below main toolbar + cues toolbar */
+  top: 120px !important; /* Position below main toolbar (60px) + cues toolbar (60px) */
   z-index: 8 !important;
   background-color: #fafafa !important;
   border-bottom: 1px solid #e0e0e0 !important;
@@ -6526,8 +6732,18 @@ export default {
   background-color: rgb(var(--v-theme-surface-variant)) !important;
   color: rgb(var(--v-theme-on-surface-variant)) !important;
   border: 1px solid rgba(var(--v-theme-outline), 0.2) !important;
-  height: 36px !important;
-  min-height: 36px !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  min-width: 100px !important;
+  padding: 2px 4px !important;
+  border-radius: 0 !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+  transition: all 0.2s ease !important;
+}
+
+.mode-btn:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3) !important;
 }
 
 .mode-btn.v-btn--active {
@@ -6588,8 +6804,8 @@ export default {
   font-size: 12px !important;
   font-weight: 600 !important;
   letter-spacing: 0.5px !important;
-  height: 36px !important;
-  min-height: 36px !important;
+  height: 48px !important;
+  min-height: 48px !important;
 }
 
 .save-all-btn:disabled {
@@ -6600,24 +6816,24 @@ export default {
 
 /* Toolbar Button Height Consistency */
 .xtts-read-btn {
-  height: 36px !important;
-  min-height: 36px !important;
+  height: 48px !important;
+  min-height: 48px !important;
   font-size: 12px !important;
   font-weight: 600 !important;
   letter-spacing: 0.5px !important;
 }
 
 .metadata-toggle-btn {
-  height: 36px !important;
-  min-height: 36px !important;
+  height: 48px !important;
+  min-height: 48px !important;
   font-size: 12px !important;
   font-weight: 600 !important;
   letter-spacing: 0.5px !important;
 }
 
 .more-options-btn {
-  height: 36px !important;
-  min-height: 36px !important;
+  height: 48px !important;
+  min-height: 48px !important;
   font-size: 12px !important;
   font-weight: 600 !important;
   letter-spacing: 0.5px !important;
@@ -6625,8 +6841,8 @@ export default {
 
 /* All toolbar buttons should have consistent height */
 .editor-toolbar-sticky .v-btn {
-  height: 36px !important;
-  min-height: 36px !important;
+  height: 48px !important;
+  min-height: 48px !important;
 }
 
 /* Cues Toolbar Styling */
@@ -6754,10 +6970,10 @@ export default {
   top: 0 !important; /* Stick to top of scrolling container (.editor-panel) */
   z-index: 9 !important;
   width: 100% !important;
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%) !important;
-  border-bottom: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
-  padding: 6px 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  background-color: #f5f5f5 !important;
+  border-bottom: 1px solid #e0e0e0 !important;
+  padding: 6px 8px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
 }
 
 .cue-buttons-flex-container {
@@ -6895,6 +7111,7 @@ export default {
   font-size: 14px;
   line-height: 1.5;
   height: auto;
+  min-height: calc(100vh - 250px);
   max-height: none;
   overflow: visible;
 }
@@ -6991,7 +7208,7 @@ export default {
   letter-spacing: 0.5px;
   font-family: 'Helvetica Light', 'Helvetica', sans-serif;
   font-weight: 600;
-  font-size: 1.5em;
+  font-size: 1.125em;  /* Reduced by 25% from 1.5em */
 }
 
 .paragraph-actions {
@@ -7331,6 +7548,8 @@ export default {
 
 .cue-segment {
   margin: 16px 0;
+  display: flex;
+  width: 100%;
 }
 
 .add-content-section {
@@ -7370,6 +7589,7 @@ export default {
   padding: 0 40px 5em 40px;
   background-color: white;
   font-family: 'Times New Roman', serif;
+  min-height: 200px;
 }
 
 .typing-area {
@@ -7643,5 +7863,29 @@ textarea.yellow-cursor-highlight {
     border-color: rgba(var(--v-theme-primary), 0.6);
     box-shadow: 0 0 0 8px rgba(var(--v-theme-primary), 0);
   }
+}
+
+/* Cue Card Alignment Classes */
+.cue-segment.cue-align-left {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.cue-segment.cue-align-center {
+  display: flex;
+  justify-content: center;
+}
+
+.cue-segment.cue-align-right {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Ensure cue cards have appropriate max-width for alignment */
+.cue-segment .cue-card,
+.cue-segment .image-cue-card,
+.cue-segment .placeholder-cue-card {
+  max-width: 800px;
+  width: 100%;
 }
 </style>

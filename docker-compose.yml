@@ -18,6 +18,7 @@ services:
     networks:
       - video-post
     environment:
+      - TZ=America/New_York
       - MODULE_NAME=main
       - VARIABLE_NAME=app
       - WEB_CONCURRENCY=1

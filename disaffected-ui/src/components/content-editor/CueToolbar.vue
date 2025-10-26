@@ -113,6 +113,18 @@
           </v-btn>
           <div class="cue-label amber-darken-4">DIR</div>
         </div>
+
+        <div class="cue-btn-wrapper">
+          <v-btn
+            @click="$emit('show-modal', 'rif')"
+            color="deep-purple-darken-3"
+            variant="elevated"
+            class="cue-btn"
+          >
+            <v-icon size="small">mdi-music-note</v-icon>
+          </v-btn>
+          <div class="cue-label deep-purple-darken-4">RIF</div>
+        </div>
       </div>
 
       <!-- Second Row of Hotkeys Below Cue Buttons -->
@@ -125,6 +137,7 @@
         <div class="cue-shortcut teal-darken-4">Alt+N</div>
         <div class="cue-shortcut red-darken-4">Alt+P</div>
         <div class="cue-shortcut amber-darken-4">Alt+D</div>
+        <div class="cue-shortcut deep-purple-darken-4">Alt+R</div>
       </div>
     </div>
 
@@ -240,6 +253,11 @@ export default {
 .cue-label.teal-darken-4,
 .cue-shortcut.teal-darken-4 {
   color: rgb(var(--v-theme-teal-darken-4)) !important;
+}
+
+.cue-label.deep-purple-darken-4,
+.cue-shortcut.deep-purple-darken-4 {
+  color: rgb(var(--v-theme-deep-purple-darken-4)) !important;
 }
 
 .cue-label.red-darken-4,

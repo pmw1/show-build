@@ -44,7 +44,10 @@ export default {
   props: {
     show: Boolean,
     episode: String,
-    duplicateSlugs: Array,
+    duplicateSlugs: {
+      type: Array,
+      default: () => []
+    },
     cueType: {
       type: String,
       default: 'dir'

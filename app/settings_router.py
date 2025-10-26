@@ -45,6 +45,7 @@ class InterfaceSettings(BaseModel):
     auto_save_interval: int = Field(30, description="Auto-save interval in seconds")
     sidebar_position: str = Field("left", description="Sidebar position (left/right)")
     default_view: str = Field("grid", description="Default episode view (grid/list)")
+    cue_card_alignment: str = Field("left", description="Cue card alignment in script mode (left/center/right)")
 
 class RundownSettings(BaseModel):
     """Rundown configuration"""

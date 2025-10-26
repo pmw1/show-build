@@ -28,11 +28,20 @@ def get_media_root() -> Path:
     """
     Get platform-appropriate media root directory.
 
+    Respects MEDIA_ROOT environment variable if set (for Docker containers).
+    Falls back to platform defaults if not set.
+
     Returns:
-        Path: /mnt/sync/disaffected on Linux, Z:/ on Windows
+        Path: Media root path (e.g., /home, /mnt/sync/disaffected, or W:/mnt/sync/disaffected)
     """
+    # Check for MEDIA_ROOT environment variable (Docker containers)
+    media_root_env = os.getenv('MEDIA_ROOT')
+    if media_root_env:
+        return Path(media_root_env)
+
+    # Fall back to platform defaults
     if IS_WINDOWS:
-        return Path('Z:/')
+        return Path('W:/mnt/sync/disaffected')
     else:
         return Path('/mnt/sync/disaffected')
 
@@ -70,15 +79,20 @@ def normalize_path(path_input) -> Path:
     if IS_WINDOWS:
         # Convert Linux path to Windows
         if path_str.startswith('/mnt/sync/disaffected'):
-            path_str = path_str.replace('/mnt/sync/disaffected', 'Z:', 1)
-        # Ensure Z: paths use backslashes on Windows
-        if path_str.startswith('Z:'):
+            path_str = path_str.replace('/mnt/sync/disaffected', 'W:/mnt/sync/disaffected', 1)
+        # Ensure W: paths use backslashes on Windows
+        if path_str.startswith('W:'):
             path_str = path_str.replace('/', '\\')
     else:
         # Convert Windows path to Linux
-        if path_str.upper().startswith('Z:'):
-            path_str = path_str[2:].lstrip('/\\')  # Remove Z: prefix
-            path_str = f'/mnt/sync/disaffected/{path_str}'
+        if path_str.upper().startswith('W:'):
+            # Remove W: prefix and extract the path after /mnt/sync/disaffected
+            path_str = path_str[2:].lstrip('/\\')  # Remove W: prefix
+            # W:\mnt\sync\disaffected\... -> /mnt/sync/disaffected/...
+            if path_str.lower().startswith('mnt\\sync\\disaffected') or path_str.lower().startswith('mnt/sync/disaffected'):
+                path_str = '/' + path_str
+            else:
+                path_str = f'/mnt/sync/disaffected/{path_str}'
         # Ensure forward slashes on Linux
         path_str = path_str.replace('\\', '/')
 

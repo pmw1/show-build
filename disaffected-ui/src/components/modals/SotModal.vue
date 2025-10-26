@@ -1,4 +1,92 @@
 <template>
+  <!-- Overlay Information Display (OUTSIDE v-dialog to avoid stacking context issues) -->
+  <div v-if="show && mediaUrl" class="overlay-info-display" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 10001;">
+    <!-- Top Center: Large Timecode Display -->
+    <div class="timecode-overlay" style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.85); padding: 14px 28px; border-radius: 9px; text-align: center; border: 2px solid rgba(255, 255, 255, 0.3); min-width: 380px;">
+      <div style="color: white; font-size: 40px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 4px; text-shadow: 0 0 15px rgba(255, 255, 255, 0.5); width: 340px; display: inline-block; font-variant-numeric: tabular-nums;">{{ currentTimecode }}</div>
+      <div style="color: #90CAF9; font-size: 10px; font-weight: bold; font-family: 'Helvetica', Arial, sans-serif; margin-top: 6px;">{{ currentActionDisplay }}</div>
+
+      <!-- Clip Duration Display (slides down from behind timecode when IN and OUT are set) -->
+      <transition name="slide-down">
+        <div v-if="trimStart && trimEnd && clipDuration" class="clip-duration-display" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.2);">
+          <div style="color: #81C784; font-size: 12px; font-weight: bold; margin-bottom: 4px;">CLIP DURATION</div>
+          <div style="color: #4CAF50; font-size: 32px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(76, 175, 80, 0.5);">{{ clipDuration }}</div>
+        </div>
+      </transition>
+    </div>
+
+    <!-- Top Left: IN Point Display -->
+    <div style="position: absolute; top: 150px; left: 50px;">
+      <div class="in-point-display" style="background: rgba(33, 150, 243, 0.9); padding: 30px; border-radius: 12px; border-left: 8px solid #1976D2; margin-bottom: 15px;">
+        <div style="color: white; font-size: 16px; font-weight: bold; margin-bottom: 10px;">◄ IN POINT</div>
+        <div style="color: white; font-size: 48px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 2px;">{{ trimStart || '--:--:--:--' }}</div>
+      </div>
+
+      <!-- Hotkeys List -->
+      <div class="hotkeys-list" style="background: rgba(0, 0, 0, 0.85); padding: 20px; border-radius: 8px; max-width: 300px;">
+        <div style="color: white; font-size: 16px; font-weight: bold; margin-bottom: 12px; border-bottom: 2px solid rgba(255, 255, 255, 0.3); padding-bottom: 8px;">
+          ⌨️ HOTKEYS
+        </div>
+        <div style="color: white; font-size: 12px; line-height: 1.8; font-family: 'Helvetica', Arial, sans-serif;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">SPACE</span><span>Play/Pause</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">SHIFT+SPACE</span><span>Preview</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">I</span><span>Mark IN</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">O</span><span>Mark OUT</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">Q</span><span>Go to IN</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">W</span><span>Go to OUT</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">K</span><span>Play/Pause</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">J / L</span><span>-1s / +1s</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">← / →</span><span>-1f / +1f</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">↑ / ↓</span><span>-10s / +10s</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #9C27B0; font-weight: bold;">ALT+T</span><span style="color: #9C27B0;">Mark Thumb</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #FF9800; font-weight: bold;">CTRL+ENTER</span><span style="color: #FF9800;">Take Clip</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2);"><span style="color: #4CAF50; font-weight: bold;">ALT+ENTER</span><span style="color: #4CAF50;">Submit</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #F44336; font-weight: bold;">ESC</span><span style="color: #F44336;">Cancel</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Right: OUT Point Display -->
+    <div style="position: absolute; top: 150px; right: 50px;">
+      <div class="out-point-display" style="background: rgba(255, 87, 34, 0.9); padding: 30px; border-radius: 12px; border-right: 8px solid #E64A19; margin-bottom: 15px;">
+        <div style="color: white; font-size: 16px; font-weight: bold; margin-bottom: 10px; text-align: right;">OUT POINT ►</div>
+        <div style="color: white; font-size: 48px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 2px; text-align: right;">{{ trimEnd || '--:--:--:--' }}</div>
+      </div>
+
+      <!-- Thumbnail Marker Display -->
+      <div class="thumbnail-marker-display" style="background: rgba(156, 39, 176, 0.9); padding: 20px; border-radius: 12px; border-right: 8px solid #7B1FA2; margin-bottom: 15px; pointer-events: auto;">
+        <div style="color: white; font-size: 14px; font-weight: bold; margin-bottom: 8px; text-align: right;">THUMBNAIL</div>
+        <div style="color: white; font-size: 24px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 1px; text-align: right; margin-bottom: 8px;">{{ thumbnailTimecode || '--:--:--:--' }}</div>
+        <button @click="setThumbnailTimecode" style="background: rgba(255, 255, 255, 0.2); color: white; padding: 10px 20px; border: 2px solid rgba(255, 255, 255, 0.4); border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; width: 100%; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
+          <span>📸 MARK (ALT+T)</span>
+        </button>
+      </div>
+
+      <!-- Individual Clip Boxes (drop in under thumbnail) -->
+      <transition-group name="clip-drop">
+        <div
+          v-for="(clip, index) in clips"
+          :key="`clip-${index}`"
+          class="clip-box"
+          style="background: rgba(255, 152, 0, 0.9); padding: 15px; border-radius: 10px; border-right: 8px solid #F57C00; margin-bottom: 12px; pointer-events: auto; max-width: 350px;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div style="color: white; font-size: 16px; font-weight: bold;">CLIP {{ index + 1 }}</div>
+            <button @click="removeClip(index)" style="background: #f44336; color: white; border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; font-weight: bold; transition: all 0.2s;">✕</button>
+          </div>
+          <input
+            v-model="clip.slug"
+            placeholder="clip-slug-here"
+            style="width: 100%; padding: 8px; margin-bottom: 8px; background: rgba(255, 255, 255, 0.2); border: 2px solid rgba(255, 255, 255, 0.4); border-radius: 6px; color: white; font-size: 14px; font-weight: bold; font-family: 'Roboto Mono', monospace;"
+            @click.stop
+          />
+          <div style="color: white; font-size: 12px; font-family: 'Roboto Mono', monospace; margin-bottom: 4px;">{{ clip.time_start }} → {{ clip.time_end }}</div>
+          <div style="color: rgba(255, 255, 255, 0.7); font-size: 11px; font-family: 'Roboto Mono', monospace;">Duration: {{ Math.round(clip.duration_seconds) }}s</div>
+        </div>
+      </transition-group>
+    </div>
+  </div>
+
   <v-dialog
     :model-value="show"
     @update:model-value="$emit('update:show', $event)"
@@ -44,22 +132,6 @@
         class="pa-5 interior-container"
         style="background-color: #f0f0f0; max-height: calc(80vh - 60px); overflow-y: auto; padding: 20px !important;"
       >
-        <!-- Episode Info Bar -->
-        <div class="info-bar d-flex justify-space-between mb-5 pa-3" style="background-color: #e8e8e8; border-radius: 4px; border: 1px solid #e0e0e0;">
-          <div class="info-item d-flex flex-column align-start">
-            <div class="text-caption font-weight-bold" style="font-size: 12px; color: #333; margin-bottom: 2px;">{{ episodeNumber || 'N/A' }}</div>
-            <div class="text-caption" style="font-size: 12px; color: #666;">Episode</div>
-          </div>
-          <div class="info-item d-flex flex-column align-start">
-            <div class="text-caption font-weight-bold" style="font-size: 12px; color: #333; margin-bottom: 2px;">{{ segmentName || 'N/A' }}</div>
-            <div class="text-caption" style="font-size: 12px; color: #666;">Segment</div>
-          </div>
-          <div class="info-item d-flex flex-column align-start">
-            <div class="text-caption font-weight-bold" style="font-size: 12px; color: #333; margin-bottom: 2px;">{{ assetId || 'Generated on save' }}</div>
-            <div class="text-caption" style="font-size: 12px; color: #666;">Asset ID</div>
-          </div>
-        </div>
-
         <v-form ref="sotFormRef">
           <!-- Slug (Required) -->
           <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">
@@ -401,26 +473,135 @@
           <div class="clipping-tools-section mb-4">
             <h3 class="text-uppercase font-weight-bold mb-3" style="font-size: 1.1em; color: #333;">CLIPPING TOOLS</h3>
 
-            <!-- Clipping Method Radio Buttons -->
+            <!-- Clipping Method Button Grid (1x10) -->
             <div class="mb-3">
               <label class="cue-modal-label mb-2 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Clipping Method:</label>
-              <div class="d-flex" style="gap: 15px; flex-wrap: wrap;">
-                <label style="display: flex; align-items: center; cursor: pointer;">
-                  <input type="radio" v-model="clippingMethod" value="none" style="margin-right: 6px;" />
-                  <span style="font-size: 14px;">None</span>
-                </label>
-                <label style="display: flex; align-items: center; cursor: pointer;">
-                  <input type="radio" v-model="clippingMethod" value="single-trim" style="margin-right: 6px;" />
-                  <span style="font-size: 14px;">Single Trim</span>
-                </label>
-                <label style="display: flex; align-items: center; cursor: pointer;">
-                  <input type="radio" v-model="clippingMethod" value="individual-clips" style="margin-right: 6px;" />
-                  <span style="font-size: 14px;">Individual Clips</span>
-                </label>
-                <label style="display: flex; align-items: center; cursor: pointer;">
-                  <input type="radio" v-model="clippingMethod" value="montage" style="margin-right: 6px;" />
-                  <span style="font-size: 14px;">Montage</span>
-                </label>
+
+              <!-- 1x10 Grid Container -->
+              <div class="clipping-grid-container" style="width: 100%; margin-bottom: 15px;">
+                <div class="clipping-row d-flex mb-0" style="gap: 1px;">
+
+                  <!-- None Button -->
+                  <div
+                    @click="clippingMethod = 'none'"
+                    @mouseenter="e => hoverButton(e, '#2196F3')"
+                    @mouseleave="e => unhoverButton(e, '#2196F3')"
+                    class="grid-btn clipping-btn"
+                    :style="{
+                      width: '25%',
+                      height: '55px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: clippingMethod === 'none' ? '#1565C0' : '#2196F3',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      fontFamily: 'Helvetica, Arial, sans-serif',
+                      overflow: 'hidden',
+                      boxShadow: clippingMethod === 'none' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
+                      transform: clippingMethod === 'none' ? 'translateY(2px)' : 'none',
+                      color: 'white',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      textShadow: '0 1px 2px rgba(0,0,0,0.3)'
+                    }"
+                    title="No clipping - use full video"
+                  >
+                    NONE
+                  </div>
+
+                  <!-- Single Trim Button -->
+                  <div
+                    @click="clippingMethod = 'single-trim'"
+                    @mouseenter="e => hoverButton(e, '#2196F3')"
+                    @mouseleave="e => unhoverButton(e, '#2196F3')"
+                    class="grid-btn clipping-btn"
+                    :style="{
+                      width: '25%',
+                      height: '55px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: clippingMethod === 'single-trim' ? '#1565C0' : '#2196F3',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      fontFamily: 'Helvetica, Arial, sans-serif',
+                      overflow: 'hidden',
+                      boxShadow: clippingMethod === 'single-trim' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
+                      transform: clippingMethod === 'single-trim' ? 'translateY(2px)' : 'none',
+                      color: 'white',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      textShadow: '0 1px 2px rgba(0,0,0,0.3)'
+                    }"
+                    title="Single trim - extract one clip from video"
+                  >
+                    SINGLE TRIM
+                  </div>
+
+                  <!-- Individual Clips Button -->
+                  <div
+                    @click="clippingMethod = 'individual-clips'"
+                    @mouseenter="e => hoverButton(e, '#2196F3')"
+                    @mouseleave="e => unhoverButton(e, '#2196F3')"
+                    class="grid-btn clipping-btn"
+                    :style="{
+                      width: '25%',
+                      height: '55px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: clippingMethod === 'individual-clips' ? '#1565C0' : '#2196F3',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      fontFamily: 'Helvetica, Arial, sans-serif',
+                      overflow: 'hidden',
+                      boxShadow: clippingMethod === 'individual-clips' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
+                      transform: clippingMethod === 'individual-clips' ? 'translateY(2px)' : 'none',
+                      color: 'white',
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      textShadow: '0 1px 2px rgba(0,0,0,0.3)'
+                    }"
+                    title="Individual clips - extract multiple separate clips"
+                  >
+                    INDIVIDUAL CLIPS
+                  </div>
+
+                  <!-- Montage Button -->
+                  <div
+                    @click="clippingMethod = 'montage'"
+                    @mouseenter="e => hoverButton(e, '#2196F3')"
+                    @mouseleave="e => unhoverButton(e, '#2196F3')"
+                    class="grid-btn clipping-btn"
+                    :style="{
+                      width: '25%',
+                      height: '55px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: clippingMethod === 'montage' ? '#1565C0' : '#2196F3',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      fontFamily: 'Helvetica, Arial, sans-serif',
+                      overflow: 'hidden',
+                      boxShadow: clippingMethod === 'montage' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
+                      transform: clippingMethod === 'montage' ? 'translateY(2px)' : 'none',
+                      color: 'white',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      textShadow: '0 1px 2px rgba(0,0,0,0.3)'
+                    }"
+                    title="Montage - combine multiple clips into single video"
+                  >
+                    MONTAGE
+                  </div>
+
+                </div>
               </div>
             </div>
 
@@ -590,7 +771,7 @@
               @click="handleAddCue"
               class="cue-modal-button"
               style="flex: 1; padding: 20px 40px; font-size: 16px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
-            >{{ clippingMethod !== 'none' ? 'Begin Processing' : 'Add SOT Cue' }}</button>
+            >{{ clippingMethod !== 'none' ? 'Insert and Begin Processing' : 'Insert SOT Cue' }}</button>
           </div>
         </v-form>
       </v-card-text>
@@ -599,7 +780,7 @@
 </template>
 
 <script>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useToast } from 'vue-toastification'
 import axios from 'axios'
 
@@ -641,6 +822,7 @@ export default {
     const timecodeDisplay = ref(null)
     const videoInfoOverlay = ref(null)
     const creditsListRef = ref(null)
+    const slugField = ref(null)
 
     // Button refs for keyboard shortcuts
     const markInBtn = ref(null)
@@ -694,6 +876,20 @@ export default {
 
     // Keyboard handler
     const keyboardHandler = ref(null)
+
+    // Overlay display state
+    const currentActionDisplay = ref('READY')
+    const thumbnailTimecode = ref('')
+
+    // Computed: Clip duration display
+    const clipDuration = computed(() => {
+      if (!trimStart.value || !trimEnd.value) return null
+      const startSeconds = timecodeToSeconds(trimStart.value)
+      const endSeconds = timecodeToSeconds(trimEnd.value)
+      const durationSeconds = endSeconds - startSeconds
+      if (durationSeconds <= 0) return null
+      return secondsToTimecode(durationSeconds, true)
+    })
 
     // Utility functions
     const secondsToTimecode = (seconds, showFrames = true) => {
@@ -771,14 +967,56 @@ export default {
     // Video control actions
     const performMarkInAction = () => {
       if (!videoPlayerRef.value) return
-      trimStart.value = secondsToTimecode(videoPlayerRef.value.currentTime, false)
+      trimStart.value = secondsToTimecode(videoPlayerRef.value.currentTime, true)  // Frame-accurate
       animateButtonPress(markInBtn.value)
+
+      // Auto-switch to single-trim mode if currently "none"
+      if (clippingMethod.value === 'none') {
+        clippingMethod.value = 'single-trim'
+        toast('Clipping mode switched to SINGLE TRIM', {
+          type: 'success',
+          position: 'top-center',
+          timeout: 2500,
+          icon: '✂️',
+        })
+      }
+
+      // Show toast notification - blue color, slide from left
+      toast(`IN point set: ${trimStart.value}`, {
+        type: 'info',
+        position: 'top-left',
+        timeout: 2000,
+        toastClassName: 'mark-in-toast',
+        bodyClassName: 'mark-in-toast-body',
+        icon: '◄',
+      })
     }
 
     const performMarkOutAction = () => {
       if (!videoPlayerRef.value) return
-      trimEnd.value = secondsToTimecode(videoPlayerRef.value.currentTime, false)
+      trimEnd.value = secondsToTimecode(videoPlayerRef.value.currentTime, true)  // Frame-accurate
       animateButtonPress(markOutBtn.value)
+
+      // Auto-switch to single-trim mode if currently "none"
+      if (clippingMethod.value === 'none') {
+        clippingMethod.value = 'single-trim'
+        toast('Clipping mode switched to SINGLE TRIM', {
+          type: 'success',
+          position: 'top-center',
+          timeout: 2500,
+          icon: '✂️',
+        })
+      }
+
+      // Show toast notification - orange/red color, slide from right
+      toast(`OUT point set: ${trimEnd.value}`, {
+        type: 'warning',
+        position: 'top-right',
+        timeout: 2000,
+        toastClassName: 'mark-out-toast',
+        bodyClassName: 'mark-out-toast-body',
+        icon: '►',
+      })
     }
 
     const performGoToInAction = () => {
@@ -799,8 +1037,10 @@ export default {
       if (!videoPlayerRef.value) return
       if (videoPlayerRef.value.paused) {
         videoPlayerRef.value.play()
+        currentActionDisplay.value = 'PLAYING ▶'
       } else {
         videoPlayerRef.value.pause()
+        currentActionDisplay.value = 'PAUSED ⏸'
       }
       animateButtonPress(playPauseBtn.value)
     }
@@ -822,6 +1062,7 @@ export default {
         return
       }
 
+      currentActionDisplay.value = 'PREVIEW MODE 👁'
       videoPlayerRef.value.currentTime = inPoint
       videoPlayerRef.value.play()
 
@@ -829,6 +1070,7 @@ export default {
       previewInterval.value = setInterval(() => {
         if (videoPlayerRef.value.currentTime >= outPoint) {
           videoPlayerRef.value.pause()
+          currentActionDisplay.value = 'PREVIEW ENDED ⏹'
           clearInterval(previewInterval.value)
           previewInterval.value = null
         }
@@ -848,6 +1090,7 @@ export default {
       if (!videoPlayerRef.value) return
       const frameDuration = 1 / currentFramerate.value
       videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - frameDuration)
+      currentActionDisplay.value = 'REVERSE 1 FRAME ◄|'
       animateButtonPress(step1fBackBtn.value)
     }
 
@@ -855,36 +1098,72 @@ export default {
       if (!videoPlayerRef.value) return
       const frameDuration = 1 / currentFramerate.value
       videoPlayerRef.value.currentTime = Math.min(videoPlayerRef.value.duration || 0, videoPlayerRef.value.currentTime + frameDuration)
+      currentActionDisplay.value = 'FORWARD 1 FRAME |►'
       animateButtonPress(step1fForwardBtn.value)
     }
 
     const performStepBackSecond = () => {
       if (!videoPlayerRef.value) return
       videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - 1)
+      currentActionDisplay.value = 'BACK 1 SECOND ◄◄'
       animateButtonPress(step1sBackBtn.value)
     }
 
     const performStepForwardSecond = () => {
       if (!videoPlayerRef.value) return
       videoPlayerRef.value.currentTime = Math.min(videoPlayerRef.value.duration || 0, videoPlayerRef.value.currentTime + 1)
+      currentActionDisplay.value = 'FORWARD 1 SECOND ►►'
       animateButtonPress(step1sForwardBtn.value)
     }
 
     const performJumpBackTenSeconds = () => {
       if (!videoPlayerRef.value) return
       videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - 10)
+      currentActionDisplay.value = 'JUMP BACK 10s ◄◄◄'
       animateButtonPress(step10sBackBtn.value)
     }
 
     const performJumpForwardTenSeconds = () => {
       if (!videoPlayerRef.value) return
       videoPlayerRef.value.currentTime = Math.min(videoPlayerRef.value.duration || 0, videoPlayerRef.value.currentTime + 10)
+      currentActionDisplay.value = 'JUMP FORWARD 10s ►►►'
       animateButtonPress(step10sForwardBtn.value)
+    }
+
+    // Thumbnail marker function
+    const setThumbnailTimecode = () => {
+      if (!videoPlayerRef.value) return
+      thumbnailTimecode.value = currentTimecode.value
+      toast.success(`📸 Thumbnail marker set at ${thumbnailTimecode.value}`, {
+        position: 'bottom-center',
+        timeout: 2000,
+        toastClassName: 'thumbnail-toast',
+        bodyClassName: 'thumbnail-toast-body',
+      })
+      currentActionDisplay.value = '📸 THUMBNAIL MARKED'
+    }
+
+    // Scroll to bottom of modal
+    const scrollToBottomOfModal = () => {
+      const interiorContainer = document.querySelector('.interior-container')
+      if (interiorContainer) {
+        interiorContainer.scrollTop = interiorContainer.scrollHeight
+        toast.info('Scrolled to bottom', { timeout: 1000 })
+      }
     }
 
     // Keyboard shortcuts setup
     const setupKeyboardShortcuts = () => {
       keyboardHandler.value = (event) => {
+        // ESC key - always handle with confirmation modal
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          event.stopImmediatePropagation()
+          handleEscapeKey()
+          return
+        }
+
         // Don't interfere with typing in input fields (except trim inputs with arrow keys)
         if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
           if (!(event.target === trimStartInputRef.value || event.target === trimEndInputRef.value) ||
@@ -978,11 +1257,38 @@ export default {
             performGoToOutAction()
             break
 
-          case 'Enter': // Ctrl+Enter - Take
+          case 'Enter': // Ctrl+Enter - Take, Alt+Enter - Submit/Inject
             if (event.ctrlKey) {
               event.preventDefault()
               performTakeAction()
+            } else if (event.altKey) {
+              event.preventDefault()
+              handleAddCue() // Submit and close modal
             }
+            break
+
+          case 't':
+          case 'T': // Alt+T - Set Thumbnail
+            if (event.altKey) {
+              event.preventDefault()
+              setThumbnailTimecode()
+            } else {
+              handled = false
+            }
+            break
+
+          case '.': // Alt+. - Set Thumbnail
+            if (event.altKey) {
+              event.preventDefault()
+              setThumbnailTimecode()
+            } else {
+              handled = false
+            }
+            break
+
+          case 'PageDown': // Page Down - Scroll to bottom of modal
+            event.preventDefault()
+            scrollToBottomOfModal()
             break
 
           default:
@@ -990,11 +1296,16 @@ export default {
             break
         }
 
+        // CRITICAL: Stop ALL keyboard events from propagating when SOT modal is open
+        // This prevents global shortcuts from interfering with video editing
         if (handled) {
+          event.preventDefault()
           event.stopPropagation()
+          event.stopImmediatePropagation()
         }
       }
 
+      // Use capture phase to intercept ALL keyboard events before other handlers
       document.addEventListener('keydown', keyboardHandler.value, true)
     }
 
@@ -1231,7 +1542,8 @@ export default {
         slug: finalClipSlug,
         time_start: timeStartWithFrames,
         time_end: timeEndWithFrames,
-        duration_seconds: endSec - startSec
+        duration_seconds: endSec - startSec,
+        transcript: '' // Initialize empty transcript for this clip
       })
 
       toast.success(`Clip "${finalClipSlug}" added`)
@@ -1338,10 +1650,12 @@ export default {
     }
 
     const handleAddCue = async () => {
+      console.log('🎬 handleAddCue called - slug:', slug.value)
       hideTopError()
 
       // Validate required fields
       if (!slug.value.trim()) {
+        console.log('❌ Validation failed: Slug is required')
         showTopError('ERROR: Slug is required')
         return
       }
@@ -1356,36 +1670,20 @@ export default {
         jobType = SOT_JOB_TYPES.MONTAGE
       }
 
+      // Show loading toast while generating AssetID
+      const loadingToast = toast.info('⏳ Assigning AssetID...', {
+        timeout: false,  // Don't auto-dismiss
+        closeButton: false
+      })
+
       // Generate AssetID early (needed for both cue creation and processing)
       const generatedAssetId = await generateAssetId()
 
-      // Check if we have a background upload that needs processing
-      if (tempJobId.value && uploadComplete.value) {
-        // Trigger multi-phase processing
-        try {
-          toast.info('Starting video processing...')
+      // Dismiss loading toast
+      toast.dismiss(loadingToast)
 
-          const response = await axios.post('/api/sot/process/multi-phase', {
-            temp_job_id: tempJobId.value,
-            episode: props.episodeNumber,
-            slug: slug.value.trim(),
-            asset_id: generatedAssetId,  // Pass AssetID for cue block updates
-            trim_start: trimStart.value,
-            trim_end: trimEnd.value,
-            job_type: jobType,
-            clips: clips.value.length > 0 ? clips.value : null
-          })
-
-          toast.success('Video processing started - check status for progress')
-          console.log('Processing started:', response.data)
-
-          // Continue with normal SOT cue creation
-        } catch (error) {
-          console.error('Failed to start processing:', error)
-          toast.error('Failed to start video processing: ' + error.message)
-          return
-        }
-      }
+      // NOTE: Processing will be triggered AFTER cue insertion by ContentEditor
+      // Don't start processing here - user hasn't inserted cue into script yet!
 
       // Format credits as JSON
       const creditsFormatted = credits.value
@@ -1414,6 +1712,7 @@ export default {
       }
 
       console.log('SOT cue data:', sotData)
+      console.log('✅ Submitting SOT cue and closing modal')
       emit('submit', sotData)
       emit('update:show', false)
 
@@ -1422,8 +1721,46 @@ export default {
     }
 
     const cancel = () => {
+      console.log('❌ User cancelled - closing modal')
       emit('update:show', false)
       resetForm()
+    }
+
+    // Handle ESC key with confirmation modal
+    const handleEscapeKey = () => {
+      // Check if any work has been done that needs cleanup
+      const hasUploadedFile = mediaUrl.value || blobUrl.value || originalFile.value
+      const hasTrimPoints = trimStart.value !== '00:00:00' || trimEnd.value !== '00:00:00'
+      const hasClips = clips.value && clips.value.length > 0
+      const hasFormData = slug.value || description.value || transcription.value
+
+      const hasAnyWork = hasUploadedFile || hasTrimPoints || hasClips || hasFormData
+
+      if (!hasAnyWork) {
+        // No work done, just close
+        cancel()
+        return
+      }
+
+      // Show confirmation dialog
+      const confirmed = window.confirm(
+        '⚠️ CLOSE SOT EDITOR?\n\n' +
+        'This will:\n' +
+        '• Discard all unsaved changes\n' +
+        '• Clear uploaded video from memory\n' +
+        '• Remove trim points and clips\n' +
+        '• Cancel any pending processing\n\n' +
+        'Are you sure you want to close?'
+      )
+
+      if (confirmed) {
+        console.log('🗑️ User confirmed ESC - cleaning up and closing')
+        // TODO: Add API call to clean up any temporary database entries or uploaded files
+        // For now, just reset the form and close
+        cancel()
+      } else {
+        console.log('🔄 User cancelled ESC - staying in modal')
+      }
     }
 
     const resetForm = () => {
@@ -1459,6 +1796,27 @@ export default {
     onMounted(() => {
       setupKeyboardShortcuts()
     })
+
+    // Watch for modal visibility changes
+    watch(
+      () => props.show,
+      (newValue, oldValue) => {
+        console.log(`🔔 SOT Modal visibility changed: ${oldValue} → ${newValue}`)
+        if (!newValue && oldValue) {
+          console.log('🚪 Modal closed - checking why...')
+          console.trace('Modal close stack trace')
+        }
+        // Auto-focus slug field when modal opens
+        if (newValue && !oldValue) {
+          nextTick(() => {
+            if (slugField.value) {
+              slugField.value.focus()
+              console.log('🎯 Auto-focused slug field')
+            }
+          })
+        }
+      }
+    )
 
     // Watch for edit mode - pre-populate form with initialData
     watch(
@@ -1496,6 +1854,17 @@ export default {
       { immediate: true }
     )
 
+    // Auto-populate Clip Slug for Single Trim mode
+    watch(
+      [() => slug.value, () => clippingMethod.value],
+      ([newSlug, newMethod]) => {
+        // Only auto-populate when in Single Trim mode
+        if (newMethod === 'single-trim') {
+          clipSlug.value = newSlug
+        }
+      }
+    )
+
     onBeforeUnmount(() => {
       if (keyboardHandler.value) {
         document.removeEventListener('keydown', keyboardHandler.value, true)
@@ -1522,6 +1891,7 @@ export default {
       timecodeDisplay,
       videoInfoOverlay,
       creditsListRef,
+      slugField,
       markInBtn,
       markOutBtn,
       goToInBtn,
@@ -1554,6 +1924,7 @@ export default {
       currentTimecode,
       durationTimecode,
       remainingTimecode,
+      clipDuration,
 
       // Upload state
       uploadProgress,
@@ -1565,6 +1936,10 @@ export default {
       clipSlug,
       clips,
 
+      // Overlay display state
+      currentActionDisplay,
+      thumbnailTimecode,
+
       // Actions
       triggerFileInput,
       handleFileUpload,
@@ -1575,6 +1950,7 @@ export default {
       removeCredit,
       handleAddCue,
       cancel,
+      handleEscapeKey,
       hoverButton,
       unhoverButton,
       performMarkInAction,
@@ -1590,6 +1966,8 @@ export default {
       performStepForwardSecond,
       performJumpBackTenSeconds,
       performJumpForwardTenSeconds,
+      setThumbnailTimecode,
+      scrollToBottomOfModal,
       updateTimecode,
       updatePlayPauseState,
       handleVideoMetadataLoaded
@@ -1599,9 +1977,96 @@ export default {
 </script>
 
 <style scoped>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');
+
+/* Slide-down animation for clip duration */
+.slide-down-enter-active {
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.slide-down-leave-active {
+  transition: all 0.3s ease-in;
+}
+
+.slide-down-enter-from {
+  transform: translateY(-20px);
+  opacity: 0;
+}
+
+.slide-down-leave-to {
+  transform: translateY(-10px);
+  opacity: 0;
+}
+
+/* Clip box drop-in animation */
+.clip-drop-enter-active {
+  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.clip-drop-leave-active {
+  transition: all 0.3s ease-in;
+}
+
+.clip-drop-enter-from {
+  transform: translateY(-30px) scale(0.8);
+  opacity: 0;
+}
+
+.clip-drop-leave-to {
+  transform: translateY(-15px) scale(0.9);
+  opacity: 0;
+}
+
+.clip-drop-move {
+  transition: transform 0.4s ease;
+}
+
 /* Modal overlay with 70% transparency */
 .v-overlay {
   background-color: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Custom toast styling for Mark IN (blue, from left) */
+:deep(.mark-in-toast) {
+  background-color: #2196F3 !important;
+  border-left: 5px solid #1976D2 !important;
+}
+
+:deep(.mark-in-toast-body) {
+  color: white !important;
+  font-weight: bold !important;
+  font-family: 'Helvetica', Arial, sans-serif !important;
+}
+
+/* Custom toast styling for Mark OUT (orange/red, from right) */
+:deep(.mark-out-toast) {
+  background-color: #FF5722 !important;
+  border-right: 5px solid #E64A19 !important;
+}
+
+:deep(.mark-out-toast-body) {
+  color: white !important;
+  font-weight: bold !important;
+  font-family: 'Helvetica', Arial, sans-serif !important;
+}
+
+/* Custom toast styling for Thumbnail marker (purple) */
+:deep(.thumbnail-toast) {
+  background-color: #9C27B0 !important;
+  border-bottom: 5px solid #7B1FA2 !important;
+}
+
+:deep(.thumbnail-toast-body) {
+  color: white !important;
+  font-weight: bold !important;
+  font-family: 'Helvetica', Arial, sans-serif !important;
+}
+
+/* Clip item hover effect */
+.clip-item:hover {
+  background: rgba(255, 255, 255, 0.2) !important;
+  transform: scale(1.03);
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.4);
 }
 
 /* Interior container scrollbar styling */
