@@ -333,10 +333,32 @@ export default {
       }
     },
     
-    handleInterfaceSave(settings) {
+    async handleInterfaceSave(settings) {
       // Update local state
       this.interfaceSettings = settings
       console.log('Interface settings saved:', settings)
+
+      // Persist to backend
+      try {
+        const response = await fetch('/api/settings/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          },
+          body: JSON.stringify({
+            interface: settings
+          })
+        })
+
+        if (response.ok) {
+          console.log('✅ Interface settings saved to database')
+        } else {
+          console.error('Failed to save interface settings:', await response.text())
+        }
+      } catch (error) {
+        console.error('Error saving interface settings:', error)
+      }
     },
     
     handleApiSave(configs) {

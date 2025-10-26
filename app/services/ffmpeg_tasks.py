@@ -13,9 +13,13 @@ Cross-Platform Support:
 import os
 import subprocess
 import platform
+import requests
+import uuid
+from datetime import datetime
 from pathlib import Path
 from celery import shared_task
 from celery.utils.log import get_task_logger
+from sqlalchemy import func
 
 # Cross-platform utilities
 from platform_utils import (
@@ -27,6 +31,38 @@ from platform_utils import (
 )
 
 logger = get_task_logger(__name__)
+
+# Notification helper
+def send_notification(title: str, message: str, priority: str = "normal", task_id: str = None):
+    """Send notification to the LLM notification system."""
+    try:
+        notif_data = {
+            "id": str(uuid.uuid4()),
+            "title": title,
+            "message": message,
+            "priority": priority,
+            "type": "ffmpeg_processing",
+            "operationId": task_id or str(uuid.uuid4()),
+            "success": True,
+            "read": False,
+            "dismissed": False,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+        # Send to API
+        response = requests.post(
+            "http://192.168.51.210:8888/llm-state/notifications",
+            json={"notifications": [notif_data]},
+            headers={"X-API-Key": "FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY"},
+            timeout=3
+        )
+
+        if response.status_code == 200:
+            logger.info(f"Notification sent: {title}")
+        else:
+            logger.warning(f"Notification failed: {response.status_code}")
+    except Exception as e:
+        logger.warning(f"Failed to send notification: {str(e)}")
 
 # Log worker platform on module load
 _platform_info = get_platform_info()
@@ -63,7 +99,17 @@ def process_sot_video(
     try:
         worker_name = platform.node()
         worker_platform = platform.system()
+        task_id = self.request.id
         logger.info(f"🎬 Processing SOT video on {worker_name} ({worker_platform}): {video_path} for episode {episode}")
+
+        # Send start notification
+        send_notification(
+            f"SOT Processing Started",
+            f"Processing {slug} on {worker_name} ({worker_platform})",
+            priority="normal",
+            task_id=task_id
+        )
+        self.update_state(state='PROGRESS', meta={'stage': 'Starting', 'progress': 0})
 
         # Normalize input path for this platform
         input_video = normalize_path(video_path)
@@ -82,6 +128,7 @@ def process_sot_video(
         ffprobe = get_ffprobe_binary()
 
         # 1. Get video duration using ffprobe
+        self.update_state(state='PROGRESS', meta={'stage': 'Analyzing video', 'progress': 10})
         duration_cmd = [
             ffprobe,
             "-v", "error",
@@ -93,7 +140,15 @@ def process_sot_video(
         duration = float(duration_result.stdout.strip())
         logger.info(f"Video duration: {duration}s")
 
+        send_notification(
+            f"Video Analyzed",
+            f"{slug}: Duration {duration:.1f}s detected",
+            priority="normal",
+            task_id=task_id
+        )
+
         # 2. Generate thumbnail at 1 second mark
+        self.update_state(state='PROGRESS', meta={'stage': 'Generating thumbnail', 'progress': 30})
         thumbnail_path = episode_dir / f"{base_name}-thumb.jpg"
         thumbnail_cmd = [
             ffmpeg, "-y",
@@ -106,7 +161,15 @@ def process_sot_video(
         subprocess.run(thumbnail_cmd, check=True, capture_output=True)
         logger.info(f"Thumbnail created: {thumbnail_path}")
 
+        send_notification(
+            f"Thumbnail Generated",
+            f"{slug}: Thumbnail created",
+            priority="normal",
+            task_id=task_id
+        )
+
         # 3. Extract audio as MP3
+        self.update_state(state='PROGRESS', meta={'stage': 'Extracting audio', 'progress': 50})
         audio_path = episode_dir / f"{base_name}.mp3"
         audio_cmd = [
             ffmpeg, "-y",
@@ -119,7 +182,15 @@ def process_sot_video(
         subprocess.run(audio_cmd, check=True, capture_output=True)
         logger.info(f"Audio extracted: {audio_path}")
 
+        send_notification(
+            f"Audio Extracted",
+            f"{slug}: Audio track extracted to MP3",
+            priority="normal",
+            task_id=task_id
+        )
+
         # 4. Process video (trim if needed, otherwise copy)
+        self.update_state(state='PROGRESS', meta={'stage': 'Processing video', 'progress': 70})
         output_video_path = episode_dir / f"{base_name}.mp4"
 
         if trim_start != "00:00:00" or trim_end != "00:00:00":
@@ -163,12 +234,29 @@ def process_sot_video(
         subprocess.run(video_cmd, check=True, capture_output=True)
         logger.info(f"Video processed: {output_video_path}")
 
+        send_notification(
+            f"Video Processed",
+            f"{slug}: Video encoding complete",
+            priority="normal",
+            task_id=task_id
+        )
+
         # Clean up temp upload file (cross-platform temp detection)
+        self.update_state(state='PROGRESS', meta={'stage': 'Cleaning up', 'progress': 90})
         input_video_str = str(input_video)
         is_temp = any(temp_marker in input_video_str.lower() for temp_marker in ['/tmp/', '\\temp\\', 'c:\\temp'])
         if input_video.exists() and is_temp:
             input_video.unlink()
             logger.info(f"Removed temp file: {input_video}")
+
+        # Send completion notification
+        send_notification(
+            f"✅ SOT Processing Complete",
+            f"{slug}: All assets generated successfully (thumbnail, audio, video)",
+            priority="normal",
+            task_id=task_id
+        )
+        self.update_state(state='PROGRESS', meta={'stage': 'Complete', 'progress': 100})
 
         # Return results with worker info
         return {
@@ -178,14 +266,28 @@ def process_sot_video(
             "duration": duration,
             "status": "completed",
             "worker": worker_name,
-            "platform": worker_platform
+            "platform": worker_platform,
+            "task_id": task_id
         }
 
     except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg error: {e.stderr if hasattr(e, 'stderr') else str(e)}")
+        error_msg = e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else str(e)
+        logger.error(f"FFmpeg error: {error_msg}")
+        send_notification(
+            f"❌ SOT Processing Failed",
+            f"{slug}: FFmpeg error - {error_msg[:100]}",
+            priority="high",
+            task_id=self.request.id
+        )
         raise
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
+        send_notification(
+            f"❌ SOT Processing Failed",
+            f"{slug}: {str(e)[:100]}",
+            priority="high",
+            task_id=self.request.id
+        )
         raise
 
 
@@ -226,6 +328,186 @@ def generate_thumbnail(self, video_path: str, output_path: str, timestamp: str =
         return {"thumbnail_path": output_path, "status": "completed"}
     except Exception as e:
         logger.error(f"Thumbnail generation failed: {str(e)}")
+        raise
+
+
+@shared_task(bind=True, queue='media', name='services.ffmpeg_tasks.process_vo_montage')
+def process_vo_montage(
+    self,
+    clips_data: list,
+    episode: str,
+    slug: str,
+    asset_id: str
+):
+    """
+    Process VO montage from multiple video clips with trim points.
+
+    Args:
+        clips_data: List of dicts with keys: video_path, trim_start, trim_end
+                   Example: [{"video_path": "/path/to/video.mp4",
+                             "trim_start": "00:00:10:00",
+                             "trim_end": "00:00:20:00"}, ...]
+        episode: Episode number (e.g., "0245")
+        slug: Item slug for naming
+        asset_id: AssetID for final output
+
+    Returns:
+        dict: {
+            "video_path": str,
+            "duration": float,
+            "clip_count": int
+        }
+    """
+    try:
+        worker_name = platform.node()
+        worker_platform = platform.system()
+        logger.info(f"🎞️  Processing VO montage on {worker_name} ({worker_platform}): {len(clips_data)} clips for episode {episode}")
+
+        # Get platform-appropriate binaries
+        ffmpeg = get_ffmpeg_binary()
+        ffprobe = get_ffprobe_binary()
+
+        # Create output directory structure
+        media_root = get_media_root()
+        episode_dir = media_root / "episodes" / episode / "assets" / "video"
+        episode_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create temp directory for trimmed clips
+        temp_dir = episode_dir / "temp_montage"
+        temp_dir.mkdir(exist_ok=True)
+
+        trimmed_clips = []
+        total_duration = 0.0
+
+        # Helper function to convert timecode to seconds
+        def timecode_to_seconds(timecode):
+            """Convert HH:MM:SS:FF timecode to seconds (assuming 30fps for frames)."""
+            parts = timecode.split(':')
+            if len(parts) == 3:
+                h, m, s = map(float, parts)
+                return h * 3600 + m * 60 + s
+            elif len(parts) == 4:
+                h, m, s, f = map(float, parts)
+                return h * 3600 + m * 60 + s + (f / 30.0)
+            return 0.0
+
+        # Step 1: Trim each clip
+        for idx, clip_data in enumerate(clips_data):
+            video_path = normalize_path(clip_data['video_path'])
+            trim_start = clip_data['trim_start']
+            trim_end = clip_data['trim_end']
+
+            if not video_path.exists():
+                logger.error(f"Clip {idx} not found: {video_path}")
+                continue
+
+            # Convert timecodes to seconds
+            start_sec = timecode_to_seconds(trim_start)
+            end_sec = timecode_to_seconds(trim_end)
+            clip_duration = end_sec - start_sec
+
+            if clip_duration <= 0:
+                logger.warning(f"Clip {idx} has invalid duration, skipping")
+                continue
+
+            # Output path for trimmed clip
+            trimmed_clip_path = temp_dir / f"clip_{idx:03d}.mp4"
+
+            # Trim the clip using FFmpeg
+            trim_cmd = [
+                ffmpeg, "-y",
+                "-ss", str(start_sec),
+                "-i", str(video_path),
+                "-t", str(clip_duration),
+                "-c:v", "h264_nvenc",
+                "-preset", "p4",
+                "-cq", "23",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                str(trimmed_clip_path)
+            ]
+
+            logger.info(f"Trimming clip {idx}: {start_sec}s to {end_sec}s ({clip_duration}s)")
+            subprocess.run(trim_cmd, check=True, capture_output=True)
+
+            trimmed_clips.append(trimmed_clip_path)
+            total_duration += clip_duration
+
+            logger.info(f"✓ Clip {idx} trimmed: {trimmed_clip_path}")
+
+        if not trimmed_clips:
+            raise ValueError("No valid clips to concatenate")
+
+        # Step 2: Create concat file for FFmpeg
+        concat_file = temp_dir / "concat_list.txt"
+        with open(concat_file, 'w') as f:
+            for clip_path in trimmed_clips:
+                # FFmpeg concat requires forward slashes even on Windows
+                f.write(f"file '{clip_path.as_posix()}'\n")
+
+        logger.info(f"Created concat file with {len(trimmed_clips)} clips")
+
+        # Step 3: Concatenate all clips into final montage
+        output_video_path = episode_dir / f"{slug}.mp4"
+
+        concat_cmd = [
+            ffmpeg, "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", str(concat_file),
+            "-c", "copy",
+            str(output_video_path)
+        ]
+
+        logger.info(f"Concatenating {len(trimmed_clips)} clips into final montage")
+        subprocess.run(concat_cmd, check=True, capture_output=True)
+
+        logger.info(f"✓ Montage created: {output_video_path}")
+
+        # Step 4: Clean up temporary files
+        for clip_path in trimmed_clips:
+            if clip_path.exists():
+                clip_path.unlink()
+        concat_file.unlink()
+        temp_dir.rmdir()
+
+        logger.info(f"✓ Cleaned up {len(trimmed_clips)} temp files")
+
+        # Step 5: Get final video duration
+        duration_cmd = [
+            ffprobe,
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(output_video_path)
+        ]
+        duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, check=True)
+        final_duration = float(duration_result.stdout.strip())
+
+        logger.info(f"🎬 VO Montage complete: {final_duration}s from {len(clips_data)} clips")
+
+        return {
+            "video_path": str(output_video_path),
+            "duration": final_duration,
+            "clip_count": len(clips_data),
+            "status": "completed",
+            "worker": worker_name,
+            "platform": worker_platform
+        }
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg error during montage: {e.stderr if hasattr(e, 'stderr') else str(e)}")
+        # Clean up on error
+        if 'temp_dir' in locals() and temp_dir.exists():
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during montage: {str(e)}")
+        # Clean up on error
+        if 'temp_dir' in locals() and temp_dir.exists():
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
         raise
 
 
@@ -474,9 +756,9 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
     phase1_cmd = [
         ffmpeg, "-y",
         "-i", str(clip_file),
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
+        "-c:v", "h264_nvenc",
+        "-preset", "p4",
+        "-cq", "23",
         "-r", "29.97",
         "-b:v", "8000k",
         "-c:a", "aac",
@@ -655,7 +937,16 @@ def _process_montage(temp_job_id, episode, slug, clips, asset_id, working_dir, n
     raise NotImplementedError("Montage workflow not yet implemented")
 
 
-@shared_task(bind=True, queue='media', name='services.ffmpeg_tasks.process_sot_video_multi_phase')
+@shared_task(
+    bind=True,
+    queue='media',
+    name='services.ffmpeg_tasks.process_sot_video_multi_phase',
+    max_retries=3,
+    soft_time_limit=1800,      # Warn at 30 minutes
+    time_limit=2400,           # Hard kill at 40 minutes
+    acks_late=True,            # Don't ack until task completes
+    reject_on_worker_lost=True  # Reject task if worker dies
+)
 def process_sot_video_multi_phase(
     self,
     temp_job_id: str,
@@ -698,7 +989,7 @@ def process_sot_video_multi_phase(
     """
     # Cross-platform working directory
     media_root = get_media_root()
-    working_dir = media_root / "preproc" / "working" / temp_job_id
+    working_dir = media_root / "shared_media" / "preproc" / "working" / temp_job_id
     normalized_slug = _normalize_slug(slug)
 
     # Get platform info for logging
@@ -915,6 +1206,7 @@ def process_sot_video_multi_phase(
         logger.info(f"Phase 0.5: Audio extracted to {phase05_audio}")
 
         # Transcribe with Whisper
+        transcription_text = None  # Store for final return payload
         try:
             from wpm_audio_router import transcribe_audio
             import asyncio
@@ -922,25 +1214,36 @@ def process_sot_video_multi_phase(
             # Run async transcription in sync context
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            transcription = loop.run_until_complete(transcribe_audio(str(phase05_audio)))
+            transcription_text = loop.run_until_complete(transcribe_audio(str(phase05_audio)))
             loop.close()
 
-            logger.info(f"Phase 0.5: Transcription complete, {len(transcription)} characters")
+            logger.info(f"Phase 0.5: Transcription complete, {len(transcription_text)} characters")
+
+            # Store transcription in database
+            db = SessionLocal()
+            try:
+                job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+                if job:
+                    job.transcription = transcription_text
+                    db.commit()
+            finally:
+                db.close()
 
             # Update cue block with transcription
             if asset_id:
                 _update_sot_cue_block(episode, slug, asset_id, {
                     'ProcessingStatus': 'Phase 0.5 Complete: Transcribed',
-                    'Transcription': transcription
+                    'Transcription': transcription_text
                 })
 
         except Exception as e:
             logger.error(f"Phase 0.5: Transcription failed: {e}")
+            transcription_text = f'[Transcription failed: {str(e)}]'
             # Continue processing even if transcription fails
             if asset_id:
                 _update_sot_cue_block(episode, slug, asset_id, {
                     'ProcessingStatus': 'Phase 0.5 Complete: Transcription Failed',
-                    'Transcription': f'[Transcription failed: {str(e)}]'
+                    'Transcription': transcription_text
                 })
 
         # ================================================================
@@ -957,9 +1260,9 @@ def process_sot_video_multi_phase(
         phase1_cmd = [
             ffmpeg, "-y",
             "-i", str(input_file),
-            "-c:v", "libx264",
-            "-preset", "medium",
-            "-crf", "18",  # High quality
+            "-c:v", "h264_nvenc",
+            "-preset", "p4",
+            "-cq", "18",  # High quality
             "-maxrate", "8M",
             "-bufsize", "16M",
             "-r", "29.97",  # Broadcast standard framerate
@@ -1057,34 +1360,78 @@ def process_sot_video_multi_phase(
                 })
 
         # ================================================================
-        # PHASE 2: Audio Normalization
+        # 🧪 TESTING MODE: Stopping after Phase 1.1
+        # - Phase 2+ disabled for incremental testing
+        # ================================================================
+        logger.info(f"🧪 TESTING MODE: Stopping after Phase 1.1 for {temp_job_id}")
+        processing_report["overall_status"] = "partial_complete"
+        processing_report["end_time"] = str(func.now())
+        processing_report["phases"]["phase1.1"] = {"status": "success"}
+
+        # Return Phase 1.1 output as final for testing
+        test_output_video = phase1_1_output
+
+        # Store processing report in database
+        db = SessionLocal()
+        try:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.processing_report = processing_report
+                job.status = 'partial_complete'
+                db.commit()
+        finally:
+            db.close()
+
+        logger.info(f"🧪 Phase 0-1.1 testing complete for {temp_job_id}")
+        logger.info(f"🧪 Output file: {test_output_video}")
+
+        return {
+            "temp_job_id": temp_job_id,
+            "episode": episode,
+            "slug": normalized_slug,
+            "video_path": str(test_output_video.relative_to(media_root)),
+            "status": "partial_complete",
+            "message": "Testing mode: Phase 0-1.1 complete, later phases disabled",
+            "pre_analysis": pre_analysis_data,
+            "processing_report": processing_report,
+            "test_mode": True
+        }
+
+        # ================================================================
+        # PHASE 2: Audio Normalization (DISABLED FOR TESTING)
         # - EBU R128 loudness normalization (-23 LUFS target)
         # - Dynamic range compression
         # - Peak limiting to -1dB
         # ================================================================
-        logger.info(f"Phase 2: Audio normalization for {temp_job_id}")
-        _update_job_status(temp_job_id, 'phase2', 'processing')
+        # logger.info(f"Phase 2: Audio normalization for {temp_job_id}")
+        # _update_job_status(temp_job_id, 'phase2', 'processing')
 
-        phase2_output = working_dir / f"{temp_job_id}_2_audio-normalized.mp4"
-        phase2_cmd = [
-            ffmpeg, "-y",
-            "-i", str(phase1_1_output),
-            "-c:v", "copy",  # Don't re-encode video
-            "-af", "loudnorm=I=-23:TP=-1:LRA=11,acompressor=threshold=-18dB:ratio=4:attack=5:release=50",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            str(phase2_output)
-        ]
-        subprocess.run(phase2_cmd, check=True, capture_output=True)
-        logger.info(f"Phase 2 complete: {phase2_output}")
+        # phase2_output = working_dir / f"{temp_job_id}_2_audio-normalized.mp4"
+        # phase2_cmd = [
+        #     ffmpeg, "-y",
+        #     "-i", str(phase1_1_output),
+        #     "-c:v", "copy",  # Don't re-encode video
+        #     "-af", "loudnorm=I=-23:TP=-1:LRA=11,acompressor=threshold=-18dB:ratio=4:attack=5:release=50",
+        #     "-c:a", "aac",
+        #     "-b:a", "192k",
+        #     str(phase2_output)
+        # ]
+        # subprocess.run(phase2_cmd, check=True, capture_output=True)
+        # logger.info(f"Phase 2 complete: {phase2_output}")
 
-        # Update cue block with Phase 2 completion
-        if asset_id:
-            _update_sot_cue_block(episode, slug, asset_id, {
-                'ProcessingStatus': 'Phase 2 Complete: Audio Normalized'
-            })
+        # # Update cue block with Phase 2 completion
+        # if asset_id:
+        #     _update_sot_cue_block(episode, slug, asset_id, {
+        #         'ProcessingStatus': 'Phase 2 Complete: Audio Normalized'
+        #     })
 
+        """
         # ================================================================
+        # PHASE 3-8: DISABLED FOR TESTING
+        # - All phases below are disabled while testing Phase 0-1.1
+        # - Uncomment to re-enable
+        # ================================================================
+
         # PHASE 3: Trimming (if requested)
         # - Trim based on trim_start and trim_end
         # - Skip entirely if no trimming needed
@@ -1371,17 +1718,20 @@ def process_sot_video_multi_phase(
             "temp_job_id": temp_job_id,
             "episode": episode,
             "slug": normalized_slug,
+            "asset_id": asset_id,
             "video_path": str(final_video.relative_to("/home/episodes")),
             "audio_path": str(final_audio.relative_to("/home/episodes")),
             "thumbnail_path": str(final_thumbs[7].relative_to("/home/episodes")),  # Primary (middle) thumbnail
             "thumbnail_options": [str(t.relative_to("/home/episodes")) for t in final_thumbs],
             "duration": duration,
+            "transcription": transcription_text,
             "status": "completed",
             "pre_analysis": pre_analysis_data,
             "post_analysis": post_analysis_data,
             "processing_report": processing_report,
             "devel_mode": devel_mode
         }
+        """  # END OF DISABLED PHASES 3-8
 
     except subprocess.CalledProcessError as e:
         error_msg = f"FFmpeg error in phase {self.request.retries + 1}: {e.stderr if hasattr(e, 'stderr') else str(e)}"

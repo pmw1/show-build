@@ -66,22 +66,24 @@
           <!-- Image Preview -->
           <div v-if="previewUrl" class="mb-3">
             <v-card variant="outlined" class="pa-2">
-              <img 
-                :src="previewUrl" 
+              <img
+                :src="previewUrl"
                 alt="Image preview"
                 style="max-width: 100%; max-height: 200px; object-fit: contain;"
                 class="mx-auto d-block"
               />
-              <div class="text-center mt-2">
+              <div class="d-flex justify-space-between align-center mt-2 px-2">
                 <v-chip size="small" color="success">{{ fileName }}</v-chip>
-                <v-btn 
-                  icon="mdi-delete" 
-                  size="small" 
-                  color="error" 
-                  variant="text"
+                <v-btn
+                  color="error"
+                  variant="flat"
+                  size="small"
                   @click="clearImage"
-                  class="ml-2"
-                ></v-btn>
+                  :prepend-icon="'mdi-delete'"
+                  style="color: white;"
+                >
+                  Clear
+                </v-btn>
               </div>
             </v-card>
           </div>
@@ -157,9 +159,14 @@
 
 <script>
 import axios from 'axios'
+import { useRequireEpisode } from '@/composables/useRequireEpisode'
 
 export default {
   name: 'ImgCueModal',
+  setup() {
+    const { requireEpisode } = useRequireEpisode();
+    return { requireEpisode };
+  },
   emits: ['update:show', 'submit'],
   props: {
     show: {
@@ -189,6 +196,7 @@ export default {
       pasteLoading: false,
       submitLoading: false,
       errorMessage: '',
+      temporaryEpisode: null, // For episode requirement callback
       rules: {
         required: value => !!value || 'This field is required'
       }
@@ -321,8 +329,42 @@ export default {
       console.log('Clipboard API available:', !!navigator.clipboard)
       console.log('Clipboard read available:', !!navigator.clipboard?.read)
 
-      // Simplified approach: Always show instructions and wait for paste event
-      // This is more reliable since the global paste listener is already set up
+      // Try direct Clipboard API first (works best on Windows)
+      if (navigator.clipboard && navigator.clipboard.read) {
+        try {
+          console.log('Attempting Clipboard API read...')
+          const clipboardItems = await navigator.clipboard.read()
+          console.log('Clipboard items retrieved:', clipboardItems.length)
+
+          for (const clipboardItem of clipboardItems) {
+            console.log('Clipboard item types:', clipboardItem.types)
+            for (const type of clipboardItem.types) {
+              if (type.startsWith('image/')) {
+                console.log('Found image type:', type)
+                const blob = await clipboardItem.getType(type)
+                console.log('Blob retrieved:', { size: blob.size, type: blob.type })
+                const file = new File([blob], 'pasted-image.png', { type })
+                await this.processImageFile(file, 'pasted-image.png')
+                this.pasteLoading = false
+                this.errorMessage = ''
+                return
+              }
+            }
+          }
+
+          // No image found via API
+          console.log('No image found in Clipboard API')
+          this.errorMessage = 'No image found in clipboard. Copy an image and try again.'
+          this.pasteLoading = false
+          return
+
+        } catch (clipboardError) {
+          console.log('Clipboard API failed, falling back to paste event:', clipboardError)
+          // Fall through to paste event method
+        }
+      }
+
+      // Fallback: Wait for paste event (for browsers without direct clipboard access)
       this.errorMessage = `${this.getPasteInstructions()} (Modal is listening for paste events)`
 
       console.log('Waiting for paste event. Modal state:', {
@@ -520,6 +562,11 @@ export default {
         console.error('🎨 Upload result:', uploadResult);
 
         if (!uploadResult.success) {
+          // Check if we're waiting for episode selection (not a real error)
+          if (uploadResult.message === 'Waiting for episode selection') {
+            console.log('⏸️ Upload paused - episode modal will handle retry');
+            return; // Don't show error, modal will trigger callback
+          }
           console.error('🎨 Upload failed:', uploadResult.error);
           this.errorMessage = uploadResult.error || 'Failed to upload image';
           return;
@@ -555,11 +602,18 @@ export default {
     
     async uploadImage(filename) {
       try {
+        // Get episode (may trigger modal if not available)
+        const episode = this.getCurrentEpisode();
+        if (!episode) {
+          console.log('⏸️ Upload paused - waiting for episode selection');
+          return { success: false, message: 'Waiting for episode selection' };
+        }
+
         // Create FormData for image upload
         const formData = new FormData()
         formData.append('file', this.imageFile)
         formData.append('filename', filename)
-        formData.append('episode', this.getCurrentEpisode())
+        formData.append('episode', episode)
 
         // Upload to backend
         const response = await axios.post('/api/upload/image', formData, {
@@ -612,20 +666,36 @@ export default {
     },
 
     getCurrentEpisode() {
-      // Use prop if available
-      if (this.currentEpisode) {
-        return this.currentEpisode
+      // Use the episode requirement system
+      const episode = this.requireEpisode(
+        this.currentEpisode,
+        'Upload Image',
+        (selectedEpisode) => {
+          // Callback: retry upload after episode selection
+          console.log('📺 Episode selected from modal, retrying upload with:', selectedEpisode);
+          // Store the selected episode temporarily
+          this.temporaryEpisode = selectedEpisode;
+          // Retry the submit
+          this.submit();
+        }
+      );
+
+      // If episode is available, return it
+      if (episode) {
+        console.log('✅ Episode available for upload:', episode);
+        return episode;
       }
 
-      // Fallback to session storage
-      const savedEpisode = sessionStorage.getItem('currentEpisodeId')
-      if (savedEpisode) {
-        return savedEpisode.padStart(4, '0')
+      // If we have a temporary episode from the callback, use it
+      if (this.temporaryEpisode) {
+        const temp = this.temporaryEpisode;
+        this.temporaryEpisode = null; // Clear it
+        return temp;
       }
 
-      // Last resort fallback - should be avoided
-      console.warn('Could not determine current episode, using fallback')
-      return '0239'
+      // Episode modal will be shown, return null to abort current operation
+      console.log('⏸️ No episode - modal will prompt user');
+      return null;
     },
 
     

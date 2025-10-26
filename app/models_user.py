@@ -9,6 +9,9 @@ from database import Base
 from typing import Optional
 from datetime import datetime
 
+# Import ONLY the association tables (not model classes) to avoid circular imports
+from models_rbac import user_roles_table, user_groups_table
+
 
 class User(Base):
     """User authentication and profile model"""
@@ -45,10 +48,10 @@ class User(Base):
     
     # Additional settings and preferences
     preferences = Column(JSON, default=dict)  # User-specific preferences (renamed from settings to avoid conflict)
-    
-    # RBAC Relationships - imported from models_rbac.py association tables
-    roles = relationship("Role", secondary="user_roles", back_populates="users")
-    groups = relationship("Group", secondary="user_groups", back_populates="users")
+
+    # RBAC Relationships - import tables (not models) to avoid circular dependency
+    roles = relationship("Role", secondary=user_roles_table, back_populates="users")
+    groups = relationship("Group", secondary=user_groups_table, back_populates="users")
 
     # Speaker profile relationship
     speaker_profile = relationship("Speaker", back_populates="user", uselist=False, cascade="all, delete-orphan")

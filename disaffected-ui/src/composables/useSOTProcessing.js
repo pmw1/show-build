@@ -1,9 +1,11 @@
 import { ref, onBeforeUnmount } from 'vue'
 import axios from 'axios'
+import { notifyUserStandard, NOTIFICATION_COLORS } from '@/composables/useStandardNotification'
 
 /**
  * Composable for tracking SOT processing jobs and auto-refreshing content
  * Polls for active jobs and triggers content refresh when updates occur
+ * Shows toast notifications for phase changes
  */
 export function useSOTProcessing() {
   const activeJobs = ref([])
@@ -68,17 +70,69 @@ export function useSOTProcessing() {
       if (!previousJob) {
         // New job detected
         console.log(`🆕 New SOT job detected: ${job.temp_job_id} (${job.current_phase})`)
+
+        // Show slide-in notification for new job
+        notifyUserStandard(
+          `🎬 ${job.slug}: ${job.phase_message || job.current_phase}`,
+          NOTIFICATION_COLORS.INFO,
+          3000
+        )
+
         if (onUpdate) onUpdate(job)
       } else if (previousJob.current_phase !== job.current_phase) {
         // Phase change detected
         console.log(`📊 SOT job phase change: ${job.temp_job_id} ${previousJob.current_phase} → ${job.current_phase}`)
+
+        // Show slide-in notification for phase change
+        notifyUserStandard(
+          `🎬 ${job.slug}: ${job.phase_message || job.current_phase}`,
+          NOTIFICATION_COLORS.INFO,
+          3000
+        )
+
         if (onUpdate) onUpdate(job)
       }
 
       // Check for completion
       if (job.status === 'completed' && previousJob?.status !== 'completed') {
         console.log(`✅ SOT job completed: ${job.temp_job_id}`)
+
+        // Show success slide-in notification
+        notifyUserStandard(
+          `✅ ${job.slug}: Processing complete`,
+          NOTIFICATION_COLORS.SUCCESS,
+          5000
+        )
+
         if (onComplete) onComplete(job)
+      }
+
+      // Check for partial completion (testing mode)
+      if (job.status === 'partial_complete' && previousJob?.status !== 'partial_complete') {
+        console.log(`🧪 SOT job partial complete: ${job.temp_job_id}`)
+
+        // Show warning slide-in notification for testing mode
+        notifyUserStandard(
+          `🧪 ${job.slug}: Testing phase complete (partial)`,
+          NOTIFICATION_COLORS.WARNING,
+          5000
+        )
+
+        if (onComplete) onComplete(job)
+      }
+
+      // Check for failure
+      if (job.status === 'failed' && previousJob?.status !== 'failed') {
+        console.log(`❌ SOT job failed: ${job.temp_job_id}`)
+
+        // Show error slide-in notification
+        notifyUserStandard(
+          `❌ ${job.slug}: Processing failed - click cue block to retry`,
+          NOTIFICATION_COLORS.ERROR,
+          10000
+        )
+
+        if (onUpdate) onUpdate(job)
       }
     })
 
@@ -114,6 +168,86 @@ export function useSOTProcessing() {
     return activeJobs.value.length > 0
   }
 
+  /**
+   * Retry a failed processing job
+   * @param {string} tempJobId - The temp_job_id to retry
+   * @returns {Promise<boolean>} - Success status
+   */
+  const retryFailedJob = async (tempJobId) => {
+    if (!tempJobId) {
+      console.error('Cannot retry: no temp_job_id provided')
+      return false
+    }
+
+    try {
+      console.log(`🔄 Retrying failed job: ${tempJobId}`)
+
+      const response = await axios.post(`/api/sot/retry/${tempJobId}`)
+
+      if (response.status === 200) {
+        notifyUserStandard(
+          `🔄 Retrying video processing...`,
+          NOTIFICATION_COLORS.INFO,
+          3000
+        )
+        return true
+      }
+
+      return false
+    } catch (error) {
+      console.error('Failed to retry job:', error)
+
+      const errorMsg = error.response?.data?.detail || 'Retry failed'
+      notifyUserStandard(
+        `❌ Retry failed: ${errorMsg}`,
+        NOTIFICATION_COLORS.ERROR,
+        5000
+      )
+
+      return false
+    }
+  }
+
+  /**
+   * Reprocess a SOT completely - Clean up and restart
+   * @param {string} assetId - The AssetID to reprocess
+   * @returns {Promise<boolean>} - Success status
+   */
+  const reprocessJob = async (assetId) => {
+    if (!assetId) {
+      console.error('Cannot reprocess: no assetId provided')
+      return false
+    }
+
+    try {
+      console.log(`🔄 Reprocessing SOT: ${assetId}`)
+
+      const response = await axios.post(`/api/sot/reprocess/${assetId}`)
+
+      if (response.status === 200) {
+        notifyUserStandard(
+          `🔄 Cleaning up and restarting video processing...`,
+          NOTIFICATION_COLORS.INFO,
+          3000
+        )
+        return true
+      }
+
+      return false
+    } catch (error) {
+      console.error('Failed to reprocess:', error)
+
+      const errorMsg = error.response?.data?.detail || 'Reprocess failed'
+      notifyUserStandard(
+        `❌ Reprocess failed: ${errorMsg}`,
+        NOTIFICATION_COLORS.ERROR,
+        5000
+      )
+
+      return false
+    }
+  }
+
   // Cleanup on unmount
   onBeforeUnmount(() => {
     stopPolling()
@@ -125,6 +259,8 @@ export function useSOTProcessing() {
     stopPolling,
     checkActiveJobs,
     getJobByAssetId,
-    hasActiveJobs
+    hasActiveJobs,
+    retryFailedJob,
+    reprocessJob
   }
 }

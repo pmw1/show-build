@@ -333,7 +333,7 @@ export class CueParser {
       type: cueData.type,
       title: this.generateCardTitle(cueData),
       subtitle: this.generateCardSubtitle(cueData),
-      assetId: cueData.assetId,
+      assetId: cueData.assetId || cueData.assetid, // Check both camelCase and lowercase
       slug: cueData.slug,
       description: cueData.description,
       mediaUrl: cueData.mediaUrl,

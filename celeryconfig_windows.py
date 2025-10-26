@@ -1,5 +1,5 @@
-broker_url = 'redis://192.168.51.210:6379/0'
-result_backend = 'redis://192.168.51.210:6379/0'
+broker_url = 'redis://:showbuild2025@192.168.51.223:6379/0'
+result_backend = 'redis://:showbuild2025@192.168.51.223:6379/0'
 
 task_routes = {
     'services.ffmpeg_tasks.*': {'queue': 'media'}

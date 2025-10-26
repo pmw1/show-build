@@ -1,9 +1,9 @@
 <template>
-  <div 
+  <div
     :class="['metadata-panel', panelWidth === 'narrow' ? 'narrow' : 'wide']"
     :style="{ width: panelWidthValue }"
   >
-    <v-card class="fill-height" flat>
+    <v-card class="h-auto" flat>
       <!-- Metadata Header -->
       <v-card-title
         class="d-flex align-center pa-2 metadata-title"
@@ -419,12 +419,14 @@ export default {
 
 <style scoped>
 .metadata-panel {
-  position: sticky !important;
-  top: 0 !important;
-  height: 100vh;
+  height: auto; /* Grow with content */
   border-left: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
-  overflow: hidden;
-  z-index: 5 !important; /* Ensure it stays above scrolling content */
+  overflow: visible; /* Scrolls with page */
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 15 !important; /* Highest - appear above all other panels */
+  padding-bottom: 50vh; /* Add whitespace equal to 50% of viewport height */
 }
 
 .metadata-title {
@@ -453,8 +455,8 @@ export default {
 }
 
 .metadata-content {
-  overflow-y: auto;
-  height: calc(100vh - 56px);
+  overflow-y: visible; /* No internal scroll - page scrolls */
+  flex: 1; /* Take remaining space after metadata-title */
   overflow-x: hidden;
 }
 

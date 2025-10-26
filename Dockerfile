@@ -1,6 +1,10 @@
 FROM tiangolo/uvicorn-gunicorn-fastapi:python3.11
 WORKDIR /app
 
+# Set timezone to America/New_York
+ENV TZ=America/New_York
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 # UNTOUCHABLE ZONE START - Existing requirements and setup
 COPY ./requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \

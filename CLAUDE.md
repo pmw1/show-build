@@ -26,6 +26,51 @@ cd disaffected-ui && npm run lint -- --fix
 
 ---
 
+## ⚠️ **MANDATORY: INTER-CLAUDE RELAY COORDINATION** ⚠️
+
+**CRITICAL RULE**: Check the relay server for coordination with other Claude instances.
+
+### Relay Server: http://192.168.51.223:8001
+**Web Interface**: http://192.168.51.223:8001/ui
+
+### MANDATORY Relay Check Frequency:
+- **EVERY 5 USER MESSAGES** - Check the relay without exception
+- **EVERY SINGLE USER MESSAGE** - When actively involved in specific troubleshooting or team development
+
+### Required Actions:
+
+**1. CHECK AT SESSION START** - Before doing any work:
+```bash
+curl http://192.168.51.223:8001/read
+```
+
+**2. CHECK EVERY 5 MESSAGES** - Regular coordination is critical:
+```bash
+curl 'http://192.168.51.223:8001/read?project=show-build&limit=10'
+```
+
+**3. POST UPDATES WHEN STARTING/COMPLETING WORK**:
+```bash
+curl -X POST http://192.168.51.223:8001/write -H "Content-Type: application/json" -d '{"content":"Your status","sender":"show-build-claude","project":"show-build"}'
+```
+
+**4. CHECK ANNOUNCEMENTS** - System-wide important messages:
+```bash
+curl http://192.168.51.223:8001/announcements
+```
+
+**5. COORDINATE BEFORE CHANGES** - If work involves shared systems, check relay first.
+
+### Why This Matters:
+- Prevents conflicting work between Claude instances
+- Enables collaboration on complex multi-system tasks
+- Shares specialized knowledge across instances
+- Avoids duplicate effort and breaking changes
+
+**This is not optional - it prevents wasted effort and system conflicts.**
+
+---
+
 ## 🚨 **DEBUGGING FRONTEND ISSUES?** 🚨
 **→ [`DEBUG_FIRST.md`](DEBUG_FIRST.md) ← START HERE IMMEDIATELY**
 

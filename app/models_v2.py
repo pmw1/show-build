@@ -12,6 +12,9 @@ from database import Base
 from typing import Optional
 import enum
 
+# Import User model for Speaker.user relationship
+from models_user import User
+
 
 class RundownItemType(str, enum.Enum):
     """Types of items that can appear in a rundown."""
@@ -439,6 +442,39 @@ class RundownItem(Base):
     # region = relationship("Region", back_populates="rundown_items")  # DISABLED: regions calculated dynamically on frontend
     segment = relationship("Segment", back_populates="rundown_items")
     speaker = relationship("Speaker")
+    content_versions = relationship("ContentVersion", back_populates="rundown_item", cascade="all, delete-orphan", order_by="ContentVersion.version_number.desc()")
+
+
+class ContentVersion(Base):
+    """Version history for rundown item script content - prevents data loss."""
+    __tablename__ = "content_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rundown_item_id = Column(Integer, ForeignKey("rundown_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_id = Column(String(50), nullable=False, index=True)  # Denormalized for easier lookup
+
+    # Version tracking
+    version_number = Column(Integer, nullable=False)
+    script_content = Column(Text, nullable=False)
+    content_hash = Column(String(64), nullable=False, index=True)  # SHA256 for deduplication
+    content_length = Column(Integer, nullable=False)  # Quick reference without loading content
+
+    # Change metadata
+    change_type = Column(String(20), nullable=False)  # 'manual_save', 'autosave', 'api_update', 'restore'
+    change_summary = Column(Text, nullable=True)  # Optional: what changed
+    created_by = Column(String(100), nullable=True)  # Username who made the change
+
+    # Timestamp
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    rundown_item = relationship("RundownItem", back_populates="content_versions")
+
+    __table_args__ = (
+        # Ensure version numbers are unique per rundown item
+        # Index for fast "get latest version" queries
+        {"schema": None}
+    )
 
 
 class Segment(Base):

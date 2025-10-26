@@ -78,7 +78,21 @@
               </v-col>
             </v-row>
 
-            <!-- Editor Options -->
+            <!-- Code Mode Settings -->
+            <v-divider class="my-4"></v-divider>
+            <h4 class="text-subtitle-1 mb-3">Code Mode Settings</h4>
+
+            <v-switch
+              v-model="interfaceSettings.editorAutoSave"
+              label="Auto-save"
+              color="primary"
+              class="mb-3"
+            />
+
+            <!-- Script Mode Settings -->
+            <v-divider class="my-4"></v-divider>
+            <h4 class="text-subtitle-1 mb-3">Script Mode Settings</h4>
+
             <v-switch
               v-model="interfaceSettings.editorLineNumbers"
               label="Show line numbers"
@@ -93,11 +107,17 @@
               class="mb-3"
             />
 
-            <v-switch
-              v-model="interfaceSettings.editorAutoSave"
-              label="Auto-save"
-              color="primary"
-              class="mb-3"
+            <v-select
+              v-model="interfaceSettings.cueCardAlignment"
+              :items="[
+                { title: 'Left', value: 'left' },
+                { title: 'Center', value: 'center' },
+                { title: 'Right', value: 'right' }
+              ]"
+              label="Cue Card Alignment"
+              hint="How cue cards are aligned in script mode"
+              persistent-hint
+              class="mb-4"
             />
 
             <v-btn
@@ -285,19 +305,22 @@ const interfaceSettings = ref({ ...props.modelValue })
 
 // Watch for changes to props and update local state
 watch(() => props.modelValue, (newValue) => {
-  interfaceSettings.value = { ...newValue }
+  // Only update if values actually changed to avoid loops
+  if (JSON.stringify(interfaceSettings.value) !== JSON.stringify(newValue)) {
+    interfaceSettings.value = { ...newValue }
+  }
 }, { deep: true })
 
 // Watch for changes to local state and emit updates
 watch(interfaceSettings, (newValue) => {
   emit('update:modelValue', newValue)
-}, { deep: true })
+}, { deep: true, flush: 'post' })
 
 // Methods
 const handleSave = () => {
   savingInterface.value = true
+  // Only emit 'save', don't double-emit 'update:modelValue' since watcher already does it
   emit('save', interfaceSettings.value)
-  emit('update:modelValue', interfaceSettings.value)
   // Reset loading state after a brief delay
   setTimeout(() => {
     savingInterface.value = false

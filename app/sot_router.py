@@ -12,6 +12,7 @@ Cross-Platform Notes:
 import os
 import shutil
 import uuid
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -27,6 +28,7 @@ from database import get_db
 from models_v2 import SOTProcessingJob
 from platform_utils import get_media_root  # Cross-platform path handling
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sot", tags=["SOT Processing"])
 
 
@@ -289,6 +291,7 @@ async def process_sot_multi_phase_endpoint(
         job.status = 'processing'
 
         # Submit to Celery with job_type, clips, and asset_id
+        # Route to Windows worker specifically (kairo has outdated code)
         task = process_sot_video_multi_phase.apply_async(
             args=[
                 request.temp_job_id,
@@ -301,7 +304,9 @@ async def process_sot_multi_phase_endpoint(
                 request.asset_id,
                 request.devel_mode  # Pass devel_mode flag
             ],
-            queue='media'
+            queue='media',
+            routing_key='media',
+            exchange='media'
         )
 
         job.celery_task_id = task.id
@@ -334,12 +339,28 @@ async def get_active_jobs(
         episode: Episode number
 
     Returns:
-        List of active job records
+        List of active job records with human-readable phase messages
     """
+    # Phase display messages for toast notifications
+    PHASE_MESSAGES = {
+        'upload': 'Video uploaded',
+        'phase0': 'Analyzing video properties',
+        'phase0.5': 'Transcribing audio with Whisper',
+        'phase1': 'Normalizing video codec',
+        'phase1.1': 'Analyzing audio channels',
+        'phase2': 'Normalizing audio levels',
+        'phase3': 'Trimming video',
+        'phase4': 'Generating thumbnails & extracting audio',
+        'phase5': 'Creating derivatives',
+        'phase6': 'Copying to final destination',
+        'phase7': 'Finalizing',
+        'phase8': 'Verifying output quality'
+    }
+
     try:
         jobs = db.query(SOTProcessingJob).filter(
             SOTProcessingJob.episode == episode,
-            SOTProcessingJob.status.in_(['uploaded', 'processing'])
+            SOTProcessingJob.status.in_(['uploaded', 'processing', 'partial_complete'])
         ).all()
 
         return {
@@ -350,6 +371,7 @@ async def get_active_jobs(
                     "asset_id": job.asset_id,
                     "slug": job.slug,
                     "current_phase": job.current_phase,
+                    "phase_message": PHASE_MESSAGES.get(job.current_phase, job.current_phase),
                     "status": job.status,
                     "job_type": job.job_type,
                     "created_at": job.created_at.isoformat() if job.created_at else None,
@@ -426,3 +448,375 @@ async def retry_failed_job(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Retry failed: {str(e)}")
+
+
+@router.get("/jobs/active")
+async def get_active_jobs(db: Session = Depends(get_db)):
+    """
+    Get all active SOT processing jobs.
+
+    Returns all jobs that are currently queued or processing.
+    Used for job monitoring dashboard.
+
+    Returns:
+        List of active jobs with status, phase, progress, and errors
+    """
+    try:
+        from datetime import datetime, timezone, timedelta
+
+        # Get all queued or processing jobs
+        active_jobs = db.query(SOTProcessingJob).filter(
+            SOTProcessingJob.status.in_(['queued', 'processing'])
+        ).order_by(SOTProcessingJob.created_at.desc()).all()
+
+        # Detect stalled jobs (no update in 5+ minutes while processing)
+        stall_threshold = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+        jobs_data = []
+        for job in active_jobs:
+            is_stalled = (
+                job.status == 'processing' and
+                job.updated_at and
+                job.updated_at < stall_threshold
+            )
+
+            jobs_data.append({
+                "job_id": job.temp_job_id,
+                "asset_id": job.asset_id,
+                "slug": job.slug,
+                "episode": job.episode,
+                "status": job.status,
+                "current_phase": job.current_phase,
+                "error_message": job.error_message,
+                "is_stalled": is_stalled,
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+                "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+                "celery_task_id": job.celery_task_id
+            })
+
+        return {
+            "active_count": len(jobs_data),
+            "jobs": jobs_data
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch active jobs: {str(e)}")
+
+
+@router.get("/jobs/recent")
+async def get_recent_jobs(limit: int = 20, db: Session = Depends(get_db)):
+    """
+    Get recent completed/failed jobs.
+
+    Args:
+        limit: Maximum number of jobs to return (default 20)
+
+    Returns:
+        List of recent jobs
+    """
+    try:
+        recent_jobs = db.query(SOTProcessingJob).filter(
+            SOTProcessingJob.status.in_(['completed', 'failed'])
+        ).order_by(SOTProcessingJob.updated_at.desc()).limit(limit).all()
+
+        jobs_data = []
+        for job in recent_jobs:
+            jobs_data.append({
+                "job_id": job.temp_job_id,
+                "asset_id": job.asset_id,
+                "slug": job.slug,
+                "episode": job.episode,
+                "status": job.status,
+                "current_phase": job.current_phase,
+                "error_message": job.error_message,
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+                "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+                "celery_task_id": job.celery_task_id
+            })
+
+        return {
+            "count": len(jobs_data),
+            "jobs": jobs_data
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch recent jobs: {str(e)}")
+
+
+@router.get("/job-status/{asset_id}")
+async def get_job_status_by_asset_id(
+    asset_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get current SOT processing job status by AssetID.
+
+    Returns the most recent job status for the given AssetID.
+    Used for real-time status updates on cue cards.
+
+    Args:
+        asset_id: AssetID of the SOT cue
+
+    Returns:
+        Job status information including status, phase, progress, and errors
+    """
+    logger.info(f"🔍 Job status requested for AssetID: {asset_id}")
+
+    try:
+        # Find most recent job for this AssetID
+        job = db.query(SOTProcessingJob).filter_by(
+            asset_id=asset_id
+        ).order_by(SOTProcessingJob.created_at.desc()).first()
+
+        if not job:
+            logger.warning(f"⚠️ No job found for AssetID: {asset_id}")
+            return {
+                "asset_id": asset_id,
+                "status": "not_found",
+                "message": "No processing job found for this AssetID"
+            }
+
+        logger.info(f"✅ Found job for AssetID {asset_id}: {job.temp_job_id}, status={job.status}, phase={job.current_phase}")
+
+        # Return job status
+        return {
+            "asset_id": asset_id,
+            "job_id": job.temp_job_id,
+            "status": job.status,
+            "current_phase": job.current_phase,
+            "error_message": job.error_message,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+            "celery_task_id": job.celery_task_id,
+            "slug": job.slug,
+            "episode": job.episode
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
+
+
+@router.post("/reprocess/{asset_id}")
+async def reprocess_sot_by_asset_id(
+    asset_id: str,
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Completely reprocess a SOT - wipe media, delete DB entries, and resubmit.
+
+    This endpoint:
+    1. Wipes all media files created by the job (video, audio, thumbnails)
+    2. Deletes all SOTProcessingJob database entries for this AssetID
+    3. Re-examines the cue data from rundown_items
+    4. Checks if uploaded video file still exists
+    5. Resubmits the Celery job with fresh metadata
+
+    Args:
+        asset_id: AssetID of the SOT to reprocess
+
+    Returns:
+        dict: Cleanup summary and new task_id
+    """
+    try:
+        import glob
+        from models_v2 import RundownItem
+
+        cleanup_summary = {
+            "asset_id": asset_id,
+            "cancelled_tasks": 0,
+            "deleted_jobs": 0,
+            "deleted_media_files": 0,
+            "media_files_deleted": [],
+            "working_dirs_removed": []
+        }
+
+        # Find all jobs for this AssetID
+        jobs = db.query(SOTProcessingJob).filter_by(asset_id=asset_id).all()
+
+        if not jobs:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No processing jobs found for asset_id: {asset_id}"
+            )
+
+        # Get info from the first job for resubmission
+        first_job = jobs[0]
+        episode = first_job.episode
+        slug = first_job.slug
+        uploaded_video_path = None
+
+        # Check if uploaded video still exists in working directory
+        if first_job.working_directory:
+            working_dir = Path(first_job.working_directory)
+            if working_dir.exists():
+                # Look for the uploaded video file
+                upload_file = working_dir / f"{first_job.temp_job_id}_upload.mp4"
+                if upload_file.exists():
+                    uploaded_video_path = str(upload_file)
+
+        # Cancel Celery tasks and collect job data
+        for job in jobs:
+            if job.celery_task_id:
+                try:
+                    celery_app.control.revoke(job.celery_task_id, terminate=True)
+                    cleanup_summary["cancelled_tasks"] += 1
+                except Exception as e:
+                    print(f"Failed to cancel task {job.celery_task_id}: {e}")
+
+        # Delete all generated media files in episode assets directory
+        media_root = get_media_root()
+        sots_dir = media_root / "episodes" / episode / "assets" / "sots"
+
+        if sots_dir.exists():
+            # Find all files matching the slug pattern
+            patterns = [
+                f"{slug}.*",  # Main files (video, audio)
+                f"{slug}-thumb*.jpg",  # Thumbnails
+                f"{slug}-*.mp4",  # Clip derivatives if any
+                f"{slug}-*.mp3"   # Audio derivatives if any
+            ]
+
+            for pattern in patterns:
+                matching_files = list(sots_dir.glob(pattern))
+                for file_path in matching_files:
+                    try:
+                        file_path.unlink()
+                        cleanup_summary["media_files_deleted"].append(str(file_path))
+                        cleanup_summary["deleted_media_files"] += 1
+                        print(f"Deleted media file: {file_path}")
+                    except Exception as e:
+                        print(f"Failed to delete {file_path}: {e}")
+
+        # Clean up working directories (but keep uploaded video if exists)
+        for job in jobs:
+            if job.working_directory and Path(job.working_directory).exists():
+                working_dir = Path(job.working_directory)
+                # Don't delete the upload file, only intermediate files
+                for item in working_dir.iterdir():
+                    if item.name != f"{job.temp_job_id}_upload.mp4":
+                        try:
+                            if item.is_dir():
+                                shutil.rmtree(item)
+                            else:
+                                item.unlink()
+                        except Exception as e:
+                            print(f"Failed to remove {item}: {e}")
+
+        # Delete all SOTProcessingJob records
+        for job in jobs:
+            db.delete(job)
+            cleanup_summary["deleted_jobs"] += 1
+
+        db.commit()
+
+        # Re-examine cue data from rundown_items
+        # SOTs can be embedded in segments, so check both direct asset_id match
+        # and script_content containing the SOT AssetID
+        rundown_item = db.query(RundownItem).filter_by(asset_id=asset_id).first()
+
+        # If not found as direct asset_id, search script_content for SOT cues
+        if not rundown_item:
+            rundown_item = db.query(RundownItem).filter(
+                RundownItem.script_content.like(f'%[AssetID: {asset_id}]%')
+            ).first()
+
+        if not rundown_item:
+            return {
+                "message": "Cleanup complete but no rundown item found",
+                "asset_id": asset_id,
+                "status": "cleaned_no_cue",
+                "cleanup_summary": cleanup_summary,
+                "next_steps": "No associated rundown item found. Manual re-upload required."
+            }
+
+        # Check if we have the uploaded video to reprocess
+        if not uploaded_video_path:
+            return {
+                "message": "Cleanup complete but uploaded video not found",
+                "asset_id": asset_id,
+                "status": "cleaned_no_video",
+                "cleanup_summary": cleanup_summary,
+                "next_steps": "Original video file not found. Please re-upload video using SOT modal."
+            }
+
+        # Create new processing job
+        new_temp_job_id = f"sot_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        new_job = SOTProcessingJob(
+            temp_job_id=new_temp_job_id,
+            episode=episode,
+            slug=slug,
+            asset_id=asset_id,
+            status='processing',
+            current_phase='phase0',
+            working_directory=str(Path(uploaded_video_path).parent)
+        )
+        db.add(new_job)
+
+        # Copy the uploaded video to new job name
+        new_upload_path = Path(uploaded_video_path).parent / f"{new_temp_job_id}_upload.mp4"
+        if not new_upload_path.exists():
+            shutil.copy2(uploaded_video_path, new_upload_path)
+
+        # Extract metadata from rundown item (trim times, job type, clips if stored)
+        import json
+        trim_start = "00:00:00"
+        trim_end = "00:00:00"
+        job_type = "full_process"
+        clips = None
+
+        # Try to get processing metadata from cue data if available
+        if rundown_item.script_content:
+            try:
+                import frontmatter
+                parsed = frontmatter.loads(rundown_item.script_content)
+                metadata = parsed.metadata
+                trim_start = metadata.get('trim_start', trim_start)
+                trim_end = metadata.get('trim_end', trim_end)
+                job_type = metadata.get('job_type', job_type)
+                if 'clips' in metadata:
+                    clips = metadata['clips']
+            except Exception as e:
+                print(f"Could not parse frontmatter: {e}")
+
+        # Resubmit to Celery
+        task = process_sot_video_multi_phase.apply_async(
+            args=[
+                new_temp_job_id,
+                episode,
+                slug,
+                trim_start,
+                trim_end,
+                job_type,
+                clips,
+                asset_id,
+                False  # devel_mode
+            ],
+            queue='media',
+            routing_key='media',
+            exchange='media'
+        )
+
+        new_job.celery_task_id = task.id
+        db.commit()
+
+        return {
+            "message": "SOT reprocessing started successfully",
+            "asset_id": asset_id,
+            "status": "reprocessing",
+            "new_task_id": task.id,
+            "new_temp_job_id": new_temp_job_id,
+            "cleanup_summary": cleanup_summary,
+            "episode": episode,
+            "slug": slug
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"🚨 REPROCESS ERROR: {str(e)}")
+        print(f"🚨 TRACEBACK:\n{error_trace}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Reprocess failed: {str(e)}")

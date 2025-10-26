@@ -14,8 +14,45 @@
       </v-toolbar-items>
     </v-toolbar>
 
-    <!-- Main Content Area -->
-    <div class="main-content-area">
+    <!-- Scrollable Content Area (contains header + columns) -->
+    <div class="scrollable-content-wrapper">
+      <!-- Show Info Header (full width, scrolls off) -->
+      <ShowInfoHeader
+        :title="currentShowTitle"
+        :episode-info="currentEpisodeInfoText"
+        :episode-number="currentEpisodeNumber"
+        :episode-asset-id="currentEpisodeAssetId"
+        :slug="currentEpisodeSlug"
+        :episode-title="currentEpisodeTitle"
+        :subtitle="currentEpisodeSubtitle"
+        :guest="currentEpisodeGuest"
+        :description="currentEpisodeDescription"
+        :is-dummy="currentEpisodeIsDummy"
+        :air-date="currentAirDate"
+        :production-status="currentProductionStatus"
+        :duration="duration"
+        :production-statuses="productionStatuses"
+        :save-state="episodeSaveState"
+        :show-metadata-panel="showMetadataPanel"
+        :is-xtts-configured="isXttsConfigured"
+        :is-reading-script="isReadingScript"
+        @update:airDate="handleAirDateChange"
+        @update:productionStatus="handleProductionStatusChange"
+        @update:title="handleTitleChange"
+        @update:slug="handleSlugChange"
+        @update:episodeTitle="handleEpisodeTitleChange"
+        @update:subtitle="handleSubtitleChange"
+        @update:guest="handleGuestChange"
+        @update:description="handleDescriptionChange"
+        @save-all="saveEverything"
+        @toggle-metadata-panel="showMetadataPanel = !showMetadataPanel"
+        @toggle-script-reading="handleToggleScriptReading"
+        @request-new-episode-assetid="handleRequestNewEpisodeAssetID"
+        @show-assetid-info="handleShowAssetIDInfo"
+      />
+
+      <!-- Main Content Area -->
+      <div class="main-content-area">
       <!-- Rundown Panel -->
       <RundownPanel
         ref="rundownPanelRef"
@@ -42,7 +79,7 @@
         @select-region="handleRegionSelection"
         @save="saveEverything"
       />
-      
+
       <!-- Reopen Rundown Button (when panel is closed) -->
       <div v-else class="rundown-reopen-button">
         <v-btn
@@ -60,34 +97,8 @@
         </v-btn>
       </div>
 
-      <!-- Editor Panel -->
+      <!-- Editor Panel (scrollable center column) -->
       <div class="editor-panel">
-        <!-- Show Info Header (scrollable) -->
-        <ShowInfoHeader
-          :title="currentShowTitle"
-          :episode-info="currentEpisodeInfoText"
-          :episode-number="currentEpisodeNumber"
-          :episode-asset-id="currentEpisodeAssetId"
-          :slug="currentEpisodeSlug"
-          :episode-title="currentEpisodeTitle"
-          :subtitle="currentEpisodeSubtitle"
-          :guest="currentEpisodeGuest"
-          :description="currentEpisodeDescription"
-          :is-dummy="currentEpisodeIsDummy"
-          :air-date="currentAirDate"
-          :production-status="currentProductionStatus"
-          :duration="duration"
-          :production-statuses="productionStatuses"
-          @update:airDate="handleAirDateChange"
-          @update:productionStatus="handleProductionStatusChange"
-          @update:title="handleTitleChange"
-          @update:slug="handleSlugChange"
-          @update:episodeTitle="handleEpisodeTitleChange"
-          @update:subtitle="handleSubtitleChange"
-          @update:guest="handleGuestChange"
-          @update:description="handleDescriptionChange"
-        />
-
         <EditorPanel
           ref="editorPanel"
           :item="currentRundownItem"
@@ -116,6 +127,7 @@
           @edit-sot-cue="handleShowSotModal"
           @show-vo-modal="handleShowVoModal"
           @show-nat-modal="handleShowNatModal"
+          @show-rif-modal="handleShowRifModal"
           @show-pkg-modal="handleShowPkgModal"
           @show-dir-modal="handleShowDirModal"
           @show-bump-modal="handleShowBumpModal"
@@ -162,6 +174,7 @@
         </v-btn>
       </div>
     </div>
+    </div><!-- End scrollable-content-wrapper -->
 
     <!-- Modals -->
     <AssetBrowserModal
@@ -204,6 +217,7 @@
     />
     <VoModal v-model:show="showVoModal" @submit="submitVo" />
     <NatModal v-model:show="showNatModal" @submit="submitNat" />
+    <RifModal v-model:show="showRifModal" @submit="submitRif" />
     <PkgModal v-model:show="showPkgModal" @submit="submitPkg" />
     <DirModal v-model:show="showDirModal" @submit="submitDir" />
     <BumpModal v-model:show="showBumpModal" @submit="submitBump" />
@@ -243,6 +257,13 @@
       v-model:show="showImgCueModal"
       :current-episode="currentEpisodeNumber"
       @submit="handleImgCueSubmit"
+    />
+
+    <RequireEpisodeModal
+      v-model:show="showEpisodeModal"
+      :action-description="episodeModalAction"
+      @episode-selected="handleEpisodeSelectedInContentEditor"
+      @cancelled="handleModalCancelled"
     />
 
     <!-- WPM Measurement Tool -->
@@ -288,6 +309,7 @@ import FsqModal from './modals/FsqModal.vue';
 import SotModal from './modals/SotModal.vue';
 import VoModal from './modals/VoModal.vue';
 import NatModal from './modals/NatModal.vue';
+import RifModal from './modals/RifModal.vue';
 import PkgModal from './modals/PkgModal.vue';
 import DirModal from './modals/DirModal.vue';
 import BumpModal from './modals/BumpModal.vue';
@@ -300,6 +322,7 @@ import NewGFXModal from './modals/NewGFXModal.vue';
 import NewSOTModal from './modals/NewSOTModal.vue';
 import DeleteCueModal from './content-editor/modals/DeleteCueModal.vue';
 import ImgCueModal from './content-editor/modals/ImgCueModal.vue';
+import RequireEpisodeModal from './modals/RequireEpisodeModal.vue';
 import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
 import WPMMeasurementTool from './tools/WPMMeasurementTool.vue';
 import { getColorValue, resolveVuetifyColor, loadColorsFromDatabase } from '../utils/themeColorMap';
@@ -309,6 +332,7 @@ import { notifyUserStandard, NOTIFICATION_COLORS } from '../composables/useStand
 import { useLLM } from '../composables/useLLM';
 import { useLLMState } from '../composables/useLLMState';
 import { useSOTProcessing } from '../composables/useSOTProcessing';
+import { useRequireEpisode } from '../composables/useRequireEpisode';
 
 export default {
   name: 'ContentEditor',
@@ -324,6 +348,7 @@ export default {
     SotModal,
     VoModal,
     NatModal,
+    RifModal,
     DirModal,
     BumpModal,
     StingModal,
@@ -337,9 +362,27 @@ export default {
     NewSOTModal,
     DeleteCueModal,
     ImgCueModal,
+    RequireEpisodeModal,
     WPMMeasurementTool
   },
-  
+
+  setup() {
+    // Episode requirement system
+    const {
+      showEpisodeModal,
+      episodeModalAction,
+      handleEpisodeSelected,
+      handleModalCancelled
+    } = useRequireEpisode();
+
+    return {
+      showEpisodeModal,
+      episodeModalAction,
+      handleEpisodeSelected,
+      handleModalCancelled
+    };
+  },
+
   async mounted() {
     console.log('ContentEditor mounted');
     
@@ -457,6 +500,18 @@ export default {
         }
       },
       deep: true
+    },
+
+    // Clean up placeholder when SOT modal closes without submitting
+    showSotModal(newVal, oldVal) {
+      if (oldVal === true && newVal === false) {
+        // Modal was closed
+        console.log('🚪 SOT modal closed - checking for placeholder cleanup');
+        // Clean up placeholder after a short delay to allow submitSot to finish if it was triggered
+        setTimeout(() => {
+          this.cleanupCuePlaceholder();
+        }, 100);
+      }
     }
     // Removed currentEpisodeNumber watcher to prevent race conditions
     // Episode changes should only be handled explicitly via handleEpisodeChange
@@ -807,6 +862,7 @@ Good night!
       editingSotCueData: null,  // For editing existing SOT cues
       showVoModal: false,
       showNatModal: false,
+      showRifModal: false,
       showDirModal: false,
       showBumpModal: false,
       showStingModal: false,
@@ -820,6 +876,7 @@ Good night!
 
       // SOT insertion snapshot (captured when modal opened)
       sotInsertionIndex: null,
+      cuePlaceholderId: null, // Placeholder div ID for precise cue insertion
 
       // Rundown management state
       showNewItemModal: false,
@@ -1123,6 +1180,15 @@ Try dropping an image or video file here!`
         ...this.currentItemMetadata,
         ...this.parsedContent.frontmatter
       };
+    },
+
+    // Pass-through computed properties from EditorPanel
+    isXttsConfigured() {
+      return this.$refs.editorPanel?.isXttsConfigured || false;
+    },
+
+    isReadingScript() {
+      return this.$refs.editorPanel?.isReadingScript || false;
     }
   },
   methods: {
@@ -1137,6 +1203,31 @@ Try dropping an image or video file here!`
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       };
+    },
+
+    /**
+     * Handle episode selection from RequireEpisodeModal
+     * Updates local state and syncs with global episode selector
+     * @param {string} selectedEpisode - The episode number selected by user
+     */
+    handleEpisodeSelectedInContentEditor(selectedEpisode) {
+      console.log('📺 Episode selected from modal:', selectedEpisode);
+
+      // Update local state
+      this.currentEpisodeNumber = selectedEpisode;
+
+      // Update sessionStorage for global consistency
+      sessionStorage.setItem('currentEpisodeId', selectedEpisode);
+      sessionStorage.setItem('selectedEpisode', selectedEpisode);
+      sessionStorage.setItem('currentEpisode', selectedEpisode);
+
+      // Load the episode
+      this.handleEpisodeChange(selectedEpisode);
+
+      // Call the composable handler to execute any pending callbacks
+      this.handleEpisodeSelected(selectedEpisode);
+
+      console.log('✅ Episode context updated globally');
     },
 
     // ===== LLM Generation State Management =====
@@ -1187,8 +1278,10 @@ Try dropping an image or video file here!`
       }
     },
     handleShowGfxModal() {
+      console.log('🎨 handleShowGfxModal called, current state:', this.showGfxModal);
       if (!this.showGfxModal) {
         this.showGfxModal = true;
+        console.log('🎨 GFX modal opened');
       }
     },
     handleShowFsqModal() {
@@ -1214,9 +1307,13 @@ Try dropping an image or video file here!`
         this.editingSotCueData = cueData;
 
         if (!cueData) {
-          // New SOT - snapshot the cursor position
+          // New SOT - insert placeholder at cursor position
+          console.log('📍 SOT modal opened - inserting placeholder at cursor position');
+          this.insertCuePlaceholder();
+
+          // Also keep the old paragraph index as fallback
           this.sotInsertionIndex = this.$refs.editorPanel?.focusedParagraphIndex;
-          console.log('📍 SOT modal opened - captured cursor position:', this.sotInsertionIndex);
+          console.log('📍 Fallback cursor position:', this.sotInsertionIndex);
 
           // If no paragraph is focused, use last segment as fallback
           if (this.sotInsertionIndex === null || this.sotInsertionIndex === undefined) {
@@ -1240,6 +1337,11 @@ Try dropping an image or video file here!`
     handleShowNatModal() {
       if (!this.showNatModal) {
         this.showNatModal = true;
+      }
+    },
+    handleShowRifModal() {
+      if (!this.showRifModal) {
+        this.showRifModal = true;
       }
     },
     handleShowPkgModal() {
@@ -1280,43 +1382,62 @@ Try dropping an image or video file here!`
 
     // SINGLE SOURCE HELPER: Update script content within rawMarkdownContent
     updateScriptContent(newScriptContent) {
-      console.log('📥 ContentEditor.updateScriptContent called with:', newScriptContent?.substring(0, 100));
+      console.log('🔄🔄🔄 ===============================================');
+      console.log('🔄 updateScriptContent CALLED');
+      console.log('📥 New script content length:', newScriptContent?.length || 0);
+      console.log('📥 New script content preview (first 200 chars):', newScriptContent?.substring(0, 200));
+      console.log('📊 this.parsedContent exists:', !!this.parsedContent);
+
       const parsed = this.parsedContent;
+      console.log('📊 Frontmatter keys:', Object.keys(parsed?.frontmatter || {}));
 
       // CRITICAL: Remove any standalone "---" lines from script content to prevent corruption
       // These would be interpreted as frontmatter delimiters
       const sanitizedScript = newScriptContent ? newScriptContent.replace(/^---\s*$/gm, '- - -') : '';
+      console.log('🧹 Sanitized script length:', sanitizedScript.length);
 
       // Rebuild frontmatter YAML
       const frontmatterLines = Object.entries(parsed.frontmatter)
         .map(([key, value]) => `${key}: ${value}`)
         .join('\n');
+      console.log('📋 Frontmatter lines:', frontmatterLines);
 
       // Rebuild full markdown content
       if (frontmatterLines) {
         this.rawMarkdownContent = `---\n${frontmatterLines}\n---\n\n${sanitizedScript}`;
+        console.log('✅ Updated rawMarkdownContent WITH frontmatter');
       } else {
         this.rawMarkdownContent = sanitizedScript;
+        console.log('✅ Updated rawMarkdownContent WITHOUT frontmatter');
       }
 
-      console.log('✅ rawMarkdownContent updated, new scriptContent computed:', this.scriptContent?.substring(0, 100));
+      console.log('📊 New rawMarkdownContent length:', this.rawMarkdownContent?.length || 0);
+      console.log('📊 New rawMarkdownContent preview (first 200 chars):', this.rawMarkdownContent?.substring(0, 200));
+      console.log('📊 New computed scriptContent preview (first 200 chars):', this.scriptContent?.substring(0, 200));
+      console.log('✅ updateScriptContent complete');
+      console.log('🔄🔄🔄 ===============================================');
     },
 
     // SINGLE SOURCE HELPER: Append to script content
     appendToScriptContent(textToAppend, insertAfterParagraph = null) {
-      console.log('📥 appendToScriptContent called');
+      console.log('📥📥📥 ===============================================');
+      console.log('📥 appendToScriptContent CALLED');
       console.log('📄 Text to append length:', textToAppend.length);
-      console.log('📝 Text to append preview:', textToAppend.substring(0, 100));
+      console.log('📝 Text to append full content:\n', textToAppend);
       console.log('📍 Insert after paragraph:', insertAfterParagraph);
+      console.log('📊 this.parsedContent exists:', !!this.parsedContent);
+      console.log('📊 this.parsedContent.scriptContent exists:', !!this.parsedContent?.scriptContent);
 
       const currentScript = this.parsedContent.scriptContent || '';
       console.log('📊 Current script length:', currentScript.length);
+      console.log('📊 Current script preview (first 200 chars):', currentScript.substring(0, 200));
 
       let newScript;
       let isAtEnd = false;
 
       // If insertAfterParagraph is specified, insert after that paragraph
       if (insertAfterParagraph !== null && this.$refs.editorPanel) {
+        console.log('🔍 Insertion after specific paragraph requested');
         const segments = this.$refs.editorPanel.scriptSegments || [];
         console.log('📋 Total segments:', segments.length);
 
@@ -1338,12 +1459,14 @@ Try dropping an image or video file here!`
 
         // Check if we're inserting at the end
         isAtEnd = (insertionPoint >= currentScript.length);
+        console.log('📍 Is at end:', isAtEnd);
 
         // Insert at the calculated position
         newScript = currentScript.slice(0, insertionPoint) + textToAppend + currentScript.slice(insertionPoint);
         console.log('✅ Inserted after paragraph', insertAfterParagraph);
       } else {
         // Default behavior: append to end
+        console.log('🔍 No specific insertion point - appending to end');
         newScript = currentScript + textToAppend;
         isAtEnd = true;
         console.log('✅ Appended to end (no insertion point specified)');
@@ -1359,10 +1482,132 @@ Try dropping an image or video file here!`
       }
 
       console.log('📊 New script length:', newScript.length);
+      console.log('📊 New script preview (first 200 chars):', newScript.substring(0, 200));
       console.log('🔄 Calling updateScriptContent...');
 
       this.updateScriptContent(newScript);
       console.log('✅ appendToScriptContent complete');
+      console.log('📥📥📥 ===============================================');
+    },
+
+    /**
+     * Clean up any cue insertion placeholders
+     */
+    cleanupCuePlaceholder() {
+      if (this.cuePlaceholderId) {
+        const placeholder = document.getElementById(this.cuePlaceholderId);
+        if (placeholder) {
+          placeholder.remove();
+          console.log('🧹 Removed cue placeholder:', this.cuePlaceholderId);
+        }
+        this.cuePlaceholderId = null;
+      }
+    },
+
+    /**
+     * Insert a placeholder div at the current cursor position for cue insertion
+     * Handles stepping out of <p> tags and cue blocks to find the correct insertion point
+     */
+    insertCuePlaceholder() {
+      console.log('📍📍📍 ===============================================');
+      console.log('📍 insertCuePlaceholder CALLED');
+
+      try {
+        // Get the editor panel's script container
+        const editorPanel = this.$refs.editorPanel;
+        if (!editorPanel || !editorPanel.$refs.scriptContainer) {
+          console.warn('⚠️ No editor panel or script container found');
+          return;
+        }
+
+        const scriptContainer = editorPanel.$refs.scriptContainer;
+        const selection = window.getSelection();
+
+        if (!selection || selection.rangeCount === 0) {
+          console.warn('⚠️ No selection found');
+          return;
+        }
+
+        const range = selection.getRangeAt(0);
+        let currentNode = range.startContainer;
+
+        console.log('📍 Current node:', currentNode.nodeName, currentNode.nodeType);
+        console.log('📍 Current node parent:', currentNode.parentElement?.tagName);
+
+        // If we're in a text node, get the parent element
+        if (currentNode.nodeType === Node.TEXT_NODE) {
+          currentNode = currentNode.parentElement;
+        }
+
+        console.log('📍 Working with element:', currentNode.tagName, currentNode.className);
+
+        // Step up the DOM tree until we're outside any <p> or cue block
+        let insertionPoint = currentNode;
+        while (insertionPoint && insertionPoint !== scriptContainer) {
+          const tagName = insertionPoint.tagName?.toLowerCase();
+          const className = insertionPoint.className || '';
+
+          console.log('🔍 Checking element:', tagName, 'class:', className);
+
+          // Check if we're inside a <p> tag or a cue block
+          if (tagName === 'p' || className.includes('cue-block') || className.includes('cue-card')) {
+            console.log('📤 Found container element, stepping to next sibling');
+
+            // If we have a next sibling, insert before it
+            if (insertionPoint.nextSibling) {
+              insertionPoint = insertionPoint.nextSibling;
+              console.log('✅ Found next sibling:', insertionPoint.nodeName);
+              break;
+            } else {
+              // No next sibling, move up to parent to insert after this element
+              const parent = insertionPoint.parentElement;
+              if (parent && parent !== scriptContainer) {
+                insertionPoint = parent;
+                break;
+              }
+            }
+          }
+
+          insertionPoint = insertionPoint.parentElement;
+        }
+
+        // Create the placeholder div with a unique ID
+        const placeholderId = `cue-placeholder-${Date.now()}`;
+        const placeholder = document.createElement('div');
+        placeholder.id = placeholderId;
+        placeholder.className = 'cue-insertion-placeholder';
+        placeholder.style.cssText = 'height: 2px; background: #FF9800; margin: 5px 0; opacity: 0.5; position: relative;';
+        placeholder.innerHTML = '<span style="position: absolute; top: -10px; left: 0; font-size: 10px; color: #FF9800; font-weight: bold;">▼ CUE WILL INSERT HERE</span>';
+
+        console.log('📍 Placeholder ID:', placeholderId);
+        console.log('📍 Insertion point:', insertionPoint?.tagName, insertionPoint?.className);
+
+        // Insert the placeholder
+        if (insertionPoint && insertionPoint.parentElement) {
+          // If insertionPoint is a text node or we're at the end, insert after
+          if (insertionPoint.nodeType === Node.TEXT_NODE || !insertionPoint.nextSibling) {
+            insertionPoint.parentElement.insertBefore(placeholder, insertionPoint.nextSibling);
+            console.log('✅ Inserted placeholder after current node');
+          } else {
+            insertionPoint.parentElement.insertBefore(placeholder, insertionPoint);
+            console.log('✅ Inserted placeholder before next sibling');
+          }
+        } else {
+          // Fallback: append to script container
+          scriptContainer.appendChild(placeholder);
+          console.log('✅ Appended placeholder to script container (fallback)');
+        }
+
+        // Store the placeholder ID for later use
+        this.cuePlaceholderId = placeholderId;
+        console.log('✅ Stored placeholder ID:', this.cuePlaceholderId);
+
+      } catch (error) {
+        console.error('❌ Error inserting cue placeholder:', error);
+        console.error('❌ Stack trace:', error.stack);
+      }
+
+      console.log('📍📍📍 ===============================================');
     },
 
     /**
@@ -1788,27 +2033,30 @@ Try dropping an image or video file here!`
         const assetId = currentItem.asset_id || currentItem.AssetID || currentItem.id;
 
         // CRITICAL VALIDATION: Check for corruption before saving
-        // Check rawMarkdownContent (not scriptContent) for multiple YAML frontmatter blocks
+        // Check rawMarkdownContent for multiple YAML frontmatter blocks (multiple segments)
         const rawToCheck = this.rawMarkdownContent || '';
-        const frontmatterPattern = /^---\s*$/gm;
-        const frontmatterMatches = rawToCheck.match(frontmatterPattern);
-        const frontmatterCount = frontmatterMatches ? frontmatterMatches.length : 0;
+
+        // More specific check: Look for multiple frontmatter blocks by detecting the pattern
+        // "---" followed by YAML keys like "id:", "slug:", "type:" which indicate segment metadata
+        const frontmatterBlockPattern = /^---\s*\n\s*(id|slug|type|title):/gm;
+        const frontmatterBlockMatches = rawToCheck.match(frontmatterBlockPattern);
+        const frontmatterBlockCount = frontmatterBlockMatches ? frontmatterBlockMatches.length : 0;
 
         console.log('🔍 Corruption check:', {
-          frontmatterCount,
+          frontmatterBlockCount,
           rawLength: rawToCheck.length,
-          matches: frontmatterMatches,
+          matches: frontmatterBlockMatches,
           rawPreview: rawToCheck.substring(0, 500)
         });
 
-        // Should have exactly 2 occurrences of "---" (opening and closing frontmatter)
-        // More than 2 means multiple segments were concatenated
-        if (frontmatterCount > 2) {
+        // Should have exactly 1 frontmatter block (the segment's metadata)
+        // More than 1 means multiple segments were concatenated
+        if (frontmatterBlockCount > 1) {
           console.error('🚨🚨🚨 SAVE BLOCKED: Raw content contains multiple segments!');
-          console.error('Frontmatter occurrences:', frontmatterCount);
-          console.error('Expected: 2 (opening and closing)');
+          console.error('Frontmatter block occurrences:', frontmatterBlockCount);
+          console.error('Expected: 1 (single segment)');
           console.error('Raw content preview:', rawToCheck.substring(0, 500));
-          console.error('All matches:', frontmatterMatches);
+          console.error('All matches:', frontmatterBlockMatches);
           throw new Error('Cannot save: Multiple segments detected in script content. This would corrupt the database.');
         }
 
@@ -2581,8 +2829,44 @@ Try dropping an image or video file here!`
                            this.showNewSOTModal || this.showDeleteCueModal ||
                            this.showAssetBrowserModal || this.showTemplateManagerModal;
 
-      // ESCAPE KEY - Exit editing mode and return to rundown navigation
-      if (event.key === 'Escape' && !hasModalOpen) {
+      // ESCAPE KEY - Close modal if one is open, otherwise exit editing mode
+      if (event.key === 'Escape') {
+        if (hasModalOpen) {
+          event.preventDefault();
+          event.stopPropagation();
+          console.log('🚨 ESC pressed with modal open - closing modal and flashing ABORT');
+
+          // Flash urgent abort
+          import('@/composables/useScreenFlash').then(({ useScreenFlash }) => {
+            const { flashUrgentAbort } = useScreenFlash();
+            flashUrgentAbort();
+          });
+
+          // Close whichever modal is open
+          this.showImgCueModal = false;
+          this.showGfxModal = false;
+          this.showFsqModal = false;
+          this.showSotModal = false;
+          this.showVoModal = false;
+          this.showNatModal = false;
+          this.showPkgModal = false;
+          this.showVoxModal = false;
+          this.showMusModal = false;
+          this.showLiveModal = false;
+          this.showNewItemModal = false;
+          this.showNewGFXModal = false;
+          this.showNewSOTModal = false;
+          this.showDeleteCueModal = false;
+          this.showAssetBrowserModal = false;
+          this.showTemplateManagerModal = false;
+          this.showBumpModal = false;
+          this.showStingModal = false;
+          this.showDirModal = false;
+
+          return;
+        }
+
+        // No modal open - handle normal escape behavior
         if (isInTextField) {
           event.preventDefault();
           event.target.blur(); // Remove focus from editor
@@ -3453,8 +3737,10 @@ Try dropping an image or video file here!`
     
     async submitSot(data) {
       try {
-        console.log('🎬 SOT Modal Submit - AssetID:', data.assetId);
-        console.log('📋 SOT data received:', data);
+        console.log('🎬🎬🎬 ===============================================');
+        console.log('🎬 submitSot CALLED - Starting SOT cue insertion');
+        console.log('🎬 AssetID:', data.assetId);
+        console.log('📋 Full SOT data received:', JSON.stringify(data, null, 2));
 
         // Build the SOT cue block
         let sotCue = `<!-- Begin Cue -->
@@ -3483,58 +3769,135 @@ Try dropping an image or video file here!`
 
 `;
 
-        console.log('📝 Built SOT cue block');
+        console.log('📝 Built SOT cue block (length:', sotCue.length, 'chars)');
+        console.log('📝 Cue block content:\n', sotCue);
 
         // Close modal first
         this.showSotModal = false;
+        console.log('🚪 SOT modal closed');
 
-        // Check if processing mode (clipping method !== 'none')
-        const isProcessingMode = data.clippingMethod && data.clippingMethod !== 'none';
+        // Try placeholder-based insertion first, fall back to paragraph index
+        let insertedViaPlaceholder = false;
 
-        if (isProcessingMode) {
-          // Processing mode: Use snapshot pattern (like FSQ)
-          console.log('🎬 Processing mode detected - using snapshotted insertion position');
+        if (this.cuePlaceholderId) {
+          console.log('📍 Attempting placeholder-based insertion with ID:', this.cuePlaceholderId);
+
+          // Find the placeholder in the script container
+          const placeholder = document.getElementById(this.cuePlaceholderId);
+
+          if (placeholder) {
+            console.log('✅ Found placeholder in DOM, replacing with cue content');
+
+            // Create a temporary div to hold the cue block HTML
+            const cueDiv = document.createElement('div');
+            cueDiv.innerHTML = sotCue;
+
+            // Replace the placeholder with the cue content
+            placeholder.parentElement.replaceChild(cueDiv.firstChild || cueDiv, placeholder);
+
+            // Now we need to update the script content from the DOM
+            const editorPanel = this.$refs.editorPanel;
+            if (editorPanel && editorPanel.$refs.scriptContainer) {
+              const scriptHtml = editorPanel.$refs.scriptContainer.innerHTML;
+              console.log('📝 Updated script HTML from DOM (length:', scriptHtml.length, ')');
+
+              // Update the script content
+              this.updateScriptContent(scriptHtml);
+
+              insertedViaPlaceholder = true;
+              console.log('✅ Cue inserted via placeholder successfully');
+            }
+
+            // Clear the placeholder ID
+            this.cuePlaceholderId = null;
+            console.log('🧹 Cleared cuePlaceholderId');
+          } else {
+            console.warn('⚠️ Placeholder not found in DOM, falling back to paragraph index method');
+          }
+        }
+
+        // Fallback to old paragraph index method if placeholder insertion failed
+        if (!insertedViaPlaceholder) {
+          console.log('🎬 SOT cue insertion - using paragraph index fallback');
 
           const insertionIndex = this.sotInsertionIndex;
-          console.log(`📍 Using snapshotted cursor position from modal open: ${insertionIndex}`);
+          console.log(`📍 Inserting at cursor position from modal open: ${insertionIndex}`);
+          console.log(`📍 Current scriptContent length: ${this.scriptContent?.length || 0} chars`);
 
           // Insert directly at snapshotted position
+          console.log('🔧 Calling appendToScriptContent...');
           this.appendToScriptContent(`\n${sotCue}\n`, insertionIndex);
+          console.log('🔧 appendToScriptContent returned');
+          console.log(`📍 New scriptContent length: ${this.scriptContent?.length || 0} chars`);
 
           // Clear the snapshot for next time
           this.sotInsertionIndex = null;
           console.log('🧹 Cleared sotInsertionIndex snapshot');
-
-          this.hasUnsavedChanges = true;
-          this.checkForUnsavedRundownChanges();
-
-          console.log(`✅ SOT cue inserted successfully at segment position ${insertionIndex}`);
-
-        } else {
-          // Standard mode: Use placement overlay pattern
-          console.log('📝 Standard mode - sending to EditorPanel for placement insertion');
-
-          // Send cue data to EditorPanel for placement-based insertion
-          // EditorPanel will activate placement overlay for user to click drop zone
-          // After user clicks, the cue will be inserted and we'll auto-save
-          if (this.$refs.editorPanel) {
-            await this.$refs.editorPanel.handleSotCueSubmit(sotCue);
-            console.log('✅ SOT cue data sent to EditorPanel - placement overlay now active');
-            console.log('📍 Waiting for user to click drop zone to insert SOT...');
-          }
-
-          // NOTE: Database save will happen automatically after user clicks placement
-          // via the normal auto-save mechanism when scriptContent is updated
         }
 
+        this.hasUnsavedChanges = true;
+        this.checkForUnsavedRundownChanges();
+
+        console.log(`✅ SOT cue inserted successfully`);
+
+        // Trigger processing NOW that cue is in script (if we have a tempJobId)
+        console.log('🔄 About to trigger SOT processing...');
+        await this.triggerSOTProcessing(data);
+        console.log('🎬🎬🎬 submitSot COMPLETED');
+        console.log('🎬🎬🎬 ===============================================');
+
       } catch (error) {
-        console.error('❌ Error in submitSot:', error);
+        console.error('❌❌❌ Error in submitSot:', error);
+        console.error('❌ Stack trace:', error.stack);
         if (this.$toast) {
           this.$toast.error(`Failed to insert SOT cue: ${error.message}`);
         }
       }
     },
-    
+
+    async triggerSOTProcessing(data) {
+      // Only trigger if we have a background upload ready
+      if (!data.tempJobId) {
+        console.log('ℹ️ No tempJobId - skipping processing');
+        return;
+      }
+
+      try {
+        console.log('🎬 Triggering SOT processing for:', data.tempJobId);
+
+        const axios = (await import('axios')).default;
+        const response = await axios.post('/api/sot/process/multi-phase', {
+          temp_job_id: data.tempJobId,
+          episode: this.currentEpisodeNumber,
+          slug: data.slug,
+          asset_id: data.assetId,
+          trim_start: data.trimStart,
+          trim_end: data.trimEnd,
+          job_type: data.jobType || 'full_process',
+          clips: data.clips ? JSON.parse(data.clips) : null
+        });
+
+        console.log('✅ Processing started:', response.data);
+
+        // Use slide-in notification instead of toast
+        notifyUserStandard(
+          `🎬 ${data.slug}: Processing started`,
+          NOTIFICATION_COLORS.SUCCESS,
+          4000
+        );
+
+      } catch (error) {
+        console.error('❌ Failed to start SOT processing:', error);
+
+        // Use slide-in notification for errors
+        notifyUserStandard(
+          `❌ ${data.slug}: Processing failed - ${error.message}`,
+          NOTIFICATION_COLORS.ERROR,
+          5000
+        );
+      }
+    },
+
     async submitVo(data) {
       try {
         console.log('🎬 VO Modal Submit');
@@ -3595,7 +3958,40 @@ Try dropping an image or video file here!`
         }
       }
     },
-    
+
+    async submitRif(data) {
+      try {
+        console.log('🎬 RIF Modal Submit');
+        console.log('📋 RIF data received:', data);
+
+        // Build the RIF cue in standard format
+        const rifCue = `<!-- Begin Cue -->
+[Assetid: ${data.assetID}]
+[Type: RIF]
+[Slug: ${data.slug}]
+[Duration: ${data.duration}]
+<!-- End Cue -->
+`;
+
+        console.log('📝 Built RIF cue, sending to EditorPanel for cursor insertion');
+
+        // Close modal first
+        this.showRifModal = false;
+
+        // Send cue data to EditorPanel for cursor insertion
+        if (this.$refs.editorPanel) {
+          await this.$refs.editorPanel.handleRifCueSubmit(rifCue);
+          console.log('✅ RIF cue inserted at cursor position');
+        }
+
+      } catch (error) {
+        console.error('❌ Error in submitRif:', error);
+        if (this.$toast) {
+          this.$toast.error(`Failed to insert RIF cue: ${error.message}`);
+        }
+      }
+    },
+
     async submitPkg(data) {
       try {
         console.log('🎬 PKG Modal Submit');
@@ -4060,17 +4456,61 @@ Try dropping an image or video file here!`
     },
     
     // IMG Cue Modal Methods
-    handleImgCueSubmit(imgCueData) {
-      console.log('IMG cue submitted:', imgCueData);
+    async handleImgCueSubmit(imgCueData) {
+      console.log('🖼️ IMG cue submitted:', imgCueData);
 
-      // Insert the IMG cue into the current editor mode
-      this.handleInsertCue({
-        cueType: 'IMG',
-        cueText: imgCueData.cueText,
-        editorMode: this.editorMode,
-        imageFile: imgCueData.imageFile,
-        filename: imgCueData.filename
-      });
+      try {
+        // Generate AssetID for the image
+        const assetIdResponse = await axios.post('/assetid/generate-legacy', {
+          type: 'img',
+          slug: imgCueData.slug
+        }, {
+          headers: {
+            'Accept': 'application/json',
+            'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
+          }
+        });
+
+        const assetId = assetIdResponse.data.id;
+        console.log('🆔 Generated AssetID:', assetId);
+
+        // Format the IMG cue block with all metadata
+        let imgCueBlock = `<!-- Begin Cue -->\n`;
+        imgCueBlock += `[Type: IMG]\n`;
+        imgCueBlock += `[AssetID: ${assetId}]\n`;
+        imgCueBlock += `[Slug: ${imgCueData.slug}]\n`;
+        if (imgCueData.description) {
+          imgCueBlock += `[Description: ${imgCueData.description}]\n`;
+        }
+        if (imgCueData.credit) {
+          imgCueBlock += `[Credit: ${imgCueData.credit}]\n`;
+        }
+        if (imgCueData.caption) {
+          imgCueBlock += `[Caption: ${imgCueData.caption}]\n`;
+        }
+        if (imgCueData.filepath) {
+          imgCueBlock += `[MediaURL: ${imgCueData.filepath}]\n`;
+        }
+        imgCueBlock += `<!-- End Cue -->`;
+
+        console.log('📝 Generated IMG cue block:', imgCueBlock);
+
+        // Insert the IMG cue into the current editor mode
+        this.handleInsertCue({
+          cueType: 'IMG',
+          cueText: imgCueBlock,
+          editorMode: this.editorMode,
+          imageFile: imgCueData.imageFile,
+          filename: imgCueData.filename
+        });
+
+        this.$toast.success('IMG cue inserted successfully!');
+        console.log('✅ IMG cue inserted');
+
+      } catch (error) {
+        console.error('❌ Error creating IMG cue:', error);
+        this.$toast.error('Failed to insert IMG cue');
+      }
 
       // Close the modal
       this.showImgCueModal = false;
@@ -4411,6 +4851,28 @@ Try dropping an image or video file here!`
       this.hasUnsavedChanges = true;
     },
 
+    // Handler methods for ShowInfoHeader button actions
+    handleToggleScriptReading() {
+      // Delegate to EditorPanel
+      if (this.$refs.editorPanel) {
+        this.$refs.editorPanel.toggleScriptReading();
+      }
+    },
+
+    handleRequestNewEpisodeAssetID() {
+      // Delegate to EditorPanel
+      if (this.$refs.editorPanel) {
+        this.$refs.editorPanel.requestNewEpisodeAssetID();
+      }
+    },
+
+    handleShowAssetIDInfo() {
+      // Delegate to EditorPanel
+      if (this.$refs.editorPanel) {
+        this.$refs.editorPanel.showAssetIDInfo();
+      }
+    },
+
     // Flash newly created rundown item with locator flash color
     async flashNewlyCreatedItem(itemIndex) {
       console.log('Starting locator flash for item at index:', itemIndex);
@@ -4703,8 +5165,8 @@ Try dropping an image or video file here!`
   display: flex;
   flex-direction: column;
   height: 100vh;
-  position: relative;
-  overflow: visible; /* Allow sticky positioning to work */
+  width: 100%;
+  overflow: hidden;
 }
 
 /* Content Editor Loading Overlay */
@@ -4722,12 +5184,14 @@ Try dropping an image or video file here!`
   width: 100vw !important;
   height: 100vh !important;
   z-index: 9999 !important;
+  pointer-events: none !important; /* Allow scrolling through the overlay */
 }
 
 .content-editor-loading-overlay :deep(.v-overlay__content) {
   position: fixed !important;
   top: 50% !important;
   left: 50% !important;
+  pointer-events: all !important; /* Allow interaction with loading spinner */
   transform: translate(-50%, -50%) !important;
   width: auto !important;
   height: auto !important;
@@ -4759,21 +5223,26 @@ Try dropping an image or video file here!`
 .main-toolbar {
   background-color: var(--v-toolbar-bg, #FFFFFF);
   border-bottom: 1px solid var(--v-divider-color, #E0E0E0);
+  flex-shrink: 0; /* Keep toolbar at top, don't let it shrink */
+  position: relative;
+  z-index: 100; /* Stay above scrolling content */
 }
 
 .rundown-panel {
-  position: relative;
   width: 40%;
+  height: auto; /* Grow with content */
+  overflow-y: visible; /* No internal scroll - scrolls with page */
   /* Remove static border-right so only dynamic border shows */
   /* border-right: 1px solid var(--v-divider-color, #E0E0E0); */
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
-  border: 2px solid transparent; /* fallback for dynamic border */
+  border: none; /* Remove all borders */
   border-radius: 0 !important;
   box-sizing: border-box;
-  min-height: 0; /* Allow flexbox to shrink */
-  overflow: hidden; /* Prevent content overflow */
+  position: relative;
+  z-index: 10; /* Appear above editor panel */
+  padding-bottom: 50vh; /* Add whitespace equal to 50% of viewport height */
 }
 
 .script-status-horizontal-bar {
@@ -5022,15 +5491,38 @@ Try dropping an image or video file here!`
   flex: 1;
   display: flex;
   flex-direction: column;
+  height: auto; /* Grow with content */
+  overflow-y: visible; /* No internal scroll - scrolls with page */
+  position: relative;
+  z-index: 5; /* Below rundown and metadata panels */
+  padding-bottom: 50vh; /* Add whitespace equal to 50% of viewport height */
+}
+
+/* Scrollable wrapper containing header + columns */
+.scrollable-content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto; /* Main scroll - controls everything until header scrolls off */
+  overflow-x: hidden;
   min-height: 0;
-  overflow-y: auto; /* This is the scrolling container - ShowInfoHeader scrolls off, cue toolbar sticks */
 }
 
 .main-content-area {
-  flex: 1;
   display: flex;
-  min-height: 0; /* Allow flexbox to shrink properly */
-  overflow: hidden; /* Prevent overflow, children handle their own scrolling */
+  min-height: 0;
+  height: auto; /* Allow to grow with content */
+  overflow: visible;
+  flex-shrink: 0; /* Don't shrink */
+}
+
+/* ShowInfoHeader - full width, scrolls off naturally */
+.show-info-header {
+  width: 100%;
+  flex-shrink: 0; /* Don't compress the header */
+  position: relative !important; /* NOT sticky - scrolls off */
+  z-index: 1; /* Keep it above content but below modals */
+  border-bottom: 1px solid var(--v-divider-color, #E0E0E0);
 }
 
 .rundown-table-header {

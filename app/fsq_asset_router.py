@@ -14,6 +14,7 @@ from datetime import datetime
 
 from auth.router import get_current_user_or_key
 from core.paths import ShowBuildPaths
+from services.asset_processing import generate_fsq_png
 
 router = APIRouter()
 path_manager = ShowBuildPaths()
@@ -35,6 +36,25 @@ class FSQAssetResponse(BaseModel):
     success: bool
     asset_path: str
     asset_url: str
+    message: str
+
+
+class FSQAssetAsyncRequest(BaseModel):
+    episode_id: str
+    quote: str
+    attribution: str
+    slug: str
+    asset_id: str
+    alignment: str = "center"
+    font_family: str = "serif"
+    font_size: int = 70
+    duration: str = "00:00:05:00"
+
+
+class FSQAssetTaskResponse(BaseModel):
+    success: bool
+    task_id: str
+    status: str
     message: str
 
 
@@ -187,3 +207,103 @@ async def regenerate_fsq_asset(
 ):
     """Regenerate an existing FSQ asset with updated data"""
     return await generate_fsq_asset(request, current_user)
+
+
+@router.post("/generate-async", response_model=FSQAssetTaskResponse)
+async def generate_fsq_asset_async(
+    request: FSQAssetAsyncRequest,
+    current_user=Depends(get_current_user_or_key)
+):
+    """
+    Generate FSQ PNG asset asynchronously using Celery.
+
+    This endpoint queues the FSQ PNG generation to a Celery worker,
+    which can run on the local server or a remote Windows worker.
+
+    Benefits:
+    - Non-blocking: UI doesn't freeze during generation
+    - Scalable: Can offload to dedicated worker machines
+    - Retry logic: Automatic retries on failure
+    - Progress tracking: Can monitor task status
+
+    Returns:
+        Task ID for monitoring progress via /tasks/{task_id} endpoint
+    """
+    try:
+        print(f"📝 Queuing FSQ PNG generation for episode {request.episode_id}")
+        print(f"   Quote: {request.quote[:50]}...")
+        print(f"   Attribution: {request.attribution}")
+        print(f"   Asset ID: {request.asset_id}")
+
+        # Queue Celery task
+        task = generate_fsq_png.apply_async(
+            kwargs={
+                'episode_id': request.episode_id,
+                'quote': request.quote,
+                'attribution': request.attribution,
+                'slug': request.slug,
+                'asset_id': request.asset_id,
+                'alignment': request.alignment,
+                'font_family': request.font_family,
+                'font_size': request.font_size,
+                'duration': request.duration
+            },
+            queue='assets'  # Use assets queue for FSQ generation
+        )
+
+        print(f"   ✅ Task queued: {task.id}")
+        print(f"   📊 Queue: assets")
+        print(f"   🔍 Monitor at: /api/tasks/{task.id}")
+
+        return FSQAssetTaskResponse(
+            success=True,
+            task_id=task.id,
+            status="QUEUED",
+            message=f"FSQ PNG generation task queued: {task.id}"
+        )
+
+    except Exception as e:
+        print(f"   ❌ Error queuing FSQ generation task: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to queue FSQ generation task: {str(e)}"
+        )
+
+
+@router.get("/task/{task_id}")
+async def get_fsq_task_status(
+    task_id: str,
+    current_user=Depends(get_current_user_or_key)
+):
+    """
+    Get status of an FSQ PNG generation task.
+
+    Returns task state and result if completed.
+    """
+    try:
+        task_result = generate_fsq_png.AsyncResult(task_id)
+
+        response = {
+            "task_id": task_id,
+            "state": task_result.state,
+            "ready": task_result.ready(),
+            "successful": task_result.successful() if task_result.ready() else None
+        }
+
+        if task_result.ready():
+            if task_result.successful():
+                response["result"] = task_result.result
+            else:
+                response["error"] = str(task_result.info)
+        elif task_result.state == 'PROGRESS':
+            response["progress"] = task_result.info
+
+        return response
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get task status: {str(e)}"
+        )
