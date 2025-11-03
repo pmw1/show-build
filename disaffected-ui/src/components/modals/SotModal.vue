@@ -2,8 +2,15 @@
   <!-- Overlay Information Display (OUTSIDE v-dialog to avoid stacking context issues) -->
   <div v-if="show && mediaUrl" class="overlay-info-display" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 10001;">
     <!-- Top Center: Large Timecode Display -->
-    <div class="timecode-overlay" style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.85); padding: 14px 28px; border-radius: 9px; text-align: center; border: 2px solid rgba(255, 255, 255, 0.3); min-width: 380px;">
-      <div style="color: white; font-size: 40px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 4px; text-shadow: 0 0 15px rgba(255, 255, 255, 0.5); width: 340px; display: inline-block; font-variant-numeric: tabular-nums;">{{ currentTimecode }}</div>
+    <div class="timecode-overlay" style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.85); padding: 14px 20px; border-radius: 9px; text-align: center; border: 2px solid rgba(255, 255, 255, 0.3); min-width: 520px;">
+      <div style="display: flex; gap: 12px; align-items: center; justify-content: center;">
+        <!-- Current Timecode (75% size) -->
+        <div style="color: white; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(255, 255, 255, 0.5); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">{{ currentTimecode }}</div>
+        <!-- Countdown Timecode (75% size, red background) -->
+        <div style="background: rgba(244, 67, 54, 0.3); border: 2px solid rgba(244, 67, 54, 0.6); border-radius: 6px; padding: 8px 12px;">
+          <div style="color: #ff6b6b; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(255, 107, 107, 0.5); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">-{{ remainingTimecode }}</div>
+        </div>
+      </div>
       <div style="color: #90CAF9; font-size: 10px; font-weight: bold; font-family: 'Helvetica', Arial, sans-serif; margin-top: 6px;">{{ currentActionDisplay }}</div>
 
       <!-- Clip Duration Display (slides down from behind timecode when IN and OUT are set) -->
@@ -74,14 +81,13 @@
         <div style="color: white; font-size: 48px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 2px; text-align: right;">{{ trimEnd || '--:--:--:--' }}</div>
       </div>
 
-      <!-- Thumbnail Marker Display -->
-      <div class="thumbnail-marker-display" style="background: rgba(156, 39, 176, 0.9); padding: 20px; border-radius: 12px; border-right: 8px solid #7B1FA2; margin-bottom: 15px; pointer-events: auto;">
-        <div style="color: white; font-size: 14px; font-weight: bold; margin-bottom: 8px; text-align: right;">THUMBNAIL</div>
-        <div style="color: white; font-size: 24px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 1px; text-align: right; margin-bottom: 8px;">{{ thumbnailTimecode || '--:--:--:--' }}</div>
-        <button @click="setThumbnailTimecode" style="background: rgba(255, 255, 255, 0.2); color: white; padding: 10px 20px; border: 2px solid rgba(255, 255, 255, 0.4); border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; width: 100%; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
-          <span>📸 MARK (ALT+T)</span>
-        </button>
-      </div>
+      <!-- Thumbnail Marker Display (only when thumbnail is set) -->
+      <transition name="clip-drop">
+        <div v-if="thumbnailTimecode && thumbnailTimecode !== '00:00:00:00'" class="thumbnail-marker-display" style="background: rgba(156, 39, 176, 0.9); padding: 12px 15px; border-radius: 10px; border-right: 8px solid #7B1FA2; margin-bottom: 15px; pointer-events: auto; max-width: 350px;">
+          <div style="color: white; font-size: 14px; font-weight: bold; margin-bottom: 6px; text-align: right;">📸 THUMBNAIL</div>
+          <div style="color: white; font-size: 18px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 1px; text-align: right;">{{ thumbnailTimecode }}</div>
+        </div>
+      </transition>
 
       <!-- Individual Clip Boxes (drop in under thumbnail) -->
       <transition-group name="clip-drop">
@@ -105,6 +111,23 @@
           <div style="color: rgba(255, 255, 255, 0.7); font-size: 11px; font-family: 'Roboto Mono', monospace;">Duration: {{ Math.round(clip.duration_seconds) }}s</div>
         </div>
       </transition-group>
+
+      <!-- Single Trim Clip Card (shows when in single-trim mode with IN/OUT set) -->
+      <transition name="clip-drop">
+        <div
+          v-if="clippingMethod === 'single-trim' && trimStart && trimEnd && clipDuration"
+          key="single-trim-card"
+          class="clip-box"
+          style="background: rgba(33, 150, 243, 0.9); padding: 15px; border-radius: 10px; border-right: 8px solid #1976D2; margin-bottom: 12px; pointer-events: auto; max-width: 350px;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div style="color: white; font-size: 16px; font-weight: bold;">SINGLE TRIM</div>
+          </div>
+          <div style="color: white; font-size: 14px; font-weight: bold; font-family: 'Roboto Mono', monospace; margin-bottom: 8px;">{{ clipSlug || slug || 'untitled' }}</div>
+          <div style="color: white; font-size: 12px; font-family: 'Roboto Mono', monospace; margin-bottom: 4px;">{{ trimStart }} → {{ trimEnd }}</div>
+          <div style="color: rgba(255, 255, 255, 0.7); font-size: 11px; font-family: 'Roboto Mono', monospace;">Duration: {{ clipDuration }}</div>
+        </div>
+      </transition>
     </div>
   </div>
 
@@ -256,7 +279,7 @@
             </div>
 
             <!-- Video Player with Metadata Overlay -->
-            <div class="video-container" style="width: 100%; max-width: 100%; background: #000; border: 2px solid #ccc; border-top: none; border-radius: 0 0 4px 4px; overflow: hidden; position: relative; z-index: 10; margin-bottom: 15px;">
+            <div class="video-container" style="width: 100%; max-width: 100%; background: #000; border: 2px solid #ccc; border-top: none; border-radius: 0 0 4px 4px; overflow: hidden; position: relative; z-index: 10; margin-bottom: 0;">
               <video
                 ref="videoPlayerRef"
                 class="video-player"
@@ -281,6 +304,22 @@
                 <div>Duration: --</div>
               </div>
             </div>
+
+            <!-- Audio Waveform (Slide-up animation) -->
+            <transition name="waveform-slide">
+              <div v-if="showWaveform && waveformData.length > 0" class="waveform-wrapper" style="width: 100%; margin-bottom: 15px;">
+                <AudioWaveform
+                  :waveform-data="waveformData"
+                  :current-time="videoPlayerRef?.currentTime || 0"
+                  :duration="videoPlayerRef?.duration || 0"
+                  :height="60"
+                  background-color="rgba(0, 0, 0, 0.7)"
+                  wave-color="#4CAF50"
+                  progress-color="#81C784"
+                  playhead-color="#FF5722"
+                />
+              </div>
+            </transition>
 
             <!-- 3x8 Control Grid Below Video -->
             <div class="control-grid-container" style="width: 100%; margin-top: 1px; margin-bottom: 15px; position: relative; z-index: 13;">
@@ -804,6 +843,8 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useToast } from 'vue-toastification'
 import axios from 'axios'
+import AudioWaveform from '../AudioWaveform.vue'
+import { useWaveform } from '../../composables/useWaveform'
 
 // SOT Processing Job Types
 // These define what type of processing the backend should perform
@@ -816,6 +857,9 @@ const SOT_JOB_TYPES = {
 
 export default {
   name: 'SotModal',
+  components: {
+    AudioWaveform
+  },
   props: {
     show: Boolean,
     episodeNumber: String,
@@ -832,6 +876,9 @@ export default {
   emits: ['update:show', 'submit'],
   setup(props, { emit }) {
     const toast = useToast()
+
+    // Waveform composable
+    const { waveformData, isAnalyzing, extractWaveform, clearWaveform } = useWaveform()
 
     // Form refs
     const sotFormRef = ref(null)
@@ -888,6 +935,7 @@ export default {
     const uploadProgress = ref(0)
     const tempJobId = ref(null)
     const uploadComplete = ref(false)
+    const isSubmitting = ref(false) // Debounce flag for Alt+Enter
 
     // Clipping tools state
     const clippingMethod = ref('none')
@@ -914,6 +962,9 @@ export default {
     const currentFrameNumber = ref(0)
     const totalFrames = ref(0)
     const frameStepDirection = ref('')
+
+    // Waveform state
+    const showWaveform = ref(false)
 
     // Computed: Clip duration display
     const clipDuration = computed(() => {
@@ -1512,6 +1563,22 @@ export default {
           <div>Size: ${fileSizeText}</div>
         `
       }
+
+      // Extract waveform asynchronously
+      setTimeout(async () => {
+        try {
+          console.log('[SOT Modal] Starting waveform extraction...')
+          await extractWaveform(videoPlayerRef.value, 500)
+
+          // Show waveform with delay for slide-up animation
+          setTimeout(() => {
+            showWaveform.value = true
+            console.log('[SOT Modal] Waveform displayed')
+          }, 300)
+        } catch (error) {
+          console.error('[SOT Modal] Waveform extraction failed:', error)
+        }
+      }, 500)
     }
 
     const updateTimecode = () => {
@@ -1645,6 +1712,10 @@ export default {
         clearInterval(previewInterval.value)
         previewInterval.value = null
       }
+
+      // Clear waveform
+      showWaveform.value = false
+      clearWaveform()
 
       toast.info('Video cleared')
     }
@@ -1809,6 +1880,13 @@ export default {
 
     const handleAddCue = async () => {
       console.log('🎬 handleAddCue called - slug:', slug.value)
+
+      // Debounce protection: prevent double-submission
+      if (isSubmitting.value) {
+        console.log('⚠️ Already submitting, ignoring duplicate call')
+        return
+      }
+
       hideTopError()
 
       // Validate required fields
@@ -1817,6 +1895,9 @@ export default {
         showTopError('ERROR: Slug is required')
         return
       }
+
+      // Set submitting flag
+      isSubmitting.value = true
 
       // Determine job type based on clipping method
       let jobType = SOT_JOB_TYPES.FULL_PROCESS // Default to full processing
@@ -1874,7 +1955,7 @@ export default {
       emit('submit', sotData)
       emit('update:show', false)
 
-      // Reset form
+      // Reset form (includes clearing isSubmitting flag)
       resetForm()
     }
 
@@ -1938,6 +2019,9 @@ export default {
       clipSlug.value = ''
       clips.value = []
       clipCounter.value = 1
+
+      // Reset debounce flag
+      isSubmitting.value = false
 
       if (videoPlayerRef.value) {
         videoPlayerRef.value.pause()
@@ -2117,6 +2201,11 @@ export default {
       totalFrames,
       frameStepDirection,
 
+      // Waveform state
+      showWaveform,
+      waveformData,
+      isAnalyzing,
+
       // Actions
       triggerFileInput,
       handleFileUpload,
@@ -2236,6 +2325,25 @@ export default {
 
 .frame-counter-fade-leave-to {
   transform: translateX(-50%) translateY(10px);
+  opacity: 0;
+}
+
+/* Waveform slide-up animation */
+.waveform-slide-enter-active {
+  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.waveform-slide-leave-active {
+  transition: all 0.3s ease-in;
+}
+
+.waveform-slide-enter-from {
+  transform: translateY(30px);
+  opacity: 0;
+}
+
+.waveform-slide-leave-to {
+  transform: translateY(20px);
   opacity: 0;
 }
 

@@ -15,6 +15,7 @@ from datetime import datetime
 from auth.router import get_current_user_or_key
 from core.paths import ShowBuildPaths
 from services.asset_processing import generate_fsq_png
+from models_assetid import generate_assetid
 
 router = APIRouter()
 path_manager = ShowBuildPaths()
@@ -56,6 +57,63 @@ class FSQAssetTaskResponse(BaseModel):
     task_id: str
     status: str
     message: str
+
+
+class QuickQuoteRequest(BaseModel):
+    quote: str
+    attribution: str
+    episode_id: str = "0247"
+
+
+@router.post("/quick-quote", response_model=FSQAssetResponse)
+async def generate_quick_quote(
+    request: QuickQuoteRequest,
+    current_user=Depends(get_current_user_or_key)
+):
+    """
+    Generate a one-off FSQ quote with minimal input.
+    Auto-generates: slug, AssetID
+    Uses: render_fsq_quotes.py with 75% height, 80% opacity settings
+
+    Perfect for quick quote generation without manual slug/ID management.
+    """
+    try:
+        print(f"🚀 Quick Quote Generation")
+        print(f"   Quote: {request.quote[:50]}...")
+        print(f"   Attribution: {request.attribution}")
+
+        # Auto-generate slug from first 3 words
+        words = request.quote.split()[:3]
+        slug = '-'.join(w.lower().strip('",.:;!?') for w in words)
+
+        # Auto-generate AssetID
+        asset_id = generate_assetid('FSQ')
+
+        print(f"   Generated Slug: {slug}")
+        print(f"   Generated AssetID: {asset_id}")
+
+        # Create FSQAssetRequest using auto-generated values
+        fsq_request = FSQAssetRequest(
+            episode_id=request.episode_id,
+            quote=request.quote,
+            source=request.attribution,
+            slug=slug,
+            asset_id=asset_id,
+            style="centered",
+            duration="00:00:05:00"
+        )
+
+        # Call existing generate endpoint
+        return await generate_fsq_asset(fsq_request, current_user)
+
+    except Exception as e:
+        print(f"   ❌ Quick quote generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Quick quote generation failed: {str(e)}"
+        )
 
 
 @router.post("/generate", response_model=FSQAssetResponse)

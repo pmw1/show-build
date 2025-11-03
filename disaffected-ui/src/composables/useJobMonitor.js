@@ -123,9 +123,17 @@ export function useJobMonitor() {
    */
   const getPhaseDisplayName = (phase) => {
     const phaseNames = {
-      'phase1': 'Analyzing',
-      'phase2': 'Processing Clips',
-      'phase3': 'Finalizing'
+      'phase0': 'Pre-Analysis',
+      'phase0.5': 'Transcription',
+      'phase1': 'Video Normalization',
+      'phase1.1': 'Audio Channel Analysis',
+      'phase2': 'Audio Normalization',
+      'phase3': 'Trimming',
+      'phase4': 'Clip Extraction',
+      'phase5': 'Moving to Final Location',
+      'phase6': 'Thumbnail Generation',
+      'phase7': 'Post-Analysis',
+      'phase8': 'Verification'
     }
     return phaseNames[phase] || phase
   }
