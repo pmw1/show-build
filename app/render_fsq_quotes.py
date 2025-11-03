@@ -20,10 +20,10 @@ import os
 CANVAS_WIDTH = 1920
 CANVAS_HEIGHT = 1080
 
-# Black box dimensions (80% height, vertically centered)
+# Black box dimensions (75% height, vertically centered)
 BOX_WIDTH = CANVAS_WIDTH  # 100% width
-BOX_HEIGHT = int(CANVAS_HEIGHT * 0.80)  # 80% height
-BOX_OPACITY = 217  # 85% opacity (0-255 scale)
+BOX_HEIGHT = int(CANVAS_HEIGHT * 0.75)  # 75% height
+BOX_OPACITY = 204  # 80% opacity (0-255 scale)
 BOX_Y = int((CANVAS_HEIGHT - BOX_HEIGHT) / 2)  # Vertically centered
 
 # Padding inside black box (10%)
@@ -205,8 +205,8 @@ def render_quote(quote_data, output_path, font_path):
 def main():
     """Render all quotes from JSON file."""
 
-    json_path = '/mnt/sync/disaffected/episodes/0245/fs_quotes_extracted.json'
-    output_dir = '/mnt/sync/disaffected/episodes/0245/assets/graphics'
+    json_path = '/mnt/sync/disaffected/episodes/0247/fs_quotes_extracted.json'
+    output_dir = '/mnt/sync/disaffected/episodes/0247/assets/graphics'
 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)

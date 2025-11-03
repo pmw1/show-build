@@ -90,7 +90,42 @@
         </div>
       </div>
 
-      <!-- Generic Placeholder Display for non-FSQ or FSQ without quote -->
+      <!-- SOT Display with Video and Transcription -->
+      <div v-else-if="cueData.type === 'SOT' && jobStatus" class="sot-container">
+        <!-- Video Player (when completed) -->
+        <div v-if="jobStatus.status === 'completed' && jobStatus.final_video_path" class="sot-video-player">
+          <video
+            :src="`/media/${jobStatus.final_video_path}`"
+            controls
+            style="width: 100%; max-height: 300px; border-radius: 4px;"
+          ></video>
+        </div>
+
+        <!-- Transcription (when available) -->
+        <div v-if="jobStatus.transcription" class="sot-transcription">
+          <div class="transcription-header">
+            <v-icon size="small" color="primary">mdi-text</v-icon>
+            <span style="font-weight: bold; margin-left: 8px;">Transcription:</span>
+          </div>
+          <div class="transcription-text">{{ jobStatus.transcription }}</div>
+        </div>
+
+        <!-- Parent Asset Link -->
+        <div v-if="jobStatus.source_asset_id" class="sot-parent-link">
+          <v-icon size="small" color="info">mdi-file-link</v-icon>
+          <a :href="`#asset-${jobStatus.source_asset_id}`" style="margin-left: 8px; color: #2196F3; text-decoration: none;">
+            Source: {{ jobStatus.source_asset_id }}
+          </a>
+        </div>
+
+        <!-- Processing Status Display -->
+        <div v-if="jobStatus.status !== 'completed'" class="sot-processing-status">
+          <v-progress-circular v-if="jobStatus.status === 'processing'" indeterminate size="20" width="2" color="primary"></v-progress-circular>
+          <span style="margin-left: 8px;">{{ jobStatus.current_phase || 'Processing...' }}</span>
+        </div>
+      </div>
+
+      <!-- Generic Placeholder Display for non-SOT, non-FSQ -->
       <div v-else class="placeholder-container">
         <div class="placeholder-icon-section">
           <v-icon size="small" :color="cueTypeColor" class="placeholder-icon">
@@ -934,6 +969,61 @@ export default {
   font-style: italic;
 }
 
+/* SOT Container Styling */
+.sot-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background-color: rgba(var(--v-theme-surface-variant), 0.05);
+  border-radius: 4px;
+}
+
+.sot-video-player {
+  width: 100%;
+}
+
+.sot-transcription {
+  padding: 12px;
+  background-color: rgba(var(--v-theme-surface), 0.3);
+  border-left: 3px solid rgb(var(--v-theme-primary));
+  border-radius: 4px;
+}
+
+.transcription-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+  color: rgba(var(--v-theme-on-surface), 0.87);
+}
+
+.transcription-text {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: rgba(var(--v-theme-on-surface), 0.7);
+  white-space: pre-wrap;
+}
+
+.sot-parent-link {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  background-color: rgba(var(--v-theme-info), 0.1);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.sot-processing-status {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  background-color: rgba(var(--v-theme-primary), 0.1);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: rgba(var(--v-theme-on-surface), 0.7);
+}
+
 /* Info Styling */
 .cue-info {
   display: flex;
@@ -988,8 +1078,15 @@ export default {
 /* FSQ-specific Styling */
 .fsq-container {
   padding: 16px;
-  background-color: rgba(var(--v-theme-surface-variant), 0.05);
+  background-color: rgba(0, 0, 0, 0.7);
   border-radius: 0;
+  width: 100%;
+  height: 80%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+  top: 10%;
 }
 
 .fsq-quote-section {

@@ -679,6 +679,11 @@ class SOTProcessingJob(Base):
     pre_analysis = Column(JSON, nullable=True)  # Technical analysis of uploaded raw file
     post_analysis = Column(JSON, nullable=True)  # Technical analysis of final processed file
     processing_report = Column(JSON, nullable=True)  # Comprehensive success/failure/warning report
+    transcription = Column(Text, nullable=True)  # Whisper transcription from phase 0.5
+
+    # Parent/child asset tracking (added 2025-10-26)
+    source_asset_id = Column(String(50), nullable=True)  # Source (original upload) AssetID
+    final_asset_id = Column(String(50), nullable=True)  # Final (processed) AssetID
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

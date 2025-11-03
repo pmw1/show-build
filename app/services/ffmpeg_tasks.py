@@ -546,6 +546,79 @@ def _normalize_slug(slug: str) -> str:
     return slug
 
 
+def _replace_sot_cue_asset_id(episode: str, old_asset_id: str, new_asset_id: str):
+    """
+    Replace the AssetID in a SOT cue block (source → final).
+
+    When processing completes, the cue block should reference the final processed
+    asset rather than the source upload.
+
+    Args:
+        episode: Episode number
+        old_asset_id: Original source AssetID
+        new_asset_id: New final AssetID to replace it with
+    """
+    try:
+        from database import SessionLocal
+        from models_v2 import Rundown, RundownItem
+        import re
+
+        db = SessionLocal()
+
+        # Find the rundown for this episode
+        rundown = db.query(Rundown).filter_by(episode_number=episode).first()
+        if not rundown:
+            logger.warning(f"No rundown found for episode {episode}")
+            db.close()
+            return
+
+        # Search all rundown items for SOT cue with matching AssetID
+        items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
+
+        for item in items:
+            if not item.script_content:
+                continue
+
+            # Look for SOT cue block with matching AssetID
+            cue_pattern = re.compile(
+                r'(<!-- Begin Cue -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(old_asset_id) + r'\].*?<!-- End Cue -->)',
+                re.DOTALL
+            )
+
+            match = cue_pattern.search(item.script_content)
+            if match:
+                cue_block = match.group(1)
+
+                # Replace old AssetID with new one
+                updated_cue = cue_block.replace(
+                    f'[AssetID: {old_asset_id}]',
+                    f'[AssetID: {new_asset_id}]'
+                )
+
+                # Also add SourceAssetID field to preserve reference
+                if '[SourceAssetID:' not in updated_cue:
+                    updated_cue = updated_cue.replace(
+                        f'[AssetID: {new_asset_id}]',
+                        f'[AssetID: {new_asset_id}]\n[SourceAssetID: {old_asset_id}]'
+                    )
+
+                # Replace in script_content
+                item.script_content = item.script_content.replace(cue_block, updated_cue)
+                db.commit()
+
+                logger.info(f"✅ Replaced AssetID in cue: {old_asset_id} → {new_asset_id}")
+                db.close()
+                return
+
+        logger.warning(f"No SOT cue found with AssetID {old_asset_id} in episode {episode}")
+        db.close()
+
+    except Exception as e:
+        logger.error(f"Failed to replace SOT cue AssetID: {e}")
+        if 'db' in locals():
+            db.close()
+
+
 def _update_sot_cue_block(episode: str, slug: str, asset_id: str, updates: dict):
     """
     Update SOT cue block in rundown item's script_content with processing progress.
@@ -1380,42 +1453,42 @@ def process_sot_video_multi_phase(
                 })
 
         # ================================================================
-        # 🧪 TESTING MODE: Stopping after Phase 1.1
-        # - Phase 2+ disabled for incremental testing
+        # 🧪 TESTING MODE DISABLED: Full pipeline enabled
+        # - All phases will now execute through to completion
         # ================================================================
-        logger.info(f"🧪 TESTING MODE: Stopping after Phase 1.1 for {temp_job_id}")
-        processing_report["overall_status"] = "partial_complete"
-        processing_report["end_time"] = str(func.now())
-        processing_report["phases"]["phase1.1"] = {"status": "success"}
-
-        # Return Phase 1.1 output as final for testing
-        test_output_video = phase1_1_output
-
-        # Store processing report in database
-        db = SessionLocal()
-        try:
-            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
-            if job:
-                job.processing_report = processing_report
-                job.status = 'partial_complete'
-                db.commit()
-        finally:
-            db.close()
-
-        logger.info(f"🧪 Phase 0-1.1 testing complete for {temp_job_id}")
-        logger.info(f"🧪 Output file: {test_output_video}")
-
-        return {
-            "temp_job_id": temp_job_id,
-            "episode": episode,
-            "slug": normalized_slug,
-            "video_path": str(test_output_video.relative_to(media_root)),
-            "status": "partial_complete",
-            "message": "Testing mode: Phase 0-1.1 complete, later phases disabled",
-            "pre_analysis": pre_analysis_data,
-            "processing_report": processing_report,
-            "test_mode": True
-        }
+        # logger.info(f"🧪 TESTING MODE: Stopping after Phase 1.1 for {temp_job_id}")
+        # processing_report["overall_status"] = "partial_complete"
+        # processing_report["end_time"] = str(func.now())
+        # processing_report["phases"]["phase1.1"] = {"status": "success"}
+        #
+        # # Return Phase 1.1 output as final for testing
+        # test_output_video = phase1_1_output
+        #
+        # # Store processing report in database
+        # db = SessionLocal()
+        # try:
+        #     job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+        #     if job:
+        #         job.processing_report = processing_report
+        #         job.status = 'partial_complete'
+        #         db.commit()
+        # finally:
+        #     db.close()
+        #
+        # logger.info(f"🧪 Phase 0-1.1 testing complete for {temp_job_id}")
+        # logger.info(f"🧪 Output file: {test_output_video}")
+        #
+        # return {
+        #     "temp_job_id": temp_job_id,
+        #     "episode": episode,
+        #     "slug": normalized_slug,
+        #     "video_path": str(test_output_video.relative_to(media_root)),
+        #     "status": "partial_complete",
+        #     "message": "Testing mode: Phase 0-1.1 complete, later phases disabled",
+        #     "pre_analysis": pre_analysis_data,
+        #     "processing_report": processing_report,
+        #     "test_mode": True
+        # }
 
         # ================================================================
         # PHASE 2: Audio Normalization (DISABLED FOR TESTING)
@@ -1741,6 +1814,16 @@ def process_sot_video_multi_phase(
                 'AudioURL': f"/episodes/{episode}/assets/sots/{normalized_slug}.mp3",
                 'Duration': duration_formatted
             })
+
+        # Replace source AssetID with final AssetID in cue block
+        db = SessionLocal()
+        try:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job and job.source_asset_id and job.final_asset_id and job.source_asset_id != job.final_asset_id:
+                logger.info(f"🔄 Replacing AssetID in cue: {job.source_asset_id} → {job.final_asset_id}")
+                _replace_sot_cue_asset_id(episode, job.source_asset_id, job.final_asset_id)
+        finally:
+            db.close()
 
         # Store final processing report in database
         db = SessionLocal()

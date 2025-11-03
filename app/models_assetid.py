@@ -67,6 +67,12 @@ class AssetIDRegistry(Base):
     meta_data = Column(JSON, default=dict)  # Flexible metadata storage
     notes = Column(Text, nullable=True)  # Human-readable notes
 
+    # Parent/child asset architecture (added 2025-10-26)
+    parent_asset_id = Column(String(50), ForeignKey("asset_id_registry.asset_id", ondelete="SET NULL"), nullable=True)
+    asset_role = Column(String(20), nullable=True)  # 'source', 'final', etc.
+    purge_policy = Column(String(20), nullable=True, server_default='keep')  # 'keep', 'purge', 'archive'
+    derivative_type = Column(String(30), nullable=True)  # 'trimmed', 'normalized', etc.
+
 
 class AssetIDRelationship(Base):
     """

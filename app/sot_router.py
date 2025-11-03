@@ -355,6 +355,11 @@ async def process_sot_multi_phase_endpoint(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"🚨 PROCESSING ERROR: {str(e)}")
+        logger.error(f"🚨 TRACEBACK:\n{error_trace}")
+        db.rollback()
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 
@@ -612,7 +617,7 @@ async def get_job_status_by_asset_id(
 
         logger.info(f"✅ Found job for AssetID {asset_id}: {job.temp_job_id}, status={job.status}, phase={job.current_phase}")
 
-        # Return job status
+        # Return job status with transcription and asset paths
         return {
             "asset_id": asset_id,
             "job_id": job.temp_job_id,
@@ -623,7 +628,11 @@ async def get_job_status_by_asset_id(
             "updated_at": job.updated_at.isoformat() if job.updated_at else None,
             "celery_task_id": job.celery_task_id,
             "slug": job.slug,
-            "episode": job.episode
+            "episode": job.episode,
+            "transcription": job.transcription,
+            "final_video_path": job.final_video_path,
+            "source_asset_id": job.source_asset_id,
+            "final_asset_id": job.final_asset_id
         }
 
     except Exception as e:
