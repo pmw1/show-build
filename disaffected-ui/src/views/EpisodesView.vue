@@ -1058,17 +1058,31 @@ export default {
 
     const editEpisode = async (episode) => {
       editingEpisode.value = true;
-      
+
+      // Load templates first (needed for template dropdown)
+      await loadTemplates();
+
       // Fetch full episode info
       try {
         const response = await axios.get(`/api/episodes/${episode.episode_number}/info`);
+
+        // Handle template_id - convert empty string to null for proper v-select handling
+        let templateId = response.data.info.template_id;
+        if (templateId === '' || templateId === undefined) {
+          templateId = null;
+        } else if (typeof templateId === 'string') {
+          // If it's a string number, convert to integer
+          templateId = parseInt(templateId) || null;
+        }
+
         episodeForm.value = {
           episode_number: episode.episode_number,
           show_id: response.data.info.show_id || 100,  // Default to 100 if not set
           rundown_id: response.data.info.rundown_id || parseInt(episode.episode_number + '000'),
+          template_id: templateId,  // Include template_id with proper handling
           title: response.data.info.title || '',
           subtitle: response.data.info.subtitle || '',
-          airdate: response.data.info.air_date || response.data.info.airdate || '',  // Backend uses air_date
+          airdate: response.data.info.airdate || '',  // Use airdate field from API
           status: response.data.info.status || 'draft',
           duration: response.data.info.duration || '01:00:00',
           guest: response.data.info.guest || '',
