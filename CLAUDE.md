@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ **CRITICAL: ALWAYS USE HTTPS URLs** ⚠️
+
+**MANDATORY RULE**: ALL URLs provided to the user MUST use HTTPS protocol.
+
+- ✅ CORRECT: `https://192.168.51.210:8091`
+- ❌ WRONG: `http://192.168.51.210:8091`
+
+This applies to:
+- Frontend URLs (port 8091)
+- Backend API URLs (port 8888)
+- ANY web-accessible service URLs
+- Documentation links
+- Example URLs in responses
+
+**NO EXCEPTIONS. ALWAYS HTTPS.**
+
 ## ⚠️ **MANDATORY: ALWAYS RUN LINTING AFTER CODE CHANGES** ⚠️
 
 **CRITICAL RULE**: After modifying any Vue, JavaScript, or TypeScript files, you MUST run linting before completing tasks:
@@ -34,8 +50,9 @@ cd disaffected-ui && npm run lint -- --fix
 **Web Interface**: http://192.168.51.223:8001/ui
 
 ### MANDATORY Relay Check Frequency:
-- **EVERY 5 USER MESSAGES** - Check the relay without exception
-- **EVERY SINGLE USER MESSAGE** - When actively involved in specific troubleshooting or team development
+- **EVERY OTHER USER MESSAGE** - Check the relay for coordination with retro-transcriber-claude and kairo-claude
+- **AT SESSION START** - Always check before beginning work
+- **WHEN STARTING/COMPLETING MAJOR WORK** - Post updates for team coordination
 
 ### Required Actions:
 

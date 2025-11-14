@@ -3688,16 +3688,22 @@ Try dropping an image or video file here!`
 
       // Only insert when we have ALL parts
       if (isLastPart) {
-        console.log(`✅ All ${totalParts} FSQ parts collected, inserting at bottom`);
+        console.log(`✅ All ${totalParts} FSQ parts collected, inserting at cursor position`);
 
         // Close the modal
         this.showFsqModal = false;
 
-        // Insert all parts at the end of the script (null = append to end)
+        // Insert all parts at the captured cursor position (or end if null)
         const allCues = this.$refs.editorPanel.pendingCueDataArray.join('\n\n');
-        console.log(`📝 Inserting ${totalParts} FSQ cue(s) at bottom of script`);
+        const insertionPosition = this.fsqInsertionIndex;
 
-        this.appendToScriptContent(`\n${allCues}\n`, null);
+        if (insertionPosition !== null && insertionPosition !== undefined) {
+          console.log(`📝 Inserting ${totalParts} FSQ cue(s) after paragraph index ${insertionPosition}`);
+        } else {
+          console.log(`📝 Inserting ${totalParts} FSQ cue(s) at bottom of script (no cursor position)`);
+        }
+
+        this.appendToScriptContent(`\n${allCues}\n`, insertionPosition);
 
         // Clear the snapshot for next time
         this.fsqInsertionIndex = null;

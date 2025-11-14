@@ -15,7 +15,9 @@ from datetime import datetime
 from auth.router import get_current_user_or_key
 from core.paths import ShowBuildPaths
 from services.asset_processing import generate_fsq_png
-from models_assetid import generate_assetid
+from services.asset_id import AssetIDService
+from database import get_db
+from sqlalchemy.orm import Session
 
 router = APIRouter()
 path_manager = ShowBuildPaths()
@@ -68,7 +70,8 @@ class QuickQuoteRequest(BaseModel):
 @router.post("/quick-quote", response_model=FSQAssetResponse)
 async def generate_quick_quote(
     request: QuickQuoteRequest,
-    current_user=Depends(get_current_user_or_key)
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
 ):
     """
     Generate a one-off FSQ quote with minimal input.
@@ -86,8 +89,14 @@ async def generate_quick_quote(
         words = request.quote.split()[:3]
         slug = '-'.join(w.lower().strip('",.:;!?') for w in words)
 
-        # Auto-generate AssetID
-        asset_id = generate_assetid('FSQ')
+        # Auto-generate AssetID using AssetIDService
+        asset_id = AssetIDService.request_asset_id(
+            db=db,
+            entity_type='fsq',
+            reason='create',
+            requested_by=current_user.get("username", current_user.get("client_name", "quick_quote")),
+            context={"slug": slug, "quote": request.quote[:50]}
+        )
 
         print(f"   Generated Slug: {slug}")
         print(f"   Generated AssetID: {asset_id}")
