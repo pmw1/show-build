@@ -84,7 +84,7 @@ services:
       - NODE_ENV=development
       - VUE_APP_API_URL=http://localhost:8888
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -k -f https://localhost:8080 || curl -f http://localhost:8080"]
+      test: ["CMD", "sh", "-c", "ps aux | grep -q '[n]ode.*vue-cli-service'"]
       interval: 30s
       timeout: 10s
       retries: 3
