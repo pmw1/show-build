@@ -1104,6 +1104,69 @@ async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)
         logger.error(f"Error retrieving rundown from database for episode {episode_number}: {e}")
         raise HTTPException(status_code=500, detail="Error retrieving rundown from database")
 
+@router.get("/{episode_number}/statistics")
+async def get_episode_statistics(episode_number: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Get statistics for an episode's rundown items."""
+    from models_v2 import Episode, Rundown, RundownItem
+    from sqlalchemy import func
+
+    try:
+        # Convert episode number to int
+        episode_num_int = int(episode_number)
+
+        # Get episode from database
+        episode = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+
+        # Get rundowns for this episode
+        rundowns = db.query(Rundown).filter(Rundown.episode_id == episode.id).all()
+        if not rundowns:
+            # Return empty statistics if no rundowns exist yet
+            return {
+                "total_items": 0,
+                "by_status": {},
+                "by_type": {},
+                "progress_percentage": 0
+            }
+
+        # Get all rundown items for this episode
+        rundown_ids = [r.id for r in rundowns]
+        items = db.query(RundownItem).filter(RundownItem.rundown_id.in_(rundown_ids)).all()
+
+        # Calculate statistics
+        total_items = len(items)
+        by_status = {}
+        by_type = {}
+
+        for item in items:
+            # Count by status
+            status = item.status or 'draft'
+            by_status[status] = by_status.get(status, 0) + 1
+
+            # Count by type
+            item_type = item.item_type or 'segment'
+            by_type[item_type] = by_type.get(item_type, 0) + 1
+
+        # Calculate progress percentage
+        # Items that are 'approved' or 'completed' count as done
+        completed_count = by_status.get('approved', 0) + by_status.get('completed', 0)
+        progress_percentage = round((completed_count / total_items * 100) if total_items > 0 else 0)
+
+        logger.info(f"Retrieved statistics for episode {episode_number}: {total_items} items")
+        return {
+            "total_items": total_items,
+            "by_status": by_status,
+            "by_type": by_type,
+            "progress_percentage": progress_percentage
+        }
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid episode number format")
+    except Exception as e:
+        logger.error(f"Error retrieving statistics for episode {episode_number}: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving episode statistics")
+
 @router.post("/{episode_number}/rundown/normalize")
 async def normalize_rundown_order(
     episode_number: str,
@@ -1134,10 +1197,279 @@ async def normalize_rundown_order(
         
         logger.info(f"Rundown normalization completed for episode {episode_number}")
         return result
-        
+
     except Exception as e:
         logger.error(f"Failed to normalize rundown for episode {episode_number}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to normalize rundown: {str(e)}")
+
+
+@router.post("/{episode_number}/enumerate-cues")
+async def enumerate_cue_blocks(
+    episode_number: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_or_key)
+):
+    """
+    Enumerate all cue blocks in an episode with sequential numbering.
+
+    Process:
+    1. Iterate through all rundown items in chronological order
+    2. Find all cue blocks (<!-- Begin Cue --> ... <!-- End Cue -->)
+    3. Strip any existing enumeration prefix from slugs
+    4. Add new enumeration prefix (10, 20, 30, ...)
+    5. Add/update [Enumerator: XX] field for display
+    6. Rename associated media files
+    7. Update MediaUrl fields
+    8. Save changes to database
+
+    This is idempotent - running again will re-enumerate cleanly.
+    """
+    from models_v2 import RundownItem, Rundown, Episode
+    import shutil
+
+    try:
+        logger.info(f"Starting cue block enumeration for episode {episode_number}")
+
+        # Normalize episode number
+        episode_id_normalized = episode_number.zfill(4) if len(episode_number) < 4 else episode_number
+
+        # Get episode
+        episode = db.query(Episode).filter(
+            Episode.episode_number == int(episode_id_normalized)
+        ).first()
+
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+
+        # Get rundown
+        rundown = db.query(Rundown).filter(Rundown.episode_id == episode.id).first()
+        if not rundown:
+            raise HTTPException(status_code=404, detail=f"Rundown not found for episode {episode_number}")
+
+        # Get all rundown items in order
+        rundown_items = db.query(RundownItem).filter(
+            RundownItem.rundown_id == rundown.id
+        ).order_by(RundownItem.order_in_rundown).all()
+
+        # Episode assets directory - use ShowBuildPaths for correct Docker/host path
+        from core.paths import ShowBuildPaths
+        path_manager = ShowBuildPaths()
+        episodes_root = path_manager.episodes_root
+        episode_assets_dir = episodes_root / episode_id_normalized / "assets"
+
+        # Patterns
+        slug_pattern = re.compile(r'\[Slug:\s*([^\]]+)\]', re.IGNORECASE)
+        mediaurl_pattern = re.compile(r'\[Mediaurl:\s*([^\]]+)\]', re.IGNORECASE)
+        enumerator_pattern = re.compile(r'\[Enumerator:\s*[^\]]*\]\n?', re.IGNORECASE)
+        enum_prefix_pattern = re.compile(r'^(\d+)[-_](.+)$')
+
+        # Track statistics
+        total_cues = 0
+        updated_cues = 0
+        renamed_files = 0
+
+        # First pass: collect all cue blocks across all items to enumerate globally
+        all_cue_data = []
+
+        for item in rundown_items:
+            if not item.script_content:
+                continue
+
+            # Find all cue blocks in this item
+            cue_block_pattern = re.compile(
+                r'<!-- Begin Cue -->(.*?)<!-- End Cue -->',
+                re.DOTALL
+            )
+            matches = list(cue_block_pattern.finditer(item.script_content))
+
+            for match in matches:
+                total_cues += 1
+                cue_body = match.group(1)
+
+                # Extract current slug
+                slug_match = slug_pattern.search(cue_body)
+                if not slug_match:
+                    continue
+
+                all_cue_data.append({
+                    'item': item,
+                    'match_start': match.start(),
+                    'match_end': match.end(),
+                    'cue_body': cue_body,
+                    'current_slug': slug_match.group(1).strip()
+                })
+
+        # Second pass: enumerate and update
+        enumeration_counter = 10
+
+        # Group by item for batch updates
+        items_to_update = {}
+
+        for cue_info in all_cue_data:
+            item = cue_info['item']
+            cue_body = cue_info['cue_body']
+            current_slug = cue_info['current_slug']
+
+            # Strip existing enumeration prefix
+            base_slug = current_slug
+            enum_match = enum_prefix_pattern.match(current_slug)
+            if enum_match:
+                base_slug = enum_match.group(2)
+
+            # Normalize slug: lowercase, replace spaces with hyphens
+            normalized_slug = base_slug.lower().replace(' ', '-').replace('_', '-')
+            normalized_slug = re.sub(r'-+', '-', normalized_slug)
+            normalized_slug = re.sub(r'[^\w-]', '', normalized_slug)
+
+            # Create new enumerated slug
+            new_slug = f"{enumeration_counter:02d}-{normalized_slug}"
+            enumerator_value = f"{enumeration_counter:02d}"
+
+            # Extract current mediaurl
+            mediaurl_match = mediaurl_pattern.search(cue_body)
+            old_mediaurl = mediaurl_match.group(1).strip() if mediaurl_match else None
+
+            # Extract cue type to determine correct asset directory
+            type_match = re.search(r'\[Type:\s*([^\]]+)\]', cue_body, re.IGNORECASE)
+            cue_type = type_match.group(1).strip().upper() if type_match else None
+
+            # Determine new mediaurl and rename file
+            new_mediaurl = None
+            if old_mediaurl:
+                old_filename = Path(old_mediaurl).name
+                ext = Path(old_filename).suffix
+
+                # Determine asset type directory based on CUE TYPE first, then path
+                # SOT cues should ALWAYS go to video directory
+                if cue_type == 'SOT':
+                    asset_type = "video"
+                    # SOT files are mp4, ensure correct extension
+                    if not ext or ext.lower() not in ['.mp4', '.mov', '.mp3']:
+                        ext = '.mp4'
+                elif cue_type == 'IMG':
+                    asset_type = "images"
+                elif cue_type == 'FSQ':
+                    asset_type = "quotes"
+                elif cue_type == 'AUDIO':
+                    asset_type = "audio"
+                elif "/video/" in old_mediaurl:
+                    asset_type = "video"
+                elif "/images/" in old_mediaurl:
+                    asset_type = "images"
+                elif "/audio/" in old_mediaurl:
+                    asset_type = "audio"
+                elif "/sot/" in old_mediaurl:
+                    asset_type = "video"  # sot goes to video
+                else:
+                    asset_type = "quotes"  # fallback for FSQ and unknown
+
+                new_filename = f"{new_slug}{ext}"
+                new_mediaurl = f"/episodes/{episode_id_normalized}/assets/{asset_type}/{new_filename}"
+
+                # Try to rename the actual file
+                old_file_path = episodes_root / old_mediaurl.lstrip('/').replace('episodes/', '')
+                new_file_path = episode_assets_dir / asset_type / new_filename
+
+                if old_file_path.exists() and str(old_file_path) != str(new_file_path):
+                    try:
+                        new_file_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(old_file_path), str(new_file_path))
+                        renamed_files += 1
+                        logger.info(f"Renamed: {old_file_path.name} -> {new_file_path.name}")
+                    except Exception as e:
+                        logger.warning(f"Could not rename file {old_file_path}: {e}")
+
+            # Store update info for this item
+            if item.id not in items_to_update:
+                items_to_update[item.id] = {
+                    'item': item,
+                    'replacements': []
+                }
+
+            items_to_update[item.id]['replacements'].append({
+                'old_slug': current_slug,
+                'new_slug': new_slug,
+                'enumerator': enumerator_value,
+                'old_mediaurl': old_mediaurl,
+                'new_mediaurl': new_mediaurl
+            })
+
+            updated_cues += 1
+            enumeration_counter += 10
+
+        # Third pass: apply all replacements to each item's content
+        for item_id, update_info in items_to_update.items():
+            item = update_info['item']
+            content = item.script_content
+
+            for repl in update_info['replacements']:
+                # Find and update each cue block
+                def update_cue_block(match):
+                    cue_body = match.group(0)
+
+                    # Check if this is the cue block we're looking for
+                    slug_m = slug_pattern.search(cue_body)
+                    if not slug_m or slug_m.group(1).strip() != repl['old_slug']:
+                        return cue_body
+
+                    # Remove existing Enumerator field if present
+                    updated_body = enumerator_pattern.sub('', cue_body)
+
+                    # Update slug
+                    updated_body = slug_pattern.sub(f"[Slug: {repl['new_slug']}]", updated_body)
+
+                    # Update mediaurl if applicable
+                    if repl['new_mediaurl'] and repl['old_mediaurl']:
+                        updated_body = mediaurl_pattern.sub(f"[Mediaurl: {repl['new_mediaurl']}]", updated_body)
+
+                    # Add Enumerator field after [Type: XXX] line
+                    type_pattern = re.compile(r'(\[Type:\s*[^\]]+\]\n)', re.IGNORECASE)
+                    type_match = type_pattern.search(updated_body)
+                    if type_match:
+                        insert_pos = type_match.end()
+                        updated_body = (
+                            updated_body[:insert_pos] +
+                            f"[Enumerator: {repl['enumerator']}]\n" +
+                            updated_body[insert_pos:]
+                        )
+
+                    return updated_body
+
+                # Apply update - process ALL cue blocks (not just count=1)
+                # The update_cue_block function only modifies the matching slug
+                cue_pattern = re.compile(
+                    r'<!-- Begin Cue -->.*?<!-- End Cue -->',
+                    re.DOTALL
+                )
+                content = cue_pattern.sub(update_cue_block, content)
+                # Update old_slug for subsequent iterations within same item
+                repl['old_slug'] = repl['new_slug']
+
+            item.script_content = content
+            db.add(item)
+
+        # Commit all changes
+        db.commit()
+
+        logger.info(f"Cue enumeration completed: {updated_cues}/{total_cues} cues updated, {renamed_files} files renamed")
+
+        return {
+            "success": True,
+            "total": total_cues,
+            "updated": updated_cues,
+            "renamed": renamed_files,
+            "message": f"Enumerated {updated_cues} cue blocks, renamed {renamed_files} files"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to enumerate cue blocks for episode {episode_number}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to enumerate cue blocks: {str(e)}")
+
 
 def load_rundown_settings() -> dict:
     """Load rundown settings from database"""
@@ -2219,8 +2551,56 @@ async def save_rundown_items(
                         new_script = item_data['script']
                         existing_script = rundown_item.script_content or ''
 
-                        # Calculate content lengths (strip HTML tags for accurate word count)
+                        # 🛡️ CRITICAL FIX: Strip frontmatter from script_content
+                        # script_content should NEVER contain YAML frontmatter - only the body
+                        # Frontmatter is stored in separate database fields (title, type, status, etc.)
                         import re
+                        if new_script and new_script.strip().startswith('---'):
+                            logger.warning(f"🚨 STRIPPING FRONTMATTER from script_content for {asset_id}")
+                            logger.warning(f"   Original content preview: {new_script[:200]}...")
+
+                            # Find the closing --- and extract only the body
+                            lines = new_script.split('\n')
+                            dash_count = 0
+                            body_start_index = 0
+
+                            for i, line in enumerate(lines):
+                                if line.strip() == '---':
+                                    dash_count += 1
+                                    if dash_count == 2:
+                                        body_start_index = i + 1
+                                        break
+
+                            if dash_count >= 2:
+                                # Take content after the closing frontmatter
+                                body_content = '\n'.join(lines[body_start_index:]).strip()
+
+                                # ADDITIONAL CHECK: If body still contains another frontmatter block,
+                                # this is duplicated content - strip it again
+                                while body_content.strip().startswith('---'):
+                                    logger.warning(f"🚨 DOUBLE FRONTMATTER DETECTED! Stripping again...")
+                                    body_lines = body_content.split('\n')
+                                    inner_dash_count = 0
+                                    inner_body_start = 0
+
+                                    for j, bline in enumerate(body_lines):
+                                        if bline.strip() == '---':
+                                            inner_dash_count += 1
+                                            if inner_dash_count == 2:
+                                                inner_body_start = j + 1
+                                                break
+
+                                    if inner_dash_count >= 2:
+                                        body_content = '\n'.join(body_lines[inner_body_start:]).strip()
+                                    else:
+                                        break  # No more complete frontmatter blocks
+
+                                new_script = body_content
+                                logger.warning(f"✅ Stripped frontmatter, body length: {len(new_script)} chars")
+                            else:
+                                logger.warning(f"⚠️ Found opening --- but no closing ---, keeping original")
+
+                        # Calculate content lengths (strip HTML tags for accurate word count)
                         new_content_length = len(re.sub(r'<[^>]+>', '', new_script or '').strip())
                         existing_content_length = len(re.sub(r'<[^>]+>', '', existing_script).strip())
 
@@ -2647,3 +3027,245 @@ async def restore_content_version(
         "restored_version": version_number,
         "content_length": version.content_length
     }
+
+
+@router.post("/{episode_number}/gather-media")
+async def gather_media_for_show(
+    episode_number: str,
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Gather all media files referenced in cue blocks and copy them to media-list directory.
+
+    Creates: {episode}/rundown/media-list/
+    Copies each cue's MediaURL source file with enumerated filename.
+
+    Returns:
+        Summary of gathered files with counts
+    """
+    import shutil
+    from models_v2 import RundownItem, Rundown, Episode
+    from core.paths import ShowBuildPaths
+
+    path_manager = ShowBuildPaths()
+
+    try:
+        print(f"📁 Starting media gather for episode {episode_number}")
+
+        # Normalize episode number
+        episode_id = episode_number.zfill(4) if len(episode_number) < 4 else episode_number
+
+        # Get episode
+        episode = db.query(Episode).filter(
+            Episode.episode_number == int(episode_id)
+        ).first()
+
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_id} not found")
+
+        # Get rundown
+        rundown = db.query(Rundown).filter(
+            Rundown.episode_id == episode.id
+        ).first()
+
+        if not rundown:
+            raise HTTPException(status_code=404, detail=f"No rundown found for episode {episode_id}")
+
+        # Create media-list directory
+        episode_path = path_manager.episodes_root / episode_id
+        media_list_dir = episode_path / "rundown" / "media-list"
+        media_list_dir.mkdir(parents=True, exist_ok=True)
+        print(f"   📁 Media-list directory: {media_list_dir}")
+
+        # Get all rundown items with script content
+        items = db.query(RundownItem).filter(
+            RundownItem.rundown_id == rundown.id
+        ).order_by(RundownItem.order_in_rundown).all()
+
+        # Cue block patterns
+        cue_pattern = re.compile(r'<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->', re.IGNORECASE)
+        mediaurl_pattern = re.compile(r'\[Mediaurl:\s*([^\]]+)\]', re.IGNORECASE)
+        enumerator_pattern = re.compile(r'\[Enumerator:\s*([^\]]+)\]', re.IGNORECASE)
+        slug_pattern = re.compile(r'\[Slug:\s*([^\]]+)\]', re.IGNORECASE)
+        type_pattern = re.compile(r'\[Type:\s*([^\]]+)\]', re.IGNORECASE)
+
+        copied = 0
+        skipped = 0
+        failed = 0
+        total = 0
+        gathered_files = []
+        failures = []
+        skipped_cues = []
+
+        # Process each rundown item
+        for item in items:
+            if not item.script_content:
+                continue
+
+            # Find all cue blocks
+            cue_matches = cue_pattern.findall(item.script_content)
+
+            for cue_content in cue_matches:
+                total += 1
+
+                # Extract cue type, slug, and enumerator
+                type_match_local = type_pattern.search(cue_content)
+                slug_match_local = slug_pattern.search(cue_content)
+                enumerator_match_local = enumerator_pattern.search(cue_content)
+
+                cue_type_local = type_match_local.group(1).strip().upper() if type_match_local else 'UNKNOWN'
+                slug_local = slug_match_local.group(1).strip() if slug_match_local else None
+                enumerator_local = enumerator_match_local.group(1).strip() if enumerator_match_local else None
+
+                # Extract MediaURL
+                mediaurl_match = mediaurl_pattern.search(cue_content)
+                media_url = mediaurl_match.group(1).strip() if mediaurl_match else None
+
+                # For FSQ cues without MediaURL, construct path from enumerator + slug
+                if not media_url and cue_type_local == 'FSQ' and slug_local:
+                    # Normalize slug for filename
+                    clean_slug = slug_local.lower().replace(' ', '-').replace('_', '-')
+                    clean_slug = re.sub(r'[^\w\-]', '', clean_slug)
+                    # Strip existing enum prefix from slug if present
+                    enum_prefix_match = re.match(r'^(\d+)[-_](.+)$', clean_slug)
+                    if enum_prefix_match:
+                        clean_slug = enum_prefix_match.group(2)
+
+                    if enumerator_local:
+                        fsq_filename = f"{enumerator_local}-{clean_slug}.png"
+                    else:
+                        fsq_filename = f"fsq_{clean_slug}.png"
+                    media_url = f"episodes/{episode_id}/assets/quotes/{fsq_filename}"
+                    print(f"   🔧 FSQ path constructed: {media_url}")
+
+                # Skip if still no media URL (non-FSQ cues without MediaURL)
+                if not media_url:
+                    skipped += 1
+                    skipped_cues.append({
+                        'type': cue_type_local,
+                        'slug': slug_local
+                    })
+                    continue
+
+                # Use already extracted values
+                enumerator = enumerator_local
+                slug = slug_local if slug_local else 'media'
+                cue_type = cue_type_local
+
+                # Convert MediaURL to actual file path
+                # MediaURL formats:
+                #   - /episodes/XXXX/assets/... (absolute URL path with leading /)
+                #   - episodes/XXXX/assets/... (relative to episodes root, no leading /)
+                #   - assets/... (relative to episode directory)
+                #   - http://... (external URL - skip)
+                if media_url.startswith('http'):
+                    # Skip external URLs
+                    print(f"   ⏭️ Skipping external URL: {media_url[:50]}...")
+                    skipped += 1
+                    continue
+                elif media_url.startswith('/episodes/') or media_url.startswith('episodes/'):
+                    # Path relative to episodes root
+                    relative_path = media_url.lstrip('/').replace('episodes/', '', 1)
+                    source_path = path_manager.episodes_root / relative_path
+                else:
+                    # Try as relative to episode directory
+                    source_path = episode_path / media_url.lstrip('/')
+
+                if not source_path.exists():
+                    # Try fallback: look for file without enumeration prefix
+                    # e.g., if looking for "20-bomb-mausoleum.mp4", try "bomb-mausoleum.mp4"
+                    fallback_found = False
+                    original_source = source_path
+
+                    # Extract base slug without enumeration prefix
+                    filename = source_path.name
+                    enum_prefix_match = re.match(r'^(\d+)[-_](.+)$', filename)
+                    if enum_prefix_match:
+                        base_filename = enum_prefix_match.group(2)
+                        fallback_path = source_path.parent / base_filename
+                        if fallback_path.exists():
+                            source_path = fallback_path
+                            fallback_found = True
+                            print(f"   🔄 Fallback found: {fallback_path.name}")
+
+                    # Also try with fsq_ prefix for quotes
+                    if not fallback_found and cue_type == 'FSQ':
+                        # Try fsq_{slug}.png format
+                        slug_part = re.sub(r'^\d+[-_]', '', filename)
+                        slug_part = re.sub(r'\.png$', '', slug_part, flags=re.IGNORECASE)
+                        fsq_fallback = source_path.parent / f"fsq_{slug_part}.png"
+                        if fsq_fallback.exists():
+                            source_path = fsq_fallback
+                            fallback_found = True
+                            print(f"   🔄 FSQ fallback found: {fsq_fallback.name}")
+
+                    if not fallback_found:
+                        print(f"   ❌ Source not found: {original_source}")
+                        failed += 1
+                        failures.append({
+                            'type': cue_type,
+                            'slug': slug,
+                            'mediaUrl': media_url,
+                            'expectedPath': str(original_source)
+                        })
+                        continue
+
+                # Build destination filename
+                # Format: {enumerator}-{type}-{slug}.{ext}
+                ext = source_path.suffix
+                clean_slug = re.sub(r'[^\w\-]', '', slug.lower().replace(' ', '-'))
+
+                if enumerator:
+                    dest_filename = f"{enumerator}-{cue_type}-{clean_slug}{ext}"
+                else:
+                    dest_filename = f"{cue_type}-{clean_slug}{ext}"
+
+                dest_path = media_list_dir / dest_filename
+
+                # Copy file to media-list directory
+                try:
+                    # Remove existing file if present
+                    if dest_path.exists() or dest_path.is_symlink():
+                        dest_path.unlink()
+
+                    # Copy file (preserves metadata)
+                    shutil.copy2(source_path, dest_path)
+
+                    gathered_files.append({
+                        'source': str(source_path),
+                        'dest': dest_filename,
+                        'type': cue_type,
+                        'enumerator': enumerator
+                    })
+                    copied += 1
+                    print(f"   ✅ Copied: {dest_filename}")
+
+                except Exception as e:
+                    print(f"   ❌ Failed to copy {dest_filename}: {e}")
+                    failed += 1
+
+        message = f"Media gather complete: {copied} copied, {skipped} skipped (no MediaURL), {failed} failed"
+        print(f"   📊 {message}")
+
+        return {
+            "success": True,
+            "episode_id": episode_id,
+            "media_list_path": str(media_list_dir),
+            "total": total,
+            "copied": copied,
+            "skipped": skipped,
+            "failed": failed,
+            "files": gathered_files,
+            "failures": failures,
+            "skippedCues": skipped_cues,
+            "message": message
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error gathering media for episode {episode_number}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

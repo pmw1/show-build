@@ -33,12 +33,12 @@
         hide-details
         color="primary"
         bg-color="rgba(25, 118, 210, 0.05)"
-        style="max-width: 440px; min-width: 440px;"
+        style="max-width: 293px; min-width: 293px; height: 28px;"
         class="ms-3 episode-selector"
         @update:model-value="loadEpisode"
       >
         <template v-slot:prepend-inner>
-          <v-icon size="medium" color="primary">mdi-television-play</v-icon>
+          <v-icon size="small" color="primary">mdi-television-play</v-icon>
         </template>
       </v-select>
 
@@ -109,11 +109,6 @@
         Login
       </v-btn>
     </v-app-bar>
-
-    <!-- Show Info Header/Main Toolbar (always visible below app bar) -->
-    <router-view v-slot="{ Component }">
-      <component :is="Component" v-if="$route.name === 'ContentEditor'" />
-    </router-view>
 
     <!-- Navigation Drawer -->
     <v-navigation-drawer
@@ -204,7 +199,7 @@
     <!-- Main Content Area -->
     <v-main>
       <v-container fluid class="pa-0">
-        <router-view v-if="$route.name !== 'ContentEditor'" />
+        <router-view :key="$route.fullPath" />
       </v-container>
     </v-main>
 
@@ -722,22 +717,28 @@ export default {
 /* Episode Selector - Match clock height and blue theme */
 .episode-selector {
   border: 1px solid rgba(25, 118, 210, 0.3) !important;
-  height: 100%;
+  height: 28px !important;
+  max-height: 28px !important;
+  min-height: 28px !important;
   display: flex;
   align-items: stretch;
 }
 
 .episode-selector .v-input__control {
-  height: 100%;
+  height: 28px !important;
+  max-height: 28px !important;
+  min-height: 28px !important;
 }
 
 .episode-selector .v-field__input {
-  font-size: 1.1rem !important;
+  font-size: 0.825rem !important;
   font-weight: 500 !important;
+  padding: 2px 8px !important;
+  min-height: 28px !important;
 }
 
 .episode-selector .v-select__selection-text {
-  font-size: 1.1rem !important;
+  font-size: 0.825rem !important;
   font-weight: 500 !important;
 }
 
@@ -745,6 +746,15 @@ export default {
   background: rgba(25, 118, 210, 0.05) !important;
   border-color: rgba(25, 118, 210, 0.3) !important;
   border-radius: 0 !important;
+  height: 28px !important;
+  max-height: 28px !important;
+  min-height: 28px !important;
+}
+
+.episode-selector .v-field__field {
+  height: 28px !important;
+  max-height: 28px !important;
+  min-height: 28px !important;
 }
 
 .episode-selector .v-field--focused {

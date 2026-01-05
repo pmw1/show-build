@@ -18,25 +18,37 @@ class ShowBuildPaths:
     def __init__(self):
         # Detect if we're running in Docker container or development
         self.is_docker = Path('/app').exists()
-        
-        # Base paths
+
+        # Base paths with fallback detection for different mount configurations
         if self.is_docker:
             # Production/Docker paths
             self.app_root = Path('/app')
-            self.episodes_root = Path('/home/episodes')  # Mounted from /mnt/sync/disaffected/episodes
-            self.shared_media = Path('/shared_media')     # Mounted from /mnt/sync/shared_media
             self.project_root = Path('/app').parent
+
+            # Try standard Docker mounts first, then Kairo/worker mounts
+            if Path('/home/episodes').exists():
+                # Standard show-build-server container
+                self.episodes_root = Path('/home/episodes')
+                self.shared_media = Path('/shared_media')
+            elif Path('/mnt/sync/disaffected/episodes').exists():
+                # Kairo worker with /mnt/sync mount
+                self.episodes_root = Path('/mnt/sync/disaffected/episodes')
+                self.shared_media = Path('/mnt/sync/shared_media')
+            else:
+                # Fallback to standard paths (will warn if not found)
+                self.episodes_root = Path('/home/episodes')
+                self.shared_media = Path('/shared_media')
         else:
-            # Development paths  
+            # Development paths
             self.app_root = Path(__file__).parent.parent
             self.project_root = self.app_root.parent
             # In development, episodes might be relative or absolute
             self.episodes_root = Path('/mnt/sync/disaffected/episodes')
             self.shared_media = Path('/mnt/sync/shared_media')
-        
+
         # Verify critical paths
         self._verify_paths()
-        
+
         logger.info(f"ShowBuildPaths initialized - Docker: {self.is_docker}")
         logger.info(f"Episodes root: {self.episodes_root}")
         logger.info(f"App root: {self.app_root}")

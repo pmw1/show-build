@@ -1,7 +1,9 @@
 📦 Show-Build — Disaffected Rundown Management System
-The Show-Build project is a full-stack application designed for the Disaff🚀 Usage
+The Show-Build project is a full-stack **database-first** application designed for broadcast media production, delivering a web-based platform to enhance media production efficiency. The system serves as the primary content creation platform, streamlining episode management across the production lifecycle with broadcast-specific features including rundown management, script generation, media asset coordination, and real-time collaboration.
 
-Navigate to http://192.168.51.210:8091/rundown-manager/0225 to manage episode 0225.
+🚀 Usage
+
+Navigate to https://192.168.51.210:8091/rundown-manager/0225 to manage episode 0225.
 Use the episode selector to switch episodes (e.g., 0226, 0227).
 Drag and drop segments to reorder, then click "Save & Commit" to persist changes.
 View segment metadata (title, ID, length) and colors based on segment type.
@@ -11,7 +13,7 @@ View segment metadata (title, ID, length) and colors based on segment type.
 The `tools/` directory contains Python utilities with centralized path management:
 
 - **`paths.py`**: Central configuration for all Python script paths
-  - Defines `EPISODE_ROOT`, `BLUEPRINTS`, `HEADER_PATH` 
+  - Defines `EPISODE_ROOT`, `BLUEPRINTS`, `HEADER_PATH`
   - Contains validation constants like `VALID_CUE_TYPES`
   - Ensures consistent path handling across all Python tools
 
@@ -23,7 +25,7 @@ The `tools/` directory contains Python utilities with centralized path managemen
 To add new Python tools, import from `paths.py` for consistent path management:
 ```python
 from paths import EPISODE_ROOT, BLUEPRINTS, VALID_CUE_TYPES
-```media automation environment, delivering a web-based platform to enhance media production efficiency. **As the system matures, it will phase out Obsidian dependencies** and become the primary content creation platform, streamlining segment management across the production lifecycle with broadcast-specific features.
+```
 
 📚 Table of Contents
 
@@ -47,17 +49,17 @@ from paths import EPISODE_ROOT, BLUEPRINTS, VALID_CUE_TYPES
 
 
 🧠 Overview
-Show-Build is a foundational tool within the Disaffected media ecosystem, designed to **replace Obsidian with a broadcast-focused UI** while maintaining **complete file format compatibility**. The system provides producers, editors, and creators with a unified broadcast-focused application that operates on **the same markdown files and organizational structure as Obsidian**, enabling seamless transition without data migration. The vision is to revolutionize media production through a purpose-built interface while preserving existing content workflows and file structures.
+Show-Build is a foundational tool within the Disaffected media ecosystem, designed as a **database-first broadcast production platform**. The system provides producers, editors, and creators with a unified broadcast-focused application that stores all episode content, rundowns, and metadata in PostgreSQL. Media assets (video, audio, graphics) are stored in the filesystem at `/mnt/sync/disaffected/episodes/`, while all content is managed through the Vue 3 web interface with real-time updates and collaborative editing capabilities.
 Current State and Roadmap
 While the ultimate vision includes advanced features like automated metadata tagging and live content distribution, Show-Build is currently in an early phase. As of June 12, 2025, 06:55 PM EDT, development focuses on enhancing the RundownManager with Vuetify color coding. The immediate next step is to deploy a basic Vuetify template, integrating RundownManager into a broader interface with tools like ColorSelector and HelloWorld, building toward a comprehensive dashboard. Future iterations will tackle transcription outcues, multi-platform exports, and more.
 
 🔧 Technologies
 
 Frontend: Vue 3, Vuetify 3, vuedraggable, Axios.
-Backend: FastAPI, Python 3.11, Pydantic, MQTT (paho-mqtt), ffmpeg-python.
+Backend: FastAPI, Python 3.11, Pydantic, Celery, Redis, ffmpeg-python.
 Containerization: Docker, Docker Compose.
-Database/Storage: **Obsidian-compatible markdown files** in `/mnt/sync/disaffected/episodes/` (maintains full file format compatibility).
-Integration: **Direct file compatibility** with Obsidian (no conversion required).
+Database/Storage: **PostgreSQL database (single source of truth)** for all episode content, rundowns, and metadata. Media assets stored in `/mnt/sync/disaffected/episodes/`.
+Integration: **Optional markdown export capability** for compatibility with external tools (future feature).
 
 Dependencies
 
@@ -182,7 +184,7 @@ Navigate to http://192.168.51.210:8091/ to access the main dashboard.
   - `POST /publish/`, `GET /listen/`: MQTT messaging.
   - `GET, POST /assets/`: Manage assets.
   - `GET, POST /templates/`: Manage templates.
-- **File Compatibility**: Maintains Obsidian markdown format and organizational structure (same files, enhanced UI).
+- **Database-First Architecture**: PostgreSQL stores all episode content, rundowns, and metadata with optional markdown export capability.
 
 
 ## 📖 Documentation

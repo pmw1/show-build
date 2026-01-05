@@ -1,19 +1,5 @@
 <template>
   <div class="content-editor-wrapper">
-    <!-- Main Toolbar -->
-    <v-toolbar dense flat class="main-toolbar">
-      <v-toolbar-title>Content Editor</v-toolbar-title>
-      <v-spacer></v-spacer>
-      <v-toolbar-items>
-        <v-btn text @click="reloadFromDatabase">
-          <v-icon start>mdi-refresh</v-icon>
-          Reload
-        </v-btn>
-        <v-btn text @click="saveEverything">Save</v-btn>
-        <v-btn text>Publish</v-btn>
-      </v-toolbar-items>
-    </v-toolbar>
-
     <!-- Scrollable Content Area (contains header + columns) -->
     <div class="scrollable-content-wrapper">
       <!-- Show Info Header (full width, scrolls off) -->
@@ -49,6 +35,7 @@
         @toggle-script-reading="handleToggleScriptReading"
         @request-new-episode-assetid="handleRequestNewEpisodeAssetID"
         @show-assetid-info="handleShowAssetIDInfo"
+        @generate-host-script="handleGenerateHostScript"
       />
 
       <!-- Main Content Area -->
@@ -81,16 +68,14 @@
       />
 
       <!-- Reopen Rundown Button (when panel is closed) -->
-      <div v-else class="rundown-reopen-button">
+      <div v-else class="rundown-tab-controls-closed">
         <v-btn
           icon
-          color="primary"
-          variant="elevated"
           size="small"
           @click="showRundownPanel = true"
-          class="reopen-btn"
+          class="rundown-tab-btn"
         >
-          <v-icon>mdi-playlist-edit</v-icon>
+          <v-icon>mdi-arrow-expand-horizontal</v-icon>
           <v-tooltip activator="parent" location="right">
             Show Rundown Panel
           </v-tooltip>
@@ -103,6 +88,7 @@
           ref="editorPanel"
           :item="currentRundownItem"
           :current-item-metadata="currentItemMetadata"
+          :current-episode="currentEpisodeNumber"
           :script-content="scriptContent"
           @update:script-content="updateScriptContent"
           v-model:scratch-content="scratchContent"
@@ -125,6 +111,8 @@
           @show-fsq-modal="handleShowFsqModal"
           @show-sot-modal="handleShowSotModal"
           @edit-sot-cue="handleShowSotModal"
+          @edit-fsq-cue="handleEditFsqCue"
+          @edit-gfx-cue="handleEditGfxCue"
           @show-vo-modal="handleShowVoModal"
           @show-nat-modal="handleShowNatModal"
           @show-rif-modal="handleShowRifModal"
@@ -150,24 +138,28 @@
         :item="currentRundownItem"
         :panel-width="metadataPanelWidth"
         :item-types="rundownItemTypes"
+        :episode-number="currentEpisodeNumber"
+        :media-list-loading="generatingMediaList"
+        :host-script-loading="generatingHostScript"
         @update-field="handleMetadataFieldUpdate"
         @toggle-width="toggleMetadataWidth"
         @close="showMetadataPanel = false"
         @reset-fields="resetMetadataFields"
         @open-wpm-tool="showWpmTool = true"
+        @generate-host-script="handleGenerateHostScript"
+        @generate-media-list="handleGenerateMediaList"
+        @generate-prompter-files="handleGeneratePrompterFiles"
       />
       
-      <!-- Reopen Metadata Button (when panel is closed) -->
-      <div v-else-if="currentRundownItem" class="metadata-reopen-button">
+      <!-- Reopen Metadata Buttons (when panel is closed) - Tab style -->
+      <div v-else-if="currentRundownItem" class="metadata-tab-controls-closed">
         <v-btn
           icon
-          color="secondary"
-          variant="elevated"
           size="small"
           @click="showMetadataPanel = true"
-          class="reopen-btn"
+          class="metadata-tab-btn"
         >
-          <v-icon>mdi-information-outline</v-icon>
+          <v-icon>mdi-arrow-expand-horizontal</v-icon>
           <v-tooltip activator="parent" location="left">
             Show Metadata Panel
           </v-tooltip>
@@ -205,6 +197,8 @@
       @update:show="handleFsqModalClose"
       :current-episode="currentEpisodeNumber"
       :speaker-wpm="currentSpeakerWpm"
+      :edit-mode="!!editingFsqCueData"
+      :initial-data="editingFsqCueData"
       @submit="submitFsq"
     />
     <SotModal
@@ -576,6 +570,8 @@ export default {
       episodes: [],
       loading: false,
       saving: false,
+      generatingMediaList: false, // Loading state for media list generation
+      generatingHostScript: false, // Loading state for host script generation
       
       // Auto-save tracking
       itemContentBackup: {},
@@ -860,6 +856,8 @@ Good night!
       showFsqModal: false,
       showSotModal: false,
       editingSotCueData: null,  // For editing existing SOT cues
+      editingFsqCueData: null,  // For editing existing FSQ cues
+      editingGfxCueData: null,  // For editing existing GFX cues
       showVoModal: false,
       showNatModal: false,
       showRifModal: false,
@@ -1286,19 +1284,30 @@ Try dropping an image or video file here!`
     },
     handleShowFsqModal() {
       if (!this.showFsqModal) {
-        // Snapshot the cursor position when FSQ hotkey is pressed
+        // Capture the cursor position when FSQ hotkey is pressed
+        // FSQ will insert AFTER this position, but at a safe point (not inside another cue)
         this.fsqInsertionIndex = this.$refs.editorPanel?.focusedParagraphIndex;
         console.log('📍 FSQ hotkey pressed - captured cursor position:', this.fsqInsertionIndex);
 
-        // If no paragraph is focused, use last segment as fallback
+        // If no paragraph is focused, will insert at end
         if (this.fsqInsertionIndex === null || this.fsqInsertionIndex === undefined) {
-          const segments = this.$refs.editorPanel?.scriptSegments || [];
-          this.fsqInsertionIndex = segments.length > 0 ? segments.length - 1 : null;
-          console.log('📍 No focus detected at hotkey press, using last segment:', this.fsqInsertionIndex);
+          console.log('📍 No focus detected, FSQ will insert at end of document');
         }
 
         this.showFsqModal = true;
       }
+    },
+    handleEditFsqCue(cueData) {
+      console.log('📝 Editing FSQ cue:', cueData);
+      // Store cue data for editing
+      this.editingFsqCueData = cueData;
+      this.showFsqModal = true;
+    },
+    handleEditGfxCue(cueData) {
+      console.log('📝 Editing GFX cue:', cueData);
+      // Store cue data for editing
+      this.editingGfxCueData = cueData;
+      this.showGfxModal = true;
     },
     handleShowSotModal(cueData = null) {
       console.error('🚨 Opening SotModal via handleShowSotModal', cueData ? '(Edit mode)' : '(New)');
@@ -1419,6 +1428,7 @@ Try dropping an image or video file here!`
     },
 
     // SINGLE SOURCE HELPER: Append to script content
+    // For cue insertions (FSQ, etc.), finds a safe insertion point between segments
     appendToScriptContent(textToAppend, insertAfterParagraph = null) {
       console.log('📥📥📥 ===============================================');
       console.log('📥 appendToScriptContent CALLED');
@@ -1434,18 +1444,42 @@ Try dropping an image or video file here!`
 
       let newScript;
       let isAtEnd = false;
+      const isInsertingCue = textToAppend.includes('<!-- Begin Cue -->');
 
-      // If insertAfterParagraph is specified, insert after that paragraph
-      if (insertAfterParagraph !== null && this.$refs.editorPanel) {
+      // If insertAfterParagraph is specified (and is a valid number), insert after that paragraph
+      // Otherwise append to end of script
+      if (insertAfterParagraph !== null && insertAfterParagraph !== undefined && typeof insertAfterParagraph === 'number' && this.$refs.editorPanel) {
         console.log('🔍 Insertion after specific paragraph requested');
         const segments = this.$refs.editorPanel.scriptSegments || [];
         console.log('📋 Total segments:', segments.length);
 
         // Find the insertion point by counting segments up to the specified index
+        // For cue insertions, skip past any consecutive cue segments to find clean insertion point
         let insertionPoint = 0;
         let charCount = 0;
+        let targetIndex = insertAfterParagraph;
 
-        for (let i = 0; i <= insertAfterParagraph && i < segments.length; i++) {
+        // If inserting a cue, find the next text segment boundary (skip past cues)
+        if (isInsertingCue) {
+          // Start from the requested position and skip any consecutive cues
+          let i = insertAfterParagraph;
+          while (i < segments.length && segments[i]?.type === 'cue') {
+            console.log(`📍 Segment ${i} is a cue, skipping...`);
+            i++;
+          }
+          // If we found a text segment, insert before it (after previous segment)
+          // If we reached the end, insert at end
+          targetIndex = i > 0 ? i - 1 : 0;
+          if (i >= segments.length) {
+            targetIndex = segments.length - 1;
+            console.log('📍 Reached end of segments, will insert at end');
+          } else {
+            console.log(`📍 Found safe insertion point after segment ${targetIndex}`);
+          }
+        }
+
+        // Calculate character position for the target segment
+        for (let i = 0; i <= targetIndex && i < segments.length; i++) {
           const segment = segments[i];
           if (segment.type === 'text' && segment.content) {
             charCount += segment.content.length;
@@ -1455,7 +1489,66 @@ Try dropping an image or video file here!`
           insertionPoint = charCount;
         }
 
-        console.log('📍 Insertion point calculated:', insertionPoint);
+        // For cue insertions, ensure we're inserting COMPLETELY OUTSIDE any elements
+        // This includes: cue blocks, <p> tags, and any other HTML elements
+        if (isInsertingCue && insertionPoint < currentScript.length) {
+          const beforeInsert = currentScript.slice(0, insertionPoint);
+          const afterInsert = currentScript.slice(insertionPoint);
+
+          // Check if we're inside a cue block
+          const lastBeginCue = beforeInsert.lastIndexOf('<!-- Begin Cue -->');
+          const lastEndCue = beforeInsert.lastIndexOf('<!-- End Cue -->');
+
+          if (lastBeginCue > lastEndCue) {
+            // We're inside a cue block - find the end and insert after
+            const endCuePos = afterInsert.indexOf('<!-- End Cue -->');
+            if (endCuePos !== -1) {
+              insertionPoint += endCuePos + '<!-- End Cue -->'.length;
+              console.log('📍 Was inside cue block, moved to after <!-- End Cue -->');
+            }
+          }
+
+          // Check if we're inside a <p> tag - count open vs close tags
+          const openPTags = (beforeInsert.match(/<p\s/g) || []).length;
+          const closePTags = (beforeInsert.match(/<\/p>/g) || []).length;
+
+          if (openPTags > closePTags) {
+            // We're inside a <p> tag - find the closing </p> and insert after
+            const closePPos = afterInsert.indexOf('</p>');
+            if (closePPos !== -1) {
+              insertionPoint += closePPos + '</p>'.length;
+              console.log('📍 Was inside <p> tag, moved to after </p>');
+            }
+          }
+
+          // Check if we're inside any other HTML element by looking for unclosed tags
+          // Find the last < that isn't followed by a matching >
+          const lastOpenBracket = beforeInsert.lastIndexOf('<');
+          if (lastOpenBracket !== -1) {
+            const afterOpenBracket = beforeInsert.slice(lastOpenBracket);
+            const hasClosingBracket = afterOpenBracket.includes('>');
+
+            if (!hasClosingBracket) {
+              // We're in the middle of an HTML tag - move past it
+              const closeBracketPos = afterInsert.indexOf('>');
+              if (closeBracketPos !== -1) {
+                insertionPoint += closeBracketPos + 1;
+                console.log('📍 Was inside HTML tag, moved past closing >');
+              }
+            }
+          }
+
+          // Final safety check: ensure we're not splitting an element
+          // Move to after any closing tag that immediately follows
+          const updatedAfter = currentScript.slice(insertionPoint);
+          const immediateCloseMatch = updatedAfter.match(/^(\s*<\/[^>]+>)+/);
+          if (immediateCloseMatch) {
+            insertionPoint += immediateCloseMatch[0].length;
+            console.log('📍 Moved past immediate closing tags:', immediateCloseMatch[0]);
+          }
+        }
+
+        console.log('📍 Final insertion point:', insertionPoint);
 
         // Check if we're inserting at the end
         isAtEnd = (insertionPoint >= currentScript.length);
@@ -1463,7 +1556,7 @@ Try dropping an image or video file here!`
 
         // Insert at the calculated position
         newScript = currentScript.slice(0, insertionPoint) + textToAppend + currentScript.slice(insertionPoint);
-        console.log('✅ Inserted after paragraph', insertAfterParagraph);
+        console.log('✅ Inserted after paragraph', insertAfterParagraph, '(adjusted to safe point)');
       } else {
         // Default behavior: append to end
         console.log('🔍 No specific insertion point - appending to end');
@@ -1473,7 +1566,7 @@ Try dropping an image or video file here!`
       }
 
       // If cue was inserted at the end of the script, add empty paragraph for writer to continue
-      if (isAtEnd && textToAppend.includes('<!-- Begin Cue -->')) {
+      if (isAtEnd && isInsertingCue) {
         console.log('🎯 Cue inserted at end of script - adding empty paragraph for continuation');
         // Extract last speaker from script content
         const lastSpeaker = this.getLastSpeakerFromScript(newScript);
@@ -1507,6 +1600,13 @@ Try dropping an image or video file here!`
     /**
      * Insert a placeholder div at the current cursor position for cue insertion
      * Handles stepping out of <p> tags and cue blocks to find the correct insertion point
+     *
+     * IMPORTANT: The placeholder must be inserted OUTSIDE of any:
+     * - <p> tags (paragraph elements)
+     * - .cue-segment elements (cue card wrappers)
+     * - .cue-card elements (cue card components)
+     * - .cue-block elements (raw cue block divs)
+     * - Any element that is part of a cue structure
      */
     insertCuePlaceholder() {
       console.log('📍📍📍 ===============================================');
@@ -1539,36 +1639,45 @@ Try dropping an image or video file here!`
           currentNode = currentNode.parentElement;
         }
 
-        console.log('📍 Working with element:', currentNode.tagName, currentNode.className);
+        console.log('📍 Working with element:', currentNode?.tagName, currentNode?.className);
 
-        // Step up the DOM tree until we're outside any <p> or cue block
-        let insertionPoint = currentNode;
-        while (insertionPoint && insertionPoint !== scriptContainer) {
-          const tagName = insertionPoint.tagName?.toLowerCase();
-          const className = insertionPoint.className || '';
+        /**
+         * Helper function to check if an element is a cue container or paragraph
+         * These are elements we should NOT insert a cue INSIDE of
+         */
+        const isCueOrParagraphContainer = (element) => {
+          if (!element || element === scriptContainer) return false;
 
-          console.log('🔍 Checking element:', tagName, 'class:', className);
+          const tagName = element.tagName?.toLowerCase();
+          const className = element.className || '';
 
-          // Check if we're inside a <p> tag or a cue block
-          if (tagName === 'p' || className.includes('cue-block') || className.includes('cue-card')) {
-            console.log('📤 Found container element, stepping to next sibling');
+          // Check for paragraph
+          if (tagName === 'p') return true;
 
-            // If we have a next sibling, insert before it
-            if (insertionPoint.nextSibling) {
-              insertionPoint = insertionPoint.nextSibling;
-              console.log('✅ Found next sibling:', insertionPoint.nodeName);
-              break;
-            } else {
-              // No next sibling, move up to parent to insert after this element
-              const parent = insertionPoint.parentElement;
-              if (parent && parent !== scriptContainer) {
-                insertionPoint = parent;
-                break;
-              }
-            }
+          // Check for cue-related classes
+          if (className.includes('cue-segment')) return true;
+          if (className.includes('cue-card')) return true;
+          if (className.includes('cue-block')) return true;
+          if (className.includes('placeholder-cue-card')) return true;
+          if (className.includes('image-cue-card')) return true;
+
+          // Check for v-card which wraps cue cards
+          if (tagName === 'div' && className.includes('v-card')) return true;
+
+          return false;
+        };
+
+        // Walk up the DOM tree to find the outermost cue/paragraph container
+        // We want to insert AFTER this container, not inside it
+        let outermostContainer = null;
+        let walker = currentNode;
+
+        while (walker && walker !== scriptContainer) {
+          if (isCueOrParagraphContainer(walker)) {
+            outermostContainer = walker;
+            console.log('🔍 Found container:', walker.tagName, walker.className);
           }
-
-          insertionPoint = insertionPoint.parentElement;
+          walker = walker.parentElement;
         }
 
         // Create the placeholder div with a unique ID
@@ -1580,22 +1689,48 @@ Try dropping an image or video file here!`
         placeholder.innerHTML = '<span style="position: absolute; top: -10px; left: 0; font-size: 10px; color: #FF9800; font-weight: bold;">▼ CUE WILL INSERT HERE</span>';
 
         console.log('📍 Placeholder ID:', placeholderId);
-        console.log('📍 Insertion point:', insertionPoint?.tagName, insertionPoint?.className);
 
-        // Insert the placeholder
-        if (insertionPoint && insertionPoint.parentElement) {
-          // If insertionPoint is a text node or we're at the end, insert after
-          if (insertionPoint.nodeType === Node.TEXT_NODE || !insertionPoint.nextSibling) {
-            insertionPoint.parentElement.insertBefore(placeholder, insertionPoint.nextSibling);
-            console.log('✅ Inserted placeholder after current node');
+        // Insert the placeholder AFTER the outermost container
+        if (outermostContainer) {
+          console.log('📍 Outermost container found:', outermostContainer.tagName, outermostContainer.className);
+
+          // Insert after the outermost container (before its next sibling)
+          const parent = outermostContainer.parentElement;
+          const nextSibling = outermostContainer.nextSibling;
+
+          if (parent) {
+            if (nextSibling) {
+              parent.insertBefore(placeholder, nextSibling);
+              console.log('✅ Inserted placeholder AFTER container (before next sibling)');
+            } else {
+              parent.appendChild(placeholder);
+              console.log('✅ Appended placeholder after container (no next sibling)');
+            }
           } else {
-            insertionPoint.parentElement.insertBefore(placeholder, insertionPoint);
-            console.log('✅ Inserted placeholder before next sibling');
+            // Fallback: append to script container
+            scriptContainer.appendChild(placeholder);
+            console.log('✅ Appended placeholder to script container (no parent found)');
           }
         } else {
-          // Fallback: append to script container
-          scriptContainer.appendChild(placeholder);
-          console.log('✅ Appended placeholder to script container (fallback)');
+          // No container found - cursor is at top level of script container
+          // Insert at current cursor position
+          console.log('📍 No container found - inserting at cursor position in script container');
+
+          if (currentNode && currentNode.parentElement === scriptContainer) {
+            // Current node is direct child of script container
+            const nextSibling = currentNode.nextSibling;
+            if (nextSibling) {
+              scriptContainer.insertBefore(placeholder, nextSibling);
+              console.log('✅ Inserted placeholder after current node');
+            } else {
+              scriptContainer.appendChild(placeholder);
+              console.log('✅ Appended placeholder to script container');
+            }
+          } else {
+            // Fallback: append to script container
+            scriptContainer.appendChild(placeholder);
+            console.log('✅ Appended placeholder to script container (fallback)');
+          }
         }
 
         // Store the placeholder ID for later use
@@ -2083,10 +2218,13 @@ Try dropping an image or video file here!`
           console.log('✅ Current item autosaved successfully');
 
           // Update local state with saved content
+          // CRITICAL: Clear rawMarkdown to prevent stale data on next load
+          // The script field should be the source of truth, not rawMarkdown
           this.rundownItems[this.selectedItemIndex] = {
             ...this.rundownItems[this.selectedItemIndex],
             script: this.parsedContent.scriptContent,
-            scratch: this.scratchContent
+            scratch: this.scratchContent,
+            rawMarkdown: null  // Clear to prevent stale frontmatter-included content
           };
         }
 
@@ -2371,19 +2509,18 @@ Try dropping an image or video file here!`
 
       console.log('🔄 Loading content for item:', item.slug || item.title);
       console.log(`🔄 Item details - ID: ${item.id}, AssetID: ${item.asset_id}, Type: ${item.type}, Order: ${item.order}`);
-      console.log('🔄 rawMarkdown length:', item.rawMarkdown?.length || 0);
       console.log('🔄 script length:', item.script?.length || 0);
-      console.log('🔄 rawMarkdown preview:', item.rawMarkdown?.substring(0, 300) || '(empty)');
+      console.log('🔄 script preview:', item.script?.substring(0, 200) || '(empty)');
 
-      // Load content directly into rawMarkdownContent (single source)
-      this.rawMarkdownContent = item.rawMarkdown || item.script || '';
-      console.log('✅ Loaded rawMarkdownContent, length:', this.rawMarkdownContent?.length || 0);
-
-      // For now, set scratch content to empty or load from a separate field if available
+      // Load scratch content
       this.scratchContent = item.scratch || '';
-      
-      // Load raw markdown content - combine frontmatter and script content
+
+      // CRITICAL: Build rawMarkdownContent from item.script (body) + item metadata (frontmatter)
+      // Do NOT use item.rawMarkdown - it may contain stale/corrupted frontmatter
+      // The loadRawMarkdownContent function rebuilds the complete markdown from clean sources
       this.loadRawMarkdownContent(item);
+
+      console.log('✅ Built rawMarkdownContent, length:', this.rawMarkdownContent?.length || 0);
       
       // Load all frontmatter metadata from the item
       this.currentItemMetadata = {
@@ -2455,6 +2592,8 @@ Try dropping an image or video file here!`
 
     loadRawMarkdownContent(item) {
       // Build raw markdown content combining frontmatter and script
+      // CRITICAL: item.script should ONLY contain the body content, not frontmatter
+      // Frontmatter is reconstructed from item metadata fields
       try {
         const frontmatter = {
           AssetID: item.AssetID || item.asset_id || '',
@@ -2477,7 +2616,7 @@ Try dropping an image or video file here!`
           ...Object.keys(item).reduce((acc, key) => {
             const standardFields = [
               'AssetID', 'asset_id', 'title', 'type', 'slug', 'subtitle', 'description',
-              'duration', 'status', 'order', 'airdate', 'priority', 'guests', 'resources', 
+              'duration', 'status', 'order', 'airdate', 'priority', 'guests', 'resources',
               'tags', 'server_message', 'created_at', 'script', 'scratch', 'filename', 'id'
             ];
             if (!standardFields.includes(key) && item[key] !== null && item[key] !== undefined && item[key] !== '') {
@@ -2486,7 +2625,7 @@ Try dropping an image or video file here!`
             return acc;
           }, {})
         };
-        
+
         // Convert frontmatter to YAML
         let yamlFrontmatter = '';
         Object.keys(frontmatter).forEach(key => {
@@ -2499,12 +2638,17 @@ Try dropping an image or video file here!`
             }
           }
         });
-        
-        // PREVENTION: Strip any existing frontmatter from item.script to prevent double frontmatter
+
+        // Get script content and aggressively strip ALL frontmatter blocks
+        // This handles cases where corrupted data has multiple frontmatter sections
         let scriptContent = item.script || '';
-        if (scriptContent.trim().startsWith('---')) {
-          console.warn('🚨 PREVENTING DOUBLE FRONTMATTER: Stripping existing frontmatter from item.script');
-          console.warn('Original script preview:', scriptContent.substring(0, 200) + '...');
+        let strippingIterations = 0;
+        const maxIterations = 5; // Safety limit to prevent infinite loops
+
+        while (scriptContent.trim().startsWith('---') && strippingIterations < maxIterations) {
+          strippingIterations++;
+          console.warn(`🚨 STRIPPING FRONTMATTER (iteration ${strippingIterations}): Found frontmatter in item.script`);
+          console.warn('Content preview:', scriptContent.substring(0, 200) + '...');
 
           // Strip existing frontmatter by finding the closing --- and taking content after it
           const lines = scriptContent.split('\n');
@@ -2524,23 +2668,36 @@ Try dropping an image or video file here!`
           if (frontmatterEndIndex > -1) {
             // Take content after the closing frontmatter
             scriptContent = lines.slice(frontmatterEndIndex + 1).join('\n').trim();
-            console.warn('✅ Stripped frontmatter, remaining content length:', scriptContent.length);
-
-            // CRITICAL FIX: Check if the remaining content contains ANOTHER frontmatter block
-            // This happens when multiple segments got mixed together in corrupted data
-            if (scriptContent.includes('---\n\nAssetID:') || scriptContent.includes('---\n\nid:')) {
-              console.error('🚨🚨🚨 CRITICAL: Detected multiple segments mixed in script content!');
-              console.error('This indicates database corruption. Truncating to first segment only.');
-
-              // Find the start of the next segment and cut it off
-              const nextSegmentStart = scriptContent.search(/---\s*\n\s*(AssetID|id):/);
-              if (nextSegmentStart > 0) {
-                scriptContent = scriptContent.substring(0, nextSegmentStart).trim();
-                console.warn('✅ Truncated to first segment, new length:', scriptContent.length);
-              }
-            }
+            console.warn(`✅ Stripped frontmatter block ${strippingIterations}, remaining length:`, scriptContent.length);
           } else {
-            console.warn('⚠️  Could not find closing frontmatter, using original content');
+            console.warn('⚠️ Found opening --- but no closing ---, stopping strip loop');
+            break;
+          }
+        }
+
+        if (strippingIterations > 0) {
+          console.warn(`🔧 Total frontmatter blocks stripped: ${strippingIterations}`);
+          if (strippingIterations > 1) {
+            console.error('🚨🚨🚨 DATABASE CORRUPTION DETECTED: Multiple frontmatter blocks found in script_content!');
+            console.error('This has been auto-repaired. Please save this item to fix the database.');
+          }
+        }
+
+        // ADDITIONAL CHECK: Look for duplicate content patterns
+        // If the body appears to be duplicated (same content twice), take only the first occurrence
+        if (scriptContent.length > 200) {
+          // Check if the first significant portion appears again later in the content
+          const checkLength = Math.min(100, Math.floor(scriptContent.length / 2));
+          const firstCheck = scriptContent.substring(0, checkLength).trim();
+
+          // Look for the pattern where duplicated content starts after a newline
+          const duplicatePattern = scriptContent.indexOf('\n' + firstCheck);
+
+          if (duplicatePattern > checkLength && duplicatePattern < scriptContent.length - checkLength) {
+            console.warn('🚨 DUPLICATE CONTENT PATTERN DETECTED! Truncating to first occurrence.');
+            console.warn(`Found duplicate at position ${duplicatePattern}`);
+            scriptContent = scriptContent.substring(0, duplicatePattern).trim();
+            console.warn('✅ Truncated duplicate content, new length:', scriptContent.length);
           }
         }
 
@@ -2901,6 +3058,13 @@ Try dropping an image or video file here!`
       if (event.ctrlKey && event.shiftKey && event.key === 'S' && !event.altKey && !event.metaKey) {
         event.preventDefault();
         this.saveEverything();
+        return;
+      }
+      // Handle Ctrl+Shift+R for reloading rundown from database
+      if (event.ctrlKey && event.shiftKey && event.key === 'R' && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        console.log('🔄 Ctrl+Shift+R: Reloading rundown from database...');
+        this.reloadFromDatabase();
         return;
       }
       // Handle Ctrl+Shift+I for new item
@@ -3669,13 +3833,17 @@ Try dropping an image or video file here!`
       }
       fsqCueBlock += `<!-- End Cue -->`;
 
-      // Initialize pending cues array if this is the first part
+      // Initialize pending cues arrays if this is the first part
       if (!this.$refs.editorPanel.pendingCueDataArray) {
         this.$refs.editorPanel.pendingCueDataArray = [];
       }
+      if (!this.$refs.editorPanel.pendingFsqDataArray) {
+        this.$refs.editorPanel.pendingFsqDataArray = [];
+      }
 
-      // Add this cue to the array
+      // Add this cue text block and original data to the arrays
       this.$refs.editorPanel.pendingCueDataArray.push(fsqCueBlock);
+      this.$refs.editorPanel.pendingFsqDataArray.push(fsqCueData);
       console.log(`📦 Collected FSQ part ${this.$refs.editorPanel.pendingCueDataArray.length} (Part: ${fsqCueData.part})`);
 
       // Check if this is a multipart quote and if we're on the last part
@@ -3693,14 +3861,19 @@ Try dropping an image or video file here!`
         // Close the modal
         this.showFsqModal = false;
 
-        // Insert all parts at the captured cursor position (or end if null)
+        // Insert all parts at the captured cursor position (or end if null/undefined)
         const allCues = this.$refs.editorPanel.pendingCueDataArray.join('\n\n');
         const insertionPosition = this.fsqInsertionIndex;
 
-        if (insertionPosition !== null && insertionPosition !== undefined) {
+        // Determine if we have a valid insertion position
+        const hasValidPosition = insertionPosition !== null &&
+                                 insertionPosition !== undefined &&
+                                 typeof insertionPosition === 'number';
+
+        if (hasValidPosition) {
           console.log(`📝 Inserting ${totalParts} FSQ cue(s) after paragraph index ${insertionPosition}`);
         } else {
-          console.log(`📝 Inserting ${totalParts} FSQ cue(s) at bottom of script (no cursor position)`);
+          console.log(`📝 Inserting ${totalParts} FSQ cue(s) at BOTTOM of script (no valid cursor position: ${insertionPosition})`);
         }
 
         this.appendToScriptContent(`\n${allCues}\n`, insertionPosition);
@@ -3714,11 +3887,103 @@ Try dropping an image or video file here!`
 
         console.log(`✅ ${totalParts} FSQ cue(s) inserted successfully at bottom of script`);
 
-        // Clear the array for next time
+        // Trigger automatic PNG generation for each FSQ
+        const fsqDataToGenerate = [...this.$refs.editorPanel.pendingFsqDataArray];
+        this.triggerFsqGeneration(fsqDataToGenerate);
+
+        // Clear the arrays for next time
         this.$refs.editorPanel.pendingCueDataArray = [];
+        this.$refs.editorPanel.pendingFsqDataArray = [];
       } else {
         console.log(`⏳ Waiting for remaining parts (${currentPart}/${totalParts})...`);
       }
+    },
+
+    /**
+     * Trigger automatic PNG generation for FSQ cues
+     * Calls the async generation endpoint for each FSQ in the background
+     */
+    async triggerFsqGeneration(fsqDataArray) {
+      if (!fsqDataArray || fsqDataArray.length === 0) return;
+
+      const episode = this.$route?.params?.episode || this.currentEpisode;
+      if (!episode) {
+        console.warn('⚠️ Cannot trigger FSQ generation: no episode ID');
+        return;
+      }
+
+      console.log(`🎨 Triggering automatic PNG generation for ${fsqDataArray.length} FSQ(s)...`);
+
+      // Show notification that generation is starting
+      if (this.$root && this.$root.$emit) {
+        this.$root.$emit('show-notification', {
+          type: 'info',
+          title: 'FSQ Generation Started',
+          message: `Generating ${fsqDataArray.length} quote graphic(s) in background...`,
+          timeout: 3000
+        });
+      }
+
+      const token = localStorage.getItem('auth-token');
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      // Fire off generation requests for each FSQ (don't wait for completion)
+      for (const fsqData of fsqDataArray) {
+        try {
+          // Map frontend style names to backend alignment
+          const alignmentMap = {
+            'centered': 'center',
+            'left': 'left',
+            'right': 'right',
+            'large': 'center',
+            'elegant': 'center'
+          };
+
+          const requestBody = {
+            episode_id: episode,
+            quote: fsqData.quote,
+            attribution: fsqData.source || '',
+            slug: fsqData.slug,
+            asset_id: fsqData.assetId,
+            alignment: alignmentMap[fsqData.style] || 'center',
+            font_family: fsqData.fontFamily || 'sans-serif',
+            box_height: 80,
+            box_opacity: 75,
+            line_spacing: 30,
+            duration: fsqData.duration || '00:00:05:00',
+            enumerator: null,  // Can add rundown position later
+            priority: 'high'   // User-initiated = high priority
+          };
+
+          console.log(`🎨 Queuing FSQ generation: ${fsqData.slug}`);
+
+          // Fire and forget - don't await
+          fetch('/api/fsq/generate-async', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(requestBody)
+          }).then(response => {
+            if (response.ok) {
+              return response.json();
+            }
+            throw new Error(`HTTP ${response.status}`);
+          }).then(result => {
+            console.log(`✅ FSQ generation queued: ${fsqData.slug} (task: ${result.task_id})`);
+          }).catch(err => {
+            console.error(`❌ FSQ generation failed for ${fsqData.slug}:`, err);
+          });
+
+        } catch (err) {
+          console.error(`❌ Error queuing FSQ generation for ${fsqData.slug}:`, err);
+        }
+      }
+
+      console.log(`🎨 All ${fsqDataArray.length} FSQ generation requests queued`);
     },
 
     // Handle FSQ modal close (including cancel/ESC)
@@ -3830,10 +4095,17 @@ Try dropping an image or video file here!`
           console.log(`📍 Inserting at cursor position from modal open: ${insertionIndex}`);
           console.log(`📍 Current scriptContent length: ${this.scriptContent?.length || 0} chars`);
 
-          // Insert directly at snapshotted position
-          console.log('🔧 Calling appendToScriptContent...');
-          this.appendToScriptContent(`\n${sotCue}\n`, insertionIndex);
-          console.log('🔧 appendToScriptContent returned');
+          // FIXED: Use EditorPanel's proper insertion method that handles paragraph boundaries correctly
+          console.log('🔧 Calling EditorPanel.handleSotCueSubmit (proper paragraph boundary detection)...');
+          if (this.$refs.editorPanel && this.$refs.editorPanel.handleSotCueSubmit) {
+            // EditorPanel's method will correctly insert AFTER paragraph, not inside it
+            await this.$refs.editorPanel.handleSotCueSubmit(sotCue);
+            console.log('✅ Used EditorPanel.handleSotCueSubmit - SOT inserted after paragraph boundary');
+          } else {
+            // Last resort fallback - append to end
+            console.warn('⚠️ EditorPanel not available, appending to end');
+            this.appendToScriptContent(`\n${sotCue}\n`, null);  // null = append to end
+          }
           console.log(`📍 New scriptContent length: ${this.scriptContent?.length || 0} chars`);
 
           // Clear the snapshot for next time
@@ -3846,7 +4118,13 @@ Try dropping an image or video file here!`
 
         console.log(`✅ SOT cue inserted successfully`);
 
-        // Trigger processing NOW that cue is in script (if we have a tempJobId)
+        // CRITICAL: Save to database BEFORE triggering processing
+        // The worker needs to find the cue block in the database
+        console.log('💾 Saving script content to database before processing...');
+        await this.saveCurrentItem();
+        console.log('💾 Save complete - cue block is now in database');
+
+        // Trigger processing NOW that cue is in database
         console.log('🔄 About to trigger SOT processing...');
         await this.triggerSOTProcessing(data);
         console.log('🎬🎬🎬 submitSot COMPLETED');
@@ -4879,6 +5157,139 @@ Try dropping an image or video file here!`
       }
     },
 
+    // Generate host script for current episode
+    async handleGenerateHostScript() {
+      if (!this.currentEpisodeNumber) {
+        this.$toast.warning('No episode loaded');
+        return;
+      }
+
+      this.generatingHostScript = true;
+
+      try {
+        console.log('🎬 Generating host script for episode:', this.currentEpisodeNumber);
+        this.$toast.info('Generating host script...');
+        const response = await this.$axios.post(`/scripts/host/${this.currentEpisodeNumber}`);
+        console.log('🎬 Script generation response:', response.data);
+
+        if (response.data.success) {
+          this.$toast.success(`Host script generated: ${response.data.output_path}`);
+          // Refresh the generated scripts list in MetadataPanel
+          if (this.$refs.metadataPanel && this.$refs.metadataPanel.loadGeneratedDocuments) {
+            this.$refs.metadataPanel.loadGeneratedDocuments();
+          }
+        } else {
+          this.$toast.error(`Error: ${response.data.error}`);
+        }
+      } catch (error) {
+        console.error('🎬 Script generation failed:', error);
+        console.error('🎬 Error response:', error.response);
+        this.$toast.error(`Failed to generate script: ${error.response?.data?.detail || error.message}`);
+      } finally {
+        this.generatingHostScript = false;
+      }
+    },
+
+    // Generate media list for current episode
+    // Media list contains all cues that have or should have a mediaURL
+    async handleGenerateMediaList() {
+      if (!this.currentEpisodeNumber) {
+        this.$toast.warning('No episode loaded');
+        return;
+      }
+
+      this.generatingMediaList = true;
+
+      try {
+        console.log('📋 Generating media list for episode:', this.currentEpisodeNumber);
+        this.$toast.info('Generating media list...');
+
+        // Collect all cues with mediaURL from all rundown items
+        const mediaItems = [];
+        const cueTypes = ['IMG', 'GFX', 'SOT', 'VO', 'NAT', 'PKG', 'BUMP', 'STING', 'FSQ', 'RIF', 'DIR'];
+
+        for (const item of this.rundownItems) {
+          if (!item.script_content) continue;
+
+          // Parse cue blocks from script content
+          const cueBlockPattern = /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g;
+          let match;
+
+          while ((match = cueBlockPattern.exec(item.script_content)) !== null) {
+            const cueContent = match[1];
+
+            // Extract fields from cue block
+            const typeMatch = cueContent.match(/\[Type:\s*([^\]]+)\]/i);
+            const slugMatch = cueContent.match(/\[Slug:\s*([^\]]+)\]/i);
+            const mediaUrlMatch = cueContent.match(/\[Media\s*URL:\s*([^\]]+)\]/i);
+            const assetIdMatch = cueContent.match(/\[Asset\s*ID:\s*([^\]]+)\]/i);
+            const durationMatch = cueContent.match(/\[Duration:\s*([^\]]+)\]/i);
+            const descriptionMatch = cueContent.match(/\[Description:\s*([^\]]+)\]/i);
+
+            const cueType = typeMatch ? typeMatch[1].trim().toUpperCase() : '';
+
+            // Only include cues that should have media
+            if (cueTypes.includes(cueType)) {
+              mediaItems.push({
+                segmentSlug: item.slug || item.title || 'Unknown Segment',
+                segmentOrder: item.order_in_rundown,
+                cueType: cueType,
+                slug: slugMatch ? slugMatch[1].trim() : '',
+                mediaUrl: mediaUrlMatch ? mediaUrlMatch[1].trim() : '',
+                assetId: assetIdMatch ? assetIdMatch[1].trim() : '',
+                duration: durationMatch ? durationMatch[1].trim() : '',
+                description: descriptionMatch ? descriptionMatch[1].trim() : '',
+                hasMissingMedia: !mediaUrlMatch || !mediaUrlMatch[1].trim()
+              });
+            }
+          }
+        }
+
+        // Sort by segment order
+        mediaItems.sort((a, b) => (a.segmentOrder || 0) - (b.segmentOrder || 0));
+
+        console.log('📋 Found', mediaItems.length, 'media cues');
+
+        // Send to backend to generate the media list file
+        const response = await this.$axios.post(`/scripts/media-list/${this.currentEpisodeNumber}`, {
+          media_items: mediaItems
+        });
+
+        if (response.data.success) {
+          const missingCount = mediaItems.filter(m => m.hasMissingMedia).length;
+          if (missingCount > 0) {
+            this.$toast.warning(`Media list generated with ${missingCount} missing media URLs`);
+          } else {
+            this.$toast.success('Media list generated successfully');
+          }
+
+          // Refresh the generated scripts list in MetadataPanel
+          if (this.$refs.metadataPanel && this.$refs.metadataPanel.loadGeneratedDocuments) {
+            this.$refs.metadataPanel.loadGeneratedDocuments();
+          }
+        } else {
+          this.$toast.error(`Error: ${response.data.error}`);
+        }
+      } catch (error) {
+        console.error('📋 Media list generation failed:', error);
+        this.$toast.error(`Failed to generate media list: ${error.response?.data?.detail || error.message}`);
+      } finally {
+        this.generatingMediaList = false;
+      }
+    },
+
+    // Generate prompter files for current episode (STUB)
+    handleGeneratePrompterFiles() {
+      this.$toast.info('Prompter file generation coming soon!');
+      console.log('📜 Prompter file generation requested for episode:', this.currentEpisodeNumber);
+      // TODO: Implement prompter file generation
+      // This will generate teleprompter-friendly text files with:
+      // - Large text formatting
+      // - Segment markers
+      // - Timing cues
+      // - Speaker attribution
+    },
+
     // Flash newly created rundown item with locator flash color
     async flashNewlyCreatedItem(itemIndex) {
       console.log('Starting locator flash for item at index:', itemIndex);
@@ -5224,14 +5635,6 @@ Try dropping an image or video file here!`
   color: #666;
   text-align: center;
   margin-top: -10px;
-}
-
-.main-toolbar {
-  background-color: var(--v-toolbar-bg, #FFFFFF);
-  border-bottom: 1px solid var(--v-divider-color, #E0E0E0);
-  flex-shrink: 0; /* Keep toolbar at top, don't let it shrink */
-  position: relative;
-  z-index: 100; /* Stay above scrolling content */
 }
 
 .rundown-panel {
@@ -5735,30 +6138,69 @@ Try dropping an image or video file here!`
 }
 
 /* Rundown Panel Reopen Button */
-.rundown-reopen-button {
+/* Rundown tab controls when panel is closed - positioned on left side */
+.rundown-tab-controls-closed {
   position: fixed;
-  left: 8px;
-  top: 50%;
+  left: 0;
+  top: 50vh;
   transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   z-index: 100;
+}
+
+.rundown-tab-btn {
+  border-radius: 0 8px 8px 0 !important;
+  background-color: rgba(25, 118, 210, 0.9) !important;
+  color: white !important;
+  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.2s ease !important;
+  width: 32px !important;
+  height: 40px !important;
+}
+
+.rundown-tab-btn:hover {
+  background-color: rgba(25, 118, 210, 1) !important;
+  transform: translateX(4px) !important;
+  box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+.rundown-tab-btn .v-icon {
+  color: white !important;
 }
 
 /* Metadata Panel Reopen Button */
-.metadata-reopen-button {
+/* Metadata tab controls when panel is closed - positioned on right side */
+.metadata-tab-controls-closed {
   position: fixed;
-  right: 8px;
-  top: 50%;
+  right: 0;
+  top: 50vh;
   transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   z-index: 100;
 }
 
-.reopen-btn {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+.metadata-tab-btn {
+  border-radius: 8px 0 0 8px !important;
+  background-color: rgba(25, 118, 210, 0.9) !important;
+  color: white !important;
+  box-shadow: -2px 2px 8px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.2s ease !important;
+  width: 32px !important;
+  height: 40px !important;
 }
 
-.reopen-btn:hover {
-  transform: scale(1.1);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+.metadata-tab-btn:hover {
+  background-color: rgba(25, 118, 210, 1) !important;
+  transform: translateX(-4px) !important;
+  box-shadow: -4px 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+.metadata-tab-btn .v-icon {
+  color: white !important;
 }
 
 </style>

@@ -412,12 +412,55 @@
                       <source :src="previewBackgroundVideo" type="video/mp4">
                     </video>
                     <div class="black-bar-overlay"></div>
-                    <div class="quote-preview" :style="getSplitPreviewStyle">
-                      <div class="quote-text" :style="getSplitTextStyle" v-html="formatSplitSegment(segment)"></div>
-                      <div v-if="includeAttribution" class="quote-source" :style="getSplitSourceStyle">{{ attributionPrefix }}{{ source || 'Source' }}</div>
+                    <div class="quote-preview" :style="getManualSplitPreviewStyle">
+                      <div class="quote-text" :style="getManualSplitTextStyle" v-html="formatSplitSegment(segment)"></div>
+                      <div v-if="includeAttribution" class="quote-source" :style="getManualSplitSourceStyle">{{ attributionPrefix }}{{ source || 'Source' }}</div>
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <!-- Manual split style controls -->
+              <div v-if="manualSplitExpanded && manualSplitSegments.length > 1" class="manual-split-controls mb-3">
+                <v-row dense class="mb-2">
+                  <v-col cols="6">
+                    <v-select
+                      v-model="manualSplitQuoteStyle"
+                      :items="styleOptions"
+                      label="Alignment (All Parts)"
+                      variant="outlined"
+                      density="compact"
+                    />
+                  </v-col>
+                  <v-col cols="6">
+                    <v-select
+                      v-model="manualSplitFontFamily"
+                      :items="fontOptions"
+                      label="Font (All Parts)"
+                      variant="outlined"
+                      density="compact"
+                    />
+                  </v-col>
+                </v-row>
+                <v-row dense class="mb-2">
+                  <v-col cols="12">
+                    <v-slider
+                      v-model="manualSplitFontSize"
+                      label="Font Size (All Parts)"
+                      min="10"
+                      max="40"
+                      step="0.5"
+                      thumb-label
+                      density="compact"
+                    >
+                      <template v-slot:append>
+                        <v-chip size="small" color="blue">
+                          {{ manualSplitFontSize }}px
+                        </v-chip>
+                      </template>
+                    </v-slider>
+                  </v-col>
+                </v-row>
               </div>
 
               <div v-if="manualSplitExpanded" class="manual-split-instructions">
@@ -951,7 +994,9 @@ export default {
   props: {
     show: { type: Boolean, required: true },
     currentEpisode: { type: String, default: '' },
-    speakerWpm: { type: Number, default: 150 }  // Speaker WPM from profile
+    speakerWpm: { type: Number, default: 150 },  // Speaker WPM from profile
+    editMode: { type: Boolean, default: false },
+    initialData: { type: Object, default: null }
   },
   emits: ['update:show', 'submit'],
   data() {
@@ -990,7 +1035,11 @@ export default {
       splitFontSize: 25,
       // Manual split markers
       manualSplitPoints: [],  // Array of character positions for manual splits
-      manualSplitExpanded: false  // Whether manual split section is expanded
+      manualSplitExpanded: false,  // Whether manual split section is expanded
+      // Manual split preview controls (separate from LLM split)
+      manualSplitQuoteStyle: 'left',
+      manualSplitFontFamily: 'serif',
+      manualSplitFontSize: 25
     }
   },
   setup() {
@@ -1004,8 +1053,12 @@ export default {
         // Fetch sources from current episode rundown
         await this.fetchEpisodeSources()
 
-        // Auto-populate source from last submitted or most recent in episode
-        if (!this.source) {
+        // Load initial data if in edit mode
+        if (this.editMode && this.initialData) {
+          console.log('📝 Loading FSQ for editing:', this.initialData);
+          this.loadInitialData();
+        } else if (!this.source) {
+          // Auto-populate source from last submitted or most recent in episode
           if (this.lastSubmittedSource) {
             this.source = this.lastSubmittedSource
             this.sourceAutopopulated = true
@@ -1207,6 +1260,45 @@ export default {
       }
     },
 
+    // Manual split preview computed properties
+    getManualSplitPreviewStyle() {
+      return {
+        alignItems: this.manualSplitQuoteStyle === 'centered' ? 'center' :
+                   this.manualSplitQuoteStyle === 'left' ? 'flex-start' :
+                   this.manualSplitQuoteStyle === 'right' ? 'flex-end' : 'center'
+      }
+    },
+    getManualSplitTextStyle() {
+      const fontMap = {
+        'sans-serif': 'Helvetica, Arial, sans-serif',
+        'serif': 'Georgia, "Times New Roman", serif',
+        'monospace': '"Courier New", Courier, monospace'
+      }
+      // Calculate font size as viewport width units to scale with container
+      const fontSizeVw = (this.manualSplitFontSize / 1920) * 100
+
+      return {
+        fontFamily: fontMap[this.manualSplitFontFamily] || fontMap['sans-serif'],
+        fontSize: `${fontSizeVw}vw`,
+        textAlign: this.manualSplitQuoteStyle === 'centered' ? 'center' :
+                  this.manualSplitQuoteStyle === 'left' ? 'left' :
+                  this.manualSplitQuoteStyle === 'right' ? 'right' : 'center'
+      }
+    },
+    getManualSplitSourceStyle() {
+      const fontMap = {
+        'sans-serif': 'Helvetica, Arial, sans-serif',
+        'serif': 'Georgia, "Times New Roman", serif',
+        'monospace': '"Courier New", Courier, monospace'
+      }
+      return {
+        fontFamily: fontMap[this.manualSplitFontFamily] || fontMap['sans-serif'],
+        textAlign: this.manualSplitQuoteStyle === 'centered' ? 'center' :
+                  this.manualSplitQuoteStyle === 'left' ? 'left' :
+                  this.manualSplitQuoteStyle === 'right' ? 'right' : 'center'
+      }
+    },
+
     // Manual split segments computed from split points
     manualSplitSegments() {
       if (!this.quote || this.manualSplitPoints.length === 0) {
@@ -1240,6 +1332,29 @@ export default {
     document.removeEventListener('keydown', this.handleKeydown)
   },
   methods: {
+    /**
+     * Load initial data when editing an existing FSQ cue
+     */
+    loadInitialData() {
+      if (!this.initialData) return;
+
+      const data = this.initialData.rawData || this.initialData;
+
+      // Load quote and attribution from cue data
+      this.quote = data.quote || '';
+      this.source = data.attribution || '';
+      this.slug = data.slug || '';
+      this.slugAutoGenerated = false;  // Don't auto-generate when editing
+
+      // Load style settings if available
+      if (data.quoteStyle) this.quoteStyle = data.quoteStyle;
+      if (data.fontFamily) this.fontFamily = data.fontFamily;
+      if (data.fontSize) this.fontSize = parseInt(data.fontSize) || 25;
+      if (data.duration) this.duration = data.duration;
+
+      console.log('✅ Loaded FSQ data for editing:', { quote: this.quote, source: this.source, slug: this.slug });
+    },
+
     /**
      * Load default settings from database
      */
@@ -2026,6 +2141,12 @@ export default {
       this.aiGenerationInfo = null
       this.aiActionPending = false
       this.aiPreviousQuote = ''
+      // Reset manual split state
+      this.manualSplitPoints = []
+      this.manualSplitExpanded = false
+      this.manualSplitQuoteStyle = 'left'
+      this.manualSplitFontFamily = 'serif'
+      this.manualSplitFontSize = 25
 
       this.$nextTick(() => {
         if (this.$refs.fsqFormRef) {
@@ -2249,18 +2370,18 @@ export default {
     },
 
     /**
-     * Insert manual split - use manual segments with split preview controls
+     * Insert manual split - use manual segments with manual split preview controls
      */
     async insertManualSplit() {
-      console.log('✅ Inserting manual split with split preview controls');
-      // Temporarily swap controls to use split settings
+      console.log('✅ Inserting manual split with manual split preview controls');
+      // Temporarily swap controls to use manual split settings
       const originalQuoteStyle = this.quoteStyle;
       const originalFontFamily = this.fontFamily;
       const originalFontSize = this.fontSize;
 
-      this.quoteStyle = this.splitQuoteStyle;
-      this.fontFamily = this.splitFontFamily;
-      this.fontSize = this.splitFontSize;
+      this.quoteStyle = this.manualSplitQuoteStyle;
+      this.fontFamily = this.manualSplitFontFamily;
+      this.fontSize = this.manualSplitFontSize;
 
       // Set split recommendations to manual segments
       const tempSplitRecs = this.splitRecommendations;

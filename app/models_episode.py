@@ -177,6 +177,7 @@ class BlueprintBase(BaseModel):
 class BlueprintCreate(BaseModel):
     episode_number: Optional[str] = None  # Auto-generate if not provided
     template_id: Optional[int] = None     # Use default template if not provided
+    rundown_template_id: Optional[int] = None  # Optional rundown template to populate
     title: Optional[str] = None
     description: Optional[str] = None
     episode_metadata: Optional[Dict[str, Any]] = None
@@ -196,3 +197,118 @@ class BlueprintResponse(BlueprintBase):
 
 # Update forward references
 BlueprintNodeResponse.model_rebuild()
+
+
+class RundownTemplate(Base):
+    """Rundown templates for automatic rundown population when creating episodes"""
+    __tablename__ = "rundown_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    episode_template_id = Column(Integer, ForeignKey("blueprint_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    is_default = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    episode_template = relationship("BlueprintTemplate", foreign_keys=[episode_template_id])
+    items = relationship("RundownTemplateItem", back_populates="template", cascade="all, delete-orphan", order_by="RundownTemplateItem.sort_order")
+
+
+class RundownTemplateItem(Base):
+    """Individual items within a rundown template"""
+    __tablename__ = "rundown_template_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rundown_template_id = Column(Integer, ForeignKey("rundown_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_type = Column(String(50), nullable=False)  # segment, ad, promo, etc.
+    title = Column(String(255), nullable=True)
+    slug = Column(String(100), nullable=True)
+    script_content = Column(Text, nullable=True)
+    duration = Column(String(20), nullable=True)  # e.g., "00:05:00"
+    sort_order = Column(Integer, nullable=False)
+    item_metadata = Column(JSON, nullable=True)  # Additional item properties
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    template = relationship("RundownTemplate", back_populates="items")
+
+
+# Pydantic models for Rundown Templates
+
+class RundownTemplateItemBase(BaseModel):
+    item_type: str
+    title: Optional[str] = None
+    slug: Optional[str] = None
+    script_content: Optional[str] = None
+    duration: Optional[str] = None
+    sort_order: int
+    item_metadata: Optional[Dict[str, Any]] = None
+
+class RundownTemplateItemCreate(RundownTemplateItemBase):
+    pass
+
+class RundownTemplateItemUpdate(BaseModel):
+    item_type: Optional[str] = None
+    title: Optional[str] = None
+    slug: Optional[str] = None
+    script_content: Optional[str] = None
+    duration: Optional[str] = None
+    sort_order: Optional[int] = None
+    item_metadata: Optional[Dict[str, Any]] = None
+
+class RundownTemplateItemResponse(RundownTemplateItemBase):
+    id: int
+    rundown_template_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class RundownTemplateBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    organization_id: int
+    episode_template_id: int
+    is_default: bool = False
+    is_active: bool = True
+    sort_order: int = 0
+
+class RundownTemplateCreate(RundownTemplateBase):
+    pass
+
+class RundownTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_default: Optional[bool] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+class RundownTemplateResponse(RundownTemplateBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    items: List[RundownTemplateItemResponse] = []
+
+    class Config:
+        from_attributes = True
+
+class RundownTemplateClone(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class RundownTemplateExport(BaseModel):
+    template: RundownTemplateResponse
+    items: List[RundownTemplateItemResponse]
+
+class RundownTemplateImport(BaseModel):
+    name: str
+    description: Optional[str] = None
+    organization_id: int
+    episode_template_id: int
+    items: List[RundownTemplateItemCreate]

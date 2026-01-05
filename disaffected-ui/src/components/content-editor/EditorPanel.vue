@@ -120,7 +120,6 @@
                 @click="insertCue('IMG')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-image</v-icon>
                   <span class="cue-label">IMG</span>
                   <span class="hotkey-display">[ALT+I]</span>
                 </div>
@@ -134,7 +133,6 @@
                 @click="insertCue('GFX')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-image-outline</v-icon>
                   <span class="cue-label">GFX</span>
                   <span class="hotkey-display">[ALT+G]</span>
                 </div>
@@ -148,7 +146,6 @@
                 @click="insertCue('FSQ')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-format-quote-close</v-icon>
                   <span class="cue-label">FSQ</span>
                   <span class="hotkey-display">[ALT+Q]</span>
                 </div>
@@ -162,7 +159,6 @@
                 @click="insertCue('SOT')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-play-circle-outline</v-icon>
                   <span class="cue-label">SOT</span>
                   <span class="hotkey-display">[ALT+S]</span>
                 </div>
@@ -176,7 +172,6 @@
                 @click="insertCue('VO')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-microphone</v-icon>
                   <span class="cue-label">VO</span>
                   <span class="hotkey-display">[ALT+V]</span>
                 </div>
@@ -190,7 +185,6 @@
                 @click="insertCue('NAT')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-volume-high</v-icon>
                   <span class="cue-label">NAT</span>
                   <span class="hotkey-display">[ALT+N]</span>
                 </div>
@@ -204,7 +198,6 @@
                 @click="insertCue('PKG')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-package-variant</v-icon>
                   <span class="cue-label">PKG</span>
                   <span class="hotkey-display">[ALT+P]</span>
                 </div>
@@ -218,7 +211,6 @@
                 @click="insertCue('DIR')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-clipboard-text-outline</v-icon>
                   <span class="cue-label">DIR</span>
                   <span class="hotkey-display">[ALT+D]</span>
                 </div>
@@ -232,7 +224,6 @@
                 @click="insertCue('BUMP')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-movie-open-play</v-icon>
                   <span class="cue-label">BUMP</span>
                   <span class="hotkey-display">[ALT+B]</span>
                 </div>
@@ -246,7 +237,6 @@
                 @click="insertCue('STING')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-movie-open-star</v-icon>
                   <span class="cue-label">STING</span>
                   <span class="hotkey-display">[ALT+T]</span>
                 </div>
@@ -260,7 +250,6 @@
                 @click="insertCue('RIF')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-music-note</v-icon>
                   <span class="cue-label">RIF</span>
                   <span class="hotkey-display">[ALT+R]</span>
                 </div>
@@ -276,6 +265,8 @@
             <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
             <v-divider vertical class="hotkey-divider mx-4"></v-divider>
             <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
+            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
+            <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
             <v-divider vertical class="hotkey-divider mx-4"></v-divider>
             <span class="formatting-hotkey"><strong>CTRL+S</strong> Save</span>
             <v-divider vertical class="hotkey-divider mx-4"></v-divider>
@@ -369,7 +360,10 @@
                     <!-- Speaker Header -->
                     <div v-if="shouldShowSpeakerHeader(index, segment.speaker)" class="speaker-header" :style="getSpeakerHeaderStyle(segment.speaker)">
                       <div class="speaker-info">
-                        <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 4px;">mdi-drag-vertical</v-icon>
+                        <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 4px;">
+                          mdi-drag-vertical
+                          <v-tooltip activator="parent" location="top">Drag to reorder paragraphs</v-tooltip>
+                        </v-icon>
                         <v-icon size="small" class="speaker-icon">mdi-account-voice</v-icon>
                         <span class="speaker-name">{{ getSpeakerDisplayName(segment.speaker) }}</span>
                       </div>
@@ -409,6 +403,11 @@
                       @mouseenter="hoveredParagraphIndex = index"
                       @mouseleave="hoveredParagraphIndex = null"
                     >
+                      <!-- Drag Handle Column (before line numbers) -->
+                      <div class="drag-handle-column drag-handle">
+                        <v-icon size="small">mdi-drag</v-icon>
+                      </div>
+
                       <!-- Line Numbers Column -->
                       <div class="line-numbers-column" :ref="`lineNumbers-${index}`">
                         <div
@@ -491,6 +490,7 @@
                     :cue-data="segment.data"
                     :selected="selectedCueIndex === index"
                     :order-number="extractOrderFromSlug(segment.data.slug)"
+                    :current-episode="currentEpisode"
                     @select="selectCue(index)"
                     @edit="editCue(index, segment.data)"
                     @delete="deleteCue(index)"
@@ -551,7 +551,6 @@
                 @click="insertCue('IMG')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-image</v-icon>
                   <span class="cue-label">IMG</span>
                   <span class="hotkey-display">[ALT+I]</span>
                 </div>
@@ -565,7 +564,6 @@
                 @click="insertCue('GFX')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-image-outline</v-icon>
                   <span class="cue-label">GFX</span>
                   <span class="hotkey-display">[ALT+G]</span>
                 </div>
@@ -579,7 +577,6 @@
                 @click="insertCue('FSQ')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-format-quote-close</v-icon>
                   <span class="cue-label">FSQ</span>
                   <span class="hotkey-display">[ALT+Q]</span>
                 </div>
@@ -593,7 +590,6 @@
                 @click="insertCue('SOT')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-play-circle-outline</v-icon>
                   <span class="cue-label">SOT</span>
                   <span class="hotkey-display">[ALT+S]</span>
                 </div>
@@ -607,7 +603,6 @@
                 @click="insertCue('VO')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-microphone</v-icon>
                   <span class="cue-label">VO</span>
                   <span class="hotkey-display">[ALT+V]</span>
                 </div>
@@ -621,7 +616,6 @@
                 @click="insertCue('NAT')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-volume-high</v-icon>
                   <span class="cue-label">NAT</span>
                   <span class="hotkey-display">[ALT+N]</span>
                 </div>
@@ -635,7 +629,6 @@
                 @click="insertCue('PKG')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-package-variant</v-icon>
                   <span class="cue-label">PKG</span>
                   <span class="hotkey-display">[ALT+P]</span>
                 </div>
@@ -649,7 +642,6 @@
                 @click="insertCue('DIR')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-clipboard-text-outline</v-icon>
                   <span class="cue-label">DIR</span>
                   <span class="hotkey-display">[ALT+D]</span>
                 </div>
@@ -663,7 +655,6 @@
                 @click="insertCue('BUMP')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-movie-open-play</v-icon>
                   <span class="cue-label">BUMP</span>
                   <span class="hotkey-display">[ALT+B]</span>
                 </div>
@@ -677,7 +668,6 @@
                 @click="insertCue('STING')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-movie-open-star</v-icon>
                   <span class="cue-label">STING</span>
                   <span class="hotkey-display">[ALT+T]</span>
                 </div>
@@ -691,7 +681,6 @@
                 @click="insertCue('RIF')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-music-note</v-icon>
                   <span class="cue-label">RIF</span>
                   <span class="hotkey-display">[ALT+R]</span>
                 </div>
@@ -707,6 +696,8 @@
             <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
             <v-divider vertical class="hotkey-divider mx-4"></v-divider>
             <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
+            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
+            <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
             <v-divider vertical class="hotkey-divider mx-4"></v-divider>
             <span class="formatting-hotkey"><strong>CTRL+S</strong> Save</span>
             <v-divider vertical class="hotkey-divider mx-4"></v-divider>
@@ -1030,7 +1021,6 @@
                 @click="insertCue('IMG')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-image</v-icon>
                   <span class="cue-label">IMG</span>
                   <span class="hotkey-display">[ALT+I]</span>
                 </div>
@@ -1044,7 +1034,6 @@
                 @click="insertCue('GFX')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-image-outline</v-icon>
                   <span class="cue-label">GFX</span>
                   <span class="hotkey-display">[ALT+G]</span>
                 </div>
@@ -1058,7 +1047,6 @@
                 @click="insertCue('FSQ')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-format-quote-close</v-icon>
                   <span class="cue-label">FSQ</span>
                   <span class="hotkey-display">[ALT+Q]</span>
                 </div>
@@ -1072,7 +1060,6 @@
                 @click="insertCue('SOT')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-play-circle-outline</v-icon>
                   <span class="cue-label">SOT</span>
                   <span class="hotkey-display">[ALT+S]</span>
                 </div>
@@ -1086,7 +1073,6 @@
                 @click="insertCue('VO')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-microphone</v-icon>
                   <span class="cue-label">VO</span>
                   <span class="hotkey-display">[ALT+V]</span>
                 </div>
@@ -1100,7 +1086,6 @@
                 @click="insertCue('NAT')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-volume-high</v-icon>
                   <span class="cue-label">NAT</span>
                   <span class="hotkey-display">[ALT+N]</span>
                 </div>
@@ -1114,7 +1099,6 @@
                 @click="insertCue('PKG')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-package-variant</v-icon>
                   <span class="cue-label">PKG</span>
                   <span class="hotkey-display">[ALT+P]</span>
                 </div>
@@ -1128,7 +1112,6 @@
                 @click="insertCue('DIR')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-clipboard-text-outline</v-icon>
                   <span class="cue-label">DIR</span>
                   <span class="hotkey-display">[ALT+D]</span>
                 </div>
@@ -1142,7 +1125,6 @@
                 @click="insertCue('BUMP')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-movie-open-play</v-icon>
                   <span class="cue-label">BUMP</span>
                   <span class="hotkey-display">[ALT+B]</span>
                 </div>
@@ -1156,7 +1138,6 @@
                 @click="insertCue('STING')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-movie-open-star</v-icon>
                   <span class="cue-label">STING</span>
                   <span class="hotkey-display">[ALT+T]</span>
                 </div>
@@ -1170,7 +1151,6 @@
                 @click="insertCue('RIF')"
               >
                 <div class="cue-btn-content-flex">
-                  <v-icon size="small" class="mb-1">mdi-music-note</v-icon>
                   <span class="cue-label">RIF</span>
                   <span class="hotkey-display">[ALT+R]</span>
                 </div>
@@ -1186,6 +1166,8 @@
             <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
             <v-divider vertical class="hotkey-divider mx-4"></v-divider>
             <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
+            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
+            <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
             <v-divider vertical class="hotkey-divider mx-4"></v-divider>
             <span class="formatting-hotkey"><strong>CTRL+S</strong> Save</span>
             <v-divider vertical class="hotkey-divider mx-4"></v-divider>
@@ -1354,7 +1336,19 @@ export default {
       audioElement: null, // Audio element for playback
       xttsInstance: null, // XTTS composable instance
       segmentLineCounts: {}, // Cache of line counts per segment for reactivity
-      isDragging: false // Track if segment is being dragged
+      isDragging: false, // Track if segment is being dragged
+      pendingSegmentOrder: null, // Store reordered segments during drag (processed after drag ends)
+      cachedScriptSegments: null, // Cache parsed segments to maintain object stability during drag
+      lastParsedContent: null, // Track when content changes to invalidate cache
+      pendingFocusSegmentIndex: null, // Index of segment to focus after next render
+      // Drop zone state for cue insertion
+      dropZoneActive: false, // Whether drop zones are visible for cue insertion
+      selectedDropZone: null, // Which drop zone is currently selected (index)
+      hoveredDropZone: null, // Which drop zone is currently hovered (index)
+      // Generic flag to block @update:model-value handlers during programmatic operations
+      // Set this to true when performing operations that shouldn't trigger reactive updates
+      // Use cases: creating paragraphs, merging paragraphs, bulk operations, etc.
+      blockReactiveUpdates: false
     }
   },
   mounted() {
@@ -1505,11 +1499,11 @@ export default {
     // Watch scriptSegments to focus textarea after initial paragraph is rendered
     scriptSegments: {
       handler(newSegments, oldSegments) {
-        console.log('📊 scriptSegments watcher fired:', {
-          oldLength: oldSegments?.length,
-          newLength: newSegments?.length,
-          newSegments
-        });
+        console.log('📊📊📊 ========== SCRIPTSEGMENTS WATCHER FIRED ==========');
+        console.log('📊 Old segments length:', oldSegments?.length);
+        console.log('📊 New segments length:', newSegments?.length);
+        console.log('📊 pendingFocusSegmentIndex:', this.pendingFocusSegmentIndex);
+        console.log('📊 blockReactiveUpdates:', this.blockReactiveUpdates);
 
         // Auto-resize all textareas when segments change
         this.$nextTick(() => {
@@ -1538,6 +1532,101 @@ export default {
                   this.paragraphEditStates[index] = true;
                 }
               }
+            });
+          }
+
+          // Focus pending segment if one was requested (e.g., after creating new paragraph)
+          if (this.pendingFocusSegmentIndex !== null) {
+            const segmentIndex = this.pendingFocusSegmentIndex;
+            console.log('🎯🎯🎯 FOCUS LOGIC TRIGGERED for segment:', segmentIndex);
+            console.log('🎯 Current segments count:', newSegments?.length);
+            console.log('🎯 Target segment exists:', !!newSegments?.[segmentIndex]);
+            console.log('🎯 All template refs:', Object.keys(this.$refs).filter(k => k.startsWith('textareaRef')));
+
+            // CRITICAL FIX: Clear the pending flag IMMEDIATELY to prevent multiple attempts
+            // Store it locally for this focus attempt
+            const targetIndex = segmentIndex;
+            this.pendingFocusSegmentIndex = null;
+
+            // Try multiple times to ensure textarea is fully rendered
+            const tryFocus = (attempts = 0) => {
+              if (attempts > 15) {
+                console.log('❌❌❌ FAILED to focus segment', targetIndex, 'after 15 attempts');
+                console.log('❌ Final refs check:', Object.keys(this.$refs).filter(k => k.startsWith('textareaRef')));
+                console.log('❌ Final segments count:', this.scriptSegments?.length);
+                return;
+              }
+
+              const refName = `textareaRef-${targetIndex}`;
+              const textareaRef = this.$refs[refName];
+
+              console.log(`🎯 Focus attempt ${attempts + 1}/${15} for segment ${targetIndex}:`, {
+                refName,
+                refExists: !!textareaRef,
+                refIsArray: Array.isArray(textareaRef),
+                refLength: Array.isArray(textareaRef) ? textareaRef.length : 'N/A'
+              });
+
+              if (textareaRef) {
+                const textareaComponent = Array.isArray(textareaRef) ? textareaRef[0] : textareaRef;
+                console.log(`🎯 Textarea component:`, {
+                  exists: !!textareaComponent,
+                  hasEl: !!textareaComponent?.$el,
+                  componentType: textareaComponent?.$.type?.name
+                });
+
+                if (textareaComponent && textareaComponent.$el) {
+                  const textarea = textareaComponent.$el.querySelector('textarea');
+                  console.log(`🎯 Native textarea element:`, {
+                    exists: !!textarea,
+                    isFocusable: textarea instanceof HTMLElement,
+                    tagName: textarea?.tagName
+                  });
+
+                  if (textarea) {
+                    console.log('✅✅✅ FOUND TEXTAREA - Attempting focus on:', textarea);
+
+                    // Focus the textarea
+                    textarea.focus();
+
+                    // CRITICAL: Use requestAnimationFrame to ensure focus has been applied
+                    // before setting cursor position
+                    requestAnimationFrame(() => {
+                      textarea.setSelectionRange(0, 0);
+                      textarea.scrollTop = 0;
+
+                      // Verify focus actually worked
+                      const isFocused = document.activeElement === textarea;
+                      console.log('✅✅✅ Focus complete:', {
+                        cursorStart: textarea.selectionStart,
+                        cursorEnd: textarea.selectionEnd,
+                        scrollTop: textarea.scrollTop,
+                        isFocused: isFocused,
+                        activeElement: document.activeElement?.tagName
+                      });
+
+                      if (!isFocused) {
+                        console.log('⚠️  Textarea not focused, retrying...');
+                        setTimeout(() => tryFocus(attempts + 1), 50);
+                      }
+                    });
+
+                    return; // Success - exit retry loop
+                  }
+                }
+              }
+
+              // Retry after delay
+              console.log(`⏳ Retrying focus in 50ms... (attempt ${attempts + 1})`);
+              setTimeout(() => tryFocus(attempts + 1), 50);
+            };
+
+            // Start focus attempts after two ticks to ensure DOM is fully updated
+            this.$nextTick(() => {
+              this.$nextTick(() => {
+                console.log('🎯 Starting focus retry loop after double nextTick');
+                tryFocus();
+              });
             });
           }
         });
@@ -1582,7 +1671,10 @@ export default {
     'showTemplateManagerModal',
     'update:item',
     'duration-calculated',
-    'save-current'
+    'save-current',
+    'edit-sot-cue',
+    'edit-fsq-cue',
+    'edit-gfx-cue'
   ],
   props: {
     showRundownPanel: {
@@ -1698,6 +1790,7 @@ export default {
     },
 
     // Parse content into segments ONLY for Script mode display (no reactive loops)
+    // eslint-disable-next-line vue/no-side-effects-in-computed-properties
     scriptSegments: {
       get() {
         console.log('🔄 scriptSegments getter called');
@@ -1707,30 +1800,52 @@ export default {
 
         if (!this.rawScriptContent || this.editorMode !== 'script' || !this.useVisualScriptMode) {
           console.log('  → Returning empty array (early exit)');
+          // eslint-disable-next-line vue/no-side-effects-in-computed-properties
+          this.cachedScriptSegments = null;
+          // eslint-disable-next-line vue/no-side-effects-in-computed-properties
+          this.lastParsedContent = null;
           return [];
         }
 
+        // CRITICAL FIX: Return cached segments during drag to maintain object stability
+        if (this.isDragging && this.cachedScriptSegments !== null) {
+          console.log('  → Returning cached segments (drag in progress)');
+          return this.cachedScriptSegments;
+        }
+
+        // Only re-parse if content has actually changed
+        const currentContent = this.rawScriptContent;
+        if (this.lastParsedContent === currentContent && this.cachedScriptSegments !== null) {
+          console.log('  → Returning cached segments (content unchanged)');
+          return this.cachedScriptSegments;
+        }
+
+        console.log('  → Re-parsing content (content changed)');
         try {
           // Strip YAML frontmatter for parsing
           const contentWithoutFrontmatter = this.stripYamlFrontmatter(this.rawScriptContent);
           console.log('  contentWithoutFrontmatter:', contentWithoutFrontmatter?.substring(0, 100));
 
           // If content is empty or only whitespace, return empty paragraph segment
-          // (initialization will be handled by mounted/watch)
           if (!contentWithoutFrontmatter || contentWithoutFrontmatter.trim() === '') {
             console.log('  → Returning single empty text segment');
-            return [{
+            const emptySegment = [{
               type: 'text',
               content: '',
               speaker: 'josh',
               needsParagraphTags: true,
               segmentIndex: 0
             }];
+            // eslint-disable-next-line vue/no-side-effects-in-computed-properties
+            this.cachedScriptSegments = emptySegment;
+            // eslint-disable-next-line vue/no-side-effects-in-computed-properties
+            this.lastParsedContent = currentContent;
+            return emptySegment;
           }
 
           const segments = CueParser.parseContent(contentWithoutFrontmatter);
 
-          return segments.map((segment, index) => {
+          const mappedSegments = segments.map((segment, index) => {
             if (segment.type === 'cue') {
               // Format cue data for card display
               const formattedCueData = CueParser.formatForCard(segment.data);
@@ -1745,17 +1860,29 @@ export default {
               segmentIndex: index
             };
           });
+
+          // Cache the results
+          // eslint-disable-next-line vue/no-side-effects-in-computed-properties
+          this.cachedScriptSegments = mappedSegments;
+          // eslint-disable-next-line vue/no-side-effects-in-computed-properties
+          this.lastParsedContent = currentContent;
+          return mappedSegments;
         } catch (error) {
           console.error('Error parsing script segments:', error);
           // Fallback: treat as single text segment
           const contentWithoutFrontmatter = this.stripYamlFrontmatter(this.rawScriptContent);
-          return [{
+          const fallbackSegment = [{
             type: 'text',
             content: contentWithoutFrontmatter,
             speaker: 'josh',
             needsParagraphTags: true,
             segmentIndex: 0
           }];
+          // eslint-disable-next-line vue/no-side-effects-in-computed-properties
+          this.cachedScriptSegments = fallbackSegment;
+          // eslint-disable-next-line vue/no-side-effects-in-computed-properties
+          this.lastParsedContent = currentContent;
+          return fallbackSegment;
         }
       },
       set(newSegments) {
@@ -1790,14 +1917,19 @@ export default {
     // Draggable segments - combines scriptSegments with pending cue ghost
     draggableSegments: {
       get() {
+        console.log('🔄🔄🔄 ========== DRAGGABLESEGMENTS GETTER CALLED ==========');
+        console.log('  isDragging:', this.isDragging);
+        console.log('  cachedScriptSegments:', this.cachedScriptSegments ? `${this.cachedScriptSegments.length} segments` : 'NULL');
+
         const segments = [...this.scriptSegments];
 
-        console.log('🔄 draggableSegments getter called:', {
-          pendingCueData: this.pendingCueData ? 'EXISTS' : 'NULL',
-          showCuePlacement: this.showCuePlacement,
-          pendingCueDataType: this.pendingCueData ? (Array.isArray(this.pendingCueData) ? 'ARRAY' : 'STRING') : 'N/A',
-          pendingCueDataLength: this.pendingCueData ? (Array.isArray(this.pendingCueData) ? this.pendingCueData.length : this.pendingCueData.length) : 0
+        console.log('  scriptSegments returned:', segments.length, 'segments');
+        segments.forEach((seg, idx) => {
+          console.log(`    [${idx}] type=${seg.type}, speaker=${seg.speaker}, contentLength=${seg.content?.length || 0}`);
         });
+
+        console.log('  pendingCueData:', this.pendingCueData ? 'EXISTS' : 'NULL');
+        console.log('  showCuePlacement:', this.showCuePlacement);
 
         // If there's a pending cue, add it as a ghost segment at the end
         if (this.pendingCueData && this.showCuePlacement) {
@@ -1829,6 +1961,16 @@ export default {
       },
       set(newSegments) {
         console.log('🔄 draggableSegments setter called with', newSegments.length, 'segments');
+        console.log('  isDragging:', this.isDragging);
+
+        // CRITICAL FIX: Don't emit updates during active drag operations
+        // This prevents Vue from re-parsing and losing track of elements
+        if (this.isDragging) {
+          console.log('⏸️ Drag in progress - storing new order but not emitting yet');
+          // Store the new order for later processing
+          this.pendingSegmentOrder = newSegments;
+          return;
+        }
 
         // Check if pending cue was moved (no longer at end)
         const pendingIndex = newSegments.findIndex(seg => seg.isPending);
@@ -2038,6 +2180,80 @@ export default {
   },
   methods: {
     /**
+     * UNIVERSAL RULE: Get safe insertion position that is NEVER inside a cue block or paragraph.
+     * Cue blocks are independent elements that must exist BETWEEN other elements, never inside them.
+     *
+     * If the position falls inside:
+     * - A cue block (<!-- Begin Cue --> ... <!-- End Cue -->): advance to after <!-- End Cue -->
+     * - A paragraph (<p>...</p>): advance to after </p>
+     *
+     * @param {string} content - The script content to check against
+     * @param {number} position - The proposed insertion position
+     * @returns {number} Safe insertion position guaranteed to be outside any cue block or paragraph
+     */
+    getSafeInsertionPosition(content, position) {
+      if (!content || position < 0) return position;
+
+      let safePosition = position;
+
+      // Check if position falls inside a cue block
+      const cueBlockPattern = /<!-- Begin Cue -->[\s\S]*?<!-- End Cue -->/g;
+      let match;
+
+      while ((match = cueBlockPattern.exec(content)) !== null) {
+        const blockStart = match.index;
+        const blockEnd = match.index + match[0].length;
+
+        if (safePosition > blockStart && safePosition < blockEnd) {
+          console.log(`⚠️ Position ${safePosition} is inside cue block [${blockStart}-${blockEnd}], advancing to ${blockEnd}`);
+          safePosition = blockEnd;
+        }
+      }
+
+      // Check if position falls inside a paragraph tag
+      const paragraphPattern = /<p[^>]*>[\s\S]*?<\/p>/g;
+
+      while ((match = paragraphPattern.exec(content)) !== null) {
+        const pStart = match.index;
+        const pEnd = match.index + match[0].length;
+
+        if (safePosition > pStart && safePosition < pEnd) {
+          console.log(`⚠️ Position ${safePosition} is inside paragraph [${pStart}-${pEnd}], advancing to ${pEnd}`);
+          safePosition = pEnd;
+        }
+      }
+
+      return safePosition;
+    },
+
+    /**
+     * Find all content segments (paragraphs and cue blocks) with their positions.
+     * Used for accurate segment-based insertion that accounts for both element types.
+     *
+     * @param {string} content - The script content to parse
+     * @returns {Array} Array of segment objects with type, index, endIndex, and content
+     */
+    findAllContentSegments(content) {
+      if (!content) return [];
+
+      const segments = [];
+      // Match both paragraph tags and cue blocks
+      const segmentPattern = /(<p[^>]*class="[^"]*"[^>]*>[\s\S]*?<\/p>|<!-- Begin Cue -->[\s\S]*?<!-- End Cue -->)/g;
+      let match;
+
+      while ((match = segmentPattern.exec(content)) !== null) {
+        segments.push({
+          content: match[0],
+          index: match.index,
+          endIndex: match.index + match[0].length,
+          type: match[0].startsWith('<p') ? 'paragraph' : 'cue'
+        });
+      }
+
+      return segments;
+    },
+
+    /**
      * Load cue card alignment from settings
      */
     async loadCueCardAlignment() {
@@ -2127,7 +2343,16 @@ export default {
 
     // Handle textarea input - update content and auto-resize
     handleTextareaInput(index, value) {
-      console.log(`✏️ handleTextareaInput called for index ${index}, value length: ${value?.length}`);
+      console.log(`✏️ handleTextareaInput called for index ${index}, value length: ${value?.length}, blockReactiveUpdates: ${this.blockReactiveUpdates}`);
+
+      // Skip update if blockReactiveUpdates is set
+      // This prevents conflicting updates during programmatic operations (paragraph creation, merging, etc.)
+      if (this.blockReactiveUpdates) {
+        console.log('⏭️⏭️⏭️ SKIPPING handleTextareaInput - blockReactiveUpdates is active');
+        console.log('⏭️ This prevents interference with paragraph creation/focus logic');
+        return;
+      }
+
       this.updateTextSegment(index, value);
       this.autoResizeTextarea(index);
     },
@@ -3101,7 +3326,77 @@ export default {
 
         // Persist to database and show visual feedback
         await this.persistCurrentItemToDatabase(segmentIndex);
-      }, 2000); // 2 second debounce - persist after user stops typing
+      }, 1000); // 1 second debounce - persist after user stops typing
+    },
+
+    /**
+     * Toggle highlight (<mark>) on selected text in a textarea
+     * Ctrl+H hotkey - wraps selection with <mark> tags or removes them if already highlighted
+     */
+    toggleHighlightSelection(segmentIndex, textarea) {
+      console.log('🖍️ toggleHighlightSelection called for segment', segmentIndex);
+
+      const selectionStart = textarea.selectionStart;
+      const selectionEnd = textarea.selectionEnd;
+      const content = textarea.value;
+
+      // If no selection, do nothing
+      if (selectionStart === selectionEnd) {
+        console.log('🖍️ No text selected, nothing to highlight');
+        return;
+      }
+
+      const selectedText = content.substring(selectionStart, selectionEnd);
+      console.log('🖍️ Selected text:', selectedText);
+
+      let newContent;
+      let newCursorStart;
+      let newCursorEnd;
+
+      // Check if selection is already wrapped in <mark> tags
+      const beforeSelection = content.substring(0, selectionStart);
+      const afterSelection = content.substring(selectionEnd);
+
+      // Pattern 1: Selection includes the mark tags
+      if (selectedText.startsWith('<mark>') && selectedText.endsWith('</mark>')) {
+        // Remove the mark tags from selection
+        const unwrappedText = selectedText.slice(6, -7); // Remove <mark> and </mark>
+        newContent = beforeSelection + unwrappedText + afterSelection;
+        newCursorStart = selectionStart;
+        newCursorEnd = selectionStart + unwrappedText.length;
+        console.log('🖍️ Removed highlight (pattern 1 - tags in selection)');
+      }
+      // Pattern 2: Mark tags are outside the selection
+      else if (beforeSelection.endsWith('<mark>') && afterSelection.startsWith('</mark>')) {
+        // Remove the surrounding mark tags
+        const newBefore = beforeSelection.slice(0, -6); // Remove trailing <mark>
+        const newAfter = afterSelection.slice(7); // Remove leading </mark>
+        newContent = newBefore + selectedText + newAfter;
+        newCursorStart = newBefore.length;
+        newCursorEnd = newBefore.length + selectedText.length;
+        console.log('🖍️ Removed highlight (pattern 2 - tags outside selection)');
+      }
+      // Pattern 3: Not highlighted - add mark tags
+      else {
+        newContent = beforeSelection + '<mark>' + selectedText + '</mark>' + afterSelection;
+        newCursorStart = selectionStart;
+        newCursorEnd = selectionEnd + 13; // +13 for <mark></mark>
+        console.log('🖍️ Added highlight');
+      }
+
+      // Update the textarea value
+      textarea.value = newContent;
+
+      // Restore selection
+      textarea.setSelectionRange(newCursorStart, newCursorEnd);
+
+      // Trigger the update through the normal flow
+      this.updateTextSegment(segmentIndex, newContent);
+
+      // Mark as having unsaved changes
+      this.hasLocalUnsavedChanges = true;
+
+      console.log('🖍️ Highlight toggle complete');
     },
 
     // Handle keyboard events for Script mode behaviors that affect Code mode
@@ -3121,12 +3416,30 @@ export default {
         if (atEnd && contentEndsWithNewline) {
           event.preventDefault();
 
-          // Remove the trailing newline from current segment
-          const cleanedContent = currentContent.replace(/\n$/, '');
-          this.updateTextSegment(segmentIndex, cleanedContent);
+          console.log('🎯 Double Enter detected - activating blockReactiveUpdates');
+          this.blockReactiveUpdates = true;
 
-          // Create new paragraph
-          this.createNewParagraphAfter(segmentIndex);
+          // Store the cleaned content (without trailing newline)
+          const cleanedContent = currentContent.replace(/\n$/, '');
+
+          // Clear any pending debounce for this segment
+          if (this.updateDebounceTimers && this.updateDebounceTimers[segmentIndex]) {
+            clearTimeout(this.updateDebounceTimers[segmentIndex]);
+            delete this.updateDebounceTimers[segmentIndex];
+          }
+          if (this.segmentEditBuffer && this.segmentEditBuffer[segmentIndex]) {
+            delete this.segmentEditBuffer[segmentIndex];
+          }
+
+          // Create new paragraph with cleaned content
+          this.createNewParagraphAfter(segmentIndex, cleanedContent);
+
+          // Clear the flag after a delay to allow the update and focus to complete
+          // Must be long enough for focus retry logic (up to 10 attempts * 50ms = 500ms)
+          setTimeout(() => {
+            console.log('🎯 Clearing blockReactiveUpdates flag');
+            this.blockReactiveUpdates = false;
+          }, 1000);
         }
         // Otherwise let the first Enter add a newline normally
       }
@@ -3156,11 +3469,20 @@ export default {
           }, 0);
         }
       }
+
+      // Ctrl+Alt+H: Toggle highlight on selected text
+      if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 'h') {
+        event.preventDefault();
+        this.toggleHighlightSelection(segmentIndex, event.target);
+      }
     },
 
     // Script Mode Behavior: Create new <p> tag in Code mode
-    createNewParagraphAfter(segmentIndex) {
-      console.log('📝 Creating new paragraph after segment', segmentIndex);
+    createNewParagraphAfter(segmentIndex, cleanedContentForCurrentSegment = null) {
+      console.log('📝📝📝 ========== CREATE NEW PARAGRAPH ==========');
+      console.log('📝 Creating new paragraph after segment:', segmentIndex);
+      console.log('📝 Current segments count:', this.scriptSegments?.length);
+      console.log('📝 cleanedContentForCurrentSegment:', cleanedContentForCurrentSegment);
 
       // Mark as having unsaved changes
       this.hasLocalUnsavedChanges = true;
@@ -3168,7 +3490,24 @@ export default {
       const segments = [...this.scriptSegments];
       const currentSegment = segments[segmentIndex];
 
-      if (!currentSegment) return;
+      if (!currentSegment) {
+        console.error('❌ Current segment not found at index:', segmentIndex);
+        return;
+      }
+
+      console.log('📝 Current segment before update:', {
+        type: currentSegment.type,
+        speaker: currentSegment.speaker,
+        contentLength: currentSegment.content?.length
+      });
+
+      // If cleaned content was provided (from double-enter), update current segment
+      if (cleanedContentForCurrentSegment !== null) {
+        console.log('📝 Updating current segment content (removing trailing newline)');
+        console.log('📝 Old content:', JSON.stringify(segments[segmentIndex].content));
+        segments[segmentIndex].content = cleanedContentForCurrentSegment;
+        console.log('📝 New content:', JSON.stringify(segments[segmentIndex].content));
+      }
 
       // Create new empty text segment that will become a new <p> tag
       const newSegment = {
@@ -3178,41 +3517,27 @@ export default {
         needsParagraphTags: true // This ensures it becomes <p class="speaker">content</p>
       };
 
+      console.log('📝 New segment to insert:', newSegment);
+
       // Insert after current segment
       segments.splice(segmentIndex + 1, 0, newSegment);
+      console.log('📝 Segments count after splice:', segments.length);
+
+      // Set the focus index to the newly created paragraph
+      this.pendingFocusSegmentIndex = segmentIndex + 1;
+      console.log('📝📝📝 Set pendingFocusSegmentIndex to:', this.pendingFocusSegmentIndex);
 
       // Reconstruct raw content - this will create the new <p> tag in Code mode
       const newRawContent = this.reconstructRawContent(segments);
+      console.log('📝 Reconstructed content length:', newRawContent.length);
+      console.log('📝 Reconstructed content preview:', newRawContent.substring(0, 300));
+
+      console.log('📝 Emitting update:scriptContent to parent...');
       this.$emit('update:scriptContent', newRawContent);
+      console.log('📝📝📝 ========== EMIT COMPLETE ==========');
 
-      // Focus the new empty paragraph for immediate typing
-      this.$nextTick(() => {
-        // Try multiple times to ensure the new textarea is rendered
-        const tryFocus = (attempts = 0) => {
-          if (attempts > 5) {
-            console.log('❌ Failed to focus new paragraph after 5 attempts');
-            return;
-          }
-
-          const textareaRef = this.$refs[`textareaRef-${segmentIndex + 1}`];
-          const textarea = textareaRef?.[0]?.$el?.querySelector('textarea');
-
-          console.log(`🎯 Focus attempt ${attempts + 1}:`, {
-            ref: textareaRef,
-            textarea: textarea
-          });
-
-          if (textarea) {
-            textarea.focus();
-            console.log('✅ Focused new paragraph');
-          } else {
-            // Try again after a short delay
-            setTimeout(() => tryFocus(attempts + 1), 50);
-          }
-        };
-
-        tryFocus();
-      });
+      // Focus logic is now handled by scriptSegments watcher
+      // which will focus pendingFocusSegmentIndex after Vue finishes re-rendering
     },
 
     // Create initial paragraph for empty content
@@ -3373,6 +3698,12 @@ export default {
       } else if (cueData.type === 'SOT') {
         // Emit event to parent (ContentEditor) to open SOT modal with cue data
         this.$emit('edit-sot-cue', cueData);
+      } else if (cueData.type === 'FSQ') {
+        // Emit event to parent (ContentEditor) to open FSQ modal with cue data
+        this.$emit('edit-fsq-cue', cueData);
+      } else if (cueData.type === 'GFX') {
+        // Emit event to parent (ContentEditor) to open GFX modal with cue data
+        this.$emit('edit-gfx-cue', cueData);
       }
       // Add other cue type modals as needed
     },
@@ -3834,15 +4165,36 @@ export default {
         return;
       }
 
-      // SCRIPT MODE: Activate placement overlay for user to choose insertion point
-      console.log('📄 Script mode: Activating placement overlay for SOT insertion');
-      console.log('✅ Pending cue data stored, showing placement overlay');
+      // SCRIPT MODE: Auto-insert based on selection
+      console.log('📄 Script mode: Auto-inserting SOT based on selection');
 
-      // Activate placement overlay - user will click to choose where to insert
-      this.showCuePlacement = true;
+      // Determine insertion point based on selection
+      let insertionIndex;
+      if (this.selectedSegmentIndex !== null && this.selectedSegmentIndex >= 0) {
+        // Insert AFTER the selected segment (between zones)
+        insertionIndex = this.selectedSegmentIndex + 1;
+        console.log(`📍 Selected segment found at index ${this.selectedSegmentIndex}, inserting AFTER at between-zone ${insertionIndex}`);
+      } else {
+        // No selection - insert at bottom (after last paragraph)
+        const paragraphCount = this.scriptSegments.filter(seg => seg.type === 'text').length;
+        insertionIndex = paragraphCount;
+        console.log(`📍 No segment selected, inserting at bottom (between-zone ${insertionIndex})`);
+      }
 
-      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
-      // User clicks a drop zone -> handleCuePlacement is called -> cue is inserted
+      // Create placement object for between-paragraph insertion
+      const placement = {
+        type: 'between',  // CRITICAL: Always use 'between' for SOT, never 'paragraph'
+        index: insertionIndex,
+        cueType: 'SOT'
+      };
+
+      // Insert SOT at determined location
+      this.insertCueBetweenParagraphsInRawScript(placement, sotCueText);
+
+      // Clear pending data
+      this.pendingCueData = null;
+      this.pendingCueType = null;
+      console.log('✅ SOT cue auto-inserted in script mode')
     },
 
     async handleVoCueSubmit(voCueText) {
@@ -3927,7 +4279,7 @@ export default {
     },
 
     async handlePkgCueSubmit(pkgCueText) {
-      console.log('🎬 PKG cue submitted to EditorPanel for placement-based insertion');
+      console.log('🎬 PKG cue submitted to EditorPanel for insertion');
 
       this.pendingCueData = pkgCueText;
       this.pendingCueType = 'PKG';
@@ -3952,13 +4304,16 @@ export default {
         return;
       }
 
-      console.log('📄 Script mode: Activating placement overlay for PKG insertion');
-      this.showCuePlacement = true;
-      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+      // Script mode: Insert at end of script (placement overlay is disabled)
+      console.log('📄 Script mode: Inserting PKG at end of script');
+      this.insertCueAtCursor(pkgCueText);
+      this.pendingCueData = null;
+      this.pendingCueType = null;
+      console.log('✅ PKG cue inserted at end of script');
     },
 
     async handleDirCueSubmit(dirCueText) {
-      console.log('🎬 DIR cue submitted to EditorPanel for placement-based insertion');
+      console.log('🎬 DIR cue submitted to EditorPanel for insertion');
 
       this.pendingCueData = dirCueText;
       this.pendingCueType = 'DIR';
@@ -3983,13 +4338,16 @@ export default {
         return;
       }
 
-      console.log('📄 Script mode: Activating placement overlay for DIR insertion');
-      this.showCuePlacement = true;
-      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+      // Script mode: Insert at end of script (placement overlay is disabled)
+      console.log('📄 Script mode: Inserting DIR at end of script');
+      this.insertCueAtCursor(dirCueText);
+      this.pendingCueData = null;
+      this.pendingCueType = null;
+      console.log('✅ DIR cue inserted at end of script');
     },
 
     async handleBumpCueSubmit(bumpCueText) {
-      console.log('🎬 BUMP cue submitted to EditorPanel for placement-based insertion');
+      console.log('🎬 BUMP cue submitted to EditorPanel for insertion');
 
       this.pendingCueData = bumpCueText;
       this.pendingCueType = 'BUMP';
@@ -4014,13 +4372,16 @@ export default {
         return;
       }
 
-      console.log('📄 Script mode: Activating placement overlay for BUMP insertion');
-      this.showCuePlacement = true;
-      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+      // Script mode: Insert at end of script (placement overlay is disabled)
+      console.log('📄 Script mode: Inserting BUMP at end of script');
+      this.insertCueAtCursor(bumpCueText);
+      this.pendingCueData = null;
+      this.pendingCueType = null;
+      console.log('✅ BUMP cue inserted at end of script');
     },
 
     async handleStingCueSubmit(stingCueText) {
-      console.log('🎬 STING cue submitted to EditorPanel for placement-based insertion');
+      console.log('🎬 STING cue submitted to EditorPanel for insertion');
 
       this.pendingCueData = stingCueText;
       this.pendingCueType = 'STING';
@@ -4045,9 +4406,12 @@ export default {
         return;
       }
 
-      console.log('📄 Script mode: Activating placement overlay for STING insertion');
-      this.showCuePlacement = true;
-      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+      // Script mode: Insert at end of script (placement overlay is disabled)
+      console.log('📄 Script mode: Inserting STING at end of script');
+      this.insertCueAtCursor(stingCueText);
+      this.pendingCueData = null;
+      this.pendingCueType = null;
+      console.log('✅ STING cue inserted at end of script');
     },
 
     generateCueBlock(cueType) {
@@ -4257,11 +4621,15 @@ export default {
       let currentScript = this.scriptContent || '';
 
       // Use stored cursor position (or fallback to end)
-      const cursorPosition = this.pendingCursorPosition !== null
+      let cursorPosition = this.pendingCursorPosition !== null
         ? this.pendingCursorPosition
         : currentScript.length;
 
-      console.log('📝 Inserting at position:', cursorPosition);
+      console.log('📝 Original cursor position:', cursorPosition);
+
+      // UNIVERSAL RULE: Ensure we never insert inside a cue block
+      cursorPosition = this.getSafeInsertionPosition(currentScript, cursorPosition);
+      console.log('📝 Safe insertion position:', cursorPosition);
 
       // Insert cue block at cursor position with proper spacing and blank paragraph
       const beforeCursor = currentScript.slice(0, cursorPosition);
@@ -4283,58 +4651,62 @@ export default {
 
     // Raw Script Insertion Methods (Direct to Database)
     insertCueBetweenParagraphsInRawScript(placement, cueContent) {
-      console.log('🎯 Inserting cue between paragraphs in raw script');
+      console.log('🎯 Inserting cue between segments in raw script');
       console.log('🎯 Placement index:', placement.index);
 
       // Get current script content
       let currentScript = this.scriptContent || '';
 
-      // Find all paragraph elements to determine insertion point
-      const paragraphMatches = [...currentScript.matchAll(/<p[^>]*class="[^"]*"[^>]*>.*?<\/p>/gs)];
+      // UNIVERSAL RULE: Find ALL content segments (paragraphs AND cue blocks)
+      // This ensures we account for cue blocks when calculating insertion positions
+      const segmentMatches = this.findAllContentSegments(currentScript);
 
-      if (paragraphMatches.length === 0) {
-        // No paragraphs found, append at end with blank paragraph
+      console.log('🎯 Found segments:', segmentMatches.length, segmentMatches.map(s => s.type));
+
+      if (segmentMatches.length === 0) {
+        // No segments found, append at end with blank paragraph
         const newScript = currentScript + '\n\n' + cueContent + '\n\n<p class="josh"></p>\n\n';
         this.$emit('update:scriptContent', newScript);
         return;
       }
 
       // Between-zone index mapping:
-      // index 0 = before first paragraph
-      // index 1 = after paragraph 0
-      // index 2 = after paragraph 1
+      // index 0 = before first segment
+      // index 1 = after segment 0
+      // index 2 = after segment 1
       // etc.
       const betweenZoneIndex = placement.index;
 
+      let insertPosition;
+
       if (betweenZoneIndex === 0) {
-        // Insert before first paragraph with blank paragraph after cue
-        const firstParagraph = paragraphMatches[0];
-        const insertPosition = firstParagraph.index;
-
-        const beforeCue = currentScript.slice(0, insertPosition);
-        const afterCue = currentScript.slice(insertPosition);
-
-        const newScript = beforeCue + cueContent + '\n\n<p class="josh"></p>\n\n' + afterCue;
-        this.$emit('update:scriptContent', newScript);
-        console.log('🎯 Inserted before first paragraph with blank paragraph');
-      } else if (betweenZoneIndex > paragraphMatches.length) {
+        // Insert before first segment
+        insertPosition = segmentMatches[0].index;
+        console.log('🎯 Inserting before first segment at position:', insertPosition);
+      } else if (betweenZoneIndex > segmentMatches.length) {
         // Insert at end with blank paragraph after cue
         const newScript = currentScript + '\n\n' + cueContent + '\n\n<p class="josh"></p>\n\n';
         this.$emit('update:scriptContent', newScript);
         console.log('🎯 Inserted at end with blank paragraph');
+        return;
       } else {
-        // Insert after paragraph[betweenZoneIndex - 1] with blank paragraph after cue
-        const paragraphIndex = betweenZoneIndex - 1;
-        const paragraphMatch = paragraphMatches[paragraphIndex];
-        const insertPosition = paragraphMatch.index + paragraphMatch[0].length;
-
-        const beforeCue = currentScript.slice(0, insertPosition);
-        const afterCue = currentScript.slice(insertPosition);
-
-        const newScript = beforeCue + '\n\n' + cueContent + '\n\n<p class="josh"></p>\n\n' + afterCue;
-        this.$emit('update:scriptContent', newScript);
-        console.log(`🎯 Inserted after paragraph ${paragraphIndex} with blank paragraph`);
+        // Insert after segment[betweenZoneIndex - 1]
+        const segmentIndex = betweenZoneIndex - 1;
+        const targetSegment = segmentMatches[segmentIndex];
+        insertPosition = targetSegment.endIndex;
+        console.log(`🎯 Inserting after segment ${segmentIndex} (${targetSegment.type}) at position:`, insertPosition);
       }
+
+      // UNIVERSAL RULE: Ensure we never insert inside a cue block
+      insertPosition = this.getSafeInsertionPosition(currentScript, insertPosition);
+      console.log('🎯 Safe insertion position:', insertPosition);
+
+      const beforeCue = currentScript.slice(0, insertPosition);
+      const afterCue = currentScript.slice(insertPosition);
+
+      const newScript = beforeCue + '\n\n' + cueContent + '\n\n<p class="josh"></p>\n\n' + afterCue;
+      this.$emit('update:scriptContent', newScript);
+      console.log('🎯 Cue inserted successfully');
     },
 
     insertCueWithinParagraphInRawScript(placement, cueContent) {
@@ -4343,16 +4715,41 @@ export default {
       // Get current script content
       let currentScript = this.scriptContent || '';
 
-      // Find all paragraph elements
+      // UNIVERSAL RULE: First check if placement.index points to a cue block
+      // If so, we should insert AFTER the cue block, not within it
+      const allSegments = this.findAllContentSegments(currentScript);
+
+      if (allSegments.length > 0 && placement.index < allSegments.length) {
+        const targetSegment = allSegments[placement.index];
+
+        // If the target is a cue block, redirect to between-segments insertion
+        if (targetSegment.type === 'cue') {
+          console.log('🎯 Target segment is a cue block - redirecting to between-segments insertion');
+          // Insert after the cue block (placement.index + 1 in between-zone terms)
+          this.insertCueBetweenParagraphsInRawScript({ index: placement.index + 1 }, cueContent);
+          return;
+        }
+      }
+
+      // Find all paragraph elements (only paragraphs, since we already handled cue blocks)
       const paragraphMatches = [...currentScript.matchAll(/<p[^>]*class="[^"]*"[^>]*>(.*?)<\/p>/gs)];
 
-      if (paragraphMatches.length === 0 || !paragraphMatches[placement.index]) {
-        // Fallback to between paragraphs
+      // Find which paragraph index this segment corresponds to
+      // We need to count only paragraphs up to the segment index
+      let paragraphIndex = 0;
+      for (let i = 0; i < placement.index && i < allSegments.length; i++) {
+        if (allSegments[i].type === 'paragraph') {
+          paragraphIndex++;
+        }
+      }
+
+      if (paragraphMatches.length === 0 || !paragraphMatches[paragraphIndex]) {
+        // Fallback to between segments
         this.insertCueBetweenParagraphsInRawScript(placement, cueContent);
         return;
       }
 
-      const paragraphMatch = paragraphMatches[placement.index];
+      const paragraphMatch = paragraphMatches[paragraphIndex];
       const paragraphContent = paragraphMatch[1];
       const paragraphStart = paragraphMatch.index;
       const paragraphEnd = paragraphMatch.index + paragraphMatch[0].length;
@@ -6344,31 +6741,126 @@ export default {
       this.$emit('save-current');
     },
 
-    // Draggable handlers
+    // Draggable handlers - generate stable unique keys
+    // Note: VueDraggable only passes the segment item, not the index
     getSegmentKey(segment) {
+      console.log('🔑 getSegmentKey called:', {
+        type: segment.type,
+        speaker: segment.speaker,
+        contentLength: segment.content?.length,
+        hasId: !!segment.id,
+        segmentIndex: segment.segmentIndex,
+        isDragging: this.isDragging
+      });
+
+      // If segment has an ID, use that (most reliable)
+      if (segment.id) {
+        const key = `seg-${segment.id}`;
+        console.log('  → Using ID key:', key);
+        return key;
+      }
+
       // For cue segments, use assetId or slug for stable key
       if (segment.type === 'cue' && segment.data) {
-        return segment.data.assetId || segment.data.slug || `cue-${segment.data.type}-${Math.random()}`;
+        if (segment.data.assetId) {
+          const key = `cue-asset-${segment.data.assetId}`;
+          console.log('  → Using cue assetId key:', key);
+          return key;
+        }
+        if (segment.data.slug) {
+          const key = `cue-slug-${segment.data.slug}`;
+          console.log('  → Using cue slug key:', key);
+          return key;
+        }
+        // Fallback for cue: use type and a simple hash
+        const key = `cue-${segment.data.type || 'unknown'}-${this.simpleHash(JSON.stringify(segment.data))}`;
+        console.log('  → Using cue hash key:', key);
+        return key;
       }
-      // For text segments, use content hash or first 50 chars as key
+
+      // For text segments, create a stable hash from content + speaker
       if (segment.type === 'text') {
-        const contentKey = segment.content ? segment.content.substring(0, 50) : 'empty';
-        return `text-${segment.speaker}-${contentKey}`;
+        const content = segment.content || '';
+        const speaker = segment.speaker || 'unknown';
+
+        // CRITICAL FIX: For empty paragraphs, include index to ensure unique keys
+        // This prevents duplicate keys that cause Vue's virtual DOM to lose track during drag
+        if (content === '') {
+          const key = `text-${speaker}-empty-${segment.segmentIndex}`;
+          console.log('  → Using text empty key with index:', key);
+          return key;
+        }
+
+        // For non-empty content, use hash-based key
+        const contentHash = this.simpleHash(content);
+        const key = `text-${speaker}-${contentHash}`;
+        console.log('  → Using text hash key:', key);
+        return key;
       }
-      return `segment-${Math.random()}`;
+
+      // Fallback: create hash from entire segment
+      return `segment-${segment.type || 'unknown'}-${this.simpleHash(JSON.stringify(segment))}`;
+    },
+
+    // Simple string hash function for generating stable keys
+    simpleHash(str) {
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+      }
+      return Math.abs(hash).toString(36);
     },
 
     handleSegmentDragStart(evt) {
-      console.log('🎯 Drag started:', evt.oldIndex);
+      console.log('🎯🎯🎯 ========== DRAG START ==========');
+      console.log('  oldIndex:', evt.oldIndex);
+      console.log('  draggableSegments count:', this.draggableSegments?.length);
+      console.log('  cachedScriptSegments:', this.cachedScriptSegments ? `${this.cachedScriptSegments.length} segments` : 'NULL');
       this.isDragging = true;
+      console.log('  isDragging set to:', this.isDragging);
     },
 
     handleSegmentDragEnd(evt) {
       console.log('🎯 Drag ended:', evt.oldIndex, '→', evt.newIndex);
       this.isDragging = false;
 
-      if (evt.oldIndex !== evt.newIndex) {
-        console.log('📝 Segment reordered, syncing to backend');
+      // Process the pending segment order that was stored during drag
+      if (this.pendingSegmentOrder && evt.oldIndex !== evt.newIndex) {
+        console.log('📝 Processing pending segment reorder');
+
+        // Filter out pending cues
+        const realSegments = this.pendingSegmentOrder.filter(seg => !seg.isPending);
+
+        // Reconstruct content from the new order
+        const frontmatter = this.extractYamlFrontmatter(this.rawScriptContent);
+        let newContent = '';
+
+        realSegments.forEach((segment) => {
+          if (segment.type === 'text') {
+            const speaker = segment.speaker || 'josh';
+            const content = segment.content || '';
+            newContent += `<p class="${speaker}">${content}</p>\n\n`;
+          } else if (segment.type === 'cue') {
+            if (segment.data && segment.data.rawData) {
+              newContent += CueParser.formatCueToMarkdown(segment.data.rawData);
+              newContent += '\n\n';
+            }
+          }
+        });
+
+        const newRawContent = frontmatter ? `${frontmatter}\n\n${newContent.trim()}` : newContent.trim();
+
+        // CRITICAL: Invalidate cache after reorder to force re-parse with new order
+        this.cachedScriptSegments = null;
+        this.lastParsedContent = null;
+
+        // Clear pending order
+        this.pendingSegmentOrder = null;
+
+        // Now emit the update after drag is complete
+        this.$emit('update:scriptContent', newRawContent);
         this.$emit('save-current');
       }
     }
@@ -7105,7 +7597,7 @@ export default {
 
 /* Visual Script Mode Styling */
 .visual-script-container {
-  padding: 20px 40px 20vh 40px; /* Large bottom padding ensures scrollable space */
+  padding: 20px 40px 20vh 40px;
   background-color: white;
   font-family: 'Times New Roman', serif;
   font-size: 14px;
@@ -7242,17 +7734,18 @@ export default {
   transition: background-color 0.2s ease;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 0px;
 }
 
 /* Line numbers column */
 .line-numbers-column {
   flex-shrink: 0;
-  width: 45px;
+  width: 50px;
   display: flex;
   flex-direction: column;
   padding-top: 5px;
   user-select: none;
+  margin-left: 4px;
 }
 
 .line-number {
@@ -7783,15 +8276,59 @@ textarea.yellow-cursor-highlight {
   min-height: auto !important;
 }
 
-/* Draggable states */
-.drag-handle {
+/* Drag handle column - appears before line numbers */
+.drag-handle-column {
+  flex-shrink: 0;
+  width: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.3;
+  transition: all 0.2s ease;
+  cursor: grab;
+  align-self: stretch;
+  min-height: 100%;
+}
+
+.drag-handle-column:hover {
+  opacity: 1;
+  background: rgba(33, 150, 243, 0.08);
+  border-radius: 6px;
+}
+
+.drag-handle-column:active {
+  cursor: grabbing;
+}
+
+.drag-handle-column .v-icon {
+  color: rgba(0, 0, 0, 0.4);
   transition: color 0.2s ease;
-  opacity: 0.5;
+}
+
+.drag-handle-column:hover .v-icon {
+  color: rgb(33, 150, 243);
+}
+
+.speaker-paragraph {
+  position: relative;
+}
+
+/* Draggable states (for speaker header drag handle) */
+.drag-handle {
+  transition: all 0.2s ease;
+  opacity: 0.6;
+  color: rgba(0, 0, 0, 0.4);
 }
 
 .drag-handle:hover {
   opacity: 1;
   color: rgb(var(--v-theme-primary)) !important;
+  transform: scale(1.2);
+  cursor: grab;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .content-segment {
@@ -7801,11 +8338,21 @@ textarea.yellow-cursor-highlight {
 .ghost-segment {
   height: 60px !important;
   min-height: 60px !important;
-  background: var(--draglight-color) !important;
-  border: 3px dashed var(--dropline-color) !important;
-  border-radius: 0 !important;
-  display: block !important;
+  background: linear-gradient(90deg, rgba(33, 150, 243, 0.1) 0%, rgba(33, 150, 243, 0.05) 100%) !important;
+  border: 3px dashed rgb(33, 150, 243) !important;
+  border-radius: 4px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   visibility: visible !important;
+}
+
+.ghost-segment::before {
+  content: "Drop here";
+  color: rgb(33, 150, 243);
+  font-weight: 600;
+  font-size: 14px;
+  opacity: 0.7;
 }
 
 /* Hide the actual content inside the ghost placeholder */
@@ -7833,11 +8380,9 @@ textarea.yellow-cursor-highlight {
   overflow: hidden !important;
 }
 
-/* Also collapse speaker paragraph content when dragging */
+/* Keep paragraph content visible but slightly transparent when dragging */
 .drag-segment .paragraph-content {
-  max-height: 0 !important;
-  overflow: hidden !important;
-  opacity: 0 !important;
+  opacity: 0.6 !important;
 }
 
 /* Keep chosen-segment visible but slightly dimmed */

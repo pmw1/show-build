@@ -261,3 +261,62 @@ input[type="number"]::-webkit-inner-spin-button {
 .toast-container-high-z .Vue-Toastification__toast {
   z-index: 10001 !important;
 }
+
+/* Custom toast styling - 50% smaller, blue color, positioned higher */
+.toast-custom-style {
+  top: 15% !important;  /* 15% higher on screen (default is usually 30%) */
+}
+
+.toast-blue-small {
+  font-size: 0.7rem !important;  /* 50% smaller text */
+  padding: 8px 12px !important;  /* 50% smaller padding */
+  min-height: 32px !important;  /* 50% smaller min-height */
+  max-width: 250px !important;  /* 50% smaller width */
+  background-color: #2196F3 !important;  /* Blue color */
+  color: white !important;
+  border-radius: 4px !important;
+}
+
+/* Override success/error/warning/info colors to be blue */
+.toast-blue-small.Vue-Toastification__toast--success,
+.toast-blue-small.Vue-Toastification__toast--error,
+.toast-blue-small.Vue-Toastification__toast--warning,
+.toast-blue-small.Vue-Toastification__toast--info {
+  background-color: #2196F3 !important;  /* Blue for all types */
+}
+
+/* Make icon smaller */
+.toast-blue-small .Vue-Toastification__icon {
+  width: 16px !important;
+  height: 16px !important;
+  font-size: 16px !important;
+  margin-right: 6px !important;
+}
+
+/* Make close button smaller */
+.toast-blue-small .Vue-Toastification__close-button {
+  font-size: 14px !important;
+  width: 14px !important;
+  height: 14px !important;
+}
+
+/* SOT Editor Mark IN/OUT toast positioning - position higher on screen */
+.Vue-Toastification__container.top-right {
+  top: 80px !important;  /* Higher position to avoid overlapping video controls */
+}
+
+.Vue-Toastification__container.top-left {
+  top: 80px !important;  /* Higher position to avoid overlapping video controls */
+}
+
+/* Mark OUT toast specific styling - ensure visibility above video UI */
+.mark-out-toast {
+  margin-top: 0 !important;
+  z-index: 10002 !important;
+}
+
+/* Mark IN toast specific styling */
+.mark-in-toast {
+  margin-top: 0 !important;
+  z-index: 10002 !important;
+}

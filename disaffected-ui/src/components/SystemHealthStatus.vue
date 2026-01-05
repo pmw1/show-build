@@ -139,13 +139,17 @@
       </div>
     </v-tooltip>
 
-    <!-- XTTS Status -->
+    <!-- TTS Status (Fish Speech or XTTS) -->
     <v-tooltip location="bottom">
       <template v-slot:activator="{ props }">
         <div
           v-bind="props"
           class="health-item"
-          :class="{ 'health-error': xttsStatus === 'error', 'health-warning': xttsStatus === 'warning' }"
+          :class="{
+            'health-error': xttsStatus === 'error',
+            'health-warning': xttsStatus === 'warning',
+            'health-deprecated': xttsStatus === 'deprecated'
+          }"
         >
           <v-icon
             :color="xttsStatusColor"
@@ -154,14 +158,15 @@
           >
             {{ xttsStatusIcon }}
           </v-icon>
-          <span class="health-label">XTTS</span>
+          <span class="health-label">{{ ttsDisplayLabel }}</span>
         </div>
       </template>
       <div>
-        <strong>XTTS TTS Service</strong><br>
+        <strong>{{ isFishSpeechActive ? 'Fish Speech TTS' : 'XTTS TTS Service' }}</strong><br>
         Status: {{ xttsStatusText }}<br>
         <span v-if="xttsHost">Host: {{ xttsHost }}</span>
         <span v-if="xttsError" class="text-error">{{ xttsError }}</span>
+        <span v-if="isXttsDeprecated" class="text-grey">XTTS deprecated - replaced by Fish Speech</span>
       </div>
     </v-tooltip>
 
@@ -217,6 +222,9 @@ const {
   xttsStatusIcon,
   xttsHost,
   xttsError,
+  ttsDisplayLabel,
+  isFishSpeechActive,
+  isXttsDeprecated,
   loading,
   checkHealth
 } = useSystemHealth()
@@ -283,6 +291,12 @@ onUnmounted(() => {
 .health-item.health-warning {
   background: rgba(255, 152, 0, 0.1);
   border-color: rgba(255, 152, 0, 0.3);
+}
+
+.health-item.health-deprecated {
+  background: rgba(158, 158, 158, 0.1);
+  border-color: rgba(158, 158, 158, 0.3);
+  opacity: 0.7;
 }
 
 .health-icon {

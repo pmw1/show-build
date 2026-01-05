@@ -37,7 +37,7 @@ export function useLLM() {
    * Call Ollama (local LLM via llama.cpp)
    * Falls back to hardcoded host if config fetch fails
    */
-  async function callOllama(prompt, model = 'llama3:latest', options = {}) {
+  async function callOllama(prompt, model = 'deepseek-r1:32b-qwen-distill-q4_K_M', options = {}) {
     try {
       // Use backend proxy to avoid HTTPS->HTTP mixed content blocking
       const response = await axios.post('/api/llm/ollama/generate', {
@@ -316,7 +316,7 @@ export function useLLM() {
       if (!configs) {
         console.warn('⚠️ Failed to load API configs, attempting direct Ollama fallback')
         try {
-          return await callOllama(prompt, options.model || 'llama3:latest', options)
+          return await callOllama(prompt, options.model || 'deepseek-r1:32b-qwen-distill-q4_K_M', options)
         } catch (err) {
           throw new Error('Failed to load API configuration. Please ensure you are logged in.')
         }
@@ -341,7 +341,7 @@ export function useLLM() {
       if (preferredService !== 'auto') {
         try {
           console.log(`🎯 Using preferred service for ${options.taskType}: ${preferredService}`)
-          const result = await callSpecificService(preferredService, prompt, options)
+          const result = await callSpecificService(preferredService, prompt, options, configs)
           if (result) return result
         } catch (err) {
           console.warn(`Preferred service ${preferredService} failed, falling back...`)
@@ -366,7 +366,7 @@ export function useLLM() {
 
         if (isEnabled) {
           try {
-            const result = await callSpecificService(service, prompt, options)
+            const result = await callSpecificService(service, prompt, options, configs)
             if (result) return result
           } catch (err) {
             console.warn(`Service ${service} failed:`, err.message)
@@ -387,7 +387,7 @@ export function useLLM() {
   /**
    * Call a specific LLM service by name
    */
-  async function callSpecificService(service, prompt, options) {
+  async function callSpecificService(service, prompt, options, configs = null) {
     // Parse service string if it includes model (e.g., "ollama:llama3:latest")
     let serviceName = service
     let modelOverride = null
@@ -448,6 +448,10 @@ export function useLLM() {
         if (!ollamaModel && options.taskType && routing.ollamaModels && routing.ollamaModels[options.taskType]) {
           ollamaModel = routing.ollamaModels[options.taskType]
           console.log(`🤖 Using Ollama (${ollamaModel}) for ${options.taskType}`)
+        } else if (!ollamaModel && configs?.preproduction?.ai_services?.ollama?.model) {
+          // Use default model from database config
+          ollamaModel = configs.preproduction.ai_services.ollama.model
+          console.log(`🤖 Using Ollama (${ollamaModel}) from config`)
         } else {
           console.log(`🤖 Using Ollama (${ollamaModel || 'default'})`)
         }
@@ -461,8 +465,9 @@ export function useLLM() {
 
         // Notify user - LOW priority for local model
         const taskName = options.taskType ? ` for ${options.taskType.replace(/-/g, ' ')}` : ''
+        const displayModel = ollamaModel || configs?.preproduction?.ai_services?.ollama?.model || 'deepseek-r1:32b-qwen-distill-q4_K_M'
         notifyUserStandard(
-          `🤖 Local AI Processing<small>Model: ${ollamaModel || 'default'}${taskName}</small>`,
+          `🤖 Local AI Processing<small>Model: ${displayModel}${taskName}</small>`,
           NOTIFICATION_COLORS.INFO,
           2500
         )
@@ -548,14 +553,12 @@ export function useLLM() {
     // Get display parameters from options or use defaults
     const maxLines = options.maxLines || 5
     const charsPerLine = options.charsPerLine || 50
-    const fontSize = options.fontSize || '19px'
 
-    // NEW: Smart split configuration
+    // Smart split configuration
     const minSecondScreen = options.minSecondScreen || 80
     const splitStrategy = options.splitStrategy || 'smart'
     const balanceThresholdPercent = options.balanceThresholdPercent || 30
     const preferSentenceBoundaries = options.preferSentenceBoundaries !== false
-    const allowMidSentenceSplit = options.allowMidSentenceSplit || false
 
     // Calculate thresholds
     const maxCharsScreen1 = maxLines * charsPerLine
@@ -569,92 +572,30 @@ export function useLLM() {
       quoteLength: quote.length
     })
 
-    const prompt = `You are an FSQ (Full Screen Quote) layout analyzer with SMART SPLIT logic to prevent orphan text.
+    // Simplified prompt - focus on clear instructions and JSON output
+    const prompt = `<task>Split this quote for full-screen display if needed.</task>
 
-DISPLAY CONSTRAINTS:
-- Screen: 1920x1080 full screen
-- Max lines for Screen 1: ${maxLines}
-- Characters per line: ~${charsPerLine}
-- Max characters for Screen 1: ${maxCharsScreen1}
-- MINIMUM characters for Screen 2: ${minSecondScreen} (prevents orphans)
-- Balance threshold: ${balanceThreshold} chars
-- Font size: ${fontSize}
-
-QUOTE TO ANALYZE (${quote.length} characters):
-"${quote}"
-
-SMART SPLIT STRATEGY: "${splitStrategy}"
-
-🔍 DECISION LOGIC:
-
-**STEP 1: Length Analysis**
+<constraints>
+- Max ${maxCharsScreen1} chars per screen (${maxLines} lines × ${charsPerLine} chars)
+- Min ${minSecondScreen} chars for second screen (no orphan text)
 - Quote length: ${quote.length} chars
-- Max Screen 1: ${maxCharsScreen1} chars
-- Balance threshold: ${balanceThreshold} chars
+</constraints>
 
-**STEP 2: Determine Split Behavior**
+<quote>
+${quote}
+</quote>
 
-A) If ${quote.length} ≤ ${maxCharsScreen1}:
-   → SINGLE SCREEN - Quote fits comfortably
-   → Return: ["original quote as-is"]
+<rules>
+1. If quote ≤ ${maxCharsScreen1} chars: Return as single item ["entire quote"]
+2. If quote > ${maxCharsScreen1}: Split at sentence boundary near ${maxCharsScreen1} chars
+3. NO overlapping text between segments - each word appears exactly once
+4. ${preferSentenceBoundaries ? 'Prefer splitting at sentence endings (. ! ?)' : 'Split at natural pauses'}
+</rules>
 
-B) If ${quote.length} is ${maxCharsScreen1 + 1} to ${balanceThreshold}:
-   → BALANCED SPLIT - In the "gray zone"
-   → Splitting at ${maxCharsScreen1} would leave only ${quote.length - maxCharsScreen1} chars on Screen 2
-   → This is LESS than minimum (${minSecondScreen}), creating orphan text!
-   → SOLUTION: Split near the MIDDLE (~${Math.floor(quote.length / 2)} chars) for balanced screens
-
-C) If ${quote.length} > ${balanceThreshold}:
-   → STANDARD SPLIT - Quote is long enough
-   → Split at ~${maxCharsScreen1} chars
-   → Remainder will be ≥ ${minSecondScreen} chars (adequate for Screen 2)
-
-**STEP 3: Find Split Point** ${preferSentenceBoundaries ? '(Prefer Sentence Boundaries)' : ''}
-
-Priority order for finding split point:
-1. ${preferSentenceBoundaries ? 'Sentence endings (. ! ?) within ±50 chars of target' : 'Target position'}
-2. ${allowMidSentenceSplit ? 'Clause breaks (, ; -) within ±30 chars if no sentence boundary' : 'Skip mid-sentence'}
-3. Word boundaries (spaces) within ±20 chars
-4. Exact position (last resort)
-
-**VALIDATION RULES:**
-- ⚠️ **NO OVERLAPPING SEGMENTS** - Each word should appear in EXACTLY ONE segment
-- ⚠️ **NO DUPLICATE TEXT** - Do not repeat any portion of the quote across segments
-- ⚠️ **CLEAN CUTS** - Split the quote, don't copy it
-- Each segment must be independently readable
-- NO orphan text (Screen 2 must be ≥ ${minSecondScreen} chars)
-- Preserve original meaning and tone
-- Each segment should be substantial
-
-**WRONG EXAMPLE (DO NOT DO THIS):**
-❌ WRONG:
-[
-  "The fundamental problem with modern technology isn't that it's too complex...",
-  "that we've created systems that prioritize convenience over understanding..."
-]
-This is WRONG because "that we've created systems..." appears in BOTH segments (overlapping).
-
-**CORRECT EXAMPLE:**
-✅ CORRECT:
-[
-  "The fundamental problem with modern technology isn't that it's too complex or too simple, but rather that we've created systems that prioritize convenience over understanding.",
-  "We've built a world where people can accomplish incredible things without having the slightest idea how any of it works..."
-]
-This is CORRECT because each segment contains unique, non-overlapping text.
-
-**OUTPUT FORMAT:**
-Return ONLY a valid JSON array of strings, no explanation.
-
-Examples:
-- 220 chars (fits): ["The entire quote stays together."]
-- 280 chars (gray zone): ["First half ~140 chars.", "Second half ~140 chars."] ← BALANCED, NO OVERLAP
-- 400 chars (long): ["First screen ~${maxCharsScreen1} chars.", "Second screen ~${400 - maxCharsScreen1} chars."] ← STANDARD, NO OVERLAP
-
-⚠️ CRITICAL:
-1. If split would create orphan (Screen 2 < ${minSecondScreen} chars), BALANCE the split instead!
-2. NEVER repeat or overlap text between segments - split the quote cleanly!
-
-Return ONLY the JSON array. No markdown, no explanation, just the array.`
+<output>
+Return ONLY a JSON array of strings. No explanation, no markdown.
+Example: ["First segment text here.", "Second segment text here."]
+</output>`
 
     try {
       const result = await smartCall(prompt, {
@@ -669,6 +610,13 @@ Return ONLY the JSON array. No markdown, no explanation, just the array.`
 
       // Remove markdown code blocks if present
       jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '')
+
+      // Remove XML tags that may have leaked through
+      jsonText = jsonText.replace(/<\/?(?:task|constraints|quote|rules|output)[^>]*>/gi, '')
+
+      // Remove common LLM preambles before JSON
+      jsonText = jsonText.replace(/^(?:Here(?:'s| is) the|The )?(?:JSON|result|output|array)[\s:]*\n?/i, '')
+      jsonText = jsonText.replace(/^(?:Sure|Certainly|Of course)[,!]?\s*(?:here(?:'s| is))?[^[]*\n?/i, '')
 
       // Extract JSON array
       const jsonMatch = jsonText.match(/\[[\s\S]*\]/)
@@ -705,7 +653,29 @@ Return ONLY the JSON array. No markdown, no explanation, just the array.`
    * Checks for overlaps and coverage of original quote
    */
   function validateAndFixSegments(segments, originalQuote) {
-    // Single segment is always valid
+    // Check for prompt artifacts in segments (indicates LLM returned instructions instead of quote)
+    const promptArtifactPatterns = [
+      /^RULES:/i,
+      /^OUTPUT:/i,
+      /^TEXT:/i,
+      /^EXAMPLE/i,
+      /^-\s*(?:Outer|Inner)\s*quotes?:/i,
+      /^-\s*Apostrophe/i,
+      /^Return\s*ONLY/i,
+      /^NO\s*explanation/i,
+      /<\/?(?:task|rules|output|input|quote)>/i
+    ]
+
+    for (const segment of segments) {
+      for (const pattern of promptArtifactPatterns) {
+        if (pattern.test(segment.trim())) {
+          console.error('❌ Prompt artifact detected in segment:', segment.substring(0, 100))
+          return { valid: false, segments }
+        }
+      }
+    }
+
+    // Single segment is always valid (if no artifacts)
     if (segments.length === 1) {
       return { valid: true, segments }
     }
@@ -872,45 +842,72 @@ Return ONLY the slug, nothing else.`
    * @returns {string} - Properly formatted quote text
    */
   async function normalizeNestedQuotes(quoteText) {
-    const prompt = `Fix quotation marks to follow American English nesting rules (outer: double quotes, inner: single quotes).
+    // Use XML-style tags for clearer instruction following
+    // This format works better with code-focused models like Qwen
+    const prompt = `<task>Fix quotation mark nesting in the text below.</task>
 
-TEXT:
+<rules>
+- Outer quotes must be double quotes: "
+- Inner/nested quotes must be single quotes: '
+- Apostrophes stay as single quotes: '
+- Do NOT change any words, only quotation marks
+</rules>
+
+<input>
 ${quoteText}
+</input>
 
-RULES:
-- Outer quotes: " (double)
-- Inner quotes: ' (single)
-- Apostrophes: ' (single)
-- Change ONLY quotation marks
-- Preserve ALL words exactly as-is
-
-OUTPUT: The corrected text ONLY. NO explanations, NO thank you messages, NO commentary, NO additional text whatsoever.
-
-EXAMPLE INPUT: He said "I think it's 'great'"
-EXAMPLE OUTPUT: He said "I think it's 'great'"
-
-DO NOT write thank you messages. DO NOT explain your work. DO NOT add any text beyond the corrected quote.`
+<output>
+Return ONLY the corrected text with no explanation. Do not include XML tags in your response.
+</output>`
 
     try {
       const result = await smartCall(prompt, {
         taskType: 'content-expansion',
         temperature: 0.1, // Very low temperature for deterministic formatting
-        max_tokens: 500,
-        systemPrompt: 'You are a silent copy editor. Output ONLY the corrected text. NO explanations. NO thank you messages. NO commentary. Just the corrected text.'
+        max_tokens: 800,  // Increased for longer quotes
+        systemPrompt: 'You fix quotation marks in text. Return ONLY the corrected text. No explanations, no tags, no commentary.',
+        model: 'llama3:latest'  // Use llama3 for better instruction following
       })
 
-      // Clean response - remove any markdown or quotes the LLM might add
+      // Clean response - remove any markdown, XML tags, or prompt echoes
       let normalized = result.trim()
+
+      // CRITICAL: Remove any XML tags that leaked through
+      normalized = normalized.replace(/<\/?(?:task|rules|input|output|text|quote)[^>]*>/gi, '')
+
+      // Remove prompt instruction echoes (common with code models)
+      const promptEchoPatterns = [
+        /^.*?(?:Fix|Correct|Normalize).*?quotation.*?(?:marks?|nesting).*?$/im,
+        /^.*?(?:outer|inner)\s*quotes?.*?(?:double|single).*?$/im,
+        /^.*?apostrophe.*?single.*?$/im,
+        /^.*?(?:do\s*not|don't)\s*change.*?words.*?$/im,
+        /^.*?return\s*only.*?(?:corrected|text).*?$/im,
+        /^.*?no\s*(?:explanation|commentary).*?$/im,
+        /^RULES:.*$/im,
+        /^OUTPUT:.*$/im,
+        /^TEXT:.*$/im,
+        /^EXAMPLE\s*(?:INPUT|OUTPUT):.*$/im,
+        /^-\s*(?:Outer|Inner)\s*quotes?:.*$/gim,
+        /^-\s*Apostrophes?:.*$/gim,
+        /^-\s*(?:Change|Preserve|Do\s*NOT).*$/gim
+      ]
+
+      for (const pattern of promptEchoPatterns) {
+        normalized = normalized.replace(pattern, '')
+      }
 
       // Remove LLM preamble/postamble (common patterns)
       const preamblePatterns = [
         /^Here'?s? the corrected text.*?:\s*/i,
         /^The corrected text is:?\s*/i,
-        /^Corrected:?\s*/i,
+        /^Corrected(?:\s*text)?:?\s*/i,
         /^Result:?\s*/i,
         /^Output:?\s*/i,
         /^\[.*?\]:?\s*/,
-        /^Sure,.*?:\s*/i
+        /^Sure,.*?:\s*/i,
+        /^Certainly[,!]?\s*/i,
+        /^Of course[,!]?\s*/i
       ]
 
       const postamblePatterns = [
@@ -933,15 +930,18 @@ DO NOT write thank you messages. DO NOT explain your work. DO NOT add any text b
         normalized = normalized.replace(pattern, '')
       }
 
-      // CRITICAL: Remove conversational paragraphs that LLM adds
+      // CRITICAL: Remove conversational paragraphs and instruction echoes
       // Split by double newlines to find distinct paragraphs
       const paragraphs = normalized.split(/\n\n+/)
 
-      // Keep only paragraphs that look like quote content (not meta-commentary)
+      // Keep only paragraphs that look like actual quote content
       const cleanedParagraphs = paragraphs.filter(para => {
         const trimmed = para.trim()
 
-        // Remove paragraphs that are clearly LLM meta-commentary
+        // Skip empty paragraphs
+        if (!trimmed) return false
+
+        // Remove paragraphs that are clearly LLM meta-commentary or instructions
         const metaPatterns = [
           /^thank you for/i,
           /^i appreciate/i,
@@ -954,7 +954,16 @@ DO NOT write thank you messages. DO NOT explain your work. DO NOT add any text b
           /^let me know/i,
           /^if you (need|want|would like)/i,
           /^i hope/i,
-          /^is there anything/i
+          /^is there anything/i,
+          /^here is the/i,
+          /^the (?:corrected|fixed|normalized)/i,
+          // Instruction-like patterns
+          /^-\s*(?:outer|inner|apostrophe)/i,
+          /^(?:rules|output|input|text):/i,
+          /^example\s*(?:input|output)/i,
+          /^do\s*not\s*(?:write|add|include)/i,
+          /^return\s*only/i,
+          /^no\s*explanation/i
         ]
 
         for (const pattern of metaPatterns) {
@@ -970,6 +979,9 @@ DO NOT write thank you messages. DO NOT explain your work. DO NOT add any text b
       // Rejoin the cleaned paragraphs
       normalized = cleanedParagraphs.join('\n\n').trim()
 
+      // Final cleanup: remove multiple consecutive newlines
+      normalized = normalized.replace(/\n{3,}/g, '\n\n')
+
       // Remove surrounding quotes if LLM added them
       if ((normalized.startsWith('"') && normalized.endsWith('"')) ||
           (normalized.startsWith("'") && normalized.endsWith("'"))) {
@@ -979,6 +991,12 @@ DO NOT write thank you messages. DO NOT explain your work. DO NOT add any text b
         if (withoutOuter.includes('"') || withoutOuter.includes("'")) {
           normalized = withoutOuter
         }
+      }
+
+      // If after all cleaning, result is empty or too short, return original
+      if (!normalized || normalized.length < quoteText.length * 0.5) {
+        console.warn('⚠️ Normalization produced invalid result, returning original')
+        return quoteText
       }
 
       console.log('📝 Normalized nested quotes:', { original: quoteText, normalized })

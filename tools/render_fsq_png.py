@@ -8,12 +8,13 @@ Usage:
     python render_fsq_png.py --json="path/to/fsq_quotes.json"
     python render_fsq_png.py --episode=0241
     python render_fsq_png.py --json="file.json" --output="custom_dir"
+    python render_fsq_png.py --json="file.json" --font-family=serif --box-opacity=85
 """
 
 import argparse
 import sys
 import json
-import textwrap
+import os
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from PIL import Image, ImageDraw, ImageFont
@@ -34,21 +35,76 @@ except ImportError:
     EPISODES_ROOT = Path("/mnt/sync/disaffected/episodes")
 
 
-class FSQPNGRenderer:
-    """Renders FSQ quotes as PNG images with transparent backgrounds."""
+# Font path definitions by family
+FONT_PATHS = {
+    'sans-serif': [
+        '/System/Library/Fonts/Helvetica.ttc',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/TTF/arial.ttf',
+        'arial.ttf'
+    ],
+    'serif': [
+        '/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf',
+        '/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf',
+    ]
+}
 
-    def __init__(self, width: int = 1920, height: int = 1080):
+
+class FSQPNGRenderer:
+    """
+    Renders FSQ quotes as PNG images with transparent backgrounds.
+
+    Can be used as:
+    1. CLI tool: python render_fsq_png.py --json=file.json
+    2. Importable module: from tools.render_fsq_png import FSQPNGRenderer
+    3. Direct rendering: renderer.render_single(quote, attribution, output_path)
+    """
+
+    def __init__(
+        self,
+        width: int = 1920,
+        height: int = 1080,
+        font_family: str = 'sans-serif',
+        box_height: int = 80,
+        box_opacity: int = 75,
+        line_spacing: int = 30,
+        attribution_size: Optional[int] = None,
+        min_font_size: int = 12,
+        max_font_size: int = 200
+    ):
+        """
+        Initialize FSQ PNG Renderer with configurable style parameters.
+
+        Args:
+            width: Canvas width in pixels (default: 1920)
+            height: Canvas height in pixels (default: 1080)
+            font_family: 'sans-serif' or 'serif' (default: sans-serif)
+            box_height: Black overlay height as percentage of canvas (default: 80)
+            box_opacity: Black overlay opacity as percentage (default: 75)
+            line_spacing: Line spacing as percentage of font size (default: 30)
+            attribution_size: Fixed attribution font size in px, or None for auto (default: None)
+            min_font_size: Minimum quote font size in pixels (default: 12)
+            max_font_size: Maximum quote font size in pixels (default: 200)
+        """
         self.width = width
         self.height = height
+        self.font_family = font_family
+        self.line_spacing_percent = line_spacing
+        self.fixed_attribution_size = attribution_size
+        self.min_font_size = min_font_size
+        self.max_font_size = max_font_size
 
-        # Design specifications
-        self.black_region_height = int(height * 0.8)  # 80% of screen height
+        # Design specifications - configurable
+        self.black_region_height = int(height * (box_height / 100))
         self.black_region_width = width  # 100% of width
         self.black_region_y = (height - self.black_region_height) // 2  # Centered vertically
         self.black_region_x = 0
 
         # Colors (RGBA for transparency support)
-        self.black_overlay = (0, 0, 0, int(255 * 0.75))  # 75% opacity black
+        self.black_overlay = (0, 0, 0, int(255 * (box_opacity / 100)))
         self.text_color = (255, 255, 255, 255)  # White text
         self.attribution_color = (200, 200, 200, 255)  # Light gray attribution
 
@@ -62,23 +118,17 @@ class FSQPNGRenderer:
         self.content_width = self.black_region_width - (2 * self.padding_x)
         self.content_height = self.black_region_height - (2 * self.padding_y)
 
-        # Load fonts
-        self.helvetica_font_paths = [
-            '/System/Library/Fonts/Helvetica.ttc',
-            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-            '/usr/share/fonts/TTF/arial.ttf',
-            'arial.ttf'
-        ]
+        # Font paths based on family
+        self.font_paths = FONT_PATHS.get(font_family, FONT_PATHS['sans-serif'])
 
         self.rendered_count = 0
         self.error_count = 0
 
     def load_font(self, size: int) -> ImageFont.ImageFont:
-        """Load Helvetica or fallback font."""
-        for font_path in self.helvetica_font_paths:
+        """Load font from configured family."""
+        for font_path in self.font_paths:
             try:
-                if Path(font_path).exists():
+                if os.path.exists(font_path):
                     return ImageFont.truetype(font_path, size)
             except OSError:
                 continue
@@ -140,13 +190,26 @@ class FSQPNGRenderer:
     def calculate_optimal_font_size(self, quote_text: str, attribution: str,
                                   target_width: int, target_height: int) -> Tuple[int, int]:
         """Calculate optimal font sizes for quote and attribution."""
+        # If min == max, use that exact font size (forced/fixed mode)
+        if self.min_font_size == self.max_font_size:
+            best_quote_size = self.min_font_size
+            # Attribution font size
+            if self.fixed_attribution_size is not None:
+                attribution_size = self.fixed_attribution_size
+            else:
+                attribution_size = max(12, int(best_quote_size * 0.6))
+            return best_quote_size, attribution_size
+
         # Attribution is now fixed at bottom, so quote gets most of the space
-        # Reserve space for attribution (about 10% of height) plus some padding
-        attribution_space = int(target_height * 0.12)  # Space for attribution + padding
+        # Reserve space for attribution (about 12% of height) plus some padding
+        attribution_space = int(target_height * 0.12)
         quote_space = target_height - attribution_space
 
+        # Line spacing multiplier from percentage
+        line_spacing_mult = 1 + (self.line_spacing_percent / 100)
+
         # Binary search for optimal quote font size
-        min_size, max_size = 12, 200
+        min_size, max_size = self.min_font_size, self.max_font_size
         best_quote_size = min_size
 
         while min_size <= max_size:
@@ -159,9 +222,9 @@ class FSQPNGRenderer:
             total_height = 0
             for line in lines:
                 if line.strip():  # Non-empty line
-                    total_height += line_height * 1.3  # Slightly increased line spacing
+                    total_height += line_height * line_spacing_mult
                 else:  # Empty line (paragraph break)
-                    total_height += line_height * 1.3 * 0.6  # Reduced paragraph spacing
+                    total_height += line_height * line_spacing_mult * 0.6  # Reduced paragraph spacing
 
             if total_height <= quote_space:
                 best_quote_size = mid_size
@@ -169,19 +232,24 @@ class FSQPNGRenderer:
             else:
                 max_size = mid_size - 1
 
-        # Attribution font size (smaller)
-        attribution_size = max(12, int(best_quote_size * 0.6))
+        # Attribution font size
+        if self.fixed_attribution_size is not None:
+            attribution_size = self.fixed_attribution_size
+        else:
+            attribution_size = max(12, int(best_quote_size * 0.6))
 
         return best_quote_size, attribution_size
 
     def render_quote_png(self, quote_data: Dict, output_path: Path) -> bool:
         """Render a single quote as PNG."""
         try:
-            print(f"   🎨 Rendering: {quote_data['slug']}")
+            print(f"   🎨 Rendering: {quote_data.get('slug', 'unknown')}")
 
-            # Extract quote data and decode escape characters
-            quote_text = quote_data['text'].encode().decode('unicode_escape')
-            attribution = quote_data['attribution']
+            # Extract quote data - keep as UTF-8, no escape processing needed
+            # (unicode_escape decode corrupts curly quotes and other UTF-8 chars)
+            quote_text = quote_data.get('text', quote_data.get('quote', ''))
+
+            attribution = quote_data.get('attribution', quote_data.get('source', 'Unknown'))
             alignment = quote_data.get('metadata', {}).get('align', 'center').lower()
 
             print(f"      Text: \"{quote_text[:50]}...\"")
@@ -209,12 +277,15 @@ class FSQPNGRenderer:
             quote_font = self.load_font(quote_font_size)
             attribution_font = self.load_font(attribution_font_size)
 
-            print(f"      Quote font size: {quote_font_size}")
-            print(f"      Attribution font size: {attribution_font_size}")
+            print(f"      Quote font size: {quote_font_size}px")
+            print(f"      Attribution font size: {attribution_font_size}px")
+
+            # Line spacing multiplier
+            line_spacing_mult = 1 + (self.line_spacing_percent / 100)
 
             # Wrap quote text
             quote_lines = self.wrap_text_to_fit(quote_text, quote_font, self.content_width)
-            line_height = int(self.get_text_dimensions("Wy", quote_font)[1] * 1.3)  # 1.3 for slightly increased line spacing
+            line_height = int(self.get_text_dimensions("Wy", quote_font)[1] * line_spacing_mult)
             paragraph_break_height = int(line_height * 0.6)  # 40% reduction for paragraph breaks
 
             # Calculate attribution dimensions
@@ -246,21 +317,23 @@ class FSQPNGRenderer:
                     current_y += paragraph_break_height  # Reduced spacing for paragraph breaks
 
             # Render attribution at bottom of black bar with 10% margin
-            attribution_text = f"— {attribution}"
-            attribution_width, attribution_height = self.get_text_dimensions(attribution_text, attribution_font)
+            # Only render if attribution is provided and not empty/placeholder
+            if attribution and attribution.strip() and attribution.lower() not in ('unknown', 'none', ''):
+                attribution_text = f"— {attribution}"
+                attribution_width, attribution_height = self.get_text_dimensions(attribution_text, attribution_font)
 
-            # Position at bottom of black region with 10% margin from bottom
-            attribution_y = (self.black_region_y + self.black_region_height) - self.padding_y - attribution_height
+                # Position at bottom of black region with 10% margin from bottom
+                attribution_y = (self.black_region_y + self.black_region_height) - self.padding_y - attribution_height
 
-            if alignment == 'center':
-                # Attribution bottom right
-                attribution_x = self.content_x + self.content_width - attribution_width
-            else:
-                # Attribution bottom left (for left alignment)
-                attribution_x = self.content_x
+                if alignment == 'center':
+                    # Attribution bottom right for centered text
+                    attribution_x = self.content_x + self.content_width - attribution_width
+                else:
+                    # Attribution bottom left (for left/right alignment)
+                    attribution_x = self.content_x
 
-            draw.text((attribution_x, attribution_y), attribution_text,
-                     font=attribution_font, fill=self.attribution_color)
+                draw.text((attribution_x, attribution_y), attribution_text,
+                         font=attribution_font, fill=self.attribution_color)
 
             # Save PNG with transparency
             img.save(output_path, 'PNG', optimize=True)
@@ -271,6 +344,8 @@ class FSQPNGRenderer:
 
         except Exception as e:
             print(f"      ❌ Error rendering quote: {e}")
+            import traceback
+            traceback.print_exc()
             self.error_count += 1
             return False
 
@@ -282,8 +357,13 @@ class FSQPNGRenderer:
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            quotes = data.get('quotes', [])
-            metadata = data.get('metadata', {})
+            # Support both formats: {"quotes": [...]} and direct list [...]
+            if isinstance(data, list):
+                quotes = data
+            else:
+                quotes = data.get('quotes', [])
+
+            metadata = data.get('metadata', {}) if isinstance(data, dict) else {}
 
             print(f"📊 Found {len(quotes)} quotes to render")
             print(f"📁 Output directory: {output_dir}")
@@ -300,8 +380,8 @@ class FSQPNGRenderer:
                 print(f"\n🎨 Rendering quote {i}/{len(quotes)}")
 
                 # Generate output filename
-                slug = quote_data.get('slug', f'quote_{i}')
-                clean_slug = re.sub(r'[^\w\-]', '', slug.replace(' ', '-'))
+                slug = quote_data.get('slug', quote_data.get('id', f'quote_{i}'))
+                clean_slug = re.sub(r'[^\w\-]', '', str(slug).replace(' ', '-'))
                 output_filename = f"fsq_{clean_slug}.png"
                 output_path = output_dir / output_filename
 
@@ -317,6 +397,8 @@ class FSQPNGRenderer:
 
         except Exception as e:
             print(f"❌ Error processing JSON file: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def process_episode(self, episode_number: str, output_dir: Optional[Path] = None) -> bool:
@@ -355,6 +437,35 @@ class FSQPNGRenderer:
 
         return success
 
+    def render_single(
+        self,
+        quote_text: str,
+        attribution: str,
+        output_path: Path,
+        slug: str = "quote",
+        alignment: str = "center"
+    ) -> bool:
+        """
+        Render a single quote directly without JSON file.
+
+        Args:
+            quote_text: The quote text to render
+            attribution: Attribution/source text
+            output_path: Path to save the PNG
+            slug: Identifier for logging
+            alignment: Text alignment (left, center, right)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        quote_data = {
+            "slug": slug,
+            "text": quote_text,
+            "attribution": attribution,
+            "metadata": {"align": alignment}
+        }
+        return self.render_quote_png(quote_data, output_path)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -362,16 +473,27 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Basic usage
   python render_fsq_png.py --episode=0241
   python render_fsq_png.py --json="fsq_quotes_0241.json"
+
+  # Custom output directory
   python render_fsq_png.py --json="file.json" --output="custom_output_dir"
 
-Features:
-  - Transparent background for video compositing
-  - 80% height black overlay with 75% opacity
-  - Helvetica font with automatic sizing
-  - User-specified text alignment
-  - Smart attribution placement
+  # Custom styling (serif font, 85% opacity overlay)
+  python render_fsq_png.py --json="file.json" --font-family=serif --box-opacity=85
+
+  # Legacy style (matches old render_single_quote.py)
+  python render_fsq_png.py --json="file.json" --font-family=serif --box-height=80 --box-opacity=85 --line-spacing=40 --attribution-size=32
+
+Style Parameters:
+  --font-family      Font family: 'sans-serif' (default) or 'serif'
+  --box-height       Black overlay height as % of canvas (default: 80)
+  --box-opacity      Black overlay opacity as % (default: 75)
+  --line-spacing     Line spacing as % of font size (default: 30)
+  --attribution-size Fixed attribution font size in px, or 'auto' (default: auto)
+  --min-font-size    Minimum quote font size in px (default: 12)
+  --max-font-size    Maximum quote font size in px (default: 200)
         """
     )
 
@@ -407,15 +529,91 @@ Features:
         help='Image height in pixels (default: 1080)'
     )
 
+    # Style parameters
+    parser.add_argument(
+        '--font-family',
+        type=str,
+        choices=['sans-serif', 'serif'],
+        default='sans-serif',
+        help='Font family (default: sans-serif)'
+    )
+
+    parser.add_argument(
+        '--box-height',
+        type=int,
+        default=80,
+        help='Black overlay height as %% of canvas height (default: 80)'
+    )
+
+    parser.add_argument(
+        '--box-opacity',
+        type=int,
+        default=75,
+        help='Black overlay opacity as %% (default: 75)'
+    )
+
+    parser.add_argument(
+        '--line-spacing',
+        type=int,
+        default=30,
+        help='Line spacing as %% of font size (default: 30)'
+    )
+
+    parser.add_argument(
+        '--attribution-size',
+        type=str,
+        default='auto',
+        help='Attribution font size in px, or "auto" (default: auto)'
+    )
+
+    parser.add_argument(
+        '--min-font-size',
+        type=int,
+        default=12,
+        help='Minimum quote font size in px (default: 12)'
+    )
+
+    parser.add_argument(
+        '--max-font-size',
+        type=int,
+        default=200,
+        help='Maximum quote font size in px (default: 200)'
+    )
+
     args = parser.parse_args()
+
+    # Parse attribution size with error handling
+    if args.attribution_size == 'auto':
+        attribution_size = None
+    else:
+        try:
+            attribution_size = int(args.attribution_size)
+        except ValueError:
+            print(f"❌ Invalid attribution-size: '{args.attribution_size}'. Use a number or 'auto'.")
+            sys.exit(1)
 
     print("🎨 FSQ PNG Renderer - Show-Build Tools")
     print("=" * 60)
     print(f"📐 Output resolution: {args.width}x{args.height}")
     print(f"📁 Episodes path: {EPISODES_ROOT}")
+    print(f"🔤 Font family: {args.font_family}")
+    print(f"📦 Box height: {args.box_height}%")
+    print(f"🌫️  Box opacity: {args.box_opacity}%")
+    print(f"↕️  Line spacing: {args.line_spacing}%")
+    print(f"📝 Attribution size: {args.attribution_size}")
     print()
 
-    renderer = FSQPNGRenderer(width=args.width, height=args.height)
+    renderer = FSQPNGRenderer(
+        width=args.width,
+        height=args.height,
+        font_family=args.font_family,
+        box_height=args.box_height,
+        box_opacity=args.box_opacity,
+        line_spacing=args.line_spacing,
+        attribution_size=attribution_size,
+        min_font_size=args.min_font_size,
+        max_font_size=args.max_font_size
+    )
     renderer.episodes_root = EPISODES_ROOT
 
     try:

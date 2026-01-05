@@ -72,16 +72,16 @@ defineExpose({
   position: fixed;
   /* Position set dynamically via inline styles */
   z-index: 99999; /* Above everything including modals and their overlays */
-  min-width: 800px;
-  max-width: 1400px;
-  padding: 32px 48px;
-  border-radius: 16px;
+  min-width: 400px;
+  max-width: 700px;
+  padding: 16px 24px;
+  border-radius: 8px;
   /* High contrast box with dark background and colored left border */
   background: linear-gradient(135deg, rgba(30, 30, 30, 0.98), rgba(20, 20, 20, 0.98));
-  border-left: 8px solid var(--notification-color, #2196F3);
+  border-left: 4px solid var(--notification-color, #2196F3);
   box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.5),
-    0 16px 48px rgba(0, 0, 0, 0.4),
+    0 4px 12px rgba(0, 0, 0, 0.5),
+    0 8px 24px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
   pointer-events: none;
@@ -90,7 +90,7 @@ defineExpose({
 
 .notification-content {
   color: #ffffff;
-  font-size: 28px;
+  font-size: 14px;
   font-weight: 600;
   text-align: left;
   letter-spacing: 0.02em;
@@ -101,19 +101,19 @@ defineExpose({
 
 .notification-content :deep(small) {
   display: block;
-  font-size: 20px;
+  font-size: 10px;
   font-weight: 400;
   opacity: 0.85;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
-/* Drop down from top, pause, then fall with gravity */
+/* Drop down from top, pause, then slide back up */
 .notification-slide-enter-active {
   animation: notificationDropIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .notification-slide-leave-active {
-  animation: notificationFallOut 0.8s cubic-bezier(0.55, 0.085, 0.68, 0.53);
+  animation: notificationSlideUp 0.5s cubic-bezier(0.4, 0.0, 0.2, 1);
 }
 
 @keyframes notificationDropIn {
@@ -127,41 +127,37 @@ defineExpose({
   }
 }
 
-/* Fall with gravity acceleration (ease-in = acceleration) */
-@keyframes notificationFallOut {
+/* Slide back up (reverse of drop in) */
+@keyframes notificationSlideUp {
   0% {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
   }
-  20% {
-    opacity: 1;
-    transform: translateX(-50%) translateY(20px);
-  }
   100% {
     opacity: 0;
-    transform: translateX(-50%) translateY(calc(100vh + 200px));
+    transform: translateX(-50%) translateY(-150px);
   }
 }
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .standard-notification {
-    min-width: 250px;
+    min-width: 125px;
     max-width: 90vw;
-    padding: 12px 20px;
+    padding: 6px 10px;
     top: 70px;
   }
 
   .notification-content {
-    font-size: 14px;
+    font-size: 12px;
   }
 }
 
 @media (max-width: 480px) {
   .standard-notification {
-    min-width: 200px;
+    min-width: 100px;
     max-width: 95vw;
-    padding: 10px 16px;
+    padding: 5px 8px;
     top: 60px;
   }
 

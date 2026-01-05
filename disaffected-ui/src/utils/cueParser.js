@@ -328,6 +328,19 @@ export class CueParser {
   static formatForCard(cueData) {
     if (!cueData) return null;
 
+    // Parse thumbnailOptions if it's a JSON string
+    let thumbnailOptions = null;
+    if (cueData.thumbnailOptions) {
+      try {
+        thumbnailOptions = typeof cueData.thumbnailOptions === 'string'
+          ? JSON.parse(cueData.thumbnailOptions)
+          : cueData.thumbnailOptions;
+      } catch (e) {
+        console.warn('Failed to parse thumbnailOptions:', e);
+        thumbnailOptions = null;
+      }
+    }
+
     return {
       id: `cue-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       type: cueData.type,
@@ -336,7 +349,13 @@ export class CueParser {
       assetId: cueData.assetId || cueData.assetid, // Check both camelCase and lowercase
       slug: cueData.slug,
       description: cueData.description,
-      mediaUrl: cueData.mediaUrl,
+      mediaUrl: cueData.mediaUrl || cueData.mediaurl, // Check both camelCase and lowercase (MediaURL -> mediaurl)
+      thumbnailUrl: cueData.thumbnailUrl,  // SOT thumbnail (primary)
+      thumbnailOptions: thumbnailOptions,   // All 15 thumbnail URLs as array
+      audioUrl: cueData.audioUrl,          // SOT audio
+      processingStatus: cueData.processingStatus, // SOT processing status
+      transcription: cueData.transcription, // SOT transcription text
+      outcue: cueData.outcue, // SOT outcue (last 5 words of transcription)
       imageSrc: cueData.imageSrc,
       imageTag: cueData.imageTag,
       duration: cueData.duration,
@@ -346,6 +365,7 @@ export class CueParser {
       analysisState: cueData.analysisState,
       analysisField: cueData.analysisField,
       analysisRecommendations: cueData.analysisRecommendations,
+      enumerator: cueData.enumerator,  // Enumeration number for display
       rawData: cueData
     };
   }

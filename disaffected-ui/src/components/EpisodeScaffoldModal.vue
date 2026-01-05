@@ -70,12 +70,49 @@
                 <template v-slot:item="{ props, item }">
                   <v-list-item v-bind="props" :subtitle="item.raw.description">
                     <template v-slot:prepend>
-                      <v-chip 
-                        v-if="item.raw.is_default" 
-                        size="x-small" 
+                      <v-chip
+                        v-if="item.raw.is_default"
+                        size="x-small"
                         color="primary"
                       >
                         DEFAULT
+                      </v-chip>
+                    </template>
+                  </v-list-item>
+                </template>
+              </v-select>
+            </v-col>
+          </v-row>
+
+          <!-- Rundown Template Selection -->
+          <v-row>
+            <v-col cols="12">
+              <v-select
+                v-model="selectedRundownTemplate"
+                :items="rundownTemplates"
+                item-title="name"
+                item-value="id"
+                label="Rundown Template"
+                hint="Optional - pre-populate rundown with template items"
+                persistent-hint
+                :loading="loadingRundownTemplates"
+                :disabled="!selectedTemplate"
+                clearable
+              >
+                <template v-slot:item="{ props, item }">
+                  <v-list-item v-bind="props" :subtitle="item.raw.description">
+                    <template v-slot:prepend>
+                      <v-chip
+                        v-if="item.raw.is_default"
+                        size="x-small"
+                        color="primary"
+                      >
+                        DEFAULT
+                      </v-chip>
+                    </template>
+                    <template v-slot:append>
+                      <v-chip size="small" variant="outlined">
+                        {{ item.raw.items?.length || 0 }} items
                       </v-chip>
                     </template>
                   </v-list-item>
@@ -249,12 +286,14 @@ const dialog = ref(false)
 const formValid = ref(false)
 const creating = ref(false)
 const loadingTemplates = ref(false)
+const loadingRundownTemplates = ref(false)
 const loadingNextNumber = ref(false)
 const checkingNumber = ref(false)
 
 // Form data
 const episodeNumber = ref('')
 const selectedTemplate = ref(null)
+const selectedRundownTemplate = ref(null)
 const episodeTitle = ref('')
 const episodeDescription = ref('')
 const episodeDuration = ref('01:00:00')
@@ -264,6 +303,7 @@ const numberAvailable = ref(null)
 
 // Templates data
 const templates = ref([])
+const rundownTemplates = ref([])
 
 // Form validation
 const episodeNumberRules = [
@@ -309,12 +349,12 @@ const loadTemplates = async () => {
     loadingTemplates.value = true
     const response = await axios.get('/api/episodes/templates')
     templates.value = response.data
-    
+
     // Auto-select default template and set duration
     const defaultTemplate = templates.value.find(t => t.is_default)
     if (defaultTemplate) {
       selectedTemplate.value = defaultTemplate.id
-      
+
       // Set duration from template metadata
       if (defaultTemplate.template_metadata?.duration) {
         episodeDuration.value = defaultTemplate.template_metadata.duration
@@ -324,6 +364,38 @@ const loadTemplates = async () => {
     console.error('Error loading templates:', error)
   } finally {
     loadingTemplates.value = false
+  }
+}
+
+const loadRundownTemplates = async (episodeTemplateId) => {
+  if (!episodeTemplateId) {
+    rundownTemplates.value = []
+    selectedRundownTemplate.value = null
+    return
+  }
+
+  try {
+    loadingRundownTemplates.value = true
+    const response = await axios.get('/api/rundown-templates/', {
+      params: {
+        episode_template_id: episodeTemplateId,
+        is_active: true
+      }
+    })
+    rundownTemplates.value = response.data
+
+    // Auto-select default rundown template
+    const defaultRundownTemplate = rundownTemplates.value.find(t => t.is_default)
+    if (defaultRundownTemplate) {
+      selectedRundownTemplate.value = defaultRundownTemplate.id
+    } else {
+      selectedRundownTemplate.value = null
+    }
+  } catch (error) {
+    console.error('Error loading rundown templates:', error)
+    rundownTemplates.value = []
+  } finally {
+    loadingRundownTemplates.value = false
   }
 }
 
@@ -361,13 +433,14 @@ const checkEpisodeNumber = async () => {
 
 const createEpisode = async () => {
   if (!formValid.value || creating.value) return
-  
+
   try {
     creating.value = true
-    
+
     const payload = {
       episode_number: episodeNumber.value || undefined,
       template_id: selectedTemplate.value,
+      rundown_template_id: selectedRundownTemplate.value || undefined,
       title: episodeTitle.value || undefined,
       description: episodeDescription.value || undefined,
       episode_metadata: {
@@ -376,29 +449,29 @@ const createEpisode = async () => {
         is_dummy: isDummy.value
       }
     }
-    
+
     const response = await axios.post('/api/episodes/create', payload)
     const createdEpisode = response.data
-    
+
     // Emit success event
     emit('episode-created', createdEpisode)
-    
+
     // Show success message
     console.log(`Episode ${createdEpisode.episode_number} created successfully!`)
-    
+
     // Navigate to the new episode
     router.push(`/content-editor/${createdEpisode.episode_number}`)
-    
+
     // Close dialog
     closeDialog()
-    
+
   } catch (error) {
     console.error('Error creating episode:', error)
-    
+
     // Show error message
     const errorMessage = error.response?.data?.detail || 'Failed to create episode'
     alert(`Error: ${errorMessage}`)
-    
+
   } finally {
     creating.value = false
   }
@@ -409,21 +482,28 @@ const closeDialog = () => {
   // Reset form
   episodeNumber.value = ''
   selectedTemplate.value = null
+  selectedRundownTemplate.value = null
   episodeTitle.value = ''
   episodeDescription.value = ''
   episodeDuration.value = '01:00:00'
   airDate.value = ''
   isDummy.value = false
   numberAvailable.value = null
+  rundownTemplates.value = []
 }
 
-// Watch for template change to update duration
+// Watch for template change to update duration and load rundown templates
 watch(selectedTemplate, (newTemplateId) => {
   if (newTemplateId) {
     const template = templates.value.find(t => t.id === newTemplateId)
     if (template?.template_metadata?.duration) {
       episodeDuration.value = template.template_metadata.duration
     }
+    // Load rundown templates for the selected episode template
+    loadRundownTemplates(newTemplateId)
+  } else {
+    rundownTemplates.value = []
+    selectedRundownTemplate.value = null
   }
 })
 
