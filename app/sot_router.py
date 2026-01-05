@@ -284,6 +284,40 @@ async def process_sot_multi_phase_endpoint(
                 detail=f"Job is in status '{job.status}', expected 'uploaded'"
             )
 
+        # CRITICAL FIX: Verify upload file exists before submitting to Celery
+        # Prevents race condition where file hasn't fully synced to NFS
+        from pathlib import Path
+        working_dir = Path("/mnt/sync/shared_media/preproc/working") / request.temp_job_id
+        upload_file = working_dir / f"{request.temp_job_id}_upload.mp4"
+
+        if not working_dir.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Working directory not found: {working_dir}. Background upload may have failed."
+            )
+
+        if not upload_file.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Upload file not found: {upload_file}. Background upload may still be in progress or failed."
+            )
+
+        file_size = upload_file.stat().st_size
+        if file_size == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Upload file is empty (0 bytes). Please re-upload the video."
+            )
+
+        # Minimum file size sanity check (1KB)
+        if file_size < 1024:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Upload file too small ({file_size} bytes). File may be corrupted."
+            )
+
+        logger.info(f"✅ Upload file verified: {upload_file} ({file_size:,} bytes)")
+
         # Create source AssetID for parent/child architecture
         # Source AssetID stores the original uploaded video
         source_asset_id = f"{request.asset_id}-src" if request.asset_id else None
@@ -462,6 +496,19 @@ async def retry_failed_job(
         job.status = 'processing'
         job.error_message = None
 
+        # CRITICAL FIX: Verify upload file still exists before retry
+        from pathlib import Path
+        working_dir = Path("/mnt/sync/shared_media/preproc/working") / temp_job_id
+        upload_file = working_dir / f"{temp_job_id}_upload.mp4"
+
+        if not upload_file.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Upload file no longer exists: {upload_file}. Cannot retry - please re-upload."
+            )
+
+        logger.info(f"✅ Retry file verified: {upload_file}")
+
         # Resubmit to Celery
         task = process_sot_video_multi_phase.apply_async(
             args=[
@@ -631,6 +678,8 @@ async def get_job_status_by_asset_id(
             "episode": job.episode,
             "transcription": job.transcription,
             "final_video_path": job.final_video_path,
+            "final_thumbnail_path": job.final_thumbnail_path,
+            "thumbnail_candidates": job.thumbnail_candidates,
             "source_asset_id": job.source_asset_id,
             "final_asset_id": job.final_asset_id
         }
@@ -783,8 +832,14 @@ async def reprocess_sot_by_asset_id(
                 "next_steps": "Original video file not found. Please re-upload video using SOT modal."
             }
 
-        # Create new processing job
+        # Create new processing job with NEW working directory
         new_temp_job_id = f"sot_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+
+        # CRITICAL: Create a NEW working directory for the new temp_job_id
+        # The worker expects: /shared_media/preproc/working/{temp_job_id}/{temp_job_id}_upload.mp4
+        new_working_dir = Path("/shared_media") / "preproc" / "working" / new_temp_job_id
+        new_working_dir.mkdir(parents=True, exist_ok=True)
+
         new_job = SOTProcessingJob(
             temp_job_id=new_temp_job_id,
             episode=episode,
@@ -792,14 +847,31 @@ async def reprocess_sot_by_asset_id(
             asset_id=asset_id,
             status='processing',
             current_phase='phase0',
-            working_directory=str(Path(uploaded_video_path).parent)
+            working_directory=str(new_working_dir)
         )
         db.add(new_job)
 
-        # Copy the uploaded video to new job name
-        new_upload_path = Path(uploaded_video_path).parent / f"{new_temp_job_id}_upload.mp4"
+        # Copy the uploaded video to the NEW working directory with correct filename
+        new_upload_path = new_working_dir / f"{new_temp_job_id}_upload.mp4"
         if not new_upload_path.exists():
             shutil.copy2(uploaded_video_path, new_upload_path)
+            logger.info(f"Copied upload file to new working directory: {new_upload_path}")
+
+        # CRITICAL FIX: Verify copy succeeded before submitting to Celery
+        if not new_upload_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to copy upload file to {new_upload_path}"
+            )
+
+        file_size = new_upload_path.stat().st_size
+        if file_size < 1024:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Copy appears corrupted: {file_size} bytes"
+            )
+
+        logger.info(f"✅ Reprocess file verified: {new_upload_path} ({file_size:,} bytes)")
 
         # Extract metadata from rundown item (trim times, job type, clips if stored)
         import json

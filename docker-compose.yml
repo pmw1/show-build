@@ -29,6 +29,7 @@ services:
       - ACCESS_TOKEN_EXPIRE_MINUTES=2880
       - MEDIA_ROOT=/home
       - REDIS_URL=redis://:showbuild2025@192.168.51.223:6379/0
+      - LLM_STATE_API_KEY=${LLM_STATE_API_KEY:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
@@ -37,7 +38,7 @@ services:
       retries: 3
       start_period: 40s
     depends_on:
-      - mqtt-broker
+      # - mqtt-broker  # Removed 2026-01-01 - MQTT archived (see app/backup/mqtt_archived_2026-01-01/)
       - postgres
 
   postgres:
@@ -90,17 +91,21 @@ services:
       retries: 3
       start_period: 40s
 
-  mqtt-broker:
-    image: eclipse-mosquitto
-    container_name: mqtt-broker
-    networks:
-      - video-post
-    ports:
-      - "1883:1883"
-      - "9001:9001"
-    volumes:
-      # Mount Mosquitto config for remote access
-      - ./tools/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+  # mqtt-broker service removed 2026-01-01 - archived in app/backup/mqtt_archived_2026-01-01/
+  # All async task processing now handled by Celery + Redis (see app/celery_app.py)
+  # To restore: uncomment this service and update server depends_on above
+  #
+  # mqtt-broker:
+  #   image: eclipse-mosquitto
+  #   container_name: mqtt-broker
+  #   networks:
+  #     - video-post
+  #   ports:
+  #     - "1883:1883"
+  #     - "9001:9001"
+  #   volumes:
+  #     # Mount Mosquitto config for remote access
+  #     - ./tools/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
 volumes:
   postgres_data:
