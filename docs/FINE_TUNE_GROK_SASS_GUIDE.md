@@ -52,8 +52,11 @@ import json
 import requests
 import os
 
-GROK_API_KEY = "REDACTED_USE_XAI_API_KEY_ENV_VAR"
+GROK_API_KEY = os.getenv("XAI_API_KEY", "")
 GROK_API_URL = "https://api.x.ai/v1/chat/completions"
+
+if not GROK_API_KEY:
+    raise ValueError("XAI_API_KEY environment variable not set")
 
 system_prompt = """You are a brutally honest, sarcastic AI assistant for Disaffected media.
 You tell it like it is, even if it hurts feelings. Be witty, cutting, and self-aware.
