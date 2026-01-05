@@ -11,15 +11,21 @@ Cross-Platform Support:
 """
 
 import os
+import sys
 import subprocess
 import platform
 import requests
 import uuid
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from celery import shared_task
 from celery.utils.log import get_task_logger
 from sqlalchemy import func
+
+# Ensure /app is in Python path
+if '/app' not in sys.path:
+    sys.path.insert(0, '/app')
 
 # Cross-platform utilities
 from platform_utils import (
@@ -31,6 +37,155 @@ from platform_utils import (
 )
 
 logger = get_task_logger(__name__)
+
+
+@contextmanager
+def db_session():
+    """
+    Database session context manager for safe session handling.
+
+    CRITICAL FIX: Ensures database connections are always properly closed,
+    preventing connection pool exhaustion and leaked sessions.
+
+    Usage:
+        with db_session() as db:
+            job = db.query(SOTProcessingJob).filter_by(id=123).first()
+            job.status = 'completed'
+            db.commit()
+
+    The session is automatically closed on exit, even if an exception occurs.
+    """
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        yield db
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Database error (rolled back): {str(e)}")
+        raise
+    finally:
+        db.close()
+
+
+def transcribe_audio_simple(audio_path: str, max_retries: int = 3) -> str:
+    """
+    Transcription function for Celery workers with retry logic.
+    Uses Whisper server via HTTP - no FastAPI dependencies required.
+
+    CRITICAL FIX: Added exponential backoff retry logic to improve reliability.
+
+    Tries multiple Whisper servers with retries:
+    1. whisper-medium on Kairo (192.168.51.197:8887)
+    2. openwebui-whisper-api fallback (192.168.51.197:8886)
+
+    Retry strategy: Exponential backoff (1s, 2s, 4s) between attempts.
+
+    Args:
+        audio_path: Path to the audio file to transcribe
+        max_retries: Maximum number of retry attempts (default 3)
+
+    Returns:
+        str: Transcription text
+
+    Raises:
+        Exception: If all servers and retries fail
+    """
+    import httpx
+    import time
+
+    whisper_servers = [
+        {
+            "name": "whisper-medium",
+            "url": "http://192.168.51.197:8887/v1/audio/transcriptions",
+            "timeout": 120.0
+        },
+        {
+            "name": "openwebui-whisper-api",
+            "url": "http://192.168.51.197:8886/v1/audio/transcriptions",
+            "timeout": 180.0
+        }
+    ]
+
+    last_error = None
+    total_attempts = 0
+
+    for attempt in range(max_retries):
+        # Exponential backoff: 0s, 1s, 2s, 4s...
+        if attempt > 0:
+            backoff_delay = 2 ** (attempt - 1)
+            logger.info(f"⏳ Whisper retry attempt {attempt + 1}/{max_retries}, waiting {backoff_delay}s...")
+            time.sleep(backoff_delay)
+
+        for server in whisper_servers:
+            total_attempts += 1
+            try:
+                logger.info(f"🎤 Attempting transcription with {server['name']} (attempt {attempt + 1}/{max_retries})")
+
+                with open(audio_path, 'rb') as audio_file:
+                    files = {'file': (Path(audio_path).name, audio_file, 'audio/mpeg')}
+                    data = {
+                        'model': 'whisper-1',
+                        'response_format': 'text',
+                        'language': 'en'
+                    }
+
+                    # Use httpx for the request
+                    with httpx.Client(timeout=server['timeout']) as client:
+                        response = client.post(server['url'], files=files, data=data)
+
+                    if response.status_code == 200:
+                        transcript = response.text.strip()
+                        logger.info(f"✅ Transcription successful: {len(transcript)} chars (after {total_attempts} attempts)")
+                        return transcript
+                    else:
+                        last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                        logger.warning(f"❌ {server['name']} failed: {last_error}")
+
+            except httpx.TimeoutException as e:
+                last_error = f"Timeout after {server['timeout']}s"
+                logger.warning(f"⏱️ {server['name']} timeout: {last_error}")
+                continue
+            except httpx.ConnectError as e:
+                last_error = f"Connection failed: {str(e)}"
+                logger.warning(f"🔌 {server['name']} connection error: {last_error}")
+                continue
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"❌ {server['name']} error: {last_error}")
+                continue
+
+    # All retries exhausted
+    error_msg = f"All Whisper servers failed after {total_attempts} total attempts. Last error: {last_error}"
+    logger.error(f"🚨 {error_msg}")
+    raise Exception(error_msg)
+
+
+def derive_outcue(transcription: str, word_count: int = 5) -> str:
+    """
+    Derive outcue from transcription - last N words with "..." prefix.
+
+    Args:
+        transcription: Full transcription text
+        word_count: Number of words to include (default 5)
+
+    Returns:
+        str: Outcue in format "...last five words here"
+    """
+    if not transcription or transcription.startswith('['):
+        # No valid transcription or error message
+        return ""
+
+    # Clean up the transcription and split into words
+    words = transcription.strip().split()
+
+    if len(words) <= word_count:
+        # If transcription is shorter than word_count, use all words
+        return "..." + " ".join(words)
+
+    # Get last N words
+    last_words = words[-word_count:]
+    return "..." + " ".join(last_words)
+
 
 # Notification helper
 def send_notification(title: str, message: str, priority: str = "normal", task_id: str = None):
@@ -50,10 +205,16 @@ def send_notification(title: str, message: str, priority: str = "normal", task_i
         }
 
         # Send to API
+        # CRITICAL FIX: Use environment variable for API key (security)
+        llm_state_api_key = os.getenv("LLM_STATE_API_KEY", "")
+        if not llm_state_api_key:
+            logger.warning("LLM_STATE_API_KEY not set, skipping notification")
+            return
+
         response = requests.post(
             "http://192.168.51.210:8888/llm-state/notifications",
             json={"notifications": [notif_data]},
-            headers={"X-API-Key": "FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY"},
+            headers={"X-API-Key": llm_state_api_key},
             timeout=3
         )
 
@@ -118,7 +279,7 @@ def process_sot_video(
 
         # Create output directory structure (cross-platform)
         media_root = get_media_root()
-        episode_dir = media_root / "episodes" / episode / "assets" / "sots"
+        episode_dir = media_root / "episodes" / episode / "assets" / "video"
         episode_dir.mkdir(parents=True, exist_ok=True)
 
         base_name = f"{slug}"
@@ -271,7 +432,12 @@ def process_sot_video(
         }
 
     except subprocess.CalledProcessError as e:
-        error_msg = e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else str(e)
+        # CRITICAL FIX: Properly extract FFmpeg stderr for debugging
+        # stderr is bytes when capture_output=True without text=True
+        if hasattr(e, 'stderr') and e.stderr:
+            error_msg = e.stderr.decode('utf-8', errors='replace') if isinstance(e.stderr, bytes) else str(e.stderr)
+        else:
+            error_msg = f"Exit code {e.returncode}: {str(e)}"
         logger.error(f"FFmpeg error: {error_msg}")
         send_notification(
             f"❌ SOT Processing Failed",
@@ -414,14 +580,19 @@ def process_vo_montage(
             trimmed_clip_path = temp_dir / f"clip_{idx:03d}.mp4"
 
             # Trim the clip using FFmpeg
+            # Determine video encoder based on platform
+            from platform_utils import IS_WINDOWS, has_nvidia_gpu
+            if IS_WINDOWS and has_nvidia_gpu():
+                video_encoder_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
+            else:
+                video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "23"]
+
             trim_cmd = [
                 ffmpeg, "-y",
                 "-ss", str(start_sec),
                 "-i", str(video_path),
                 "-t", str(clip_duration),
-                "-c:v", "h264_nvenc",
-                "-preset", "p4",
-                "-cq", "23",
+                *video_encoder_args,
                 "-c:a", "aac",
                 "-b:a", "192k",
                 str(trimmed_clip_path)
@@ -496,7 +667,12 @@ def process_vo_montage(
         }
 
     except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg error during montage: {e.stderr if hasattr(e, 'stderr') else str(e)}")
+        # CRITICAL FIX: Properly extract FFmpeg stderr for debugging
+        if hasattr(e, 'stderr') and e.stderr:
+            stderr_text = e.stderr.decode('utf-8', errors='replace') if isinstance(e.stderr, bytes) else str(e.stderr)
+        else:
+            stderr_text = f"Exit code {e.returncode}"
+        logger.error(f"FFmpeg error during montage: {stderr_text}")
         # Clean up on error
         if 'temp_dir' in locals() and temp_dir.exists():
             import shutil
@@ -514,18 +690,16 @@ def process_vo_montage(
 def _update_job_status(temp_job_id: str, phase: str, status: str, error_message: str = None):
     """Update job status in database (helper function for multi-phase processing)."""
     try:
-        from database import SessionLocal
         from models_v2 import SOTProcessingJob
 
-        db = SessionLocal()
-        job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
-        if job:
-            job.current_phase = phase
-            job.status = status
-            if error_message:
-                job.error_message = error_message
-            db.commit()
-        db.close()
+        with db_session() as db:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.current_phase = phase
+                job.status = status
+                if error_message:
+                    job.error_message = error_message
+                db.commit()
     except Exception as e:
         logger.error(f"Failed to update job status: {e}")
 
@@ -559,64 +733,63 @@ def _replace_sot_cue_asset_id(episode: str, old_asset_id: str, new_asset_id: str
         new_asset_id: New final AssetID to replace it with
     """
     try:
-        from database import SessionLocal
-        from models_v2 import Rundown, RundownItem
+        from models_v2 import Rundown, RundownItem, Episode
         import re
 
-        db = SessionLocal()
-
-        # Find the rundown for this episode
-        rundown = db.query(Rundown).filter_by(episode_number=episode).first()
-        if not rundown:
-            logger.warning(f"No rundown found for episode {episode}")
-            db.close()
-            return
-
-        # Search all rundown items for SOT cue with matching AssetID
-        items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
-
-        for item in items:
-            if not item.script_content:
-                continue
-
-            # Look for SOT cue block with matching AssetID
-            cue_pattern = re.compile(
-                r'(<!-- Begin Cue -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(old_asset_id) + r'\].*?<!-- End Cue -->)',
-                re.DOTALL
-            )
-
-            match = cue_pattern.search(item.script_content)
-            if match:
-                cue_block = match.group(1)
-
-                # Replace old AssetID with new one
-                updated_cue = cue_block.replace(
-                    f'[AssetID: {old_asset_id}]',
-                    f'[AssetID: {new_asset_id}]'
-                )
-
-                # Also add SourceAssetID field to preserve reference
-                if '[SourceAssetID:' not in updated_cue:
-                    updated_cue = updated_cue.replace(
-                        f'[AssetID: {new_asset_id}]',
-                        f'[AssetID: {new_asset_id}]\n[SourceAssetID: {old_asset_id}]'
-                    )
-
-                # Replace in script_content
-                item.script_content = item.script_content.replace(cue_block, updated_cue)
-                db.commit()
-
-                logger.info(f"✅ Replaced AssetID in cue: {old_asset_id} → {new_asset_id}")
-                db.close()
+        with db_session() as db:
+            # Find the rundown for this episode by joining with Episode
+            rundown = db.query(Rundown).join(Episode).filter(Episode.episode_number == episode).first()
+            if not rundown:
+                logger.warning(f"No rundown found for episode {episode}")
                 return
 
-        logger.warning(f"No SOT cue found with AssetID {old_asset_id} in episode {episode}")
-        db.close()
+            # Search all rundown items for SOT cue with matching AssetID
+            items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
+
+            for item in items:
+                if not item.script_content:
+                    continue
+
+                # Look for SOT cue block with matching AssetID (case-insensitive)
+                cue_pattern = re.compile(
+                    r'(<!-- Begin Cue -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
+                    re.DOTALL | re.IGNORECASE
+                )
+                asset_pattern = re.compile(r'\[Asset[Ii][Dd]:\s*' + re.escape(old_asset_id) + r'\s*\]', re.IGNORECASE)
+
+                for match in cue_pattern.finditer(item.script_content):
+                    cue_block = match.group(1)
+
+                    # Check if this cue block contains our asset_id
+                    if not asset_pattern.search(cue_block):
+                        continue
+
+                    # Replace old AssetID with new one (case-insensitive)
+                    updated_cue = re.sub(
+                        r'\[Asset[Ii][Dd]:\s*' + re.escape(old_asset_id) + r'\s*\]',
+                        f'[AssetID: {new_asset_id}]',
+                        cue_block,
+                        flags=re.IGNORECASE
+                    )
+
+                    # Also add SourceAssetID field to preserve reference
+                    if '[SourceAssetID:' not in updated_cue.lower():
+                        updated_cue = updated_cue.replace(
+                            f'[AssetID: {new_asset_id}]',
+                            f'[AssetID: {new_asset_id}]\n[SourceAssetID: {old_asset_id}]'
+                        )
+
+                    # Replace in script_content
+                    item.script_content = item.script_content.replace(cue_block, updated_cue)
+                    db.commit()
+
+                    logger.info(f"✅ Replaced AssetID in cue: {old_asset_id} → {new_asset_id}")
+                    return
+
+            logger.warning(f"No SOT cue found with AssetID {old_asset_id} in episode {episode}")
 
     except Exception as e:
         logger.error(f"Failed to replace SOT cue AssetID: {e}")
-        if 'db' in locals():
-            db.close()
 
 
 def _update_sot_cue_block(episode: str, slug: str, asset_id: str, updates: dict):
@@ -630,65 +803,66 @@ def _update_sot_cue_block(episode: str, slug: str, asset_id: str, updates: dict)
         updates: Dict of fields to update (e.g., {'MediaURL': '/path/to/video.mp4', 'Status': 'Phase 2'})
     """
     try:
-        from database import SessionLocal
-        from models_v2 import Rundown, RundownItem
+        from models_v2 import Rundown, RundownItem, Episode
         import re
 
-        db = SessionLocal()
-
-        # Find the rundown for this episode
-        rundown = db.query(Rundown).filter_by(episode_number=episode).first()
-        if not rundown:
-            logger.warning(f"No rundown found for episode {episode}")
-            db.close()
-            return
-
-        # Search all rundown items for SOT cue with matching AssetID
-        items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
-
-        for item in items:
-            if not item.script_content:
-                continue
-
-            # Look for SOT cue block with matching AssetID
-            cue_pattern = re.compile(
-                r'(<!-- Begin Cue -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(asset_id) + r'\].*?<!-- End Cue -->)',
-                re.DOTALL
-            )
-
-            match = cue_pattern.search(item.script_content)
-            if match:
-                cue_block = match.group(1)
-                updated_cue = cue_block
-
-                # Update each field in the cue block
-                for field, value in updates.items():
-                    # Check if field exists, update it
-                    field_pattern = re.compile(rf'\[{field}: [^\]]*\]')
-                    if field_pattern.search(updated_cue):
-                        updated_cue = field_pattern.sub(f'[{field}: {value}]', updated_cue)
-                    else:
-                        # Add new field before <!-- End Cue -->
-                        updated_cue = updated_cue.replace(
-                            '<!-- End Cue -->',
-                            f'[{field}: {value}]\n<!-- End Cue -->'
-                        )
-
-                # Replace in script_content
-                item.script_content = item.script_content.replace(cue_block, updated_cue)
-                db.commit()
-
-                logger.info(f"Updated SOT cue block in item {item.id} for AssetID {asset_id}")
-                db.close()
+        with db_session() as db:
+            # Find the rundown for this episode by joining with Episode
+            rundown = db.query(Rundown).join(Episode).filter(Episode.episode_number == episode).first()
+            if not rundown:
+                logger.warning(f"No rundown found for episode {episode}")
                 return
 
-        logger.warning(f"No SOT cue found with AssetID {asset_id} in episode {episode}")
-        db.close()
+            # Search all rundown items for SOT cue with matching AssetID
+            items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
+
+            for item in items:
+                if not item.script_content:
+                    continue
+
+                # Look for SOT cue block with matching AssetID (case-insensitive for field names)
+                # The cue block contains [Type: SOT] and [AssetID: xxx] (or [Assetid: xxx]) in any order
+                cue_pattern = re.compile(
+                    r'(<!-- Begin Cue -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
+                    re.DOTALL | re.IGNORECASE
+                )
+                # Find cue blocks and check if they contain our asset_id
+                asset_pattern = re.compile(r'\[Asset[Ii][Dd]:\s*' + re.escape(asset_id) + r'\s*\]', re.IGNORECASE)
+
+                # Find all SOT cue blocks and check each for our asset_id
+                for match in cue_pattern.finditer(item.script_content):
+                    cue_block = match.group(1)
+
+                    # Check if this cue block contains our asset_id
+                    if not asset_pattern.search(cue_block):
+                        continue
+
+                    updated_cue = cue_block
+
+                    # Update each field in the cue block (case-insensitive matching)
+                    for field, value in updates.items():
+                        # Check if field exists (case-insensitive), update it
+                        field_pattern = re.compile(rf'\[{field}:\s*[^\]]*\]', re.IGNORECASE)
+                        if field_pattern.search(updated_cue):
+                            updated_cue = field_pattern.sub(f'[{field}: {value}]', updated_cue)
+                        else:
+                            # Add new field before <!-- End Cue -->
+                            updated_cue = updated_cue.replace(
+                                '<!-- End Cue -->',
+                                f'[{field}: {value}]\n<!-- End Cue -->'
+                            )
+
+                    # Replace in script_content
+                    item.script_content = item.script_content.replace(cue_block, updated_cue)
+                    db.commit()
+
+                    logger.info(f"Updated SOT cue block in item {item.id} for AssetID {asset_id}")
+                    return
+
+            logger.warning(f"No SOT cue found with AssetID {asset_id} in episode {episode}")
 
     except Exception as e:
         logger.error(f"Failed to update SOT cue block: {e}")
-        if 'db' in locals():
-            db.close()
 
 
 def _generate_asset_id() -> str:
@@ -825,13 +999,18 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
     logger.info(f"📊 Clip {clip_index} duration: {duration_formatted}")
 
     # PHASE 1: Video normalization
+    # Determine video encoder based on platform
+    from platform_utils import IS_WINDOWS, has_nvidia_gpu
+    if IS_WINDOWS and has_nvidia_gpu():
+        video_encoder_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
+    else:
+        video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "23"]
+
     phase1_output = working_dir / f"clip{clip_index}_1_normalized.mp4"
     phase1_cmd = [
         ffmpeg, "-y",
         "-i", str(clip_file),
-        "-c:v", "h264_nvenc",
-        "-preset", "p4",
-        "-cq", "23",
+        *video_encoder_args,
         "-r", "29.97",
         "-b:v", "8000k",
         "-c:a", "aac",
@@ -883,12 +1062,15 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
     subprocess.run(mp3_cmd, check=True, capture_output=True)
 
     # PHASE 5: Move to final location (cross-platform)
-    final_dir = media_root / "episodes" / episode / "assets" / "sots"
-    final_dir.mkdir(parents=True, exist_ok=True)
+    # Videos/audio go to assets/video/, thumbnails go to assets/thumbnails/
+    final_video_dir = media_root / "episodes" / episode / "assets" / "video"
+    final_thumb_dir = media_root / "episodes" / episode / "assets" / "thumbnails"
+    final_video_dir.mkdir(parents=True, exist_ok=True)
+    final_thumb_dir.mkdir(parents=True, exist_ok=True)
 
-    final_video = final_dir / f"{normalized_clip_slug}.mp4"
-    final_thumb = final_dir / f"{normalized_clip_slug}-thumb.jpg"
-    final_audio = final_dir / f"{normalized_clip_slug}.mp3"
+    final_video = final_video_dir / f"{normalized_clip_slug}.mp4"
+    final_thumb = final_thumb_dir / f"{normalized_clip_slug}-thumb.jpg"
+    final_audio = final_video_dir / f"{normalized_clip_slug}.mp3"
 
     import shutil
     shutil.move(str(phase3_output), str(final_video))
@@ -900,9 +1082,9 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
     return {
         "asset_id": clip_asset_id,
         "slug": clip_slug,
-        "media_url": f"/episodes/{episode}/assets/sots/{normalized_clip_slug}.mp4",
-        "thumbnail_url": f"/episodes/{episode}/assets/sots/{normalized_clip_slug}-thumb.jpg",
-        "audio_url": f"/episodes/{episode}/assets/sots/{normalized_clip_slug}.mp3",
+        "media_url": f"/episodes/{episode}/assets/video/{normalized_clip_slug}.mp4",
+        "thumbnail_url": f"/episodes/{episode}/assets/thumbnails/{normalized_clip_slug}-thumb.jpg",
+        "audio_url": f"/episodes/{episode}/assets/video/{normalized_clip_slug}.mp3",
         "duration": duration_formatted
     }
 
@@ -926,41 +1108,38 @@ def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
         parent_asset_id: AssetID of the original SOT cue block
     """
     try:
-        from database import SessionLocal
-        from models_v2 import Rundown, RundownItem
+        from models_v2 import Rundown, RundownItem, Episode
         import re
 
-        db = SessionLocal()
+        with db_session() as db:
+            # Find the rundown for this episode by joining with Episode
+            rundown = db.query(Rundown).join(Episode).filter(Episode.episode_number == episode).first()
+            if not rundown:
+                logger.warning(f"No rundown found for episode {episode}")
+                return
 
-        # Find the rundown for this episode
-        rundown = db.query(Rundown).filter_by(episode_number=episode).first()
-        if not rundown:
-            logger.warning(f"No rundown found for episode {episode}")
-            db.close()
-            return
+            # Search all rundown items for parent SOT cue with matching AssetID
+            items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
 
-        # Search all rundown items for parent SOT cue with matching AssetID
-        items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
+            for item in items:
+                if not item.script_content:
+                    continue
 
-        for item in items:
-            if not item.script_content:
-                continue
+                # Look for parent SOT cue block
+                cue_pattern = re.compile(
+                    r'(<!-- Begin Cue -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
+                    re.DOTALL
+                )
 
-            # Look for parent SOT cue block
-            cue_pattern = re.compile(
-                r'(<!-- Begin Cue -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
-                re.DOTALL
-            )
+                match = cue_pattern.search(item.script_content)
+                if match:
+                    parent_cue = match.group(1)
+                    insertion_point = match.end()
 
-            match = cue_pattern.search(item.script_content)
-            if match:
-                parent_cue = match.group(1)
-                insertion_point = match.end()
-
-                # Build cue blocks for each clip
-                new_cues = []
-                for clip in clip_results:
-                    cue_block = f"""
+                    # Build cue blocks for each clip
+                    new_cues = []
+                    for clip in clip_results:
+                        cue_block = f"""
 <!-- Begin Cue -->
 [Type: SOT]
 [AssetID: {clip['asset_id']}]
@@ -973,28 +1152,24 @@ def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
 [Credits: {{}}]
 <!-- End Cue -->
 """
-                    new_cues.append(cue_block)
+                        new_cues.append(cue_block)
 
-                # Insert all new cues after parent cue
-                all_cues = '\n\n'.join(new_cues)
-                item.script_content = (
-                    item.script_content[:insertion_point] +
-                    '\n\n' + all_cues +
-                    item.script_content[insertion_point:]
-                )
+                    # Insert all new cues after parent cue
+                    all_cues = '\n\n'.join(new_cues)
+                    item.script_content = (
+                        item.script_content[:insertion_point] +
+                        '\n\n' + all_cues +
+                        item.script_content[insertion_point:]
+                    )
 
-                db.commit()
-                logger.info(f"✅ Inserted {len(clip_results)} cue blocks after parent {parent_asset_id}")
-                db.close()
-                return
+                    db.commit()
+                    logger.info(f"✅ Inserted {len(clip_results)} cue blocks after parent {parent_asset_id}")
+                    return
 
-        logger.warning(f"Parent SOT cue {parent_asset_id} not found in episode {episode}")
-        db.close()
+            logger.warning(f"Parent SOT cue {parent_asset_id} not found in episode {episode}")
 
     except Exception as e:
         logger.error(f"Failed to insert multiple cue blocks: {e}")
-        if 'db' in locals():
-            db.close()
 
 
 def _process_montage(temp_job_id, episode, slug, clips, asset_id, working_dir, normalized_slug):
@@ -1061,8 +1236,20 @@ def process_sot_video_multi_phase(
         dict: Final file paths, processing metadata, and failure report
     """
     # Cross-platform working directory
+    # shared_media is a sibling of disaffected, not a child
+    # Docker: /shared_media/preproc/working/{job_id}
+    # Linux workers: /mnt/sync/shared_media/preproc/working/{job_id}
+    # Windows workers: W:/mnt/sync/shared_media/preproc/working/{job_id}
     media_root = get_media_root()
-    working_dir = media_root / "shared_media" / "preproc" / "working" / temp_job_id
+    if platform.system() == 'Windows':
+        shared_media_root = Path('W:/mnt/sync/shared_media')
+    elif Path('/shared_media').exists():
+        # Docker container
+        shared_media_root = Path('/shared_media')
+    else:
+        # Linux worker (kairo)
+        shared_media_root = Path('/mnt/sync/shared_media')
+    working_dir = shared_media_root / "preproc" / "working" / temp_job_id
     normalized_slug = _normalize_slug(slug)
 
     # Get platform info for logging
@@ -1074,7 +1261,6 @@ def process_sot_video_multi_phase(
 
         # Initialize failure tracking
         import json
-        from database import SessionLocal
         from models_v2 import SOTProcessingJob  # Speaker now in models_v2, no import order issue
 
         processing_report = {
@@ -1089,16 +1275,13 @@ def process_sot_video_multi_phase(
         }
 
         # Update job record with job_type and clips_data
-        db = SessionLocal()
-        try:
+        with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job:
                 job.job_type = job_type
                 if clips:
                     job.clips_data = json.dumps(clips)
                 db.commit()
-        finally:
-            db.close()
 
         # Route to appropriate processing workflow based on job_type
         if job_type == "single_trim":
@@ -1130,12 +1313,11 @@ def process_sot_video_multi_phase(
             raise FileNotFoundError(f"Upload file not found: {input_file}")
 
         # Copy source video to permanent storage if source asset exists
-        db = SessionLocal()
-        try:
+        with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job and job.source_asset_id:
                 # Create sources directory for original uploads
-                source_dir = media_root / "episodes" / episode / "assets" / "sots" / "sources"
+                source_dir = media_root / "episodes" / episode / "assets" / "video" / "sources"
                 source_dir.mkdir(parents=True, exist_ok=True)
 
                 # Copy uploaded video to source asset location
@@ -1146,8 +1328,6 @@ def process_sot_video_multi_phase(
                     import shutil
                     shutil.copy2(input_file, source_path)
                     logger.info(f"✅ Saved source video: {source_path}")
-        finally:
-            db.close()
 
         # ================================================================
         # PHASE 0: Technical Analysis with FFprobe
@@ -1235,6 +1415,80 @@ def process_sot_video_multi_phase(
 
         logger.info(f"Phase 0 analysis: {width}x{height} {orientation}, {frame_rate}fps, {audio_config}, {duration_formatted}")
 
+        # ================================================================
+        # PRE-PROCESSING VALIDATION
+        # Fail fast on invalid inputs to prevent wasted processing time
+        # ================================================================
+        validation_errors = []
+        validation_warnings = []
+
+        # 1. File size check (max 10GB)
+        MAX_FILE_SIZE_GB = 10
+        file_size_bytes = input_file.stat().st_size
+        file_size_gb = file_size_bytes / (1024 ** 3)
+        if file_size_gb > MAX_FILE_SIZE_GB:
+            validation_errors.append(f"File too large: {file_size_gb:.2f}GB (max {MAX_FILE_SIZE_GB}GB)")
+        elif file_size_gb > MAX_FILE_SIZE_GB * 0.8:
+            validation_warnings.append(f"Large file: {file_size_gb:.2f}GB (may take extended processing time)")
+
+        # 2. Duration check (min 1s, max 1 hour)
+        MIN_DURATION_SECONDS = 1
+        MAX_DURATION_SECONDS = 3600  # 1 hour
+        if duration_seconds < MIN_DURATION_SECONDS:
+            validation_errors.append(f"Video too short: {duration_seconds:.2f}s (min {MIN_DURATION_SECONDS}s)")
+        elif duration_seconds > MAX_DURATION_SECONDS:
+            validation_errors.append(f"Video too long: {duration_formatted} (max 1 hour)")
+        elif duration_seconds > MAX_DURATION_SECONDS * 0.8:
+            validation_warnings.append(f"Long video: {duration_formatted} (may take extended processing time)")
+
+        # 3. Resolution validation
+        MIN_WIDTH = 100
+        MIN_HEIGHT = 100
+        MAX_WIDTH = 7680  # 8K
+        MAX_HEIGHT = 4320  # 8K
+        if width < MIN_WIDTH or height < MIN_HEIGHT:
+            validation_errors.append(f"Resolution too small: {width}x{height} (min {MIN_WIDTH}x{MIN_HEIGHT})")
+        elif width > MAX_WIDTH or height > MAX_HEIGHT:
+            validation_errors.append(f"Resolution too large: {width}x{height} (max {MAX_WIDTH}x{MAX_HEIGHT})")
+        elif width == 0 or height == 0:
+            validation_errors.append(f"Invalid resolution: {width}x{height} (video stream may be corrupt)")
+
+        # 4. Framerate validation
+        MIN_FRAMERATE = 10
+        MAX_FRAMERATE = 120
+        if frame_rate < MIN_FRAMERATE:
+            validation_warnings.append(f"Low framerate: {frame_rate}fps (quality may be degraded)")
+        elif frame_rate > MAX_FRAMERATE:
+            validation_warnings.append(f"High framerate: {frame_rate}fps (will be normalized to 30fps)")
+
+        # 5. Audio stream validation
+        if audio_channels == 0:
+            validation_errors.append("No audio stream detected (SOT videos must contain audio)")
+
+        # Log validation results
+        for warning in validation_warnings:
+            logger.warning(f"⚠️ Validation warning: {warning}")
+            processing_report["warnings"].append(warning)
+
+        # Fail if critical errors found
+        if validation_errors:
+            error_msg = "; ".join(validation_errors)
+            logger.error(f"❌ Pre-processing validation failed: {error_msg}")
+            processing_report["overall_status"] = "failed"
+            processing_report["phases"]["validation"] = {"status": "failed", "errors": validation_errors}
+            _update_job_status(temp_job_id, 'validation', 'failed')
+
+            # Update cue block with failure info
+            if asset_id:
+                _update_sot_cue_block(episode, slug, asset_id, {
+                    'ProcessingStatus': f'❌ Validation Failed: {error_msg}'
+                })
+
+            raise ValueError(f"Pre-processing validation failed: {error_msg}")
+
+        logger.info(f"✅ Pre-processing validation passed for {temp_job_id}")
+        processing_report["phases"]["validation"] = {"status": "success", "file_size_gb": round(file_size_gb, 2)}
+
         # Store pre-analysis in database
         pre_analysis_data = {
             "duration": duration_formatted,
@@ -1251,14 +1505,11 @@ def process_sot_video_multi_phase(
             "audio_config": audio_config
         }
 
-        db = SessionLocal()
-        try:
+        with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job:
                 job.pre_analysis = pre_analysis_data
                 db.commit()
-        finally:
-            db.close()
 
         processing_report["phases"]["phase0"] = {"status": "success", "data": pre_analysis_data}
 
@@ -1301,32 +1552,28 @@ def process_sot_video_multi_phase(
         # Transcribe with Whisper
         transcription_text = None  # Store for final return payload
         try:
-            from wpm_audio_router import transcribe_audio
-            import asyncio
-
-            # Run async transcription in sync context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            transcription_text = loop.run_until_complete(transcribe_audio(str(phase05_audio)))
-            loop.close()
+            # Use simple transcription function (no FastAPI dependencies)
+            transcription_text = transcribe_audio_simple(str(phase05_audio))
 
             logger.info(f"Phase 0.5: Transcription complete, {len(transcription_text)} characters")
 
+            # Derive outcue from transcription (last 5 words)
+            outcue_text = derive_outcue(transcription_text, word_count=5)
+            logger.info(f"Phase 0.5: Outcue derived: {outcue_text}")
+
             # Store transcription in database
-            db = SessionLocal()
-            try:
+            with db_session() as db:
                 job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
                 if job:
                     job.transcription = transcription_text
                     db.commit()
-            finally:
-                db.close()
 
-            # Update cue block with transcription
+            # Update cue block with transcription and outcue
             if asset_id:
                 _update_sot_cue_block(episode, slug, asset_id, {
                     'ProcessingStatus': 'Phase 0.5 Complete: Transcribed',
-                    'Transcription': transcription_text
+                    'Transcription': transcription_text,
+                    'Outcue': outcue_text
                 })
 
         except Exception as e:
@@ -1350,14 +1597,20 @@ def process_sot_video_multi_phase(
         _update_job_status(temp_job_id, 'phase1', 'processing')
 
         phase1_output = working_dir / f"{temp_job_id}_1_normalized.mp4"
+
+        # Determine video encoder based on platform
+        # NVENC for Windows with GPU, libx264 CPU fallback for Linux workers
+        from platform_utils import IS_WINDOWS, has_nvidia_gpu
+        if IS_WINDOWS and has_nvidia_gpu():
+            video_encoder_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18", "-maxrate", "8M", "-bufsize", "16M"]
+        else:
+            # CPU encoding fallback for Linux workers (kairo)
+            video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
+
         phase1_cmd = [
             ffmpeg, "-y",
             "-i", str(input_file),
-            "-c:v", "h264_nvenc",
-            "-preset", "p4",
-            "-cq", "18",  # High quality
-            "-maxrate", "8M",
-            "-bufsize", "16M",
+            *video_encoder_args,
             "-r", "29.97",  # Broadcast standard framerate
             "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",  # Max width 1920, maintain aspect
             "-c:a", "aac",
@@ -1491,34 +1744,34 @@ def process_sot_video_multi_phase(
         # }
 
         # ================================================================
-        # PHASE 2: Audio Normalization (DISABLED FOR TESTING)
+        # PHASE 2: Audio Normalization
         # - EBU R128 loudness normalization (-23 LUFS target)
         # - Dynamic range compression
         # - Peak limiting to -1dB
         # ================================================================
-        # logger.info(f"Phase 2: Audio normalization for {temp_job_id}")
-        # _update_job_status(temp_job_id, 'phase2', 'processing')
+        logger.info(f"Phase 2: Audio normalization for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase2', 'processing')
 
-        # phase2_output = working_dir / f"{temp_job_id}_2_audio-normalized.mp4"
-        # phase2_cmd = [
-        #     ffmpeg, "-y",
-        #     "-i", str(phase1_1_output),
-        #     "-c:v", "copy",  # Don't re-encode video
-        #     "-af", "loudnorm=I=-23:TP=-1:LRA=11,acompressor=threshold=-18dB:ratio=4:attack=5:release=50",
-        #     "-c:a", "aac",
-        #     "-b:a", "192k",
-        #     str(phase2_output)
-        # ]
-        # subprocess.run(phase2_cmd, check=True, capture_output=True)
-        # logger.info(f"Phase 2 complete: {phase2_output}")
+        phase2_output = working_dir / f"{temp_job_id}_2_audio-normalized.mp4"
+        phase2_cmd = [
+            ffmpeg, "-y",
+            "-i", str(phase1_1_output),
+            "-c:v", "copy",  # Don't re-encode video
+            "-af", "loudnorm=I=-23:TP=-1:LRA=11,acompressor=threshold=-18dB:ratio=4:attack=5:release=50",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            str(phase2_output)
+        ]
+        subprocess.run(phase2_cmd, check=True, capture_output=True)
+        logger.info(f"Phase 2 complete: {phase2_output}")
 
-        # # Update cue block with Phase 2 completion
-        # if asset_id:
-        #     _update_sot_cue_block(episode, slug, asset_id, {
-        #         'ProcessingStatus': 'Phase 2 Complete: Audio Normalized'
-        #     })
+        # Update cue block with Phase 2 completion
+        if asset_id:
+            _update_sot_cue_block(episode, slug, asset_id, {
+                'ProcessingStatus': 'Phase 2 Complete: Audio Normalized'
+            })
 
-        """
+
         # ================================================================
         # PHASE 3-8: DISABLED FOR TESTING
         # - All phases below are disabled while testing Phase 0-1.1
@@ -1530,18 +1783,29 @@ def process_sot_video_multi_phase(
         # - Skip entirely if no trimming needed
         # ================================================================
 
-        # Check if trimming is actually needed
-        if trim_start != "00:00:00" or trim_end != "00:00:00":
-            logger.info(f"Phase 3: Trimming for {temp_job_id}")
+        # Check if trimming is actually needed - handle both HH:MM:SS and HH:MM:SS:FF formats
+        def is_zero_time(time_str):
+            """Check if timecode is effectively zero (handles 00:00:00 and 00:00:00:00)"""
+            return time_str in ("00:00:00", "00:00:00:00", "0", "0.0", "")
+
+        if not is_zero_time(trim_start) or not is_zero_time(trim_end):
+            logger.info(f"Phase 3: Trimming for {temp_job_id} (start={trim_start}, end={trim_end})")
             _update_job_status(temp_job_id, 'phase3', 'processing')
 
             phase3_output = working_dir / f"{temp_job_id}_3_trimmed.mp4"
 
-            if trim_end != "00:00:00":
-                # Calculate duration
+            if not is_zero_time(trim_end):
+                # Calculate duration - handle both HH:MM:SS and HH:MM:SS:FF formats
                 def time_to_seconds(time_str):
-                    h, m, s = map(float, time_str.split(':'))
-                    return h * 3600 + m * 60 + s
+                    parts = time_str.split(':')
+                    if len(parts) == 3:
+                        h, m, s = map(float, parts)
+                        return h * 3600 + m * 60 + s
+                    elif len(parts) == 4:
+                        h, m, s, f = map(float, parts)
+                        # Assume 30fps for frame conversion
+                        return h * 3600 + m * 60 + s + (f / 30.0)
+                    return 0.0
 
                 start_sec = time_to_seconds(trim_start)
                 end_sec = time_to_seconds(trim_end)
@@ -1549,17 +1813,28 @@ def process_sot_video_multi_phase(
 
                 phase3_cmd = [
                     ffmpeg, "-y",
-                    "-ss", trim_start,
+                    "-ss", str(start_sec),  # Use seconds, not raw timecode
                     "-i", str(phase2_output),
                     "-t", str(trim_duration),
                     "-c", "copy",
                     str(phase3_output)
                 ]
             else:
-                # Trim from start only
+                # Trim from start only - handle HH:MM:SS:FF format
+                def time_to_seconds(time_str):
+                    parts = time_str.split(':')
+                    if len(parts) == 3:
+                        h, m, s = map(float, parts)
+                        return h * 3600 + m * 60 + s
+                    elif len(parts) == 4:
+                        h, m, s, f = map(float, parts)
+                        return h * 3600 + m * 60 + s + (f / 30.0)
+                    return 0.0
+
+                start_sec = time_to_seconds(trim_start)
                 phase3_cmd = [
                     ffmpeg, "-y",
-                    "-ss", trim_start,
+                    "-ss", str(start_sec),  # Use seconds, not raw timecode
                     "-i", str(phase2_output),
                     "-c", "copy",
                     str(phase3_output)
@@ -1635,16 +1910,13 @@ def process_sot_video_multi_phase(
             logger.info(f"Phase 4: Generated thumbnail {i}/{num_thumbnails} at {time_point:.1f}s")
 
         # Store thumbnail candidates in database for user selection
-        db = SessionLocal()
-        try:
+        with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job:
                 job.thumbnail_candidates = thumbnail_filenames
                 # Set first thumbnail as default selection
                 job.selected_thumbnail = thumbnail_filenames[7] if len(thumbnail_filenames) >= 8 else thumbnail_filenames[0]
                 db.commit()
-        finally:
-            db.close()
 
         logger.info(f"Phase 4: Stored {len(thumbnail_filenames)} thumbnail candidates in database")
 
@@ -1676,26 +1948,30 @@ def process_sot_video_multi_phase(
         logger.info(f"Phase 5: Final move for {temp_job_id}")
         _update_job_status(temp_job_id, 'phase5', 'processing')
 
-        # Create final output directory (cross-platform)
-        final_dir = media_root / "episodes" / episode / "assets" / "sots"
-        final_dir.mkdir(parents=True, exist_ok=True)
+        # Create final output directories (cross-platform)
+        # SOT videos go to assets/video/ per episode directory standard
+        # Thumbnails go to assets/thumbnails/ per episode directory standard
+        final_video_dir = media_root / "episodes" / episode / "assets" / "video"
+        final_thumb_dir = media_root / "episodes" / episode / "assets" / "thumbnails"
+        final_video_dir.mkdir(parents=True, exist_ok=True)
+        final_thumb_dir.mkdir(parents=True, exist_ok=True)
 
         # Move and rename files
-        final_video = final_dir / f"{normalized_slug}.mp4"
-        final_audio = final_dir / f"{normalized_slug}.mp3"
+        final_video = final_video_dir / f"{normalized_slug}.mp4"
+        final_audio = final_video_dir / f"{normalized_slug}.mp3"
 
         import shutil
         shutil.move(str(phase3_output), str(final_video))
         shutil.move(str(phase4_audio), str(final_audio))
 
-        # Move all 15 thumbnails
+        # Move all 15 thumbnails to thumbnails directory
         final_thumbs = []
         for i, thumb_file in enumerate(phase4_thumbs, 1):
-            final_thumb = final_dir / f"{normalized_slug}-thumb-{i:02d}.jpg"
+            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.jpg"
             shutil.move(str(thumb_file), str(final_thumb))
             final_thumbs.append(final_thumb)
 
-        logger.info(f"Phase 5 complete: video, audio, and {len(final_thumbs)} thumbnails moved to {final_dir}")
+        logger.info(f"Phase 5 complete: video/audio moved to {final_video_dir}, {len(final_thumbs)} thumbnails moved to {final_thumb_dir}")
 
         # Get video duration for metadata
         duration_cmd = [
@@ -1709,50 +1985,55 @@ def process_sot_video_multi_phase(
         duration = float(duration_result.stdout.strip())
 
         # Update database with final paths
-        from database import SessionLocal
         from models_v2 import SOTProcessingJob
 
-        db = SessionLocal()
-        job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
-        if job:
-            job.current_phase = 'completed'
-            job.status = 'completed'
-            job.final_video_path = str(final_video.relative_to("/home/episodes"))
-            job.final_audio_path = str(final_audio.relative_to("/home/episodes"))
-            job.final_thumbnail_path = str(final_thumbs[0].relative_to("/home/episodes"))  # Store first thumbnail as primary
-            db.commit()
+        # Calculate relative paths from episodes root
+        episodes_root = media_root / "episodes"
 
-            # Create parent/child asset relationship if source asset exists
-            if job.source_asset_id and job.final_asset_id:
-                from models_assetid import AssetIDRegistry, AssetRelationship
-
-                # Update final asset with parent reference
-                final_asset = db.query(AssetIDRegistry).filter_by(asset_id=job.final_asset_id).first()
-                if final_asset:
-                    final_asset.parent_asset_id = job.source_asset_id
-                    final_asset.asset_role = 'final'
-                    final_asset.derivative_type = job_type or 'trimmed'
-                    db.commit()
-                    logger.info(f"✅ Updated final asset {job.final_asset_id} with parent {job.source_asset_id}")
-
-                # Create asset_relationship record with processing metadata
-                relationship = AssetRelationship(
-                    parent_asset_id=job.source_asset_id,
-                    child_asset_id=job.final_asset_id,
-                    relationship_type=f"{job_type}_from" if job_type else "trimmed_from",
-                    processing_metadata={
-                        'trim_start': trim_start,
-                        'trim_end': trim_end,
-                        'job_type': job_type,
-                        'temp_job_id': temp_job_id,
-                        'processing_date': str(func.now())
-                    }
-                )
-                db.add(relationship)
+        with db_session() as db:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.current_phase = 'completed'
+                job.status = 'completed'
+                job.final_video_path = str(final_video.relative_to(episodes_root))
+                job.final_audio_path = str(final_audio.relative_to(episodes_root))
+                job.final_thumbnail_path = str(final_thumbs[0].relative_to(episodes_root))  # Store first thumbnail as primary
                 db.commit()
-                logger.info(f"✅ Created asset relationship: {job.source_asset_id} → {job.final_asset_id}")
 
-        db.close()
+                # Create parent/child asset relationship if source asset exists
+                if job.source_asset_id and job.final_asset_id:
+                    # Import with sys.path - ensure /app is available in forked process
+                    if '/app' not in sys.path:
+                        sys.path.insert(0, '/app')
+                    import models_assetid
+                    AssetIDRegistry = models_assetid.AssetIDRegistry
+                    AssetRelationship = models_assetid.AssetRelationship
+
+                    # Update final asset with parent reference
+                    final_asset = db.query(AssetIDRegistry).filter_by(asset_id=job.final_asset_id).first()
+                    if final_asset:
+                        final_asset.parent_asset_id = job.source_asset_id
+                        final_asset.asset_role = 'final'
+                        final_asset.derivative_type = job_type or 'trimmed'
+                        db.commit()
+                        logger.info(f"✅ Updated final asset {job.final_asset_id} with parent {job.source_asset_id}")
+
+                    # Create asset_relationship record with processing metadata
+                    relationship = AssetRelationship(
+                        parent_asset_id=job.source_asset_id,
+                        child_asset_id=job.final_asset_id,
+                        relationship_type=f"{job_type}_from" if job_type else "trimmed_from",
+                        processing_metadata={
+                            'trim_start': trim_start,
+                            'trim_end': trim_end,
+                            'job_type': job_type,
+                            'temp_job_id': temp_job_id,
+                            'processing_date': str(func.now())
+                        }
+                    )
+                    db.add(relationship)
+                    db.commit()
+                    logger.info(f"✅ Created asset relationship: {job.source_asset_id} → {job.final_asset_id}")
 
         # Convert duration to HH:MM:SS format
         hours = int(duration // 3600)
@@ -1760,9 +2041,9 @@ def process_sot_video_multi_phase(
         seconds = int(duration % 60)
         duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-        # Build thumbnail URLs for all 15 options
+        # Build thumbnail URLs for all 15 options (now in thumbnails directory)
         thumbnail_urls = [
-            f"/episodes/{episode}/assets/sots/{normalized_slug}-thumb-{i:02d}.jpg"
+            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.jpg"
             for i in range(1, 16)
         ]
 
@@ -1791,14 +2072,11 @@ def process_sot_video_multi_phase(
             "file_size_mb": round(final_video.stat().st_size / (1024 * 1024), 2)
         }
 
-        db = SessionLocal()
-        try:
+        with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job:
                 job.post_analysis = post_analysis_data
                 db.commit()
-        finally:
-            db.close()
 
         processing_report["phases"]["phase8"] = {"status": "success", "data": post_analysis_data}
         processing_report["overall_status"] = "completed"
@@ -1806,34 +2084,36 @@ def process_sot_video_multi_phase(
 
         # Update cue block with final completion and all MediaURLs
         if asset_id:
+            import json
+            # Derive outcue if we have valid transcription
+            final_outcue = derive_outcue(transcription_text) if transcription_text else ''
             _update_sot_cue_block(episode, slug, asset_id, {
                 'ProcessingStatus': 'Complete',
-                'MediaURL': f"/episodes/{episode}/assets/sots/{normalized_slug}.mp4",
+                'MediaURL': f"/episodes/{episode}/assets/video/{normalized_slug}.mp4",
                 'ThumbnailURL': thumbnail_urls[7],  # Middle thumbnail (8/15) as primary
-                'ThumbnailOptions': thumbnail_urls,  # All 15 thumbnail URLs
-                'AudioURL': f"/episodes/{episode}/assets/sots/{normalized_slug}.mp3",
-                'Duration': duration_formatted
+                'ThumbnailOptions': json.dumps(thumbnail_urls),  # All 15 thumbnail URLs as JSON string
+                'AudioURL': f"/episodes/{episode}/assets/video/{normalized_slug}.mp3",
+                'Duration': duration_formatted,
+                'Transcription': transcription_text or '',  # Include transcription in final cue update
+                'Outcue': final_outcue  # Last 5 words of transcription
             })
 
         # Replace source AssetID with final AssetID in cue block
-        db = SessionLocal()
-        try:
+        with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job and job.source_asset_id and job.final_asset_id and job.source_asset_id != job.final_asset_id:
                 logger.info(f"🔄 Replacing AssetID in cue: {job.source_asset_id} → {job.final_asset_id}")
                 _replace_sot_cue_asset_id(episode, job.source_asset_id, job.final_asset_id)
-        finally:
-            db.close()
 
-        # Store final processing report in database
-        db = SessionLocal()
-        try:
+        # Store final processing report in database and mark as completed
+        with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job:
                 job.processing_report = processing_report
+                job.current_phase = 'completed'
+                job.status = 'completed'
                 db.commit()
-        finally:
-            db.close()
+                logger.info(f"✅ Job {temp_job_id} marked as completed")
 
         # Handle devel_mode: Keep or clean up working directory
         if devel_mode:
@@ -1853,10 +2133,10 @@ def process_sot_video_multi_phase(
             "episode": episode,
             "slug": normalized_slug,
             "asset_id": asset_id,
-            "video_path": str(final_video.relative_to("/home/episodes")),
-            "audio_path": str(final_audio.relative_to("/home/episodes")),
-            "thumbnail_path": str(final_thumbs[7].relative_to("/home/episodes")),  # Primary (middle) thumbnail
-            "thumbnail_options": [str(t.relative_to("/home/episodes")) for t in final_thumbs],
+            "video_path": str(final_video.relative_to(episodes_root)),
+            "audio_path": str(final_audio.relative_to(episodes_root)),
+            "thumbnail_path": str(final_thumbs[7].relative_to(episodes_root)),  # Primary (middle) thumbnail
+            "thumbnail_options": [str(t.relative_to(episodes_root)) for t in final_thumbs],
             "duration": duration,
             "transcription": transcription_text,
             "status": "completed",
@@ -1865,10 +2145,15 @@ def process_sot_video_multi_phase(
             "processing_report": processing_report,
             "devel_mode": devel_mode
         }
-        """  # END OF DISABLED PHASES 3-8
 
     except subprocess.CalledProcessError as e:
-        error_msg = f"FFmpeg error in phase {self.request.retries + 1}: {e.stderr if hasattr(e, 'stderr') else str(e)}"
+        # CRITICAL FIX: Properly extract FFmpeg stderr for debugging
+        # stderr is bytes when capture_output=True without text=True
+        if hasattr(e, 'stderr') and e.stderr:
+            stderr_text = e.stderr.decode('utf-8', errors='replace') if isinstance(e.stderr, bytes) else str(e.stderr)
+        else:
+            stderr_text = f"Exit code {e.returncode}"
+        error_msg = f"FFmpeg error in phase {self.request.retries + 1}: {stderr_text}"
         logger.error(error_msg)
         _update_job_status(temp_job_id, f"phase{self.request.retries + 1}", 'failed', error_msg)
         raise

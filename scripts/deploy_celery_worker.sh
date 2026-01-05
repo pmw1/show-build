@@ -31,6 +31,7 @@ NC='\033[0m' # No Color
 REDIS_HOST="${REDIS_HOST:-192.168.51.223}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 REDIS_PASSWORD="${REDIS_PASSWORD:-showbuild2025}"
+LLM_STATE_API_KEY="${LLM_STATE_API_KEY:-}"  # Optional: for SOT processing notifications
 WORKER_DIR="show-build-worker"
 
 # Function to print colored output
@@ -126,8 +127,12 @@ log_info "Generating Dockerfile..."
 cat > /tmp/worker_dockerfile << 'EOF'
 FROM python:3.11-slim
 
-# Install ffmpeg
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# Install ffmpeg and fonts for FSQ rendering
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    fonts-liberation \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -138,6 +143,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app /app
+
+# Copy tools directory (for FSQ renderer)
+COPY tools /tools
+
+# Add tools to Python path
+ENV PYTHONPATH="/app:/tools:${PYTHONPATH}"
 
 # Run Celery worker
 CMD ["celery", "-A", "celery_app.celery_app", "worker", "--loglevel=info"]
@@ -160,6 +171,9 @@ requests>=2.31.0
 # Media processing
 ffmpeg-python>=0.2.0
 
+# Image processing (for FSQ quote generation)
+pillow>=10.0.0
+
 # Content processing
 python-frontmatter>=1.0.0
 markdown>=3.4.3
@@ -168,19 +182,31 @@ pydantic-settings>=2.0.3
 EOF
 
 # Generate docker-compose.yml
+# For asset queues, include all priority levels
 log_info "Generating docker-compose.yml..."
+
+# Determine queue list based on queue name
+if [ "$QUEUE_NAME" = "assets" ]; then
+    FULL_QUEUE_LIST="assets_high,assets,assets_low"
+    log_info "Asset queue selected - will consume: assets_high, assets, assets_low"
+else
+    FULL_QUEUE_LIST="$QUEUE_NAME"
+fi
+
 cat > /tmp/worker_compose.yml << EOF
 services:
   celery-worker:
     build: .
     container_name: ${HOSTNAME}-${WORKER_NAME}
-    command: celery -A celery_app worker -Q ${QUEUE_NAME} --hostname=${WORKER_NAME}@${HOSTNAME} --concurrency=${CONCURRENCY}
+    command: celery -A celery_app worker -Q ${FULL_QUEUE_LIST} --hostname=${WORKER_NAME}@${HOSTNAME} --concurrency=${CONCURRENCY}
     volumes:
       - /mnt/sync:/mnt/sync
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/0
       - MEDIA_ROOT=/mnt/sync
       - DATABASE_URL=postgresql://showbuild:showbuild@192.168.51.210:5433/showbuild
+      - PYTHONPATH=/app:/tools
+      - LLM_STATE_API_KEY=${LLM_STATE_API_KEY:-}
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -201,7 +227,10 @@ rm -f /tmp/worker_dockerfile /tmp/worker_requirements.txt /tmp/worker_compose.ym
 
 # Copy application code
 log_info "Copying application code to $HOSTNAME..."
-APP_DIR="$(dirname "$(dirname "$(readlink -f "$0")")")/app"
+PROJECT_DIR="$(dirname "$(dirname "$(readlink -f "$0")")")"
+APP_DIR="${PROJECT_DIR}/app"
+TOOLS_DIR="${PROJECT_DIR}/tools"
+
 if [ ! -d "$APP_DIR" ]; then
     log_error "Cannot find app directory at $APP_DIR"
     exit 1
@@ -209,6 +238,15 @@ fi
 
 scp -r "$APP_DIR" "$HOSTNAME:~/${WORKER_DIR}/"
 log_success "Application code copied"
+
+# Copy tools directory (needed for FSQ renderer)
+if [ -d "$TOOLS_DIR" ]; then
+    log_info "Copying tools directory to $HOSTNAME..."
+    scp -r "$TOOLS_DIR" "$HOSTNAME:~/${WORKER_DIR}/"
+    log_success "Tools directory copied"
+else
+    log_warning "Tools directory not found at $TOOLS_DIR"
+fi
 
 # Check if volumes exist on remote server
 log_info "Checking required volumes on $HOSTNAME..."
