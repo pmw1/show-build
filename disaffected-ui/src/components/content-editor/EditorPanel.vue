@@ -1,5 +1,5 @@
 <template>
-  <div :class="['editor-panel-content', !showRundownPanel ? 'full-width' : '']">
+  <div :class="['editor-panel-content', !showRundownPanel ? 'full-width' : '']" :style="editorPanelCssVars">
     <!-- Flash Message for Cue Insertion -->
     <v-snackbar
       v-model="flashMessage.show"
@@ -21,6 +21,21 @@
       class="thick-cursor"
       :style="thickCursor.style"
     ></div>
+
+    <!-- Segment Locked Overlay -->
+    <div v-if="isSegmentLocked" class="segment-locked-overlay">
+      <div class="locked-content">
+        <v-icon size="48" color="warning">mdi-lock</v-icon>
+        <div class="locked-title">Segment Locked</div>
+        <div class="locked-message">
+          Currently being edited by<br>
+          <strong>{{ lockInfo.lockedBy }}</strong>
+        </div>
+        <div v-if="lockInfo.lockedAt" class="locked-time">
+          Started {{ formatRelativeTime(lockInfo.lockedAt) }}
+        </div>
+      </div>
+    </div>
 
     <v-card class="editor-card" flat>
       <!-- Editor Mode and Controls Toolbar -->
@@ -52,54 +67,25 @@
           </v-btn>
         </v-btn-toggle>
 
-        <div class="slug-field-toolbar-container">
-          <div class="slug-field-with-validation">
-            <v-text-field
-              :model-value="item?.slug || ''"
-              @update:model-value="$emit('update:slug', $event)"
-              @focus="slugFieldFocused = true"
-              @blur="handleSlugBlur"
-              label="Slug"
-              placeholder="slug required"
-              variant="outlined"
-              density="compact"
-              hide-details
-              class="script-slug-field-inline"
-              :class="{
-                'slug-needs-attention': !item?.slug || item.slug.trim().length === 0,
-                'slug-filled-unfocused': item?.slug && item.slug.trim().length > 0 && !slugFieldFocused
-              }"
-              :disabled="hasNoItem"
-            ></v-text-field>
-            <v-icon
-              v-if="isSlugValid"
-              color="success"
-              size="small"
-              class="slug-validation-icon"
-            >
-              mdi-check-circle
-            </v-icon>
-          </div>
-          <v-text-field
-            :model-value="item?.title || ''"
-            @update:model-value="$emit('update:title', $event)"
-            @focus="titleFieldFocused = true"
-            @blur="titleFieldFocused = false"
-            label="Title"
-            placeholder="title required"
-            variant="outlined"
-            density="compact"
-            hide-details
-            class="script-title-field-inline"
-            :class="{
-              'title-needs-attention': !item?.title || item.title.trim().length === 0,
-              'title-filled-unfocused': item?.title && item.title.trim().length > 0 && !titleFieldFocused
-            }"
-            :disabled="hasNoItem"
-          ></v-text-field>
-        </div>
-
         <v-spacer></v-spacer>
+
+        <!-- Save All Button - mirrors main Save All behavior -->
+        <v-tooltip :text="saveState.tooltip" location="bottom">
+          <template v-slot:activator="{ props }">
+            <v-btn
+              v-bind="props"
+              :color="saveState.buttonColor"
+              size="small"
+              :variant="saveState.hasChanges ? 'flat' : 'tonal'"
+              class="mr-2"
+              :disabled="saveState.isDisabled"
+              @click="handleSaveAll"
+            >
+              <v-icon left size="small">{{ saveState.buttonIcon }}</v-icon>
+              {{ saveState.buttonText }}
+            </v-btn>
+          </template>
+        </v-tooltip>
 
       </v-toolbar>
 
@@ -397,7 +383,8 @@
                         `speaker-bg-${segment.speaker}`,
                         {
                           'paragraph-focused': focusedParagraphIndex === index,
-                          'paragraph-saved': savedParagraphIndex === index
+                          'paragraph-saved': savedParagraphIndex === index,
+                          'paragraph-needs-attention': segment.needsAttention
                         }
                       ]"
                       @mouseenter="hoveredParagraphIndex = index"
@@ -419,31 +406,93 @@
                         </div>
                       </div>
 
-                      <v-textarea
+                      <div
                         :ref="`textareaRef-${index}`"
-                        :model-value="getSegmentContent(index)"
-                        @update:model-value="handleTextareaInput(index, $event)"
-                        @keydown="handleTextareaKeydown(index, $event)"
-                        @focus="handleParagraphFocus(index)"
+                        contenteditable="true"
+                        v-html="getSegmentContent(index)"
+                        @input="handleContentEditableInput(index, $event)"
+                        @keydown="handleContentEditableKeydown(index, $event)"
+                        @paste="handleContentEditablePaste(index, $event)"
+                        @focus="setEditingFlags(index); handleParagraphFocus(index)"
                         @blur="handleParagraphBlur(index)"
-                        variant="plain"
-                        hide-details
-                        class="speaker-textarea"
+                        class="speaker-textarea speaker-contenteditable"
                         :class="`speaker-${segment.speaker}`"
                         :style="getSpeakerTextStyle(segment.speaker)"
-                        :placeholder="`Enter ${getSpeakerDisplayName(segment.speaker)}'s dialogue here...`"
-                        no-resize
-                      ></v-textarea>
+                        :data-placeholder="`Enter ${getSpeakerDisplayName(segment.speaker)}'s dialogue here...`"
+                      ></div>
+
+                      <!-- Needs Attention Flag (right side, above delete) -->
+                      <v-btn
+                        v-if="hoveredParagraphIndex === index || segment.needsAttention"
+                        icon
+                        size="x-small"
+                        class="paragraph-flag-btn"
+                        :class="{ 'flag-active': segment.needsAttention }"
+                        @click.stop="handleFlagClick(index, 'paragraph', segment)"
+                        :title="segment.needsAttention ? (isFlagNoteMinimized('paragraph', index) ? 'Expand note' : 'Minimize note') : 'Flag for attention'"
+                      >
+                        <v-icon size="18" :color="segment.needsAttention ? 'orange' : 'grey'">
+                          {{ segment.needsAttention ? 'mdi-flag' : 'mdi-flag-outline' }}
+                        </v-icon>
+                      </v-btn>
+
+                      <!-- Flag Note Panel (teleported to body to escape stacking context) -->
+                      <Teleport to="body">
+                        <div
+                          v-if="segment.needsAttention && !isFlagNoteMinimized('paragraph', index)"
+                          class="flag-note-panel"
+                          :style="editorPanelCssVars"
+                          @click.stop
+                        >
+                          <div class="flag-note-header">
+                            <v-icon size="16" :color="needsAttentionColor" class="mr-1">mdi-flag</v-icon>
+                            <span class="flag-note-title">{{ getFirstFourWords(segment.content) }}</span>
+                            <v-btn
+                              icon
+                              size="x-small"
+                              variant="text"
+                              @click.stop="minimizeFlagNote('paragraph', index)"
+                              class="flag-note-minimize"
+                              title="Minimize"
+                            >
+                              <v-icon size="16">mdi-minus</v-icon>
+                            </v-btn>
+                          </div>
+                          <v-textarea
+                            :model-value="segment.flagNote || ''"
+                            @update:model-value="updateParagraphFlagNote(index, $event)"
+                            placeholder="Why does this need attention?"
+                            variant="outlined"
+                            density="compact"
+                            rows="2"
+                            auto-grow
+                            hide-details
+                            class="flag-note-textarea"
+                            @click.stop
+                          />
+                          <div class="flag-note-actions">
+                            <v-btn
+                              size="small"
+                              :color="needsAttentionColor"
+                              variant="tonal"
+                              @click.stop="resolveFlag(index, 'paragraph')"
+                            >
+                              <v-icon size="16" start>mdi-check</v-icon>
+                              Resolved
+                            </v-btn>
+                          </div>
+                        </div>
+                      </Teleport>
 
                       <!-- Delete Button (right middle) -->
                       <v-btn
                         v-if="hoveredParagraphIndex === index"
                         icon
-                        size="small"
+                        size="x-small"
                         class="paragraph-delete-btn"
                         @click.stop="deleteSegment(index)"
                       >
-                        <v-icon size="medium">mdi-close</v-icon>
+                        <v-icon size="18">mdi-close</v-icon>
                       </v-btn>
 
                       <!-- Add Paragraph Button (bottom center) -->
@@ -474,7 +523,24 @@
                 </div>
 
                 <!-- Cue Card Segment -->
-                <div v-else-if="segment.type === 'cue'" class="cue-segment" :class="`cue-align-${cueCardAlignment}`" :data-pending="segment.isPending || null">
+                <div
+                  v-else-if="segment.type === 'cue'"
+                  class="cue-segment"
+                  :class="[
+                    `cue-align-${cueCardAlignment}`,
+                    { 'cue-focused': focusedCueIndex === index },
+                    { 'cue-needs-attention': segment.data?.needsAttention }
+                  ]"
+                  :style="focusedCueIndex === index ? { backgroundColor: highlightBackgroundColor } : {}"
+                  :data-pending="segment.isPending || null"
+                  tabindex="0"
+                  @focus="handleCueFocus(index)"
+                  @blur="handleCueBlur(index)"
+                  @click="handleCueRowClick(index, $event)"
+                  @keydown.enter.prevent="editCue(index, segment.data)"
+                  @mouseenter="hoveredCueIndex = index"
+                  @mouseleave="hoveredCueIndex = null"
+                >
                   <ImageCueCard
                     v-if="segment.data.isImageType"
                     :cue-data="segment.data"
@@ -494,7 +560,74 @@
                     @select="selectCue(index)"
                     @edit="editCue(index, segment.data)"
                     @delete="deleteCue(index)"
+                    @reupload-sot-cue="handleReuploadSotCue"
+                    @status-changed="handleSotStatusChange"
+                    @update-meta="handleCueFieldUpdate"
+                    @edit-fsq="handleEditFsq"
                   />
+
+                  <!-- Needs Attention Flag Button for Cue -->
+                  <v-btn
+                    v-if="hoveredCueIndex === index || segment.data?.needsAttention"
+                    icon
+                    size="x-small"
+                    class="cue-flag-btn"
+                    :class="{ 'flag-active': segment.data?.needsAttention }"
+                    @click.stop="handleFlagClick(index, 'cue', segment)"
+                    :title="segment.data?.needsAttention ? (isFlagNoteMinimized('cue', index) ? 'Expand note' : 'Minimize note') : 'Flag for attention'"
+                  >
+                    <v-icon size="18" :color="segment.data?.needsAttention ? 'orange' : 'grey'">
+                      {{ segment.data?.needsAttention ? 'mdi-flag' : 'mdi-flag-outline' }}
+                    </v-icon>
+                  </v-btn>
+
+                  <!-- Flag Note Panel for Cue (teleported to body to escape stacking context) -->
+                  <Teleport to="body">
+                    <div
+                      v-if="segment.data?.needsAttention && !isFlagNoteMinimized('cue', index)"
+                      class="flag-note-panel"
+                      :style="editorPanelCssVars"
+                      @click.stop
+                    >
+                      <div class="flag-note-header">
+                        <v-icon size="16" :color="needsAttentionColor" class="mr-1">mdi-flag</v-icon>
+                        <span class="flag-note-title">{{ getCueReference(segment) }}</span>
+                        <v-btn
+                          icon
+                          size="x-small"
+                          variant="text"
+                          @click.stop="minimizeFlagNote('cue', index)"
+                          class="flag-note-minimize"
+                          title="Minimize"
+                        >
+                          <v-icon size="16">mdi-minus</v-icon>
+                        </v-btn>
+                      </div>
+                      <v-textarea
+                        :model-value="segment.data?.flagNote || ''"
+                        @update:model-value="updateCueFlagNote(index, $event)"
+                        placeholder="Why does this need attention?"
+                        variant="outlined"
+                        density="compact"
+                        rows="2"
+                        auto-grow
+                        hide-details
+                        class="flag-note-textarea"
+                        @click.stop
+                      />
+                      <div class="flag-note-actions">
+                        <v-btn
+                          size="small"
+                          :color="needsAttentionColor"
+                          variant="tonal"
+                          @click.stop="resolveFlag(index, 'cue')"
+                        >
+                          <v-icon size="16" start>mdi-check</v-icon>
+                          Resolved
+                        </v-btn>
+                      </div>
+                    </div>
+                  </Teleport>
                 </div>
                     </div>
                   </div>
@@ -1297,8 +1430,14 @@ export default {
       pendingCueData: null, // Store IMG cue data for post-modal placement
       useVisualScriptMode: true, // Toggle for visual cue cards vs traditional text - RE-ENABLED, fixing visibility issue
       hoveredParagraphIndex: null, // Track which paragraph is being hovered
+      hoveredCueIndex: null, // Track which cue is being hovered (for flag button)
+      activeFlagNoteIndex: null, // Track which segment's flag note panel is open
+      activeFlagNoteType: null, // 'paragraph' or 'cue' - type of segment with open note
+      flagNoteContent: '', // Content of the flag note being edited
+      minimizedFlagNotes: {}, // Track which flag notes are minimized (by "type-index" key as object for Vue reactivity)
       focusedParagraphIndex: null, // Track which paragraph has focus
-      savedParagraphIndex: null, // Track paragraph that just saved (for blue flash)
+      focusedCueIndex: null, // Track which cue row has focus (for tab navigation)
+      savedParagraphIndex: null, // Track paragraph that just saved (for green flash)
       errorParagraphIndex: null, // Track paragraph with save error (for red flash)
       paragraphEditStates: {}, // Track if paragraph has been edited before (for re-edit detection)
       hasLocalUnsavedChanges: false, // Track if script content has unsaved changes
@@ -1315,6 +1454,10 @@ export default {
       lastEnterState: {}, // Track Enter key state per segment for double Enter detection
       segmentEditBuffer: {}, // Buffer for segment edits to prevent reactivity race conditions
       updateDebounceTimers: {}, // Debounce timers for each segment to prevent rapid updates
+      activelyEditingSegment: null, // Track which segment is being actively typed in (prevents v-html re-render)
+      isActivelyEditing: false, // Master flag to block watchers during active editing (prevents cursor loss on autosave)
+      isRestoringCursor: false, // Flag to block watchers during cursor restoration
+      savedCursorState: null, // Saved cursor position for restoration after autosave { segmentIndex, nodeIndex, offset }
       // Universal cue insertion workflow
       pendingInsertionPoint: null, // Store cursor position for insertion (script mode)
       pendingCursorPosition: null, // Store cursor position for insertion (code mode)
@@ -1348,7 +1491,13 @@ export default {
       // Generic flag to block @update:model-value handlers during programmatic operations
       // Set this to true when performing operations that shouldn't trigger reactive updates
       // Use cases: creating paragraphs, merging paragraphs, bulk operations, etc.
-      blockReactiveUpdates: false
+      blockReactiveUpdates: false,
+      // Scroll position preservation for paragraph splitting
+      savedScrollPosition: undefined,
+      savedContainerScroll: undefined,
+      scrollContainerRef: null,
+      scriptContainerRef: null,
+      colorLoadTrigger: 0 // Reactive trigger to force re-computation of color-dependent properties
     }
   },
   mounted() {
@@ -1407,6 +1556,14 @@ export default {
       const draglightColor = resolveVuetifyColor(draglightColorName);
       const droplineColor = resolveVuetifyColor(droplineColorName);
 
+      // Debug: Log needs-attention color
+      const needsAttentionColorName = getColorValue('needs-attention');
+      const needsAttentionResolved = resolveVuetifyColor(needsAttentionColorName);
+      console.log('🚩 Needs-attention color loaded:', {
+        colorName: needsAttentionColorName,
+        resolvedHex: needsAttentionResolved
+      });
+
       console.log('🎨 Setting drag/drop colors:', {
         draglightColorName,
         droplineColorName,
@@ -1416,6 +1573,10 @@ export default {
 
       document.documentElement.style.setProperty('--draglight-color', draglightColor);
       document.documentElement.style.setProperty('--dropline-color', droplineColor);
+
+      // Increment trigger to force Vue to re-compute color-dependent computed properties
+      this.colorLoadTrigger++;
+      console.log('🎨 Color load trigger incremented:', this.colorLoadTrigger);
     });
 
     // Add global hotkey listeners
@@ -1466,6 +1627,30 @@ export default {
       immediate: true
     },
 
+    // Watch for item changes to clear edit buffer and cached segments
+    item: {
+      handler(newVal, oldVal) {
+        // If item changed (different asset_id), flush pending changes then clear buffer
+        const newAssetId = newVal?.asset_id || newVal?.AssetID;
+        const oldAssetId = oldVal?.asset_id || oldVal?.AssetID;
+
+        if (newAssetId !== oldAssetId) {
+          console.log('🔄 Item changed from', oldAssetId, 'to', newAssetId);
+
+          // CRITICAL: Flush any pending changes before switching
+          // This ensures edits are not lost when clicking to a different segment
+          this.flushPendingChanges();
+
+          // Now clear the buffer and cache for the new item
+          console.log('🧹 Clearing edit buffer and cache');
+          this.segmentEditBuffer = {};
+          this.cachedScriptSegments = null;
+          this.lastParsedContent = null;
+        }
+      },
+      deep: false
+    },
+
     // Watch for empty content in Script Mode and initialize with first paragraph
     scriptContent: {
       handler(newVal, oldVal) {
@@ -1473,8 +1658,26 @@ export default {
           newLength: newVal?.length,
           oldLength: oldVal?.length,
           editorMode: this.editorMode,
-          useVisualScriptMode: this.useVisualScriptMode
+          useVisualScriptMode: this.useVisualScriptMode,
+          isActivelyEditing: this.isActivelyEditing
         });
+
+        // CRITICAL GUARD: Skip disruptive operations while user is actively editing or restoring cursor
+        // This prevents cursor loss and focus stealing during autosave
+        if (this.isActivelyEditing || this.isRestoringCursor) {
+          console.log('⏭️ Skipping scriptContent watcher - user is actively editing or restoring cursor');
+          return;
+        }
+
+        // CRITICAL: Clear edit buffer when content changes significantly
+        // This prevents stale buffered content from a previous item being displayed
+        const significantChange = Math.abs((newVal?.length || 0) - (oldVal?.length || 0)) > 100;
+        const contentDifferent = newVal !== oldVal && oldVal !== undefined;
+
+        if (contentDifferent && (significantChange || !oldVal)) {
+          console.log('🧹 Clearing segmentEditBuffer - item appears to have changed');
+          this.segmentEditBuffer = {};
+        }
 
         if (this.editorMode === 'script' && this.useVisualScriptMode) {
           const contentWithoutFrontmatter = this.stripYamlFrontmatter(newVal || '');
@@ -1569,12 +1772,62 @@ export default {
 
               if (textareaRef) {
                 const textareaComponent = Array.isArray(textareaRef) ? textareaRef[0] : textareaRef;
+                const isHTMLElement = textareaComponent instanceof HTMLElement;
                 console.log(`🎯 Textarea component:`, {
                   exists: !!textareaComponent,
                   hasEl: !!textareaComponent?.$el,
-                  componentType: textareaComponent?.$.type?.name
+                  isHTMLElement: isHTMLElement,
+                  componentType: isHTMLElement ? 'HTMLElement' : textareaComponent?.$?.type?.name
                 });
 
+                // Handle contenteditable div (direct HTMLElement ref)
+                if (textareaComponent instanceof HTMLElement && textareaComponent.contentEditable === 'true') {
+                  console.log('✅✅✅ FOUND CONTENTEDITABLE - Attempting focus on:', textareaComponent);
+
+                  // Save ALL scroll positions before any focus operation
+                  const scrollWrapper = document.querySelector('.scrollable-content-wrapper');
+                  const scriptContainer = textareaComponent.closest('.script-content-container');
+                  const savedScrolls = {
+                    wrapper: scrollWrapper?.scrollTop || 0,
+                    container: scriptContainer?.scrollTop || 0,
+                    window: window.scrollY
+                  };
+                  console.log('📜 Saved scroll positions:', savedScrolls);
+
+                  // Use preventScroll to avoid jumping to bottom
+                  textareaComponent.focus({ preventScroll: true });
+
+                  requestAnimationFrame(() => {
+                    // Set cursor to beginning for contenteditable
+                    const selection = window.getSelection();
+                    const range = document.createRange();
+                    range.selectNodeContents(textareaComponent);
+                    range.collapse(true); // Collapse to start
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+
+                    // Restore scroll positions immediately after setting selection
+                    if (scrollWrapper) scrollWrapper.scrollTop = savedScrolls.wrapper;
+                    if (scriptContainer) scriptContainer.scrollTop = savedScrolls.container;
+                    window.scrollTo(0, savedScrolls.window);
+                    console.log('📜 Restored scroll positions');
+
+                    const isFocused = document.activeElement === textareaComponent;
+                    console.log('✅✅✅ Contenteditable focus complete:', {
+                      isFocused: isFocused,
+                      activeElement: document.activeElement?.tagName
+                    });
+
+                    if (!isFocused) {
+                      console.log('⚠️  Contenteditable not focused, retrying...');
+                      setTimeout(() => tryFocus(attempts + 1), 50);
+                    }
+                  });
+
+                  return; // Success - exit retry loop
+                }
+
+                // Handle Vue component wrapping textarea (fallback for other textareas)
                 if (textareaComponent && textareaComponent.$el) {
                   const textarea = textareaComponent.$el.querySelector('textarea');
                   console.log(`🎯 Native textarea element:`, {
@@ -1673,10 +1926,20 @@ export default {
     'duration-calculated',
     'save-current',
     'edit-sot-cue',
+    'reupload-sot-cue',
     'edit-fsq-cue',
-    'edit-gfx-cue'
+    'edit-gfx-cue',
+    'sot-job-complete',
+    'showDirModal',
+    'showBumpModal',
+    'showStingModal'
   ],
   props: {
+    context: {
+      type: String,
+      default: 'episode',
+      validator: (value) => ['episode', 'library'].includes(value)
+    },
     showRundownPanel: {
       type: Boolean,
       default: false
@@ -1775,6 +2038,18 @@ export default {
         buttonIcon: 'mdi-check-circle',
         isDisabled: true,
         tooltip: 'Episode is synchronized - no changes to save'
+      })
+    },
+    // Segment locking props for concurrent editing protection
+    isSegmentLocked: {
+      type: Boolean,
+      default: false
+    },
+    lockInfo: {
+      type: Object,
+      default: () => ({
+        lockedBy: '',
+        lockedAt: null
       })
     }
   },
@@ -2008,7 +2283,8 @@ export default {
           });
 
           const newRawContent = frontmatter ? `${frontmatter}\n\n${newContent.trim()}` : newContent.trim();
-          this.$emit('update:scriptContent', newRawContent);
+          // Use centralized emitter with validation
+          this.emitScriptContent(newRawContent);
           this.$emit('save-current');
         }
       }
@@ -2134,6 +2410,16 @@ export default {
       return `rgba(${r}, ${g}, ${b}, 0.2)`;
     },
 
+    // Get highlight color with opacity for background (uses existing highlightColor)
+    highlightBackgroundColor() {
+      const hexColor = this.highlightColor;
+      // Convert hex to RGB and add 40% opacity for visibility
+      const r = parseInt(hexColor.slice(1, 3), 16);
+      const g = parseInt(hexColor.slice(3, 5), 16);
+      const b = parseInt(hexColor.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, 0.4)`;
+    },
+
     // Check if XTTS is properly configured
     isXttsConfigured() {
       return this.xttsInstance?.isXttsAvailable() || false;
@@ -2159,6 +2445,49 @@ export default {
       return resolved || '#FFF9C4';
     },
 
+    // Get needs-attention color from settings for flagged paragraphs
+    needsAttentionColor() {
+      // Reference colorLoadTrigger to ensure re-computation when colors are loaded
+      // eslint-disable-next-line no-unused-vars
+      const _trigger = this.colorLoadTrigger;
+      const colorName = getColorValue('needs-attention') || 'orange-lighten-3';
+      const resolved = resolveVuetifyColor(colorName);
+      console.log('🚩 needsAttentionColor computed:', { colorName, resolved });
+      return resolved || '#FFCC80';
+    },
+
+    // Get needs-attention background color with 30% opacity
+    needsAttentionBackgroundColor() {
+      const hexColor = this.needsAttentionColor;
+      const r = parseInt(hexColor.slice(1, 3), 16);
+      const g = parseInt(hexColor.slice(3, 5), 16);
+      const b = parseInt(hexColor.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, 0.3)`;
+    },
+
+    // Get needs-attention border color (solid)
+    needsAttentionBorderColor() {
+      return this.needsAttentionColor;
+    },
+
+    // CSS variables for dynamic theming
+    editorPanelCssVars() {
+      // Calculate additional opacity variations for the needs-attention color
+      const hexColor = this.needsAttentionColor;
+      const r = parseInt(hexColor.slice(1, 3), 16);
+      const g = parseInt(hexColor.slice(3, 5), 16);
+      const b = parseInt(hexColor.slice(5, 7), 16);
+
+      return {
+        '--needs-attention-bg': this.needsAttentionBackgroundColor,
+        '--needs-attention-border': this.needsAttentionBorderColor,
+        '--needs-attention-color': this.needsAttentionColor,
+        '--needs-attention-btn-bg': `rgba(${r}, ${g}, ${b}, 0.15)`,
+        '--needs-attention-btn-hover': `rgba(${r}, ${g}, ${b}, 0.4)`,
+        '--needs-attention-btn-active': `rgba(${r}, ${g}, ${b}, 0.5)`
+      };
+    },
+
     // Validate slug: must be lowercase and 4 words or less
     isSlugValid() {
       if (!this.item?.slug || this.item.slug.trim().length === 0) {
@@ -2179,6 +2508,321 @@ export default {
 
   },
   methods: {
+    /**
+     * Format relative time from ISO date string for locked segment display.
+     */
+    formatRelativeTime(isoString) {
+      if (!isoString) return '';
+      const date = new Date(isoString);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+
+      if (diffMins < 1) return 'just now';
+      if (diffMins === 1) return '1 minute ago';
+      if (diffMins < 60) return `${diffMins} minutes ago`;
+
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours === 1) return '1 hour ago';
+      return `${diffHours} hours ago`;
+    },
+
+    /**
+     * Check if a flag note is minimized.
+     * @param {string} type - 'paragraph' or 'cue'
+     * @param {number} index - The segment index
+     * @returns {boolean} - Whether the note is minimized
+     */
+    isFlagNoteMinimized(type, index) {
+      const key = `${type}-${index}`;
+      const isMinimized = !!this.minimizedFlagNotes[key];
+      console.log('🚩 isFlagNoteMinimized:', { type, index, key, isMinimized, minimizedFlagNotes: { ...this.minimizedFlagNotes } });
+      return isMinimized;
+    },
+
+    /**
+     * Toggle the minimized state of a flag note.
+     * @param {string} type - 'paragraph' or 'cue'
+     * @param {number} index - The segment index
+     */
+    toggleFlagNoteMinimized(type, index) {
+      const key = `${type}-${index}`;
+      if (this.minimizedFlagNotes[key]) {
+        delete this.minimizedFlagNotes[key];
+      } else {
+        this.minimizedFlagNotes[key] = true;
+      }
+    },
+
+    /**
+     * Toggle the needs-attention flag on a paragraph segment.
+     * This persists when the script is saved.
+     */
+    toggleNeedsAttention(segmentIndex) {
+      console.log('🚩 Toggle needs-attention for segment:', segmentIndex);
+
+      // Mark as having unsaved changes
+      this.hasLocalUnsavedChanges = true;
+
+      // Get current segments
+      const segments = [...this.scriptSegments];
+
+      if (!segments[segmentIndex] || segments[segmentIndex].type !== 'text') {
+        console.warn('Cannot toggle needs-attention on non-text segment');
+        return;
+      }
+
+      // Toggle the flag
+      segments[segmentIndex].needsAttention = !segments[segmentIndex].needsAttention;
+
+      console.log('🚩 New needsAttention value:', segments[segmentIndex].needsAttention);
+
+      // Reconstruct and emit the updated script content
+      const newRawContent = this.reconstructRawContent(segments);
+      this.$emit('update:scriptContent', newRawContent);
+    },
+
+    /**
+     * Toggle the needs-attention flag on a cue segment.
+     * This persists when the script is saved via the cue's rawData.
+     */
+    toggleCueNeedsAttention(segmentIndex) {
+      console.log('🚩 Toggle needs-attention for cue segment:', segmentIndex);
+
+      // Mark as having unsaved changes
+      this.hasLocalUnsavedChanges = true;
+
+      // Get current segments
+      const segments = [...this.scriptSegments];
+
+      if (!segments[segmentIndex] || segments[segmentIndex].type !== 'cue') {
+        console.warn('Cannot toggle cue needs-attention on non-cue segment');
+        return;
+      }
+
+      // Toggle the flag on the cue data
+      const cueData = segments[segmentIndex].data;
+      if (cueData) {
+        cueData.needsAttention = !cueData.needsAttention;
+        // Also update rawData if it exists
+        if (cueData.rawData) {
+          cueData.rawData.needsAttention = cueData.needsAttention;
+        }
+      }
+
+      console.log('🚩 New cue needsAttention value:', cueData?.needsAttention);
+
+      // Reconstruct and emit the updated script content
+      const newRawContent = this.reconstructRawContent(segments);
+      this.$emit('update:scriptContent', newRawContent);
+    },
+
+    /**
+     * Open the flag note panel for a segment.
+     * If segment is not flagged, flags it first.
+     */
+    openFlagNotePanel(index, type, segment) {
+      console.log('🚩 Opening flag note panel:', { index, type });
+
+      // Get the current flag note content
+      let currentNote = '';
+      if (type === 'paragraph') {
+        currentNote = segment.flagNote || '';
+        // If not already flagged, flag it now
+        if (!segment.needsAttention) {
+          this.toggleNeedsAttention(index);
+        }
+      } else if (type === 'cue') {
+        currentNote = segment.data?.flagNote || '';
+        // If not already flagged, flag it now
+        if (!segment.data?.needsAttention) {
+          this.toggleCueNeedsAttention(index);
+        }
+      }
+
+      // Set the panel state
+      this.activeFlagNoteIndex = index;
+      this.activeFlagNoteType = type;
+      this.flagNoteContent = currentNote;
+    },
+
+    /**
+     * Close the flag note panel without saving.
+     */
+    closeFlagNotePanel() {
+      console.log('🚩 Closing flag note panel');
+      this.activeFlagNoteIndex = null;
+      this.activeFlagNoteType = null;
+      this.flagNoteContent = '';
+    },
+
+    /**
+     * Save the flag note content to the segment.
+     */
+    saveFlagNote(index, type) {
+      console.log('🚩 Saving flag note:', { index, type, content: this.flagNoteContent });
+
+      this.hasLocalUnsavedChanges = true;
+      const segments = [...this.scriptSegments];
+
+      if (type === 'paragraph') {
+        if (segments[index] && segments[index].type === 'text') {
+          segments[index].flagNote = this.flagNoteContent;
+        }
+      } else if (type === 'cue') {
+        if (segments[index] && segments[index].type === 'cue' && segments[index].data) {
+          segments[index].data.flagNote = this.flagNoteContent;
+          if (segments[index].data.rawData) {
+            segments[index].data.rawData.flagNote = this.flagNoteContent;
+          }
+        }
+      }
+
+      // Reconstruct and emit the updated script content
+      const newRawContent = this.reconstructRawContent(segments);
+      this.$emit('update:scriptContent', newRawContent);
+
+      // Close the panel
+      this.closeFlagNotePanel();
+    },
+
+    /**
+     * Resolve (unflag) the segment and close the panel.
+     */
+    resolveFlag(index, type) {
+      console.log('🚩 Resolving flag:', { index, type });
+
+      this.hasLocalUnsavedChanges = true;
+      const segments = [...this.scriptSegments];
+
+      if (type === 'paragraph') {
+        if (segments[index] && segments[index].type === 'text') {
+          segments[index].needsAttention = false;
+          segments[index].flagNote = ''; // Clear the note
+        }
+      } else if (type === 'cue') {
+        if (segments[index] && segments[index].type === 'cue' && segments[index].data) {
+          segments[index].data.needsAttention = false;
+          segments[index].data.flagNote = ''; // Clear the note
+          if (segments[index].data.rawData) {
+            segments[index].data.rawData.needsAttention = false;
+            segments[index].data.rawData.flagNote = '';
+          }
+        }
+      }
+
+      // Reconstruct and emit the updated script content
+      const newRawContent = this.reconstructRawContent(segments);
+      this.$emit('update:scriptContent', newRawContent);
+
+      // Close the panel
+      this.closeFlagNotePanel();
+    },
+
+    /**
+     * Update flag note for a paragraph segment (called on input change).
+     */
+    updateParagraphFlagNote(index, value) {
+      this.hasLocalUnsavedChanges = true;
+      const segments = [...this.scriptSegments];
+
+      if (segments[index] && segments[index].type === 'text') {
+        segments[index].flagNote = value;
+      }
+
+      // Reconstruct and emit the updated script content
+      const newRawContent = this.reconstructRawContent(segments);
+      this.$emit('update:scriptContent', newRawContent);
+    },
+
+    /**
+     * Update flag note for a cue segment (called on input change).
+     */
+    updateCueFlagNote(index, value) {
+      this.hasLocalUnsavedChanges = true;
+      const segments = [...this.scriptSegments];
+
+      if (segments[index] && segments[index].type === 'cue' && segments[index].data) {
+        segments[index].data.flagNote = value;
+        if (segments[index].data.rawData) {
+          segments[index].data.rawData.flagNote = value;
+        }
+      }
+
+      // Reconstruct and emit the updated script content
+      const newRawContent = this.reconstructRawContent(segments);
+      this.$emit('update:scriptContent', newRawContent);
+    },
+
+    /**
+     * Handle flag button click - toggles flag on/off. Notes are always on by default.
+     * Click on unflagged = flag it (note shows automatically)
+     * Click on flagged = unflag it (if minimized, expand first; if visible, unflag)
+     */
+    handleFlagClick(index, type, segment) {
+      const key = `${type}-${index}`;
+      const isFlagged = type === 'paragraph' ? segment.needsAttention : segment.data?.needsAttention;
+
+      console.log('🚩 handleFlagClick:', { index, type, isFlagged, key });
+
+      if (!isFlagged) {
+        // Not flagged - flag it (note shows automatically, always on by default)
+        console.log('🚩 Flagging segment - note will show by default');
+        if (type === 'paragraph') {
+          this.toggleNeedsAttention(index);
+        } else {
+          this.toggleCueNeedsAttention(index);
+        }
+        // Ensure not minimized so note shows
+        delete this.minimizedFlagNotes[key];
+      } else if (this.minimizedFlagNotes[key]) {
+        // Flagged but minimized - expand it (don't unflag)
+        console.log('🚩 Expanding minimized note');
+        delete this.minimizedFlagNotes[key];
+      } else {
+        // Flagged and visible - unflag it
+        console.log('🚩 Unflagging segment');
+        if (type === 'paragraph') {
+          this.toggleNeedsAttention(index);
+        } else {
+          this.toggleCueNeedsAttention(index);
+        }
+        delete this.minimizedFlagNotes[key];
+      }
+    },
+
+    /**
+     * Minimize a flag note panel.
+     */
+    minimizeFlagNote(type, index) {
+      const key = `${type}-${index}`;
+      this.minimizedFlagNotes[key] = true;
+    },
+
+    /**
+     * Get the first four words from paragraph content for flag note header.
+     */
+    getFirstFourWords(content) {
+      if (!content) return 'Flagged paragraph';
+      // Strip HTML tags and get plain text
+      const plainText = content.replace(/<[^>]*>/g, '').trim();
+      // Split by whitespace and get first 4 words
+      const words = plainText.split(/\s+/).slice(0, 4);
+      const result = words.join(' ');
+      // Add ellipsis if there were more words
+      return plainText.split(/\s+/).length > 4 ? result + '...' : result;
+    },
+
+    /**
+     * Get a reference string for a cue segment for flag note header.
+     */
+    getCueReference(segment) {
+      if (!segment || !segment.data) return 'Flagged cue';
+      const cueType = segment.data.type || segment.data.cueType || 'CUE';
+      const slug = segment.data.slug || segment.data.Slug || '';
+      return slug ? `${cueType}: ${slug}` : cueType;
+    },
+
     /**
      * UNIVERSAL RULE: Get safe insertion position that is NEVER inside a cue block or paragraph.
      * Cue blocks are independent elements that must exist BETWEEN other elements, never inside them.
@@ -2357,51 +3001,538 @@ export default {
       this.autoResizeTextarea(index);
     },
 
-    // Custom auto-resize for textareas (Vuetify auto-grow is broken)
+    // Handle contenteditable input - update content from innerHTML
+    handleContentEditableInput(index, event) {
+      const element = event.target;
+      const htmlContent = element.innerHTML;
+      console.log(`✏️ handleContentEditableInput called for index ${index}, html length: ${htmlContent?.length}`);
+
+      // CRITICAL FIX: Mark this segment as actively being edited
+      // This prevents getSegmentContent from returning buffered content,
+      // which would cause Vue to re-render and reset cursor position (causing reverse typing)
+      this.activelyEditingSegment = index;
+      this.isActivelyEditing = true; // Block watchers during active editing
+
+      // Save cursor state for restoration after autosave
+      // Uses text offset instead of Range object so it survives DOM re-renders
+      const selection = window.getSelection();
+      if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        // Calculate the text offset from start of contenteditable to cursor
+        const preCaretRange = range.cloneRange();
+        preCaretRange.selectNodeContents(element);
+        preCaretRange.setEnd(range.startContainer, range.startOffset);
+        const textOffset = preCaretRange.toString().length;
+
+        this.savedCursorState = {
+          segmentIndex: index,
+          textOffset: textOffset,
+          htmlContent: element.innerHTML // Save content to detect if it changed
+        };
+      }
+
+      // Skip update if blockReactiveUpdates is set
+      if (this.blockReactiveUpdates) {
+        console.log('⏭️⏭️⏭️ SKIPPING handleContentEditableInput - blockReactiveUpdates is active');
+        return;
+      }
+
+      // Clean up any browser-generated formatting quirks
+      // Browsers wrap pasted lines in <div> or <p> tags - convert to newlines to preserve paragraphs
+      // Note: <br[^>]*> catches <br>, <br/>, <br class="Apple-interchange-newline">, etc.
+      let cleanedHtml = htmlContent
+        // CRITICAL: Replace closing </div> and </p> with newlines BEFORE stripping opening tags
+        // This preserves paragraph breaks when pasting multi-paragraph content
+        .replace(/<\/div>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<div[^>]*>/gi, '')  // Strip opening div tags (including ones with attributes)
+        .replace(/<p[^>]*>/gi, '')    // Strip opening p tags (including ones with classes)
+        .replace(/<br[^>]*\/?>/gi, '\n')
+        // Clean up multiple consecutive newlines (max 2 for paragraph breaks)
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+      this.updateTextSegment(index, cleanedHtml);
+      this.hasLocalUnsavedChanges = true;
+    },
+
+    // Flush all pending changes from the edit buffer immediately
+    // Called before switching items to ensure no edits are lost
+    flushPendingChanges() {
+      if (!this.segmentEditBuffer || Object.keys(this.segmentEditBuffer).length === 0) {
+        console.log('💾 No pending changes to flush');
+        return;
+      }
+
+      console.log('💾 Flushing pending changes for', Object.keys(this.segmentEditBuffer).length, 'segments');
+
+      // Clear any pending debounce timers
+      if (this.updateDebounceTimers) {
+        Object.keys(this.updateDebounceTimers).forEach(key => {
+          clearTimeout(this.updateDebounceTimers[key]);
+        });
+        this.updateDebounceTimers = {};
+      }
+
+      // Get current segments and apply all buffered changes
+      const segments = [...this.scriptSegments];
+      let hasChanges = false;
+
+      Object.keys(this.segmentEditBuffer).forEach(indexStr => {
+        const index = parseInt(indexStr);
+        if (segments[index] && segments[index].type === 'text') {
+          console.log('💾 Applying buffered changes to segment', index);
+          segments[index].content = this.segmentEditBuffer[index];
+          hasChanges = true;
+        }
+      });
+
+      if (hasChanges) {
+        // Reconstruct and emit the updated content
+        const newRawContent = this.reconstructRawContent(segments);
+        this.$emit('update:scriptContent', newRawContent);
+        console.log('💾 Flushed changes emitted to parent');
+      }
+    },
+
+    // Handle paste for contenteditable divs - detect paragraph breaks and split into multiple paragraphs
+    handleContentEditablePaste(index, event) {
+      event.preventDefault();
+
+      const clipboardData = event.clipboardData || window.clipboardData;
+      const plainText = clipboardData.getData('text/plain');
+      const htmlText = clipboardData.getData('text/html');
+
+      console.log('📋 Paste detected - analyzing content for paragraph breaks');
+      console.log('📋 Plain text length:', plainText?.length, 'HTML length:', htmlText?.length);
+
+      // Check user setting for plain text paste
+      const interfaceSettings = JSON.parse(localStorage.getItem('showbuild_interface_settings') || '{}');
+      const pastePlainTextOnly = interfaceSettings.pastePlainTextOnly === true;
+
+      // Determine paragraphs from pasted content
+      let paragraphs = [];
+
+      if (pastePlainTextOnly || !htmlText) {
+        // Plain text mode: split on double newlines (paragraph breaks)
+        paragraphs = plainText.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0);
+        console.log('📋 Plain text mode - found', paragraphs.length, 'paragraphs');
+      } else {
+        // HTML mode: parse and extract paragraphs
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = htmlText;
+
+        // Clean up Google Docs cruft
+        tempDiv.querySelectorAll('[id^="docs-internal-guid"]').forEach(el => {
+          // Unwrap the span but keep its content
+          while (el.firstChild) {
+            el.parentNode.insertBefore(el.firstChild, el);
+          }
+          el.remove();
+        });
+
+        // Remove style attributes from all elements
+        tempDiv.querySelectorAll('[style]').forEach(el => {
+          el.removeAttribute('style');
+        });
+
+        // Extract paragraphs from <p>, <div>, or split plain text by line breaks
+        const pElements = tempDiv.querySelectorAll('p, div');
+        if (pElements.length > 0) {
+          pElements.forEach(p => {
+            const content = p.innerHTML.trim();
+            if (content && content !== '<br>' && content !== '<br/>') {
+              paragraphs.push(content);
+            }
+          });
+        }
+
+        // If no paragraph elements found, try splitting by <br><br> or double newlines
+        if (paragraphs.length === 0) {
+          const rawContent = tempDiv.innerHTML
+            .replace(/<br\s*\/?>\s*<br\s*\/?>/gi, '\n\n')
+            .replace(/<\/p>\s*<p[^>]*>/gi, '\n\n')
+            .replace(/<\/div>\s*<div[^>]*>/gi, '\n\n');
+
+          // Create temp element to get text content split by our markers
+          const temp2 = document.createElement('div');
+          temp2.innerHTML = rawContent;
+          const textWithBreaks = temp2.textContent || temp2.innerText || '';
+          paragraphs = textWithBreaks.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0);
+        }
+
+        console.log('📋 HTML mode - found', paragraphs.length, 'paragraphs');
+      }
+
+      // If no paragraphs found, just insert the plain text
+      if (paragraphs.length === 0) {
+        paragraphs = [plainText.trim()];
+      }
+
+      const element = event.target;
+      const currentSegment = this.scriptSegments[index];
+
+      if (paragraphs.length === 1) {
+        // Single paragraph - just insert at cursor
+        document.execCommand('insertText', false, paragraphs[0]);
+        this.syncContentEditableToSegment(index, element);
+        this.hasLocalUnsavedChanges = true;
+        console.log('📋 Single paragraph pasted');
+      } else {
+        // Multiple paragraphs - need to split and create new paragraph segments
+        console.log('📋 Multiple paragraphs detected - creating', paragraphs.length, 'segments');
+
+        // Get cursor position to split current content
+        const selection = window.getSelection();
+        let contentBefore = '';
+        let contentAfter = '';
+
+        if (selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+
+          // Get content BEFORE cursor
+          const beforeRange = document.createRange();
+          beforeRange.selectNodeContents(element);
+          beforeRange.setEnd(range.startContainer, range.startOffset);
+          const beforeFragment = beforeRange.cloneContents();
+          const tempBefore = document.createElement('div');
+          tempBefore.appendChild(beforeFragment);
+          contentBefore = tempBefore.innerHTML.trim();
+
+          // Get content AFTER cursor
+          const afterRange = document.createRange();
+          afterRange.selectNodeContents(element);
+          afterRange.setStart(range.endContainer, range.endOffset);
+          const afterFragment = afterRange.cloneContents();
+          const tempAfter = document.createElement('div');
+          tempAfter.appendChild(afterFragment);
+          contentAfter = tempAfter.innerHTML.trim();
+        }
+
+        // Build new segments array
+        const segments = [...this.scriptSegments];
+        const speaker = currentSegment?.speaker || 'josh';
+
+        // First paragraph: content before cursor + first pasted paragraph
+        const firstParagraphContent = contentBefore + (contentBefore ? ' ' : '') + paragraphs[0];
+
+        // Update current segment
+        segments[index] = {
+          ...currentSegment,
+          content: firstParagraphContent
+        };
+
+        // Create new segments for remaining paragraphs
+        const newSegments = [];
+        for (let i = 1; i < paragraphs.length; i++) {
+          newSegments.push({
+            type: 'text',
+            content: paragraphs[i],
+            speaker: speaker,
+            needsParagraphTags: true
+          });
+        }
+
+        // Add segment for content after cursor (if any)
+        if (contentAfter) {
+          newSegments.push({
+            type: 'text',
+            content: contentAfter,
+            speaker: speaker,
+            needsParagraphTags: true
+          });
+        }
+
+        // Insert new segments after current
+        segments.splice(index + 1, 0, ...newSegments);
+
+        // Set focus to end of pasted content (last new paragraph, or just after pasted if no content after)
+        this.pendingFocusSegmentIndex = index + paragraphs.length - (contentAfter ? 0 : 1);
+
+        // Reconstruct and emit
+        const newRawContent = this.reconstructRawContent(segments);
+        this.$emit('update:scriptContent', newRawContent);
+        this.hasLocalUnsavedChanges = true;
+
+        console.log('📋 Created', newSegments.length, 'new paragraph segments');
+      }
+    },
+
+    // Handle keydown for contenteditable divs
+    handleContentEditableKeydown(index, event) {
+      console.log('🎹 ContentEditable key pressed:', event.key, 'in segment', index);
+
+      // Allow space key to pass through naturally (browser handles insertion)
+      if (event.key === ' ' || event.code === 'Space') {
+        return;
+      }
+
+      // Ctrl+B: Toggle bold using execCommand
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        document.execCommand('bold', false, null);
+        this.syncContentEditableToSegment(index, event.target);
+        return;
+      }
+
+      // Ctrl+I: Toggle italic using execCommand
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'i') {
+        event.preventDefault();
+        document.execCommand('italic', false, null);
+        this.syncContentEditableToSegment(index, event.target);
+        return;
+      }
+
+      // Ctrl+U: Toggle underline using execCommand
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'u') {
+        event.preventDefault();
+        document.execCommand('underline', false, null);
+        this.syncContentEditableToSegment(index, event.target);
+        return;
+      }
+
+      // Ctrl+S: Save all
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        this.handleSaveAll();
+        return;
+      }
+
+      // Handle Enter key for paragraph creation (DOUBLE-ENTER required)
+      // Single Enter = line break within segment
+      // Double Enter (two Enters within 1 second) = split paragraph at cursor position
+      if (event.key === 'Enter' && !event.shiftKey) {
+        const element = event.target;
+        const textContent = element.textContent || '';
+
+        // Get cursor position
+        const selection = window.getSelection();
+        if (!selection.rangeCount) return;
+        const range = selection.getRangeAt(0);
+
+        // Calculate cursor offset in text content
+        const preCaretRange = range.cloneRange();
+        preCaretRange.selectNodeContents(element);
+        preCaretRange.setEnd(range.startContainer, range.startOffset);
+        const caretOffset = preCaretRange.toString().length;
+
+        // Track Enter timing per segment for double-Enter detection
+        // Double-Enter now works ANYWHERE in paragraph (not just at end)
+        const now = Date.now();
+        const lastEnterTime = this.lastEnterState[index]?.time || 0;
+        const lastEnterPosition = this.lastEnterState[index]?.position || -1;
+        const timeSinceLastEnter = now - lastEnterTime;
+        // Double-enter detected if: within 1 second AND cursor hasn't moved much (within 5 chars)
+        const isDoubleEnter = timeSinceLastEnter < 1000 && Math.abs(caretOffset - lastEnterPosition) <= 5;
+
+        console.log('⏎ Enter pressed:', {
+          textContent: textContent.substring(Math.max(0, caretOffset - 10), Math.min(textContent.length, caretOffset + 10)),
+          caretOffset,
+          totalLength: textContent.length,
+          lastEnterPosition,
+          timeSinceLastEnter,
+          isDoubleEnter
+        });
+
+        // Update last Enter state for this segment
+        this.lastEnterState[index] = { time: now, position: caretOffset };
+
+        if (isDoubleEnter) {
+          // DOUBLE ENTER: Split paragraph at cursor position
+          event.preventDefault();
+          console.log('⏎⏎ Double Enter detected - splitting paragraph at cursor');
+
+          // Find scrollable containers
+          const scrollWrapper = document.querySelector('.scrollable-content-wrapper');
+          const scriptContainer = element.closest('.script-content-container');
+          const savedWrapperScroll = scrollWrapper ? scrollWrapper.scrollTop : 0;
+          const savedContainerScroll = scriptContainer ? scriptContainer.scrollTop : 0;
+
+          if (scrollWrapper) {
+            scrollWrapper.style.overflow = 'hidden';
+          }
+
+          this.blockReactiveUpdates = true;
+
+          // CRITICAL FIX: Clear active editing flags BEFORE creating new paragraph
+          this.isActivelyEditing = false;
+          this.activelyEditingSegment = null;
+          console.log('⏎⏎ Cleared isActivelyEditing and activelyEditingSegment for paragraph creation');
+
+          // Split content at cursor position using Range API
+          // Get content BEFORE cursor (stays in current paragraph)
+          const beforeRange = document.createRange();
+          beforeRange.selectNodeContents(element);
+          beforeRange.setEnd(range.startContainer, range.startOffset);
+          const beforeFragment = beforeRange.cloneContents();
+          const tempBefore = document.createElement('div');
+          tempBefore.appendChild(beforeFragment);
+          let contentBefore = tempBefore.innerHTML
+            .replace(/(<br[^>]*\/?>|\n|<div><br[^>]*\/?><\/div>|\s)+$/gi, '')
+            .trim();
+
+          // Get content AFTER cursor (goes to new paragraph)
+          const afterRange = document.createRange();
+          afterRange.selectNodeContents(element);
+          afterRange.setStart(range.endContainer, range.endOffset);
+          const afterFragment = afterRange.cloneContents();
+          const tempAfter = document.createElement('div');
+          tempAfter.appendChild(afterFragment);
+          let contentAfter = tempAfter.innerHTML
+            .replace(/^(<br[^>]*\/?>|\n|<div><br[^>]*\/?><\/div>|\s)+/gi, '')
+            .trim();
+
+          console.log('⏎⏎ Split content - before:', contentBefore.substring(0, 50), '... after:', contentAfter.substring(0, 50));
+
+          // Update current element with content before cursor
+          element.innerHTML = contentBefore;
+
+          // Clear any pending debounce for this segment
+          if (this.updateDebounceTimers && this.updateDebounceTimers[index]) {
+            clearTimeout(this.updateDebounceTimers[index]);
+            delete this.updateDebounceTimers[index];
+          }
+          if (this.segmentEditBuffer && this.segmentEditBuffer[index]) {
+            delete this.segmentEditBuffer[index];
+          }
+
+          // Create new paragraph with content after cursor
+          this.createNewParagraphAfterWithContent(index, contentAfter, contentBefore);
+
+          // Restore scroll and unlock after a delay
+          setTimeout(() => {
+            if (scrollWrapper) {
+              scrollWrapper.style.overflow = '';
+              scrollWrapper.scrollTop = savedWrapperScroll;
+            }
+            if (scriptContainer) {
+              scriptContainer.scrollTop = savedContainerScroll;
+            }
+            this.blockReactiveUpdates = false;
+          }, 100);
+
+          return;
+        }
+
+        // SINGLE ENTER: Allow default behavior (inserts line break)
+        // Don't preventDefault - let browser insert the newline/br
+        console.log('⏎ Single Enter - allowing line break');
+        // Let the event propagate naturally
+      }
+
+      // Handle Backspace at beginning - merge with previous
+      if (event.key === 'Backspace') {
+        const selection = window.getSelection();
+        if (selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          // Check if cursor is at the very beginning
+          if (range.startOffset === 0 && range.collapsed) {
+            const element = event.target;
+            // Check if there's no content before the cursor
+            if (range.startContainer === element || range.startContainer === element.firstChild) {
+              event.preventDefault();
+              this.mergeParagraphWithPrevious(index);
+            }
+          }
+        }
+      }
+
+      // Ctrl+Alt+H: Toggle highlight
+      if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 'h') {
+        event.preventDefault();
+        // Use custom highlight since execCommand doesn't have built-in highlight
+        this.toggleHighlightContentEditable(index, event.target);
+      }
+    },
+
+    // Sync contenteditable innerHTML back to segment data
+    syncContentEditableToSegment(index, element) {
+      this.$nextTick(() => {
+        let html = element.innerHTML;
+        // Normalize the HTML - browsers use different tags
+        html = html
+          .replace(/<b>/gi, '<strong>')
+          .replace(/<\/b>/gi, '</strong>')
+          .replace(/<i>/gi, '<em>')
+          .replace(/<\/i>/gi, '</em>');
+        this.updateTextSegment(index, html);
+        this.hasLocalUnsavedChanges = true;
+      });
+    },
+
+    // Toggle highlight for contenteditable (mark tag)
+    toggleHighlightContentEditable(index, element) {
+      const selection = window.getSelection();
+      if (!selection.rangeCount || selection.isCollapsed) {
+        console.log('🖍️ No text selected for highlight');
+        return;
+      }
+
+      const range = selection.getRangeAt(0);
+      const selectedText = range.toString();
+
+      if (!selectedText) return;
+
+      // Check if selection is inside a mark element
+      let parentMark = range.commonAncestorContainer;
+      while (parentMark && parentMark !== element) {
+        if (parentMark.nodeName === 'MARK') {
+          // Already highlighted - remove the mark
+          const textNode = document.createTextNode(parentMark.textContent);
+          parentMark.parentNode.replaceChild(textNode, parentMark);
+          this.syncContentEditableToSegment(index, element);
+          return;
+        }
+        parentMark = parentMark.parentNode;
+      }
+
+      // Not highlighted - add mark
+      const mark = document.createElement('mark');
+      try {
+        range.surroundContents(mark);
+        this.syncContentEditableToSegment(index, element);
+      } catch (e) {
+        console.warn('Could not apply highlight - selection spans multiple elements');
+      }
+    },
+
+    // Custom auto-resize for textareas and contenteditable divs
     autoResizeTextarea(index) {
-      console.log(`📏 autoResizeTextarea called for index ${index}`);
       this.$nextTick(() => {
         const textareaRefArray = this.$refs[`textareaRef-${index}`];
-        console.log(`📏 textareaRef for ${index}:`, textareaRefArray);
 
         // Template refs in v-for return arrays, so get the first element
         const textareaRef = Array.isArray(textareaRefArray) ? textareaRefArray[0] : textareaRefArray;
-        console.log(`📏 textareaRef component for ${index}:`, textareaRef);
 
+        if (!textareaRef) return;
+
+        // Handle contenteditable div (direct HTMLElement)
+        if (textareaRef instanceof HTMLElement && textareaRef.contentEditable === 'true') {
+          // Contenteditable divs auto-size naturally, just update line count
+          this.$nextTick(() => {
+            this.updateLineCount(index);
+          });
+          return;
+        }
+
+        // Handle Vue component wrapping textarea (fallback)
         if (textareaRef && textareaRef.$el) {
-          // Get the actual textarea element (Vuetify wraps it)
           const textarea = textareaRef.$el.querySelector('textarea');
-          console.log(`📏 textarea element for ${index}:`, textarea);
 
           if (textarea) {
-            const oldHeight = textarea.style.height;
-
-            // Force overflow hidden and remove any height constraints
             textarea.style.overflow = 'hidden';
             textarea.style.minHeight = '0';
             textarea.style.maxHeight = 'none';
-
-            // Reset to 1px to force recalculation (auto doesn't always work)
             textarea.style.height = '1px';
 
-            // Calculate the new height based on scrollHeight
             const scrollHeight = textarea.scrollHeight;
             const newHeight = scrollHeight + 'px';
-
-            // Apply the new height directly
             textarea.style.height = newHeight;
 
-            console.log(`📏 Auto-resized textarea ${index} from ${oldHeight} to ${newHeight} (scrollHeight: ${scrollHeight}px)`);
-
-            // Update line count after resize
             this.$nextTick(() => {
               this.updateLineCount(index);
             });
-          } else {
-            console.warn(`📏 No textarea element found for index ${index}`);
           }
-        } else {
-          console.warn(`📏 No textareaRef component found for index ${index}`);
         }
       });
     },
@@ -2426,17 +3557,26 @@ export default {
       const textareaRefArray = this.$refs[`textareaRef-${index}`];
       const textareaRef = Array.isArray(textareaRefArray) ? textareaRefArray[0] : textareaRefArray;
 
-      if (textareaRef && textareaRef.$el) {
+      if (!textareaRef) return;
+
+      const lineHeight = 24; // 16px font * 1.5 line-height
+      let totalHeight = 0;
+
+      // Handle contenteditable div (direct HTMLElement)
+      if (textareaRef instanceof HTMLElement && textareaRef.contentEditable === 'true') {
+        totalHeight = textareaRef.scrollHeight;
+      }
+      // Handle Vue component wrapping textarea
+      else if (textareaRef && textareaRef.$el) {
         const textarea = textareaRef.$el.querySelector('textarea');
         if (textarea) {
-          // Calculate line count based on actual height
-          const lineHeight = 24; // 16px font * 1.5 line-height
-          const totalHeight = textarea.scrollHeight;
-          const lineCount = Math.max(1, Math.round(totalHeight / lineHeight));
-
-          // Update reactive cache (Vue 3 way - direct assignment)
-          this.segmentLineCounts[index] = lineCount;
+          totalHeight = textarea.scrollHeight;
         }
+      }
+
+      if (totalHeight > 0) {
+        const lineCount = Math.max(1, Math.round(totalHeight / lineHeight));
+        this.segmentLineCounts[index] = lineCount;
       }
     },
 
@@ -2722,6 +3862,225 @@ export default {
         isMalformed: isMalformed,
         hasYamlAfterClosing: hasYamlAfterClosing
       };
+    },
+
+    /**
+     * Validate script content for common issues that cause data corruption
+     * Returns an object with validation results and detected issues
+     */
+    validateScriptContent(content) {
+      if (!content) return { isValid: true, issues: [] };
+
+      const issues = [];
+
+      // 1. Check for truncated HTML tags (e.g., </p instead of </p>)
+      const truncatedTagMatch = content.match(/<\/[a-z]+[^>]*$/i);
+      if (truncatedTagMatch) {
+        issues.push({
+          type: 'truncated_tag',
+          description: `Truncated closing tag found: "${truncatedTagMatch[0]}"`,
+          position: content.lastIndexOf(truncatedTagMatch[0])
+        });
+      }
+
+      // 2. Check for unclosed paragraph tags
+      const openPTags = (content.match(/<p\s/g) || []).length + (content.match(/<p>/g) || []).length;
+      const closePTags = (content.match(/<\/p>/g) || []).length;
+      if (openPTags !== closePTags) {
+        issues.push({
+          type: 'mismatched_tags',
+          description: `Mismatched paragraph tags: ${openPTags} opening, ${closePTags} closing`,
+          openCount: openPTags,
+          closeCount: closePTags
+        });
+      }
+
+      // 3. Check for duplicate content blocks (same paragraph appearing twice)
+      const paragraphs = content.match(/<p[^>]*>[\s\S]*?<\/p>/g) || [];
+      if (paragraphs.length > 10) {
+        // Only check first 5 paragraphs for duplication (performance)
+        const firstFiveParagraphs = paragraphs.slice(0, 5).join('|||');
+        const contentAfterHalf = paragraphs.slice(Math.floor(paragraphs.length / 2));
+        const secondHalfStart = contentAfterHalf.slice(0, 5).join('|||');
+
+        if (firstFiveParagraphs === secondHalfStart && paragraphs.length > 20) {
+          issues.push({
+            type: 'duplicate_content',
+            description: 'Content appears to be duplicated (first half matches second half)',
+            totalParagraphs: paragraphs.length,
+            estimatedOriginalLength: Math.floor(paragraphs.length / 2)
+          });
+        }
+      }
+
+      // 4. Check for multiple YAML frontmatter blocks
+      const frontmatterCheck = this.detectMultipleFrontmatterBlocks(content);
+      if (frontmatterCheck.isMalformed) {
+        issues.push({
+          type: 'malformed_frontmatter',
+          description: `Multiple or malformed YAML frontmatter blocks detected`,
+          blockCount: frontmatterCheck.blockCount
+        });
+      }
+
+      return {
+        isValid: issues.length === 0,
+        issues: issues
+      };
+    },
+
+    /**
+     * Repair common content issues
+     * Returns the repaired content and a log of repairs made
+     */
+    repairScriptContent(content) {
+      if (!content) return { content: content, repairs: [] };
+
+      let repairedContent = content;
+      const repairs = [];
+
+      // 1. Fix truncated closing tags (</p, </div, etc.)
+      const truncatedTagPattern = /<\/([a-z]+)$/i;
+      const truncatedMatch = repairedContent.match(truncatedTagPattern);
+      if (truncatedMatch) {
+        repairedContent = repairedContent.replace(truncatedTagPattern, `</${truncatedMatch[1]}>`);
+        repairs.push({
+          type: 'truncated_tag_fixed',
+          description: `Fixed truncated tag: </${truncatedMatch[1]}> was missing >`
+        });
+      }
+
+      // 2. Remove duplicate content (if detected)
+      const paragraphs = repairedContent.match(/<p[^>]*>[\s\S]*?<\/p>/g) || [];
+      if (paragraphs.length > 20) {
+        const firstFive = paragraphs.slice(0, 5).map(p => p.trim()).join('|||');
+        const halfPoint = Math.floor(paragraphs.length / 2);
+        const atHalfFive = paragraphs.slice(halfPoint, halfPoint + 5).map(p => p.trim()).join('|||');
+
+        if (firstFive === atHalfFive) {
+          // Content is duplicated - extract frontmatter and first half of body
+          const frontmatterMatch = repairedContent.match(/^(---[\s\S]*?---\n)/);
+          const frontmatter = frontmatterMatch ? frontmatterMatch[1] : '';
+          const bodyContent = frontmatterMatch ? repairedContent.slice(frontmatter.length) : repairedContent;
+
+          // Find the position where duplication starts
+          const bodyParagraphs = bodyContent.match(/<p[^>]*>[\s\S]*?<\/p>/g) || [];
+          const halfBodyParagraphs = bodyParagraphs.slice(0, Math.floor(bodyParagraphs.length / 2));
+
+          // Reconstruct content with just the first half
+          const uniqueBody = halfBodyParagraphs.join('\n\n');
+          repairedContent = frontmatter + uniqueBody;
+
+          repairs.push({
+            type: 'duplicate_content_removed',
+            description: `Removed duplicate content block (${paragraphs.length} paragraphs reduced to ${halfBodyParagraphs.length})`
+          });
+        }
+      }
+
+      // 3. Fix multiple frontmatter blocks - keep only the first one
+      const frontmatterCheck = this.detectMultipleFrontmatterBlocks(repairedContent);
+      if (frontmatterCheck.blockCount > 1) {
+        // Keep only content up to end of first frontmatter block
+        const firstBlockEnd = repairedContent.indexOf('---', 3) + 3;
+        const afterFirstBlock = repairedContent.slice(firstBlockEnd);
+        const bodyStart = afterFirstBlock.search(/<p|<!-- Begin Cue/);
+
+        if (bodyStart > -1) {
+          const cleanBody = afterFirstBlock.slice(bodyStart);
+          // Remove any additional frontmatter from body
+          const cleanedBody = cleanBody.replace(/\n---[\s\S]*?---\n/g, '\n');
+          repairedContent = repairedContent.slice(0, firstBlockEnd) + '\n' + cleanedBody;
+
+          repairs.push({
+            type: 'multiple_frontmatter_fixed',
+            description: `Removed ${frontmatterCheck.blockCount - 1} extra frontmatter block(s)`
+          });
+        }
+      }
+
+      return {
+        content: repairedContent,
+        repairs: repairs,
+        wasRepaired: repairs.length > 0
+      };
+    },
+
+    /**
+     * Validate and repair content before saving
+     * Called automatically before emitting save events
+     */
+    validateAndRepairBeforeSave(content) {
+      const validation = this.validateScriptContent(content);
+
+      if (!validation.isValid) {
+        console.warn('⚠️ Content validation issues detected:', validation.issues);
+
+        const repair = this.repairScriptContent(content);
+
+        if (repair.wasRepaired) {
+          console.log('🔧 Content repaired:', repair.repairs);
+          return {
+            content: repair.content,
+            wasRepaired: true,
+            repairs: repair.repairs,
+            originalIssues: validation.issues
+          };
+        }
+      }
+
+      return {
+        content: content,
+        wasRepaired: false,
+        repairs: [],
+        originalIssues: validation.issues
+      };
+    },
+
+    /**
+     * Centralized method for emitting script content updates
+     * Validates and repairs content before emitting to prevent corruption
+     * @param {string} content - The content to emit
+     * @param {boolean} skipValidation - Skip validation (for raw edits, default false)
+     */
+    emitScriptContent(content, skipValidation = false) {
+      if (!content) {
+        this.$emit('update:scriptContent', content);
+        return;
+      }
+
+      if (skipValidation) {
+        this.$emit('update:scriptContent', content);
+        return;
+      }
+
+      // Validate and repair before emitting
+      const result = this.validateAndRepairBeforeSave(content);
+
+      if (result.wasRepaired) {
+        console.log('📝 Content was auto-repaired before save:', result.repairs);
+        // Show a subtle notification to user
+        this.showRepairNotification(result.repairs);
+      }
+
+      this.$emit('update:scriptContent', result.content);
+    },
+
+    /**
+     * Show a subtle notification when content is auto-repaired
+     */
+    showRepairNotification(repairs) {
+      if (!repairs || repairs.length === 0) return;
+
+      const repairDescriptions = repairs.map(r => r.description).join(', ');
+      console.info(`🔧 Auto-repair applied: ${repairDescriptions}`);
+
+      // Use flash message if available
+      if (this.flashMessage) {
+        this.flashMessage.show = true;
+        this.flashMessage.text = `Auto-fixed: ${repairs.length} issue(s)`;
+        this.flashMessage.color = 'warning';
+      }
     },
 
     updateMetadata(field, value) {
@@ -3196,17 +4555,35 @@ export default {
           return;
         }
 
-        // SCRIPT MODE: Insert at end of script content
-        console.log('📄 Script mode: Inserting at end of script content');
+        // SCRIPT MODE: Insert based on selection (like SOT)
+        console.log('📄 Script mode: Auto-inserting IMG based on selection');
 
         // Close the modal
         this.showImgModal = false;
 
-        // Simply append to the end of script content with blank paragraph
-        const currentContent = this.scriptContent || '';
-        const newContent = currentContent + '\n\n' + imgCueBlock + '\n\n<p class="josh"></p>\n\n';
-        this.$emit('update:scriptContent', newContent);
-        console.log('✅ IMG cue inserted at end of script with blank paragraph');
+        // Determine insertion point based on selection
+        let insertionIndex;
+        if (this.selectedSegmentIndex !== null && this.selectedSegmentIndex >= 0) {
+          // Insert AFTER the selected segment (between zones)
+          insertionIndex = this.selectedSegmentIndex + 1;
+          console.log(`📍 Selected segment found at index ${this.selectedSegmentIndex}, inserting AFTER at between-zone ${insertionIndex}`);
+        } else {
+          // No selection - insert at bottom (after last paragraph)
+          const paragraphCount = this.scriptSegments.filter(seg => seg.type === 'text').length;
+          insertionIndex = paragraphCount;
+          console.log(`📍 No segment selected, inserting at bottom (between-zone ${insertionIndex})`);
+        }
+
+        // Create placement object for between-paragraph insertion
+        const placement = {
+          type: 'between',
+          index: insertionIndex,
+          cueType: 'IMG'
+        };
+
+        // Insert IMG at determined location
+        this.insertCueBetweenParagraphsInRawScript(placement, imgCueBlock);
+        console.log('✅ IMG cue inserted at selected position in script mode');
 
         // Clear pending data
         this.pendingCueData = null;
@@ -3259,6 +4636,17 @@ export default {
     // Visual Script Mode Methods
     // Single Source of Truth Editing Methods
     getSegmentContent(segmentIndex) {
+      // CRITICAL FIX: If this segment is actively being edited, return the DOM's current innerHTML
+      // This prevents Vue's v-html from overwriting content and resetting cursor position
+      if (this.activelyEditingSegment === segmentIndex) {
+        const refName = `textareaRef-${segmentIndex}`;
+        const element = this.$refs[refName];
+        if (element && element.innerHTML !== undefined) {
+          // Return the element's current innerHTML to prevent Vue from re-rendering it
+          return element.innerHTML;
+        }
+      }
+
       // Return buffered content if it exists (user is actively editing)
       if (this.segmentEditBuffer && this.segmentEditBuffer[segmentIndex] !== undefined) {
         console.log('📝 getSegmentContent: returning BUFFERED content for segment', segmentIndex);
@@ -3317,6 +4705,9 @@ export default {
 
         console.log('📝 Reconstructed raw content length:', newRawContent.length);
 
+        // CRITICAL: Set restoration flag BEFORE emit to block watchers during the entire save cycle
+        this.isRestoringCursor = true;
+
         // Update single source of truth
         this.$emit('update:scriptContent', newRawContent);
 
@@ -3324,9 +4715,108 @@ export default {
         delete this.segmentEditBuffer[segmentIndex];
         delete this.updateDebounceTimers[segmentIndex];
 
+        // IMPORTANT: Do NOT clear editing flags here!
+        // Keep isActivelyEditing=true so user can continue typing after autosave
+        // Flags are only cleared on blur (when user clicks away from paragraph)
+        console.log('📝 Autosave complete - keeping editing flags active for continued typing');
+
         // Persist to database and show visual feedback
         await this.persistCurrentItemToDatabase(segmentIndex);
-      }, 1000); // 1 second debounce - persist after user stops typing
+      }, 5000); // 5 second debounce - persist after user stops typing (longer to avoid cursor disruption)
+    },
+
+    /**
+     * Generic method to toggle formatting tags on selected text
+     * @param {number} segmentIndex - Index of the segment being edited
+     * @param {HTMLTextAreaElement} textarea - The textarea element
+     * @param {string} openTag - Opening tag (e.g., '<strong>')
+     * @param {string} closeTag - Closing tag (e.g., '</strong>')
+     * @param {string} tagName - Tag name for logging (e.g., 'bold')
+     */
+    toggleSelectionFormatting(segmentIndex, textarea, openTag, closeTag, tagName) {
+      console.log(`🎨 toggleSelectionFormatting (${tagName}) called for segment`, segmentIndex);
+
+      const selectionStart = textarea.selectionStart;
+      const selectionEnd = textarea.selectionEnd;
+      const content = textarea.value;
+
+      // If no selection, do nothing
+      if (selectionStart === selectionEnd) {
+        console.log(`🎨 No text selected, nothing to ${tagName}`);
+        return;
+      }
+
+      const selectedText = content.substring(selectionStart, selectionEnd);
+      console.log(`🎨 Selected text for ${tagName}:`, selectedText);
+
+      let newContent;
+      let newCursorStart;
+      let newCursorEnd;
+
+      const beforeSelection = content.substring(0, selectionStart);
+      const afterSelection = content.substring(selectionEnd);
+
+      // Pattern 1: Selection includes the tags
+      if (selectedText.startsWith(openTag) && selectedText.endsWith(closeTag)) {
+        // Remove the tags from selection
+        const unwrappedText = selectedText.slice(openTag.length, -closeTag.length);
+        newContent = beforeSelection + unwrappedText + afterSelection;
+        newCursorStart = selectionStart;
+        newCursorEnd = selectionStart + unwrappedText.length;
+        console.log(`🎨 Removed ${tagName} (pattern 1 - tags in selection)`);
+      }
+      // Pattern 2: Tags are outside the selection
+      else if (beforeSelection.endsWith(openTag) && afterSelection.startsWith(closeTag)) {
+        // Remove the surrounding tags
+        const newBefore = beforeSelection.slice(0, -openTag.length);
+        const newAfter = afterSelection.slice(closeTag.length);
+        newContent = newBefore + selectedText + newAfter;
+        newCursorStart = newBefore.length;
+        newCursorEnd = newBefore.length + selectedText.length;
+        console.log(`🎨 Removed ${tagName} (pattern 2 - tags outside selection)`);
+      }
+      // Pattern 3: Not formatted - add tags
+      else {
+        newContent = beforeSelection + openTag + selectedText + closeTag + afterSelection;
+        newCursorStart = selectionStart;
+        newCursorEnd = selectionEnd + openTag.length + closeTag.length;
+        console.log(`🎨 Added ${tagName}`);
+      }
+
+      // Update the textarea value
+      textarea.value = newContent;
+
+      // Restore selection
+      textarea.setSelectionRange(newCursorStart, newCursorEnd);
+
+      // Trigger the update through the normal flow
+      this.updateTextSegment(segmentIndex, newContent);
+
+      // Mark as having unsaved changes
+      this.hasLocalUnsavedChanges = true;
+
+      console.log(`🎨 ${tagName} toggle complete`);
+    },
+
+    /**
+     * Toggle bold (<strong>) on selected text - Ctrl+B
+     */
+    toggleBoldSelection(segmentIndex, textarea) {
+      this.toggleSelectionFormatting(segmentIndex, textarea, '<strong>', '</strong>', 'bold');
+    },
+
+    /**
+     * Toggle italic (<em>) on selected text - Ctrl+I
+     */
+    toggleItalicSelection(segmentIndex, textarea) {
+      this.toggleSelectionFormatting(segmentIndex, textarea, '<em>', '</em>', 'italic');
+    },
+
+    /**
+     * Toggle underline (<u>) on selected text - Ctrl+U
+     */
+    toggleUnderlineSelection(segmentIndex, textarea) {
+      this.toggleSelectionFormatting(segmentIndex, textarea, '<u>', '</u>', 'underline');
     },
 
     /**
@@ -3470,6 +4960,34 @@ export default {
         }
       }
 
+      // Ctrl+B: Toggle bold on selected text
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        this.toggleBoldSelection(segmentIndex, event.target);
+        return;
+      }
+
+      // Ctrl+I: Toggle italic on selected text
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'i') {
+        event.preventDefault();
+        this.toggleItalicSelection(segmentIndex, event.target);
+        return;
+      }
+
+      // Ctrl+U: Toggle underline on selected text
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'u') {
+        event.preventDefault();
+        this.toggleUnderlineSelection(segmentIndex, event.target);
+        return;
+      }
+
+      // Ctrl+S: Save all
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        this.handleSaveAll();
+        return;
+      }
+
       // Ctrl+Alt+H: Toggle highlight on selected text
       if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 'h') {
         event.preventDefault();
@@ -3538,6 +5056,63 @@ export default {
 
       // Focus logic is now handled by scriptSegments watcher
       // which will focus pendingFocusSegmentIndex after Vue finishes re-rendering
+    },
+
+    // Create new paragraph after current one with specific content (for splitting)
+    // currentSegmentContent: optional - if provided, update current segment's content too (for mid-paragraph splits)
+    createNewParagraphAfterWithContent(segmentIndex, newParagraphContent, currentSegmentContent = null) {
+      console.log('📝📝📝 ========== CREATE NEW PARAGRAPH WITH CONTENT ==========');
+      console.log('📝 Creating new paragraph after segment:', segmentIndex);
+      console.log('📝 New paragraph content:', newParagraphContent);
+      if (currentSegmentContent !== null) {
+        console.log('📝 Updating current segment content to:', currentSegmentContent);
+      }
+
+      // Mark as having unsaved changes
+      this.hasLocalUnsavedChanges = true;
+
+      const segments = [...this.scriptSegments];
+      const currentSegment = segments[segmentIndex];
+
+      if (!currentSegment) {
+        console.error('❌ Current segment not found at index:', segmentIndex);
+        return;
+      }
+
+      // If currentSegmentContent is provided, update the current segment (for mid-paragraph splits)
+      if (currentSegmentContent !== null) {
+        segments[segmentIndex] = {
+          ...currentSegment,
+          content: currentSegmentContent
+        };
+        console.log('📝 Updated current segment content');
+      }
+
+      // Create new text segment with the provided content
+      const newSegment = {
+        type: 'text',
+        content: newParagraphContent || '',
+        speaker: currentSegment.speaker || 'josh',
+        needsParagraphTags: true
+      };
+
+      console.log('📝 New segment to insert:', newSegment);
+
+      // Insert after current segment
+      segments.splice(segmentIndex + 1, 0, newSegment);
+      console.log('📝 Segments count after splice:', segments.length);
+
+      // Set the focus index to the newly created paragraph
+      this.pendingFocusSegmentIndex = segmentIndex + 1;
+      console.log('📝📝📝 Set pendingFocusSegmentIndex to:', this.pendingFocusSegmentIndex);
+
+      // Reconstruct raw content
+      const newRawContent = this.reconstructRawContent(segments);
+      console.log('📝 Reconstructed content length:', newRawContent.length);
+
+      console.log('📝 Emitting update:scriptContent to parent...');
+      this.$emit('update:scriptContent', newRawContent);
+      console.log('📝📝📝 ========== EMIT COMPLETE ==========');
     },
 
     // Create initial paragraph for empty content
@@ -3708,6 +5283,37 @@ export default {
       // Add other cue type modals as needed
     },
 
+    /**
+     * Handle re-upload request for SOT cue
+     * Opens SotModal with existing metadata but requires new video upload
+     */
+    handleReuploadSotCue(reuploadData) {
+      console.log('📤 Re-upload SOT cue requested:', reuploadData);
+      // Emit to parent (ContentEditor) which will open SotModal with pre-filled data
+      this.$emit('reupload-sot-cue', reuploadData);
+    },
+
+    /**
+     * Handle FSQ edit request from PlaceholderCueCard
+     * Emits to parent (ContentEditor) which will open FsqModal in edit mode
+     */
+    handleEditFsq(cueData) {
+      console.log('📝 Edit FSQ cue requested:', cueData);
+      this.$emit('edit-fsq-cue', cueData);
+    },
+
+    /**
+     * Handle SOT job status change (especially completion)
+     * Emits to ContentEditor to trigger content refresh
+     */
+    handleSotStatusChange({ status, assetId }) {
+      console.log(`📊 SOT job status changed: ${assetId} → ${status}`);
+      if (status === 'completed') {
+        console.log('✅ SOT job completed - requesting content refresh');
+        this.$emit('sot-job-complete', { assetId });
+      }
+    },
+
     handleMetaUpdate({ cueData, metadata }) {
       console.log('Meta update received:', metadata);
 
@@ -3746,6 +5352,61 @@ export default {
       this.$emit('update:scriptContent', newRawContent);
 
       console.log('Meta updated successfully');
+    },
+
+    /**
+     * Handle cue field update from PlaceholderCueCard
+     * Format: { assetId, field, value }
+     * Used for updating individual fields like mediaUrl after FSQ generation
+     */
+    handleCueFieldUpdate({ assetId, field, value }) {
+      console.log(`📝 handleCueFieldUpdate: assetId=${assetId}, field=${field}, value=${value}`);
+
+      // Find the cue segment by assetId
+      const segmentIndex = this.scriptSegments.findIndex(segment =>
+        segment.type === 'cue' &&
+        (segment.data?.assetId === assetId || segment.data?.rawData?.assetId === assetId)
+      );
+
+      if (segmentIndex === -1) {
+        console.error('❌ Could not find cue segment with assetId:', assetId);
+        return;
+      }
+
+      const segment = this.scriptSegments[segmentIndex];
+      console.log('Found segment at index:', segmentIndex, segment);
+
+      // Update the specific field in both data and rawData
+      // Use Vue reactivity-friendly approach
+      const updatedData = { ...segment.data };
+      const updatedRawData = { ...segment.data.rawData };
+
+      // Set the field value (supports camelCase field names)
+      updatedData[field] = value;
+      updatedRawData[field] = value;
+
+      // For mediaUrl, also set the lowercase version for parser compatibility
+      if (field === 'mediaUrl') {
+        updatedRawData.mediaurl = value;
+      }
+
+      updatedData.rawData = updatedRawData;
+
+      // Rebuild the cue block markdown using CueParser
+      const updatedCueBlock = CueParser.formatCueToMarkdown(updatedRawData);
+
+      // Update the segment
+      this.scriptSegments.splice(segmentIndex, 1, {
+        ...segment,
+        data: updatedData,
+        rawContent: updatedCueBlock
+      });
+
+      // Reconstruct and emit the updated script content
+      const newRawContent = this.reconstructRawContent(this.scriptSegments);
+      this.$emit('update:scriptContent', newRawContent);
+
+      console.log(`✅ Cue field '${field}' updated successfully for assetId: ${assetId}`);
     },
 
     deleteCue(index) {
@@ -4837,6 +6498,11 @@ export default {
     },
 
     handleGlobalKeydown(event) {
+      // Allow space key to pass through to contenteditable elements
+      if ((event.key === ' ' || event.code === 'Space') && event.target.isContentEditable) {
+        return;
+      }
+
       // Handle Ctrl+Shift+X for XTTS reading
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'x') {
         console.log('✅ CTRL+SHIFT+X triggered - toggling XTTS reading');
@@ -4851,8 +6517,17 @@ export default {
         return;
       }
 
-      // Handle Alt+Shift+A for AssetID regeneration (special case)
-      if (this.altKeyPressed && event.shiftKey && event.key.toLowerCase() === 'a') {
+      // EARLY CHECK: Don't trigger hotkeys when typing in input fields (except our own speaker textareas)
+      // This check must happen BEFORE any shortcut handling to prevent shortcuts from firing in form fields
+      const target = event.target;
+      const isInSpeakerParagraph = target.closest && target.closest('.speaker-paragraph');
+      const isInInputField = target.tagName === 'INPUT' ||
+                             target.tagName === 'SELECT' ||
+                             (target.tagName === 'TEXTAREA' && !isInSpeakerParagraph) ||
+                             target.isContentEditable;
+
+      // Handle Alt+Shift+A for AssetID regeneration (special case) - but NOT in input fields
+      if (this.altKeyPressed && event.shiftKey && event.key.toLowerCase() === 'a' && !isInInputField) {
         console.log('✅ ALT+SHIFT+A triggered - calling regenerateCurrentCueAssetID');
         event.preventDefault();
         this.regenerateCurrentCueAssetID();
@@ -4864,11 +6539,8 @@ export default {
         return;
       }
 
-      // Don't trigger hotkeys when typing in input fields (except our own speaker textareas)
-      const target = event.target;
-
+      // Skip hotkeys for input fields (re-check for other hotkeys below)
       // Allow hotkeys in speaker textareas by checking if textarea is inside a speaker-paragraph
-      const isInSpeakerParagraph = target.closest && target.closest('.speaker-paragraph');
 
       if (target.tagName === 'INPUT' ||
           (target.tagName === 'TEXTAREA' && !isInSpeakerParagraph)) {
@@ -4927,6 +6599,11 @@ export default {
         case 'p':
           event.preventDefault();
           this.insertCue('PKG');
+          break;
+        case 'd':
+          console.log('✅ ALT+D triggered - calling insertCue(DIR)');
+          event.preventDefault();
+          this.insertCue('DIR');
           break;
         case 'b':
           event.preventDefault();
@@ -5029,10 +6706,10 @@ export default {
     },
 
     // Get explicit text color style for speaker
-    getSpeakerTextStyle(speaker) {
-      const speakerColor = CueParser.getSpeakerColor(speaker);
+    getSpeakerTextStyle(/* speaker */) {
+      // Use black text for readability - speaker is identified by background color
       return {
-        color: speakerColor + ' !important'
+        color: '#000000 !important'
       };
     },
 
@@ -5062,20 +6739,20 @@ export default {
         };
       }
 
-      // If saved (blue flash), override with blue
+      // If saved (green flash), override with green
       if (this.savedParagraphIndex === index) {
-        console.log(`🔵 Paragraph ${index} is SAVED - showing blue`);
+        console.log(`💚 Paragraph ${index} is SAVED - showing green`);
         return {
-          backgroundColor: '#bbdefb', // Light blue
+          backgroundColor: '#c8e6c9', // Light green
           transition: 'background-color 0.25s ease'
         };
       }
 
-      // If focused, use very light yellow
+      // If focused, use highlight color from config
       if (this.focusedParagraphIndex === index) {
-        console.log(`🟡 Paragraph ${index} is FOCUSED - showing yellow`);
+        console.log(`🟡 Paragraph ${index} is FOCUSED - showing highlight color`);
         return {
-          backgroundColor: '#fffef0', // Very light yellow
+          backgroundColor: this.highlightBackgroundColor,
           transition: 'background-color 0.2s ease'
         };
       }
@@ -5092,27 +6769,40 @@ export default {
     // Handle paragraph focus
     handleParagraphFocus(index) {
       console.log('🎯 Paragraph focused:', index);
-      console.log('🎯 Previously edited?', this.paragraphEditStates[index]);
-      console.log('🎯 All edit states:', this.paragraphEditStates);
 
-      // Only show yellow highlight if this paragraph was previously edited
-      // (i.e., user is coming back to edit existing content)
-      if (this.paragraphEditStates[index]) {
-        console.log('🟡 Re-editing existing paragraph - setting focusedParagraphIndex to', index);
-        this.focusedParagraphIndex = index;
-        console.log('🟡 focusedParagraphIndex is now:', this.focusedParagraphIndex);
-      } else {
-        console.log('⚪ First edit of paragraph - no highlight');
-        this.focusedParagraphIndex = null;
+      // Always highlight the currently focused paragraph
+      this.focusedParagraphIndex = index;
+      // Clear any cue focus when paragraph is focused
+      this.focusedCueIndex = null;
+      console.log('🟡 focusedParagraphIndex set to:', this.focusedParagraphIndex);
+    },
+
+    // Handle cue row focus (for tab navigation)
+    handleCueFocus(index) {
+      console.log('🎯 Cue row focused:', index);
+      this.focusedCueIndex = index;
+      // Clear paragraph focus when cue is focused
+      this.focusedParagraphIndex = null;
+    },
+
+    // Handle cue row blur
+    handleCueBlur(index) {
+      console.log('📝 Cue row blurred:', index);
+      // Only clear if this cue is still the focused one
+      if (this.focusedCueIndex === index) {
+        this.focusedCueIndex = null;
       }
+    },
 
-      // Debug: Check if the CSS class is being applied
-      this.$nextTick(() => {
-        const element = document.querySelector(`.seg-${index}`);
-        console.log('🎯 Element found:', element);
-        console.log('🎯 Element classes:', element?.classList.toString());
-        console.log('🎯 Element computed background:', element ? window.getComputedStyle(element).backgroundColor : 'N/A');
-      });
+    // Handle click on cue row (focus the row, not internal elements)
+    handleCueRowClick(index, event) {
+      // If clicking on a button inside the cue card, let it handle the event
+      if (event.target.closest('button') || event.target.closest('.v-btn')) {
+        return;
+      }
+      // Otherwise focus the row itself
+      this.focusedCueIndex = index;
+      event.currentTarget.focus();
     },
 
     // Handle paragraph blur
@@ -5120,6 +6810,16 @@ export default {
       console.log('📝 Paragraph blurred:', index);
       this.focusedParagraphIndex = null;
       console.log('📝 focusedParagraphIndex cleared');
+
+      // Clear the actively editing segment flag to allow v-html to update again
+      if (this.activelyEditingSegment === index) {
+        this.activelyEditingSegment = null;
+        console.log('📝 activelyEditingSegment cleared');
+      }
+
+      // Clear the master editing flag to allow watchers to run again
+      this.isActivelyEditing = false;
+      console.log('📝 isActivelyEditing cleared - watchers re-enabled');
 
       // Mark this paragraph as having been edited at least once
       this.paragraphEditStates[index] = true;
@@ -5164,15 +6864,17 @@ export default {
     },
 
     // Persist current item to database with visual feedback
+    // Preserves cursor position and focus during save using pre-saved state
     async persistCurrentItemToDatabase(segmentIndex) {
       console.log('💾 Persisting current item to database (autosave)...');
+      console.log('📍 Using pre-saved cursor state:', this.savedCursorState ? `segment ${this.savedCursorState.segmentIndex}` : 'none');
 
       try {
         // Emit save-current event to parent ContentEditor
         // This will trigger the saveCurrentItem method which persists to DB
         this.$emit('save-current');
 
-        // Triple blue flash on success
+        // Triple blue flash on success (CSS animation, no re-render)
         await this.flashParagraph(segmentIndex, 'success', 3);
 
         console.log('✅ Autosave successful');
@@ -5187,20 +6889,233 @@ export default {
           window.flashUrgent('Autosave Failed!', window.FLASH_COLORS.RED, 3000);
         }
       }
+
+      // Restore cursor position and focus using the pre-saved state
+      // This state was captured during typing in handleContentEditableInput
+      // Note: isRestoringCursor flag was already set BEFORE emit in updateTextSegment
+      this.$nextTick(() => {
+        try {
+          this.restoreCursorPosition();
+        } finally {
+          // Clear flag after a brief delay to ensure Vue has finished processing
+          setTimeout(() => {
+            this.isRestoringCursor = false;
+          }, 100);
+        }
+      });
     },
 
-    // Flash a paragraph with specified color and count
-    async flashParagraph(index, type, count) {
-      const flashClass = type === 'success' ? 'savedParagraphIndex' : 'errorParagraphIndex';
+    // Set editing flags on focus (BEFORE any input events fire)
+    // This prevents the character reversal bug by ensuring v-html is disabled before typing starts
+    setEditingFlags(index) {
+      this.activelyEditingSegment = index;
+      this.isActivelyEditing = true;
+      console.log('🎯 Editing flags set on focus for segment', index);
+    },
 
-      for (let i = 0; i < count; i++) {
-        this[flashClass] = index;
-        await new Promise(resolve => setTimeout(resolve, 150));
-        this[flashClass] = null;
-        if (i < count - 1) {
-          await new Promise(resolve => setTimeout(resolve, 150));
-        }
+    // Restore cursor position from savedCursorState using text offset
+    // Called after autosave to return user to their editing position
+    restoreCursorPosition() {
+      if (!this.savedCursorState) {
+        console.log('📍 No saved cursor state to restore');
+        return;
       }
+
+      const { segmentIndex, textOffset } = this.savedCursorState;
+      const refName = `textareaRef-${segmentIndex}`;
+      const targetElement = this.$refs[refName];
+
+      if (!targetElement || !document.body.contains(targetElement)) {
+        console.warn('📍 Target element not found for cursor restore');
+        return;
+      }
+
+      try {
+        // Focus the element first
+        targetElement.focus();
+
+        // Restore cursor position using text offset
+        // This works even after DOM re-renders because we're using character count
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+
+        // Create a range and find the position matching the text offset
+        const range = document.createRange();
+
+        // Walk through text nodes to find the right position
+        let currentOffset = 0;
+        let found = false;
+
+        const walker = document.createTreeWalker(
+          targetElement,
+          NodeFilter.SHOW_TEXT,
+          null,
+          false
+        );
+
+        let node = walker.nextNode();
+        while (node) {
+          const nodeLength = node.textContent.length;
+          if (currentOffset + nodeLength >= textOffset) {
+            // Found the right node
+            range.setStart(node, textOffset - currentOffset);
+            range.collapse(true);
+            found = true;
+            break;
+          }
+          currentOffset += nodeLength;
+          node = walker.nextNode();
+        }
+
+        if (!found) {
+          // Couldn't find exact position, place cursor at end
+          console.log('📍 Text offset not found, placing cursor at end');
+          range.selectNodeContents(targetElement);
+          range.collapse(false); // false = collapse to end
+        }
+
+        selection.addRange(range);
+
+        // Re-enable editing flags since we're still in the element
+        this.activelyEditingSegment = segmentIndex;
+        this.isActivelyEditing = true;
+
+        console.log('📍 Cursor restored to segment', segmentIndex, 'at offset', textOffset);
+      } catch (e) {
+        console.warn('📍 Could not restore cursor position:', e);
+        // Ultimate fallback: just focus the element
+        targetElement.focus();
+        this.activelyEditingSegment = segmentIndex;
+        this.isActivelyEditing = true;
+      }
+    },
+
+    // Flash the currently focused paragraph green on successful autosave
+    // Called by ContentEditor after debounced autosave completes
+    flashFocusedParagraphSaved() {
+      console.log('💚 flashFocusedParagraphSaved called');
+      console.log('💚 focusedParagraphIndex:', this.focusedParagraphIndex);
+      console.log('💚 activelyEditingSegment:', this.activelyEditingSegment);
+
+      // Try focusedParagraphIndex first, fall back to activelyEditingSegment
+      let index = this.focusedParagraphIndex;
+      if (index === null || index === undefined) {
+        index = this.activelyEditingSegment;
+      }
+
+      if (index !== null && index !== undefined) {
+        console.log('💚 Flashing paragraph', index, 'green for successful save');
+        this.flashParagraph(index, 'success', 3);
+      } else {
+        console.log('⚠️ No focused paragraph to flash - both focusedParagraphIndex and activelyEditingSegment are null');
+      }
+    },
+
+    // Flash a paragraph with specified color
+    // Uses JavaScript-based animations to support dynamic colors from settings
+    // This prevents cursor loss during autosave by not triggering Vue re-renders
+    // eslint-disable-next-line no-unused-vars
+    async flashParagraph(index, type, count = 3) {
+      const refName = `textareaRef-${index}`;
+      let element = this.$refs[refName];
+
+      console.log(`🎨 flashParagraph called: index=${index}, type=${type}, refName=${refName}`);
+
+      // In Vue 3, refs inside v-for return arrays
+      if (Array.isArray(element)) {
+        element = element[0];
+      }
+
+      if (!element) {
+        console.warn(`🎨 No element found for ref: ${refName}`);
+        return;
+      }
+
+      // Find the parent paragraph-content div
+      const paragraphDiv = element.closest('.paragraph-content');
+      if (!paragraphDiv) {
+        console.warn(`🎨 Could not find .paragraph-content parent for element`);
+        return;
+      }
+
+      // Get flash color from settings or use defaults
+      let flashColor;
+      if (type === 'success') {
+        // Get autosave color from settings, default to green
+        const autosaveColorName = getColorValue('autosave');
+        console.log(`🎨 autosave color from settings: "${autosaveColorName}"`);
+        const colorToResolve = autosaveColorName || 'green';
+        let resolvedColor = resolveVuetifyColor(colorToResolve);
+        console.log(`🎨 resolved color: "${resolvedColor}"`);
+        resolvedColor = resolvedColor || '#4CAF50';
+        // Add alpha for flash effect - handle both hex and rgba/rgb
+        if (resolvedColor.startsWith('rgba') || resolvedColor.startsWith('rgb')) {
+          flashColor = resolvedColor;
+        } else {
+          // Ensure hex has # prefix for hexToRgba
+          if (!resolvedColor.startsWith('#')) {
+            resolvedColor = '#' + resolvedColor;
+          }
+          flashColor = this.hexToRgba(resolvedColor, 0.7);
+        }
+      } else {
+        // Error color - red
+        flashColor = 'rgba(244, 67, 54, 0.6)';
+      }
+
+      console.log(`🎨 Flash color: ${flashColor}`);
+
+      // Store original state
+      const originalTransition = paragraphDiv.style.transition || '';
+      const hadFocusClass = paragraphDiv.classList.contains('paragraph-focused');
+
+      // Find the inner contenteditable element (the text area that may have its own background)
+      const innerTextArea = paragraphDiv.querySelector('.speaker-contenteditable, .speaker-textarea');
+      const innerOriginalTransition = innerTextArea ? innerTextArea.style.transition : '';
+
+      // Temporarily remove focus class to prevent yellow override
+      if (hadFocusClass) {
+        paragraphDiv.classList.remove('paragraph-focused');
+        console.log(`🎨 Temporarily removed paragraph-focused class`);
+      }
+
+      // Set fast transition for snappy flashing on both elements
+      paragraphDiv.style.transition = 'background-color 0.05s ease-in-out';
+      if (innerTextArea) {
+        innerTextArea.style.transition = 'background-color 0.05s ease-in-out';
+      }
+
+      // Perform 3 fast flashes using JavaScript (80ms on, 80ms off)
+      for (let i = 0; i < 3; i++) {
+        // Flash on - use !important to override speaker backgrounds on both elements
+        paragraphDiv.style.setProperty('background-color', flashColor, 'important');
+        if (innerTextArea) {
+          innerTextArea.style.setProperty('background-color', flashColor, 'important');
+        }
+        await new Promise(resolve => setTimeout(resolve, 80));
+        // Flash off - brief transparent moment
+        paragraphDiv.style.setProperty('background-color', 'transparent', 'important');
+        if (innerTextArea) {
+          innerTextArea.style.setProperty('background-color', 'transparent', 'important');
+        }
+        await new Promise(resolve => setTimeout(resolve, 80));
+      }
+
+      // Restore original styles
+      paragraphDiv.style.removeProperty('background-color');
+      paragraphDiv.style.transition = originalTransition;
+      if (innerTextArea) {
+        innerTextArea.style.removeProperty('background-color');
+        innerTextArea.style.transition = innerOriginalTransition;
+      }
+
+      // Restore focus class if it was present
+      if (hadFocusClass) {
+        paragraphDiv.classList.add('paragraph-focused');
+        console.log(`🎨 Restored paragraph-focused class`);
+      }
+
+      console.log(`🎨 Flash animation complete`);
     },
 
     // Get dark border style for speaker header
@@ -5265,9 +7180,78 @@ export default {
         }
       }
 
+      // Remove leading dashes from paragraphs (unless part of a list)
+      // Re-match paragraphs after potential changes above
+      const dashCheckMatches = [...formattedContent.matchAll(/<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/g)];
+
+      for (const match of dashCheckMatches) {
+        const fullMatch = match[0];
+        const speaker = match[1] || 'josh';
+        const content = match[2];
+
+        // Check if content starts with a dash (possibly with whitespace)
+        if (/^\s*[-–—]/.test(content)) {
+          // Check if this is a list (multiple lines starting with dashes)
+          const lines = content.split('\n').filter(l => l.trim());
+          const dashLines = lines.filter(l => /^\s*[-–—]/.test(l));
+
+          // It's a list if 2+ consecutive lines start with dashes
+          const isListContent = dashLines.length >= 2 && dashLines.length === lines.length;
+
+          if (!isListContent) {
+            // Not a list - remove the leading dash
+            const cleanedContent = content.replace(/^\s*[-–—]\s*/, '');
+            const newTag = `<p class="${speaker}">${cleanedContent}</p>`;
+
+            if (newTag !== fullMatch) {
+              formattedContent = formattedContent.replace(fullMatch, newTag);
+              hasChanges = true;
+              console.log('Autoformat: Removed leading dash from paragraph');
+            }
+          }
+        }
+      }
+
+      // Strip inline styles from pasted content (Google Docs, Word, etc.)
+      // This normalizes colors, fonts, and other styles to match manually typed content
+      const originalLength = formattedContent.length;
+
+      // Remove Google Docs span IDs
+      formattedContent = formattedContent.replace(/<span id="docs-internal-guid-[^"]*">/gi, '');
+
+      // Remove nested <p dir="ltr"...> tags from Google Docs (keep content)
+      formattedContent = formattedContent.replace(/<p dir="ltr"[^>]*>/gi, '');
+
+      // Convert font-weight: 700 spans to <b> tags (preserve bold formatting)
+      formattedContent = formattedContent.replace(/<span[^>]*font-weight:\s*700[^>]*>([^<]*)<\/span>/gi, '<b>$1</b>');
+      formattedContent = formattedContent.replace(/<span[^>]*font-weight:\s*bold[^>]*>([^<]*)<\/span>/gi, '<b>$1</b>');
+
+      // Convert font-style: italic spans to <i> tags (preserve italic formatting)
+      formattedContent = formattedContent.replace(/<span[^>]*font-style:\s*italic[^>]*>([^<]*)<\/span>/gi, '<i>$1</i>');
+
+      // Remove all other spans with style attributes (colors, fonts, etc.) but keep content
+      formattedContent = formattedContent.replace(/<span[^>]*style="[^"]*"[^>]*>([^<]*)<\/span>/gi, '$1');
+
+      // Remove orphaned </span> tags
+      formattedContent = formattedContent.replace(/<\/span>/gi, '');
+
+      // Remove remaining span tags without content
+      formattedContent = formattedContent.replace(/<span[^>]*><\/span>/gi, '');
+
+      // Clean &nbsp; to regular spaces
+      formattedContent = formattedContent.replace(/&nbsp;/gi, ' ');
+
+      // Clean multiple consecutive spaces
+      formattedContent = formattedContent.replace(/  +/g, ' ');
+
+      if (formattedContent.length !== originalLength) {
+        hasChanges = true;
+        console.log('Autoformat: Stripped inline styles from pasted content');
+      }
+
       // Apply changes if any were made
       if (hasChanges) {
-        console.log('Autoformat: Fixed multiple paragraphs in single <p> tags');
+        console.log('Autoformat: Content was formatted');
         this.$emit('update:scriptContent', formattedContent);
         return true;
       }
@@ -6737,7 +8721,8 @@ export default {
       const newContent = CueParser.reconstructContent(segments);
       const newRawContent = frontmatter ? `${frontmatter}\n\n${newContent}` : newContent;
 
-      this.$emit('update:scriptContent', newRawContent);
+      // Use centralized emitter with validation
+      this.emitScriptContent(newRawContent);
       this.$emit('save-current');
     },
 
@@ -6859,10 +8844,25 @@ export default {
         // Clear pending order
         this.pendingSegmentOrder = null;
 
-        // Now emit the update after drag is complete
-        this.$emit('update:scriptContent', newRawContent);
+        // Now emit the update after drag is complete (with validation)
+        this.emitScriptContent(newRawContent);
         this.$emit('save-current');
       }
+    },
+
+    /**
+     * Force refresh of script segments by invalidating cache.
+     * Called by parent (ContentEditor) when external content changes occur,
+     * such as SOT processing completion updating the cue block data.
+     */
+    forceRefreshSegments() {
+      console.log('🔄 forceRefreshSegments called - invalidating segment cache');
+      this.cachedScriptSegments = null;
+      this.lastParsedContent = null;
+      // Force Vue to re-evaluate the computed property
+      this.$nextTick(() => {
+        console.log('🔄 Segment cache invalidated, segments will re-parse on next access');
+      });
     }
   }
 }
@@ -6884,10 +8884,61 @@ export default {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: visible !important; /* Required for sticky children to work */
+  position: relative; /* Required for segment locked overlay positioning */
 }
 
 .editor-panel-content.full-width {
   width: 100%;
+}
+
+/* Segment Locked Overlay */
+.segment-locked-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(128, 128, 128, 0.85);
+  backdrop-filter: blur(2px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.locked-content {
+  text-align: center;
+  color: white;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 12px;
+  min-width: 280px;
+}
+
+.locked-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.locked-message {
+  font-size: 1rem;
+  line-height: 1.6;
+  opacity: 0.9;
+}
+
+.locked-message strong {
+  font-size: 1.1rem;
+  display: block;
+  margin-top: 4px;
+}
+
+.locked-time {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  margin-top: 12px;
 }
 
 /* Ensure v-card uses flex layout properly */
@@ -6897,6 +8948,7 @@ export default {
   height: auto !important;
   max-height: none !important;
   min-height: 0 !important;
+  overflow: visible !important; /* Required for sticky children to work */
 }
 
 /* Override any Vuetify fill-height constraints */
@@ -6909,14 +8961,14 @@ export default {
 .editor-card .v-card-text {
   height: auto !important;
   max-height: none !important;
+  overflow: visible !important; /* Required for sticky children */
 }
 
 .editor-content {
   display: flex;
   flex-direction: column;
-  overflow: visible;
+  overflow: visible !important; /* Required for sticky children */
   min-height: calc(100vh - 180px);
-  /* Remove overflow: hidden to allow proper scrolling */
 }
 
 .editor-content .fill-height {
@@ -7187,17 +9239,17 @@ export default {
 .editor-toolbar-sticky {
   position: sticky !important;
   top: 0 !important;
-  z-index: 10 !important;
+  z-index: 100 !important; /* High z-index to stay above cues toolbar */
   background-color: #f5f5f5 !important;
   border-bottom: 1px solid #e0e0e0 !important;
   padding: 6px 8px !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15) !important; /* Slightly stronger shadow */
 }
 
 /* Sticky Cues Toolbar */
 .cues-toolbar-sticky {
   position: sticky !important;
-  top: 60px !important; /* Position below the main toolbar (48px height + 12px padding) */
+  top: 62px !important; /* Position below the main toolbar (48px + padding) */
   z-index: 9 !important;
   background-color: #f5f5f5 !important;
   border-bottom: 1px solid #e0e0e0 !important;
@@ -7459,7 +9511,7 @@ export default {
 /* Auto-sizing Cue Toolbar inside Editor Content */
 .editor-cues-toolbar {
   position: sticky !important;
-  top: 0 !important; /* Stick to top of scrolling container (.editor-panel) */
+  top: 62px !important; /* Below the mode toolbar (48px + padding) */
   z-index: 9 !important;
   width: 100% !important;
   background-color: #f5f5f5 !important;
@@ -7568,7 +9620,7 @@ export default {
 .script-mode-container {
   height: auto !important;
   max-height: none !important;
-  overflow: visible;
+  overflow: visible !important; /* Required for sticky children */
 }
 
 /* Multi-Selection Toolbar - Fixed Overlay */
@@ -7737,6 +9789,17 @@ export default {
   gap: 0px;
 }
 
+/* Invisible hover extension to reach action buttons positioned outside */
+.paragraph-content::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -40px; /* Extend past the buttons (at -28px with 24px width = -52px edge, so -40px gives overlap) */
+  width: 40px;
+  height: 100%;
+  pointer-events: auto; /* Capture mouse events */
+}
+
 /* Line numbers column */
 .line-numbers-column {
   flex-shrink: 0;
@@ -7754,10 +9817,11 @@ export default {
   font-size: 14px;
   font-weight: 600;
   color: rgba(0, 0, 0, 0.4);
-  line-height: 1.5;
-  height: 24px; /* Match textarea line height (16px font * 1.5) */
+  line-height: 24px; /* Must match .speaker-contenteditable line-height */
+  height: 24px;
   padding-right: 8px;
   white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .speaker-textarea {
@@ -7780,7 +9844,7 @@ export default {
 }
 
 .paragraph-content.paragraph-saved {
-  background-color: rgba(33, 150, 243, 0.4) !important; /* Light blue flash on save */
+  background-color: rgba(76, 175, 80, 0.5) !important; /* Green flash on save */
 }
 
 /* Force override with more specific selectors */
@@ -7799,6 +9863,66 @@ export default {
 
 .paragraph-content.paragraph-saved-green {
   background-color: rgba(76, 175, 80, 0.5) !important; /* Green flash on final save confirmation */
+}
+
+/* Needs Attention Flag styling - uses CSS variables from settings */
+.paragraph-content.paragraph-needs-attention {
+  background-color: var(--needs-attention-bg, rgba(255, 152, 0, 0.3)) !important;
+  border-left: 4px solid var(--needs-attention-border, #FF9800) !important;
+}
+
+/* Override speaker backgrounds when needs attention - must be specific */
+.paragraph-content.seg-0.paragraph-needs-attention,
+.paragraph-content.seg-1.paragraph-needs-attention,
+.paragraph-content.seg-2.paragraph-needs-attention,
+.paragraph-content.seg-3.paragraph-needs-attention,
+.paragraph-content.seg-4.paragraph-needs-attention,
+.paragraph-content.seg-5.paragraph-needs-attention,
+.paragraph-content.seg-6.paragraph-needs-attention,
+.paragraph-content.seg-7.paragraph-needs-attention,
+.paragraph-content.seg-8.paragraph-needs-attention,
+.paragraph-content.seg-9.paragraph-needs-attention {
+  background-color: var(--needs-attention-bg, rgba(255, 152, 0, 0.3)) !important;
+}
+
+/* Make textarea background transparent when paragraph needs attention */
+.paragraph-content.paragraph-needs-attention .speaker-textarea,
+.paragraph-content.paragraph-needs-attention .speaker-textarea :deep(.v-field),
+.paragraph-content.paragraph-needs-attention .speaker-textarea :deep(.v-field__input),
+.paragraph-content.paragraph-needs-attention .speaker-textarea :deep(textarea),
+.paragraph-content.paragraph-needs-attention .speaker-contenteditable {
+  background-color: transparent !important;
+}
+
+/* Flag button positioning - outside segment, above delete button */
+.paragraph-flag-btn,
+.paragraph-flag-btn.v-btn,
+.paragraph-flag-btn.v-btn--icon {
+  position: absolute !important;
+  right: -28px !important; /* Outside segment, touching edge */
+  top: 50% !important;
+  transform: translateY(-105%) !important; /* Position above the delete button */
+  opacity: 0.7;
+  z-index: 10;
+  min-width: 24px !important;
+  max-width: 24px !important;
+  width: 24px !important;
+  min-height: 24px !important;
+  max-height: 24px !important;
+  height: 24px !important;
+  background-color: var(--needs-attention-btn-bg, rgba(255, 152, 0, 0.15)) !important;
+  border-radius: 4px !important;
+  padding: 0 !important;
+}
+
+.paragraph-flag-btn:hover {
+  opacity: 1;
+  background-color: var(--needs-attention-btn-hover, rgba(255, 152, 0, 0.4)) !important;
+}
+
+.paragraph-flag-btn.flag-active {
+  opacity: 1;
+  background-color: var(--needs-attention-btn-active, rgba(255, 152, 0, 0.5)) !important;
 }
 
 /* Make textarea background transparent when paragraph is focused/saved to show parent background */
@@ -7823,21 +9947,72 @@ export default {
   background-color: transparent !important;
 }
 
+/* CSS Animation-based flash effects (non-reactive, preserves cursor/focus) */
+/* 3 distinct flashes over 1.2s - each flash is 200ms on, 200ms off */
+@keyframes flash-save {
+  0% { background-color: inherit; }
+  /* Flash 1 */
+  8% { background-color: rgba(76, 175, 80, 0.7); }
+  16% { background-color: inherit; }
+  /* Flash 2 */
+  33% { background-color: rgba(76, 175, 80, 0.7); }
+  50% { background-color: inherit; }
+  /* Flash 3 */
+  66% { background-color: rgba(76, 175, 80, 0.7); }
+  83% { background-color: inherit; }
+  100% { background-color: inherit; }
+}
+
+@keyframes flash-error {
+  0% { background-color: inherit; }
+  /* Flash 1 */
+  8% { background-color: rgba(244, 67, 54, 0.6); }
+  16% { background-color: inherit; }
+  /* Flash 2 */
+  33% { background-color: rgba(244, 67, 54, 0.6); }
+  50% { background-color: inherit; }
+  /* Flash 3 */
+  66% { background-color: rgba(244, 67, 54, 0.6); }
+  83% { background-color: inherit; }
+  100% { background-color: inherit; }
+}
+
+.paragraph-content.flash-save-animation {
+  animation: flash-save 1.2s ease-in-out;
+}
+
+.paragraph-content.flash-error-animation {
+  animation: flash-error 1.2s ease-in-out;
+}
+
+/* Ensure textarea stays transparent during flash animation */
+.paragraph-content.flash-save-animation .speaker-textarea,
+.paragraph-content.flash-save-animation .speaker-contenteditable,
+.paragraph-content.flash-error-animation .speaker-textarea,
+.paragraph-content.flash-error-animation .speaker-contenteditable {
+  background-color: transparent !important;
+}
+
 /* Paragraph hover action buttons */
-.paragraph-delete-btn {
+.paragraph-delete-btn,
+.paragraph-delete-btn.v-btn,
+.paragraph-delete-btn.v-btn--icon {
   position: absolute !important;
-  right: -10px;
-  top: 50%;
-  transform: translateY(-50%);
+  right: -28px !important; /* Outside segment, touching edge */
+  top: 50% !important;
+  transform: translateY(5%) !important; /* Below center, under the flag */
   background-color: #f44336 !important;
+  min-width: 24px !important;
+  max-width: 24px !important;
+  width: 24px !important;
+  min-height: 24px !important;
+  max-height: 24px !important;
+  height: 24px !important;
   color: white !important;
   opacity: 0;
   animation: fadeIn 0.2s ease-in forwards;
   z-index: 10;
-  width: 18px !important;
-  height: 18px !important;
-  border-radius: 50% !important;
-  min-width: 18px !important;
+  border-radius: 4px !important;
   padding: 0 !important;
 }
 
@@ -7875,10 +10050,57 @@ export default {
 /* Clean textarea styling */
 .speaker-textarea {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  font-size: 16px;
+  font-size: 14pt;
   line-height: 1.5;
   padding: 0;
   background-color: #fafafa !important; /* Even lighter gray background */
+}
+
+/* Contenteditable div styling - renders HTML formatting */
+.speaker-contenteditable {
+  min-height: 1.5em;
+  padding: 5px !important;
+  outline: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  cursor: text;
+  /* Match line-height with line numbers for proper alignment */
+  font-size: 16px;
+  line-height: 24px; /* Must match .line-number height */
+  /* Force LTR text direction to prevent RTL character input issues */
+  direction: ltr !important;
+  unicode-bidi: plaintext !important;
+  text-align: left !important;
+}
+
+/* Placeholder for empty contenteditable */
+.speaker-contenteditable:empty::before {
+  content: attr(data-placeholder);
+  color: #9e9e9e;
+  font-style: italic;
+  pointer-events: none;
+}
+
+/* Formatting styles inside contenteditable */
+.speaker-contenteditable strong,
+.speaker-contenteditable b {
+  font-weight: bold;
+}
+
+.speaker-contenteditable em,
+.speaker-contenteditable i {
+  font-style: italic;
+}
+
+.speaker-contenteditable u {
+  text-decoration: underline;
+}
+
+.speaker-contenteditable mark {
+  background-color: #ffeb3b;
+  padding: 0 2px;
+  border-radius: 2px;
 }
 
 /* Ensure speaker textareas auto-grow without scrollbars */
@@ -7930,7 +10152,7 @@ export default {
   background-color: #fafafa !important;
   color: #000000 !important;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
-  font-size: 16px !important;
+  font-size: 14pt !important;
   padding: 0 !important;
   line-height: 1.5 !important;
   margin: 0 !important;
@@ -8004,7 +10226,7 @@ export default {
 
 .segment-textarea {
   font-family: 'Roboto', sans-serif !important;
-  font-size: 16px !important;
+  font-size: 14pt !important;
   line-height: 1.6 !important;
   padding: 16px !important;
   min-height: 80px !important;
@@ -8025,7 +10247,7 @@ export default {
 
 .segment-textarea :deep(textarea) {
   font-family: 'Roboto', sans-serif !important;
-  font-size: 16px !important;
+  font-size: 14pt !important;
   line-height: 1.6 !important;
   padding: 16px !important;
   min-height: 80px !important;
@@ -8043,6 +10265,143 @@ export default {
   margin: 16px 0;
   display: flex;
   width: 100%;
+  padding: 8px 12px;
+  margin-left: -12px;
+  margin-right: -12px;
+  width: calc(100% + 24px);
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+  position: relative; /* For flag button positioning */
+}
+
+/* Invisible hover extension to reach flag button positioned outside */
+.cue-segment::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -40px;
+  width: 40px;
+  height: 100%;
+  pointer-events: auto;
+}
+
+.cue-segment.cue-focused {
+  /* Full row highlight when cue is selected */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+/* Cue segment needs-attention highlight - full row */
+.cue-segment.cue-needs-attention {
+  background-color: var(--needs-attention-bg, rgba(255, 152, 0, 0.3)) !important;
+  border-left: 4px solid var(--needs-attention-border, #FF9800) !important;
+}
+
+/* Cue flag button positioning */
+.cue-flag-btn,
+.cue-flag-btn.v-btn,
+.cue-flag-btn.v-btn--icon {
+  position: absolute !important;
+  right: -28px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  opacity: 0.7;
+  z-index: 10;
+  min-width: 24px !important;
+  max-width: 24px !important;
+  width: 24px !important;
+  min-height: 24px !important;
+  max-height: 24px !important;
+  height: 24px !important;
+  background-color: var(--needs-attention-btn-bg, rgba(255, 152, 0, 0.15)) !important;
+  border-radius: 4px !important;
+  padding: 0 !important;
+}
+
+.cue-flag-btn:hover {
+  opacity: 1;
+  background-color: var(--needs-attention-btn-hover, rgba(255, 152, 0, 0.4)) !important;
+}
+
+.cue-flag-btn.flag-active {
+  opacity: 1;
+  background-color: var(--needs-attention-btn-active, rgba(255, 152, 0, 0.5)) !important;
+}
+
+/* Flag Note Panel - floating panel for attention notes */
+.flag-note-panel {
+  position: fixed; /* Use fixed to escape stacking context and float above sidebar */
+  right: 20px; /* Position from right edge of viewport */
+  top: 50%;
+  transform: translateY(-50%);
+  width: 300px;
+  background-color: #fff;
+  border: 2px solid var(--needs-attention-border, #FF9800);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  z-index: 9999; /* High z-index to float above everything */
+  padding: 0;
+  overflow: hidden;
+}
+
+.flag-note-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: var(--needs-attention-bg, rgba(255, 152, 0, 0.15));
+  border-bottom: 1px solid var(--needs-attention-border, #FF9800);
+}
+
+.flag-note-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 13px;
+  color: #333;
+}
+
+.flag-note-close {
+  opacity: 0.6;
+}
+
+.flag-note-close:hover {
+  opacity: 1;
+}
+
+.flag-note-minimize {
+  margin-left: auto;
+  opacity: 0.6;
+}
+
+.flag-note-minimize:hover {
+  opacity: 1;
+}
+
+.flag-note-textarea {
+  margin: 12px;
+}
+
+.flag-note-textarea :deep(.v-field) {
+  background-color: #fafafa;
+}
+
+.flag-note-textarea :deep(textarea) {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.flag-note-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px 12px;
+}
+
+.cue-segment:focus {
+  outline: none;
+}
+
+.cue-segment:focus-visible {
+  outline: 2px solid rgba(var(--v-theme-primary), 0.5);
+  outline-offset: 2px;
 }
 
 .add-content-section {

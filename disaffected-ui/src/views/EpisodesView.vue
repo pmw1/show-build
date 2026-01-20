@@ -6,13 +6,7 @@
         <h2 class="text-h4 font-weight-bold">Episodes</h2>
       </v-col>
       <v-col class="text-right">
-        <v-btn
-          color="primary"
-          @click="createNewEpisode"
-          prepend-icon="mdi-plus"
-        >
-          New Episode
-        </v-btn>
+        <EpisodeScaffoldModal @episode-created="handleEpisodeCreated" />
       </v-col>
     </v-row>
 
@@ -247,12 +241,7 @@
             icon="mdi-television-classic-off"
           >
             <template v-slot:actions>
-              <v-btn
-                color="primary"
-                @click="createNewEpisode"
-              >
-                Create First Episode
-              </v-btn>
+              <EpisodeScaffoldModal @episode-created="handleEpisodeCreated" />
             </template>
           </v-empty-state>
         </template>
@@ -554,6 +543,72 @@
       </v-card>
     </v-dialog>
 
+    <!-- Phantom Record Delete Confirmation Dialog -->
+    <v-dialog
+      v-model="phantomDeleteDialog"
+      max-width="550"
+      persistent
+    >
+      <v-card>
+        <v-card-title class="text-warning">
+          <v-icon class="mr-2" color="warning">mdi-ghost</v-icon>
+          Phantom Episode Record
+        </v-card-title>
+        <v-card-text class="pb-2">
+          <div class="mb-3">
+            <strong>Episode:</strong> {{ episodeToDelete?.episode_number }}: "{{ episodeToDelete?.title || 'Untitled' }}"
+          </div>
+
+          <v-alert
+            type="warning"
+            variant="tonal"
+            class="mb-3"
+          >
+            <strong>This episode exists in the database but has no filesystem directory.</strong>
+            <p class="mt-2 mb-0">
+              This is a "phantom record" - possibly created by a failed operation or manual database entry.
+              The episode directory at <code>/episodes/{{ episodeToDelete?.episode_number }}/</code> does not exist.
+            </p>
+          </v-alert>
+
+          <v-alert
+            type="info"
+            variant="tonal"
+            class="mb-3"
+          >
+            <strong>Clicking "Delete Database Records" will:</strong>
+            <ul class="mt-2 mb-0">
+              <li>Remove the episode record from the database</li>
+              <li>Delete any associated rundown items</li>
+              <li>Delete any associated segments</li>
+            </ul>
+          </v-alert>
+
+          <div class="text-warning font-weight-bold">
+            Please confirm you want to delete the database records for this phantom episode.
+          </div>
+        </v-card-text>
+        <v-card-actions class="pa-4">
+          <v-spacer />
+          <v-btn
+            variant="text"
+            @click="cancelPhantomDelete"
+          >
+            Cancel
+          </v-btn>
+          <v-btn
+            color="warning"
+            variant="flat"
+            @click="confirmPhantomDelete"
+            :loading="deleting"
+            prepend-icon="mdi-database-remove"
+          >
+            Delete Database Records
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- AssetID Info Modal -->
     <v-dialog
       v-model="assetIdInfoDialog"
@@ -742,9 +797,13 @@ import axios from 'axios';
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { getColorValue, loadColorsFromDatabase } from '@/utils/themeColorMap.js';
+import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue';
 
 export default {
   name: 'EpisodesView',
+  components: {
+    EpisodeScaffoldModal
+  },
   setup() {
     const router = useRouter();
     
@@ -758,6 +817,7 @@ export default {
     const dateFilter = ref(null);
     const episodeDialog = ref(false);
     const deleteDialog = ref(false);
+    const phantomDeleteDialog = ref(false);  // For phantom record confirmation
     const editingEpisode = ref(false);
     const episodeToDelete = ref(null);
     const assetIdInfoDialog = ref(false);
@@ -873,6 +933,12 @@ export default {
       } finally {
         loading.value = false;
       }
+    };
+
+    // Handler for when a new episode is created via EpisodeScaffoldModal
+    const handleEpisodeCreated = async (episode) => {
+      console.log('Episode created:', episode);
+      await fetchEpisodes();
     };
 
     const formatDate = (dateString) => {
@@ -1161,38 +1227,74 @@ export default {
       }
     };
 
-    const confirmDelete = async () => {
+    const confirmDelete = async (forceDelete = false) => {
       if (!episodeToDelete.value) return;
-      
+
       deleting.value = true;
       try {
-        console.log('Deleting episode:', episodeToDelete.value.episode_number);
-        
+        console.log('Deleting episode:', episodeToDelete.value.episode_number, forceDelete ? '(forced)' : '');
+
+        // Build URL with force parameter if needed
+        const url = forceDelete
+          ? `/api/episodes/${episodeToDelete.value.episode_number}?force=true`
+          : `/api/episodes/${episodeToDelete.value.episode_number}`;
+
         // Call backend delete API - this will remove from filesystem and database
-        await axios.delete(`/api/episodes/${episodeToDelete.value.episode_number}`, {
+        const response = await axios.delete(url, {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
         });
-        
+
         console.log(`Episode ${episodeToDelete.value.episode_number} deleted successfully`);
-        
+
         // Remove from local list
         const index = episodes.value.findIndex(ep => ep.episode_number === episodeToDelete.value.episode_number);
         if (index > -1) {
           episodes.value.splice(index, 1);
         }
-        
-        // Show success message
-        alert(`Episode ${episodeToDelete.value.episode_number} has been permanently deleted from the filesystem and database.`);
-        
+
+        // Show success message based on what was deleted
+        const message = response.data?.filesystem_deleted
+          ? `Episode ${episodeToDelete.value.episode_number} has been permanently deleted from the filesystem and database.`
+          : `Episode ${episodeToDelete.value.episode_number} database records have been deleted (no filesystem directory existed).`;
+        alert(message);
+
         deleteDialog.value = false;
+        phantomDeleteDialog.value = false;
       } catch (error) {
         console.error('Failed to delete episode:', error);
-        const errorMessage = error.response?.data?.detail || error.response?.data?.error || error.message;
+
+        // Check for phantom record response (409 Conflict)
+        if (error.response?.status === 409 && error.response?.data?.detail?.error === 'phantom_record') {
+          // Close regular delete dialog and show phantom confirmation
+          deleteDialog.value = false;
+          phantomDeleteDialog.value = true;
+          deleting.value = false;
+          return;
+        }
+
+        // Handle other errors
+        const errorDetail = error.response?.data?.detail;
+        const errorMessage = typeof errorDetail === 'object'
+          ? errorDetail.message || JSON.stringify(errorDetail)
+          : errorDetail || error.response?.data?.error || error.message;
         alert(`Failed to delete episode: ${errorMessage}`);
       } finally {
-        deleting.value = false;
-        episodeToDelete.value = null;
+        if (!phantomDeleteDialog.value) {
+          deleting.value = false;
+          episodeToDelete.value = null;
+        } else {
+          deleting.value = false;
+        }
       }
+    };
+
+    const confirmPhantomDelete = () => {
+      confirmDelete(true);
+    };
+
+    const cancelPhantomDelete = () => {
+      phantomDeleteDialog.value = false;
+      episodeToDelete.value = null;
     };
 
     const closeEpisodeDialog = () => {
@@ -1367,6 +1469,7 @@ export default {
       dateFilter,
       episodeDialog,
       deleteDialog,
+      phantomDeleteDialog,
       editingEpisode,
       episodeToDelete,
       episodeForm,
@@ -1383,6 +1486,7 @@ export default {
       loadingNextNumber,
       filteredEpisodes,
       fetchEpisodes,
+      handleEpisodeCreated,
       formatDate,
       isUpcoming,
       getStatusColor,
@@ -1393,6 +1497,8 @@ export default {
       duplicateEpisode,
       deleteEpisode,
       confirmDelete,
+      confirmPhantomDelete,
+      cancelPhantomDelete,
       openStatusModal,
       closeStatusModal,
       changeEpisodeStatus,

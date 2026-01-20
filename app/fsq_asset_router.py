@@ -66,6 +66,7 @@ class FSQAssetAsyncRequest(BaseModel):
     asset_id: str
     alignment: str = "center"  # Text alignment: left, center, right
     font_family: str = "sans-serif"  # sans-serif or serif
+    max_font_size: Optional[int] = None  # Maximum font size in px for auto-fitting (None = full auto)
     box_height: int = 80  # Black overlay height as % of canvas
     box_opacity: int = 75  # Black overlay opacity as %
     line_spacing: int = 30  # Line spacing as % of font size
@@ -379,6 +380,7 @@ async def generate_fsq_asset_async(
                 'asset_id': request.asset_id,
                 'alignment': request.alignment,
                 'font_family': request.font_family,
+                'max_font_size': request.max_font_size,
                 'box_height': request.box_height,
                 'box_opacity': request.box_opacity,
                 'line_spacing': request.line_spacing,

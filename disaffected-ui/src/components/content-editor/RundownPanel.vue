@@ -1,7 +1,7 @@
 <template>
   <div
     :class="['rundown-panel', panelWidth === 'narrow' ? 'narrow' : 'wide']"
-    :style="{ width: panelWidthValue }"
+    :style="{ ...rundownPanelCssVars, width: panelWidthValue }"
   >
     <!-- Tab-shaped control buttons on right edge -->
     <div class="tab-controls-right">
@@ -298,11 +298,12 @@
                           { 'placeholder-item': item.isPlaceholder },
                           { 'region-item-selected': isItemRegionSelected(item) },
                           { 'generating-item': getItemGlobalIndex(item) === generatingItemIndex },
+                          { 'needs-attention-item': itemHasNeedsAttention(item) },
                           llmState ? llmState.getVisualClass('item', item.id) : ''
                         ]"
                         :style="Object.assign({},
                           {
-                            backgroundColor: getItemGlobalIndex(item) === selectedItemIndex ? getSelectionColor() : getBackgroundColorForItem(item?.type || 'unknown'),
+                            backgroundColor: itemHasNeedsAttention(item) ? needsAttentionColor : (getItemGlobalIndex(item) === selectedItemIndex ? getSelectionColor() : getBackgroundColorForItem(item?.type || 'unknown')),
                             color: getItemGlobalIndex(item) === selectedItemIndex ? getSelectionTextColor() : getTextColorForItem(item?.type || 'unknown')
                           },
                           llmState ? llmState.getVisualStyle('item', item.id) : {}
@@ -323,7 +324,16 @@
                             </div>
 
                             <!-- Type -->
-                            <div class="type-label">{{ (item?.type || 'UNKNOWN').toUpperCase().substring(0, 3) }}</div>
+                            <div class="type-label">
+                              {{ (item?.type || 'UNKNOWN').toUpperCase().substring(0, 3) }}
+                              <v-icon
+                                v-if="item?.is_library_item || item?.source === 'library'"
+                                size="x-small"
+                                color="amber"
+                                class="library-badge"
+                                title="Library Content"
+                              >mdi-library</v-icon>
+                            </div>
 
                             <!-- Slug -->
                             <div class="slug-column">
@@ -356,7 +366,7 @@
                                 <v-list-item @click="handleItemDelete(item)">
                                   <v-list-item-title>
                                     <v-icon size="small" class="mr-2" color="error">mdi-delete</v-icon>
-                                    Delete Item
+                                    {{ item?.is_library_item || item?.source === 'library' ? 'Remove from Rundown' : 'Delete Item' }}
                                   </v-list-item-title>
                                 </v-list-item>
                                 <v-list-item @click="requestNewItemAssetID(item)">
@@ -744,7 +754,10 @@ export default {
       clearRundownInProgress: false,
 
       // Region visibility toggle
-      showRegions: false  // Default to regions hidden
+      showRegions: false,  // Default to regions hidden
+
+      // Color reactivity trigger
+      colorLoadTrigger: 0  // Incremented when colors load to force re-computation
     }
   },
   setup() {
@@ -759,6 +772,29 @@ export default {
   computed: {
     panelWidthValue() {
       return this.panelWidth === 'narrow' ? '300px' : '520px'
+    },
+    // Get needs-attention color from settings for flagged items
+    needsAttentionColor() {
+      // Reference colorLoadTrigger to ensure re-computation when colors are loaded
+      // eslint-disable-next-line no-unused-vars
+      const _trigger = this.colorLoadTrigger;
+      const colorName = getColorValue('needs-attention') || 'orange-lighten-3';
+      return resolveVuetifyColor(colorName) || '#FFCC80';
+    },
+    // Get needs-attention border color (solid) for rundown items
+    needsAttentionBorderColor() {
+      return this.needsAttentionColor;
+    },
+    // CSS variables for dynamic theming of needs-attention items
+    rundownPanelCssVars() {
+      const hexColor = this.needsAttentionColor;
+      const r = parseInt(hexColor.slice(1, 3), 16);
+      const g = parseInt(hexColor.slice(3, 5), 16);
+      const b = parseInt(hexColor.slice(5, 7), 16);
+      return {
+        '--needs-attention-border': this.needsAttentionBorderColor,
+        '--needs-attention-bg-light': `rgba(${r}, ${g}, ${b}, 0.15)`
+      };
     },
     safeItems() {
       return this.items || []
@@ -965,8 +1001,8 @@ export default {
     try {
       await loadColorsFromDatabase('default');
       console.log('Colors loaded successfully in RundownPanel');
-      // Force reactivity update
-      this.$forceUpdate();
+      // Increment trigger to force re-computation of color-dependent computed properties
+      this.colorLoadTrigger++;
     } catch (error) {
       console.warn('Failed to load colors in RundownPanel, using defaults:', error);
     }
@@ -979,6 +1015,18 @@ export default {
     document.removeEventListener('keydown', this.handleKeydown, true);
   },
   methods: {
+    // Check if an item's script content contains any needs-attention flagged segments
+    itemHasNeedsAttention(item) {
+      if (!item || !item.script_content) {
+        return false;
+      }
+      // Check for paragraph flags (data-needs-attention="true")
+      const hasParagraphFlag = item.script_content.includes('data-needs-attention="true"');
+      // Check for cue flags (NeedsAttention: true or NeedsAttention:true)
+      const hasCueFlag = /NeedsAttention:\s*true/i.test(item.script_content);
+      return hasParagraphFlag || hasCueFlag;
+    },
+
     // Region visibility toggle
     toggleRegionsVisibility() {
       this.showRegions = !this.showRegions;
@@ -2629,11 +2677,12 @@ export default {
   top: 0 !important;
   height: 100vh; /* Full viewport height - reach bottom no matter what */
   border-right: none; /* Remove border */
-  overflow-y: hidden; /* Prevent vertical overflow issues */
+  overflow-y: auto; /* Allow internal scrolling for long rundowns */
   overflow-x: visible; /* Allow items to extend beyond right edge */
   display: flex;
   flex-direction: column;
   z-index: 15 !important; /* Above editor panel (z-index: 10) so rows can overhang */
+  align-self: flex-start; /* Required for sticky to work in flex container */
 }
 
 .rundown-title {
@@ -2647,7 +2696,7 @@ export default {
 
 .rundown-content {
   flex: 1; /* Take up remaining space */
-  overflow-y: visible; /* No internal scroll - page scrolls */
+  overflow-y: auto; /* Internal scroll within the sticky panel */
   overflow-x: hidden; /* Prevent horizontal scrolling during drag */
   min-height: 0; /* Allow flex item to shrink */
 }
@@ -2735,6 +2784,12 @@ export default {
   z-index: 100;
 }
 
+/* Needs-attention items get 400% wider status bar (4x = 20px) */
+.needs-attention-item .status-indicator {
+  width: 20px !important;
+  background-color: var(--needs-attention-border, #FFCC80) !important;
+}
+
 .rundown-panel.narrow .index-number-cell {
   min-width: 40px; /* Slightly smaller for narrow mode */
 }
@@ -2761,6 +2816,11 @@ export default {
   min-width: 75px;
   max-width: 75px;
   flex-shrink: 0;
+}
+
+.library-badge {
+  margin-left: 4px;
+  opacity: 0.9;
 }
 
 .slug-column {
@@ -3829,6 +3889,51 @@ export default {
   border: 2px solid v-bind('getSelectionColor()') !important;
   background-color: v-bind('getSelectionColor()') !important;
   color: v-bind('getSelectionTextColor()') !important;
+}
+
+/* Needs-attention item styling - uses CSS variables from settings */
+/* 10x larger left bar (40px) to make flagged items very visible */
+.needs-attention-item {
+  border-left: none !important;
+  background-color: var(--needs-attention-bg-light, rgba(255, 204, 128, 0.15)) !important;
+  position: relative;
+  margin-left: 0 !important;
+}
+
+/* Large attention bar on left side - 10x normal size */
+.needs-attention-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 40px;
+  background-color: var(--needs-attention-border, #FFCC80);
+  z-index: 5;
+}
+
+/* Adjust content to not overlap the large bar */
+.needs-attention-item .compact-rundown-row {
+  margin-left: 36px;
+}
+
+/* Flag indicator on needs-attention items */
+.needs-attention-item::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 12px;
+  height: 12px;
+  background-color: var(--needs-attention-border, #FFCC80);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M14.4,6L14,4H5V21H7V14H12.6L13,16H20V6H14.4Z'/%3E%3C/svg%3E") no-repeat center;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M14.4,6L14,4H5V21H7V14H12.6L13,16H20V6H14.4Z'/%3E%3C/svg%3E") no-repeat center;
+  z-index: 10;
+}
+
+/* Override needs-attention when item is selected */
+.needs-attention-item.selected-item {
+  border-left: none !important;
 }
 
 /* Tab-shaped control buttons on right edge of RundownPanel */

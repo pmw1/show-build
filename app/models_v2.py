@@ -108,6 +108,7 @@ class Organization(Base):
     # Relationships
     shows = relationship("Show", back_populates="organization", cascade="all, delete-orphan")
     speakers = relationship("Speaker", back_populates="organization", cascade="all, delete-orphan")
+    customers = relationship("Customer", back_populates="organization", cascade="all, delete-orphan")
 
 
 class Show(Base):
@@ -222,6 +223,72 @@ class Season(Base):
     # Relationships
     show = relationship("Show", back_populates="seasons")
     episodes = relationship("Episode", back_populates="season", cascade="all, delete-orphan")
+
+
+class Customer(Base):
+    """Customer/Sponsor model for managing advertisers and sponsors."""
+    __tablename__ = "customers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(String(50), unique=True, nullable=False, index=True)
+
+    # Organization relationship
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+
+    # Company information
+    company_name = Column(String(255), nullable=False, index=True)
+    display_name = Column(String(255), nullable=True)  # Short name for UI display
+    industry = Column(String(100), nullable=True)  # Retail, Tech, Healthcare, etc.
+
+    # Primary contact
+    contact_name = Column(String(255), nullable=True)
+    contact_email = Column(String(255), nullable=True)
+    contact_phone = Column(String(50), nullable=True)
+    contact_title = Column(String(100), nullable=True)  # Marketing Manager, etc.
+
+    # Billing information
+    billing_email = Column(String(255), nullable=True)
+    billing_address = Column(Text, nullable=True)
+
+    # Relationship metadata
+    customer_type = Column(String(50), default="advertiser")  # advertiser, sponsor, partner
+    tier = Column(String(50), default="standard")  # premium, standard, basic
+    notes = Column(Text, nullable=True)
+
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_test_data = Column(Boolean, default=False, nullable=False)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    organization = relationship("Organization", back_populates="customers")
+
+    def __repr__(self):
+        return f"<Customer(id={self.id}, company_name='{self.company_name}')>"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "asset_id": self.asset_id,
+            "company_name": self.company_name,
+            "display_name": self.display_name or self.company_name,
+            "industry": self.industry,
+            "contact_name": self.contact_name,
+            "contact_email": self.contact_email,
+            "contact_phone": self.contact_phone,
+            "contact_title": self.contact_title,
+            "billing_email": self.billing_email,
+            "billing_address": self.billing_address,
+            "customer_type": self.customer_type,
+            "tier": self.tier,
+            "notes": self.notes,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+        }
 
 
 class Episode(Base):
@@ -445,6 +512,29 @@ class RundownItem(Base):
     content_versions = relationship("ContentVersion", back_populates="rundown_item", cascade="all, delete-orphan", order_by="ContentVersion.version_number.desc()")
 
 
+class SegmentLock(Base):
+    """Segment-level editing locks for concurrent editing protection."""
+    __tablename__ = "segment_locks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(String(50), unique=True, nullable=False, index=True)
+
+    # What is locked (by rundown item asset_id, not segment_id)
+    rundown_item_asset_id = Column(String(50), ForeignKey("rundown_items.asset_id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Who holds the lock
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    # Lock lifecycle
+    locked_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    last_heartbeat = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    rundown_item = relationship("RundownItem", backref="lock")
+    user = relationship("User")
+
+
 class ContentVersion(Base):
     """Version history for rundown item script content - prevents data loss."""
     __tablename__ = "content_versions"
@@ -664,6 +754,7 @@ class SOTProcessingJob(Base):
     current_phase = Column(String(20), nullable=False, server_default='upload')
     status = Column(String(20), nullable=False, server_default='pending')
     job_type = Column(String(30), nullable=False, server_default='full_process')  # single_trim, individual_clips, montage, full_process
+    job_category = Column(String(20), nullable=False, server_default='sot')  # sot, vo - distinguishes SOT vs VO processing
     clips_data = Column(Text, nullable=True)  # JSON string of clips array
     error_message = Column(Text, nullable=True)
     retry_count = Column(Integer, nullable=False, server_default='0')

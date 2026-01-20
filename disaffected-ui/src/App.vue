@@ -123,11 +123,11 @@
           <v-list-item-title>Dashboard</v-list-item-title>
         </v-list-item>
 
-        <!-- Show Factory Section -->
+        <!-- ShowFactory Section -->
         <v-list-group value="scriptfactory">
           <template v-slot:activator="{ props }">
             <v-list-item v-bind="props" prepend-icon="mdi-script-text">
-              <v-list-item-title>Show Factory</v-list-item-title>
+              <v-list-item-title>ShowFactory</v-list-item-title>
             </v-list-item>
           </template>
           <v-list-item to="/episodes" prepend-icon="mdi-television-classic">
@@ -148,8 +148,11 @@
           <v-list-item to="/item-types" prepend-icon="mdi-format-list-bulleted-type">
             <v-list-item-title>Item Types</v-list-item-title>
           </v-list-item>
+          <v-list-item to="/reusables-studio" prepend-icon="mdi-content-copy">
+            <v-list-item-title>Reusables Studio</v-list-item-title>
+          </v-list-item>
 
-          <!-- Preshow submenu within Show Factory -->
+          <!-- Preshow submenu within ShowFactory -->
           <v-list-group value="brainstorm" subgroup>
             <template v-slot:activator="{ props }">
               <v-list-item v-bind="props" prepend-icon="mdi-lightbulb-on">
@@ -181,6 +184,11 @@
           prepend-icon="mdi-database-cog"
         >
           <v-list-item-title>MetaFactory</v-list-item-title>
+        </v-list-item>
+
+        <!-- MoneyFactory Section -->
+        <v-list-item to="/moneyfactory" prepend-icon="mdi-cash-multiple">
+          <v-list-item-title>MoneyFactory</v-list-item-title>
         </v-list-item>
 
         <!-- Other items -->

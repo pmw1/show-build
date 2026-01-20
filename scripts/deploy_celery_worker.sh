@@ -179,6 +179,10 @@ python-frontmatter>=1.0.0
 markdown>=3.4.3
 pydantic>=2.0.3
 pydantic-settings>=2.0.3
+
+# AI/Transcription (for Whisper API)
+httpx>=0.25.0
+openai>=1.0.0
 EOF
 
 # Generate docker-compose.yml
@@ -193,17 +197,60 @@ else
     FULL_QUEUE_LIST="$QUEUE_NAME"
 fi
 
-cat > /tmp/worker_compose.yml << EOF
+# Determine volume mount path based on hostname
+# Kairo has NFS at /mnt/whisperbox/sync instead of /mnt/sync
+if [ "$HOSTNAME" = "kairo" ]; then
+    VOLUME_PATH="/mnt/whisperbox/sync:/mnt/sync"
+    log_info "Kairo detected - using NFS mount at /mnt/whisperbox/sync"
+else
+    VOLUME_PATH="/mnt/sync:/mnt/sync"
+fi
+
+# Kairo needs to connect to kairo_kairo-network for Whisper access
+if [ "$HOSTNAME" = "kairo" ]; then
+    log_info "Kairo detected - will connect to kairo_kairo-network for Whisper"
+    cat > /tmp/worker_compose.yml << EOF
 services:
   celery-worker:
     build: .
     container_name: ${HOSTNAME}-${WORKER_NAME}
+    user: "1000:1001"
     command: celery -A celery_app worker -Q ${FULL_QUEUE_LIST} --hostname=${WORKER_NAME}@${HOSTNAME} --concurrency=${CONCURRENCY}
     volumes:
-      - /mnt/sync:/mnt/sync
+      - ${VOLUME_PATH}
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/0
-      - MEDIA_ROOT=/mnt/sync
+      - MEDIA_ROOT=/mnt/sync/disaffected
+      - DATABASE_URL=postgresql://showbuild:showbuild@192.168.51.210:5433/showbuild
+      - PYTHONPATH=/app:/tools
+      - LLM_STATE_API_KEY=${LLM_STATE_API_KEY:-}
+    networks:
+      - default
+      - kairo_kairo-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  kairo_kairo-network:
+    external: true
+EOF
+else
+    cat > /tmp/worker_compose.yml << EOF
+services:
+  celery-worker:
+    build: .
+    container_name: ${HOSTNAME}-${WORKER_NAME}
+    user: "1000:1001"
+    command: celery -A celery_app worker -Q ${FULL_QUEUE_LIST} --hostname=${WORKER_NAME}@${HOSTNAME} --concurrency=${CONCURRENCY}
+    volumes:
+      - ${VOLUME_PATH}
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/0
+      - MEDIA_ROOT=/mnt/sync/disaffected
       - DATABASE_URL=postgresql://showbuild:showbuild@192.168.51.210:5433/showbuild
       - PYTHONPATH=/app:/tools
       - LLM_STATE_API_KEY=${LLM_STATE_API_KEY:-}
@@ -214,6 +261,7 @@ services:
         max-size: "10m"
         max-file: "3"
 EOF
+fi
 
 # Upload configuration files
 log_info "Uploading configuration files to $HOSTNAME..."

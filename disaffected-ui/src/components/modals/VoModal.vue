@@ -458,6 +458,16 @@
             </div>
           </div>
 
+          <!-- Upload Progress -->
+          <div v-if="uploadProgress > 0 && uploadProgress < 100" class="mb-3">
+            <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">
+              Uploading to server: {{ uploadProgress }}%
+            </label>
+            <div style="height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden;">
+              <div :style="{ width: uploadProgress + '%', height: '100%', background: '#4CAF50', transition: 'width 0.3s ease' }"></div>
+            </div>
+          </div>
+
           <!-- Buttons -->
           <div class="d-flex" style="gap: 10px; margin-top: 20px;">
             <button
@@ -469,11 +479,11 @@
             <button
               type="button"
               @click="handleSubmit"
-              :disabled="!slug || clips.length === 0"
+              :disabled="!slug || (!uploadComplete && clips.length === 0)"
               class="cue-modal-button"
               style="flex: 1; padding: 20px 40px; font-size: 16px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
-              :style="{ opacity: (!slug || clips.length === 0) ? 0.5 : 1, cursor: (!slug || clips.length === 0) ? 'not-allowed' : 'pointer' }"
-            >Create VO Montage ({{ clips.length }} clip{{ clips.length !== 1 ? 's' : '' }})</button>
+              :style="{ opacity: (!slug || (!uploadComplete && clips.length === 0)) ? 0.5 : 1, cursor: (!slug || (!uploadComplete && clips.length === 0)) ? 'not-allowed' : 'pointer' }"
+            >{{ clips.length > 0 ? `Create VO Montage (${clips.length} clip${clips.length !== 1 ? 's' : ''})` : 'Create VO Cue' }}</button>
           </div>
         </v-form>
       </v-card-text>
@@ -537,6 +547,11 @@ export default {
     const currentVideoFile = ref(null)
     const trimStart = ref('00:00:00:00')
     const trimEnd = ref('00:00:00:00')
+
+    // Background upload state (like SOT)
+    const uploadProgress = ref(0)
+    const tempJobId = ref(null)
+    const uploadComplete = ref(false)
 
     // Clips collection for montage
     const clips = ref([])
@@ -901,6 +916,12 @@ export default {
             scrollToBottomOfModal()
             break
 
+          case 'Escape':
+            event.preventDefault()
+            emit('update:show', false)
+            resetForm()
+            break
+
           default:
             handled = false
             break
@@ -996,8 +1017,65 @@ export default {
 
       // Reset trim points for new video
       trimStart.value = '00:00:00:00'
+      uploadProgress.value = 0
+      uploadComplete.value = false
+      tempJobId.value = null
 
       toast.success(`Video loaded: ${file.name}`)
+
+      // Start background upload to VO endpoint (like SOT)
+      startBackgroundUpload(file)
+    }
+
+    const startBackgroundUpload = async (file) => {
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+
+        const xhr = new XMLHttpRequest()
+
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            uploadProgress.value = Math.round((e.loaded / e.total) * 100)
+          }
+        })
+
+        xhr.addEventListener('load', () => {
+          if (xhr.status === 200) {
+            const response = JSON.parse(xhr.responseText)
+            tempJobId.value = response.temp_job_id
+            uploadComplete.value = true
+            uploadProgress.value = 100
+            toast.success('Video uploaded to server')
+          } else {
+            toast.error('Upload failed: ' + xhr.statusText)
+            uploadProgress.value = 0
+          }
+        })
+
+        xhr.addEventListener('error', () => {
+          uploadProgress.value = 0
+          toast.error('Upload failed - network error')
+        })
+
+        const token = localStorage.getItem('auth-token')
+        const apiKey = localStorage.getItem('api_key')
+
+        xhr.open('POST', '/api/vo/upload/background', true)
+
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+        } else if (apiKey) {
+          xhr.setRequestHeader('X-API-Key', apiKey)
+        }
+
+        xhr.send(formData)
+
+      } catch (error) {
+        console.error('Background upload error:', error)
+        uploadProgress.value = 0
+        toast.error('Upload failed: ' + error.message)
+      }
     }
 
     const clearVideo = () => {
@@ -1012,6 +1090,11 @@ export default {
       currentVideoFile.value = null
       trimStart.value = '00:00:00:00'
       trimEnd.value = '00:00:00:00'
+
+      // Clear upload state
+      uploadProgress.value = 0
+      tempJobId.value = null
+      uploadComplete.value = false
 
       if (previewInterval.value) {
         clearInterval(previewInterval.value)
@@ -1090,9 +1173,16 @@ export default {
         return
       }
 
+      // Single video mode: require background upload to be complete
       if (clips.value.length === 0) {
-        showTopError('ERROR: Add at least one clip to the montage')
-        return
+        if (!tempJobId.value) {
+          showTopError('ERROR: Please upload a video file first')
+          return
+        }
+        if (!uploadComplete.value) {
+          showTopError('ERROR: Video upload still in progress')
+          return
+        }
       }
 
       const normalizedSlug = slug.value.toLowerCase().replace(/['".,!?]/g, '').replace(/\s+/g, '-')
@@ -1102,48 +1192,88 @@ export default {
         const formData = new FormData()
         formData.append('type', 'vo')
         formData.append('slug', normalizedSlug)
-        const response = await axios.post('/assetid/generate-legacy', formData, {
+        const assetResponse = await axios.post('/assetid/generate-legacy', formData, {
           headers: {
             'Accept': 'application/json',
             'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
           }
         })
-        const assetID = response.data.id
+        const generatedAssetId = assetResponse.data.id
 
-        // Upload all clips
-        const uploadForm = new FormData()
-        uploadForm.append('type', 'vo-montage')
-        uploadForm.append('episode', props.episode)
-        uploadForm.append('asset_id', assetID)
-        uploadForm.append('slug', normalizedSlug)
-        uploadForm.append('clip_count', clips.value.length.toString())
+        // Single video processing (like SOT)
+        if (clips.value.length === 0 && tempJobId.value) {
+          // Trigger VO processing via new endpoint
+          const token = localStorage.getItem('auth-token')
+          const apiKey = localStorage.getItem('api_key')
+          const headers = {
+            'Content-Type': 'application/json'
+          }
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`
+          } else if (apiKey) {
+            headers['X-API-Key'] = apiKey
+          }
 
-        // Add each clip's file and metadata
-        clips.value.forEach((clip, index) => {
-          uploadForm.append(`clip_${index}_file`, clip.file)
-          uploadForm.append(`clip_${index}_trim_start`, clip.trimStart)
-          uploadForm.append(`clip_${index}_trim_end`, clip.trimEnd)
-        })
+          const processResponse = await axios.post('/api/vo/process', {
+            temp_job_id: tempJobId.value,
+            episode: props.episode,
+            slug: normalizedSlug,
+            asset_id: generatedAssetId,
+            trim_start: trimStart.value.split(':').slice(0, 3).join(':'),  // HH:MM:SS format
+            trim_end: trimEnd.value.split(':').slice(0, 3).join(':')
+          }, { headers })
 
-        await axios.post('http://192.168.51.210:8888/preproc_vo', uploadForm, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
-        })
+          const mediaURL = `episodes/${props.episode}/assets/video/${normalizedSlug}.mp4`
 
-        const mediaURL = `episodes/${props.episode}/assets/video/${normalizedSlug}.mp4`
+          emit('submit', {
+            duration: duration.value,
+            slug: normalizedSlug,
+            assetID: generatedAssetId,
+            mediaURL,
+            tempJobId: tempJobId.value,
+            trimStart: trimStart.value,
+            trimEnd: trimEnd.value,
+            taskId: processResponse.data.task_id
+          })
+          toast.success('VO processing started')
+          emit('update:show', false)
+          resetForm()
+        } else if (clips.value.length > 0) {
+          // Montage mode - upload all clips (legacy behavior)
+          const uploadForm = new FormData()
+          uploadForm.append('type', 'vo-montage')
+          uploadForm.append('episode', props.episode)
+          uploadForm.append('asset_id', generatedAssetId)
+          uploadForm.append('slug', normalizedSlug)
+          uploadForm.append('clip_count', clips.value.length.toString())
 
-        emit('submit', {
-          duration: '',
-          slug: normalizedSlug,
-          assetID,
-          mediaURL,
-          clipCount: clips.value.length
-        })
-        toast.success(`VO montage created with ${clips.value.length} clips`)
-        emit('update:show', false)
-        resetForm()
+          clips.value.forEach((clip, index) => {
+            uploadForm.append(`clip_${index}_file`, clip.file)
+            uploadForm.append(`clip_${index}_trim_start`, clip.trimStart)
+            uploadForm.append(`clip_${index}_trim_end`, clip.trimEnd)
+          })
+
+          await axios.post('http://192.168.51.210:8888/preproc_vo', uploadForm, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
+          })
+
+          const mediaURL = `episodes/${props.episode}/assets/video/${normalizedSlug}.mp4`
+
+          emit('submit', {
+            duration: '',
+            slug: normalizedSlug,
+            assetID: generatedAssetId,
+            mediaURL,
+            clipCount: clips.value.length
+          })
+          toast.success(`VO montage created with ${clips.value.length} clips`)
+          emit('update:show', false)
+          resetForm()
+        }
       } catch (error) {
-        showTopError('Failed to create VO montage: ' + error.message)
-        toast.error('Failed to create VO montage')
+        console.error('VO submit error:', error)
+        showTopError('Failed to create VO: ' + (error.response?.data?.detail || error.message))
+        toast.error('Failed to create VO')
       }
     }
 
@@ -1161,6 +1291,11 @@ export default {
       trimStart.value = '00:00:00:00'
       trimEnd.value = '00:00:00:00'
       clips.value = []
+
+      // Clear upload state
+      uploadProgress.value = 0
+      tempJobId.value = null
+      uploadComplete.value = false
 
       if (videoPlayerRef.value) {
         videoPlayerRef.value.pause()
@@ -1220,6 +1355,9 @@ export default {
       trimStart,
       trimEnd,
       clips,
+      uploadProgress,
+      tempJobId,
+      uploadComplete,
       currentFramerate,
       isPlaying,
       currentTimecode,

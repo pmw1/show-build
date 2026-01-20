@@ -106,6 +106,18 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/reusables-studio',
+    name: 'reusables-studio',
+    component: () => import('@/views/ReusablesStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/moneyfactory',
+    name: 'moneyfactory',
+    component: () => import('@/views/MoneyFactoryView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/profile',
     name: 'profile',
     component: () => import('@/views/ProfileView.vue'),

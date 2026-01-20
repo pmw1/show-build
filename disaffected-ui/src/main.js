@@ -13,6 +13,12 @@ import { initializeXtts } from '@/composables/useXtts'
 
 loadFonts()
 
+// Set global axios defaults to use relative URLs (proxy handles routing to backend)
+// This ensures all axios imports use the correct baseURL
+// Use window.location.origin to ensure HTTPS protocol matches
+axios.defaults.baseURL = typeof window !== 'undefined' ? window.location.origin : ''
+console.log('Axios baseURL set to:', axios.defaults.baseURL)
+
 // Handle hot module reload and prevent duplicate app mounting
 const appElement = document.getElementById('app')
 

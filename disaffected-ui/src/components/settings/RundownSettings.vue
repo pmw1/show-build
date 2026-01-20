@@ -116,6 +116,19 @@
         </v-col>
       </v-row>
     </v-card-text>
+
+    <!-- Snackbar for messages -->
+    <v-snackbar
+      v-model="snackbar.show"
+      :color="snackbar.color"
+      :timeout="snackbar.timeout"
+      location="bottom"
+    >
+      {{ snackbar.message }}
+      <template v-slot:actions>
+        <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
+      </template>
+    </v-snackbar>
   </v-card>
 </template>
 
@@ -149,6 +162,20 @@ const settings = computed({
 })
 
 const saving = ref(false)
+
+// Snackbar state
+const snackbar = ref({
+  show: false,
+  message: '',
+  color: 'success',
+  timeout: 4000
+})
+
+const showSnackbar = (message, color = 'success') => {
+  snackbar.value.message = message
+  snackbar.value.color = color
+  snackbar.value.show = true
+}
 
 async function loadSettings() {
   try {
@@ -210,7 +237,7 @@ async function saveSettings() {
 
     if (response.ok) {
       emit('save', settings.value)
-      alert('Rundown settings saved successfully')
+      showSnackbar('Rundown settings saved successfully', 'success')
     } else {
       const errorData = await response.text()
       console.error('Save failed:', errorData)
@@ -218,7 +245,7 @@ async function saveSettings() {
     }
   } catch (error) {
     console.error('Error saving rundown settings:', error)
-    alert('Failed to save rundown settings')
+    showSnackbar('Failed to save rundown settings', 'error')
   } finally {
     saving.value = false
   }

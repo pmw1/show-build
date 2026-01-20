@@ -36,11 +36,16 @@ def create_content_version(db: Session, rundown_item, change_type: str = "manual
         username: Username making the change
 
     Returns:
-        ContentVersion object or None if content unchanged
+        ContentVersion object or None if content unchanged or autosave
     """
     import hashlib
     import re
     from models_v2 import ContentVersion
+
+    # Skip version creation for autosaves - only create versions on manual save
+    if change_type == 'autosave':
+        logger.debug(f"Skipping version creation for autosave on {rundown_item.asset_id}")
+        return None
 
     # Get content and calculate hash
     content = rundown_item.script_content or ''
@@ -611,16 +616,48 @@ Show opening and introduction
 @router.delete("/{episode_number}")
 async def delete_episode(
     episode_number: str,
+    force: bool = False,
     current_user: dict = Depends(get_current_user_or_key),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Delete an episode and all its content from both filesystem and database"""
-    
+    """Delete an episode and all its content from both filesystem and database.
+
+    If the filesystem directory doesn't exist but database records do (phantom record),
+    use force=true to confirm database-only deletion.
+    """
+    from models_v2 import Episode
+
     episode_dir = EPISODES_ROOT / episode_number
-    
-    if not episode_dir.exists():
-        raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found in filesystem")
-    
+    filesystem_exists = episode_dir.exists()
+
+    # Check for database record
+    try:
+        episode_num_int = int(episode_number)
+        db_record_exists = db.query(Episode).filter(Episode.episode_number == episode_num_int).first() is not None
+    except ValueError:
+        db_record_exists = False
+
+    # Handle phantom records (database exists but no filesystem)
+    if not filesystem_exists:
+        if not db_record_exists:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found in filesystem or database")
+
+        # Database record exists but no filesystem - require force confirmation
+        if not force:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "phantom_record",
+                    "message": f"Episode {episode_number} exists in database but has no filesystem directory. Use force=true to confirm deletion of database records only.",
+                    "episode_number": episode_number,
+                    "filesystem_exists": False,
+                    "database_exists": True,
+                    "action_required": "confirm_force_delete"
+                }
+            )
+        # force=true, proceed with database-only deletion
+        logger.info(f"Force deleting phantom episode {episode_number} (database only, no filesystem)")
+
     try:
         import shutil
         from datetime import datetime
@@ -694,18 +731,29 @@ async def delete_episode(
         # Calculate total deletions for response
         total_deleted = ((1 if episode_record else 0) +
                         (1 if blueprint_episode else 0))
-        
-        # Now delete from filesystem - create backup first
-        backup_dir = EPISODES_ROOT / ".trash" / f"{episode_number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        backup_dir.parent.mkdir(exist_ok=True)
-        shutil.move(str(episode_dir), str(backup_dir))
-        
-        logger.info(f"Episode {episode_number} deleted successfully (filesystem moved to {backup_dir})")
-        
+
+        # Delete from filesystem if it exists - create backup first
+        backup_path = None
+        if filesystem_exists:
+            backup_dir = EPISODES_ROOT / ".trash" / f"{episode_number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            backup_dir.parent.mkdir(exist_ok=True)
+            shutil.move(str(episode_dir), str(backup_dir))
+            backup_path = str(backup_dir)
+            logger.info(f"Episode {episode_number} filesystem moved to {backup_dir}")
+
+        # Build appropriate response message
+        if filesystem_exists:
+            message = f"Episode {episode_number} deleted successfully from filesystem and database"
+        else:
+            message = f"Episode {episode_number} database records deleted (no filesystem directory existed)"
+
+        logger.info(f"Episode {episode_number} deletion completed: filesystem={'yes' if filesystem_exists else 'no'}, db_records={total_deleted}")
+
         return {
             "success": True,
-            "message": f"Episode {episode_number} deleted successfully from filesystem and database",
-            "backup_path": str(backup_dir),
+            "message": message,
+            "backup_path": backup_path,
+            "filesystem_deleted": filesystem_exists,
             "database_records_deleted": {
                 "episodes": 1 if episode_record else 0,
                 "blueprints": 1 if blueprint_episode else 0,
@@ -1041,7 +1089,12 @@ async def get_episode_info(episode_number: str, db: Session = Depends(get_db)) -
 
 @router.get("/{episode_number}/rundown")
 async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Get all rundown items for an episode from database."""
+    """Get all rundown items for an episode from database.
+
+    Returns unified list of:
+    - Regular rundown_items (source: 'rundown_item')
+    - Content library placements (source: 'library')
+    """
     from models_v2 import Episode, Rundown, RundownItem
 
     try:
@@ -1062,12 +1115,14 @@ async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)
         # Get all rundown items for all rundowns of this episode
         rundown_items = []
         for rundown in rundowns:
+            # Get regular rundown items
             items = db.query(RundownItem).filter(RundownItem.rundown_id == rundown.id).order_by(RundownItem.order_in_rundown).all()
 
             for item in items:
                 order_value = item.order_in_rundown or 0
                 rundown_item_dict = {
-                    "id": item.asset_id,
+                    "id": item.asset_id,  # Legacy: asset_id as primary identifier for frontend
+                    "db_id": item.id,     # Database integer ID for API operations
                     "type": item.item_type or 'segment',
                     "slug": item.slug or '',
                     "duration": item.duration or '00:00:00',
@@ -1088,9 +1143,64 @@ async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)
                     "priority": item.priority or '',
                     "server_message": item.server_message or '',
                     "created_at": item.created_at.isoformat() if item.created_at else None,
-                    "updated_at": item.updated_at.isoformat() if item.updated_at else None
+                    "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+                    "source": "rundown_item"  # Distinguish from library placements
                 }
                 rundown_items.append(rundown_item_dict)
+
+            # Get content library placements (active only - removed_at is NULL)
+            try:
+                from models_content_library import ContentPlacement, ContentLibrary
+                placements = db.query(ContentPlacement, ContentLibrary).join(
+                    ContentLibrary, ContentPlacement.library_item_id == ContentLibrary.id
+                ).filter(
+                    ContentPlacement.rundown_id == rundown.id,
+                    ContentPlacement.removed_at == None  # Only active placements
+                ).all()
+
+                for placement, library_item in placements:
+                    order_value = placement.order_in_rundown or 0
+                    # Use snapshot if available, otherwise use current library item data
+                    snapshot = placement.content_snapshot or {}
+
+                    placement_dict = {
+                        "id": library_item.asset_id,  # Library item's asset_id
+                        "db_id": placement.id,        # Placement ID for operations
+                        "placement_id": placement.id, # Explicit placement ID
+                        "library_item_id": library_item.id,
+                        "type": library_item.item_type or 'advertisement',
+                        "slug": snapshot.get('slug', library_item.slug) or '',
+                        "duration": snapshot.get('duration', library_item.duration) or '00:00:00',
+                        "script": snapshot.get('script_content', library_item.script_content) or '',
+                        "order": order_value,
+                        "order_in_rundown": order_value,
+                        "index": order_value,
+                        "status": 'library',  # Special status for library items
+                        "title": snapshot.get('title', library_item.title) or 'Untitled',
+                        "subtitle": '',
+                        "description": '',
+                        "filename": f"{order_value:03d}-{library_item.slug}.md",
+                        "asset_id": library_item.asset_id,
+                        "airdate": placement.airdate.isoformat() if placement.airdate else '',
+                        "guests": '',
+                        "resources": '',
+                        "tags": '',
+                        "priority": snapshot.get('priority', library_item.priority) or '',
+                        "server_message": '',
+                        "customer_name": snapshot.get('customer_name', library_item.customer_name) or '',
+                        "placement_notes": placement.placement_notes or '',
+                        "created_at": placement.created_at.isoformat() if placement.created_at else None,
+                        "updated_at": placement.updated_at.isoformat() if placement.updated_at else None,
+                        "source": "library",  # Distinguish from regular items
+                        "is_library_item": True  # Flag for frontend handling
+                    }
+                    rundown_items.append(placement_dict)
+            except ImportError:
+                # Content library tables don't exist yet - skip
+                pass
+            except Exception as e:
+                # Log but don't fail - content library is optional enhancement
+                logger.warning(f"Could not load content placements: {e}")
 
         # Sort by order field
         rundown_items.sort(key=lambda x: x.get('order', 999))
@@ -2619,10 +2729,12 @@ async def save_rundown_items(
                         logger.info(f"   Content length: {existing_content_length} -> {new_content_length} chars")
                         rundown_item.script_content = new_script
 
-                        # 📸 Create version snapshot after successful save
+                        # 📸 Create version snapshot after successful save (only for manual saves)
                         try:
                             username = current_user.get('username') if isinstance(current_user, dict) else None
-                            create_content_version(db, rundown_item, change_type="manual_save", username=username)
+                            # Use save_type from request body, default to 'manual_save'
+                            save_type = rundown_data.get('save_type', 'manual_save')
+                            create_content_version(db, rundown_item, change_type=save_type, username=username)
                         except Exception as e:
                             logger.error(f"Failed to create content version for {asset_id}: {e}")
                     else:
@@ -2871,13 +2983,31 @@ async def delete_rundown_item(
 
             # Delete from database using the found AssetID
             if asset_id:
-                from models_v2 import RundownItem, Segment
+                from models_v2 import RundownItem, Segment, SegmentLock
 
-                # Find and delete the rundown item by AssetID
+                db_deleted = False
+
+                # First, delete any segment locks referencing this rundown item
+                locks_deleted = db.query(SegmentLock).filter(
+                    SegmentLock.rundown_item_asset_id == str(asset_id)
+                ).delete(synchronize_session=False)
+                if locks_deleted:
+                    logger.info(f"Deleted {locks_deleted} segment lock(s) for AssetID: {asset_id}")
+
+                # Try to find and delete by asset_id first
                 db_item = db.query(RundownItem).filter(RundownItem.asset_id == str(asset_id)).first()
                 if db_item:
                     db.delete(db_item)
+                    db_deleted = True
                     logger.info(f"Deleted database rundown item for AssetID: {asset_id}")
+
+                # Also try to find by id if asset_id is numeric (might be database id)
+                if not db_deleted and asset_id.isdigit():
+                    db_item = db.query(RundownItem).filter(RundownItem.id == int(asset_id)).first()
+                    if db_item:
+                        db.delete(db_item)
+                        db_deleted = True
+                        logger.info(f"Deleted database rundown item for ID: {asset_id}")
 
                 # Also try to delete segment record
                 segment = db.query(Segment).filter(Segment.asset_id == str(asset_id)).first()
@@ -2886,18 +3016,196 @@ async def delete_rundown_item(
                     logger.info(f"Deleted database segment for AssetID: {asset_id}")
 
                 db.commit()
-                logger.info(f"Successfully deleted database entries for AssetID: {asset_id}")
+
+                if db_deleted:
+                    logger.info(f"Successfully deleted database entries for AssetID/ID: {asset_id}")
+                else:
+                    logger.warning(f"No database record found for AssetID/ID: {asset_id}")
 
         except Exception as e:
-            logger.warning(f"Could not delete from database: {str(e)}")
+            logger.error(f"Database deletion failed: {str(e)}")
             db.rollback()
-            # Continue even if database deletion fails - file deletion is more important
-        
+            # In database-first architecture, failing to delete from DB is a real error
+            raise HTTPException(status_code=500, detail=f"Failed to delete from database: {str(e)}")
+
         return {"status": "success", "message": "Rundown item deleted successfully"}
 
     except Exception as e:
         logger.error(f"Error deleting rundown item: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to delete rundown item: {str(e)}")
+
+
+@router.delete("/{episode_number}/rundown/by-asset-id/{asset_id}")
+async def delete_rundown_item_by_asset_id(
+    episode_number: str,
+    asset_id: str,
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """Delete rundown item by asset_id - DATABASE FIRST approach.
+
+    This is the preferred delete method. It:
+    1. Looks up the item by asset_id (guaranteed unique)
+    2. Validates the item belongs to the specified episode
+    3. Deletes from database FIRST (source of truth)
+    4. Then cleans up filesystem file (if exists)
+
+    Args:
+        episode_number: Episode number (e.g., "0101")
+        asset_id: The unique asset_id of the rundown item
+
+    Returns:
+        Success status with deleted item details
+    """
+    from models_v2 import RundownItem, Segment, Episode, Rundown, SegmentLock
+
+    try:
+        logger.info(f"Delete by asset_id: {asset_id} for episode {episode_number}")
+
+        # Step 1: Find the rundown item by asset_id
+        db_item = db.query(RundownItem).filter(RundownItem.asset_id == str(asset_id)).first()
+
+        if not db_item:
+            logger.warning(f"Rundown item not found for asset_id: {asset_id}")
+            raise HTTPException(status_code=404, detail=f"Rundown item with asset_id '{asset_id}' not found")
+
+        # Step 2: Validate the item belongs to the correct episode
+        rundown = db.query(Rundown).filter(Rundown.id == db_item.rundown_id).first()
+        if rundown:
+            episode = db.query(Episode).filter(Episode.id == rundown.episode_id).first()
+            if episode:
+                # Normalize episode numbers for comparison (handle "0101" vs 101)
+                db_episode_num = str(episode.episode_number).zfill(4)
+                request_episode_num = str(episode_number).zfill(4)
+                if db_episode_num != request_episode_num:
+                    logger.warning(f"Asset {asset_id} belongs to episode {db_episode_num}, not {request_episode_num}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Item belongs to episode {db_episode_num}, not {episode_number}"
+                    )
+
+        # Step 3: Capture item details before deletion (for file cleanup and response)
+        item_slug = db_item.slug
+        item_title = db_item.title
+        item_order = db_item.order_in_rundown
+        item_type = db_item.item_type
+
+        # Step 4: DELETE FROM DATABASE FIRST (source of truth)
+        # First delete any segment locks referencing this rundown item
+        locks_deleted = db.query(SegmentLock).filter(
+            SegmentLock.rundown_item_asset_id == str(asset_id)
+        ).delete(synchronize_session=False)
+        if locks_deleted:
+            logger.info(f"Deleted {locks_deleted} segment lock(s) for asset_id: {asset_id}")
+
+        db.delete(db_item)
+        logger.info(f"Deleted rundown item from database: {asset_id} ({item_title})")
+
+        # Also delete associated segment if exists
+        segment = db.query(Segment).filter(Segment.asset_id == str(asset_id)).first()
+        if segment:
+            db.delete(segment)
+            logger.info(f"Deleted associated segment for asset_id: {asset_id}")
+
+        # Commit database changes
+        db.commit()
+        logger.info(f"Database deletion committed for asset_id: {asset_id}")
+
+        # Step 5: Clean up filesystem file (secondary, non-critical)
+        files_deleted = []
+        try:
+            episode_path = EPISODES_ROOT / episode_number
+            rundown_dir = episode_path / "rundown"
+
+            if rundown_dir.exists():
+                # Try multiple filename patterns that might exist
+                possible_filenames = [
+                    f"{item_order:03d}-{item_slug}.md",           # Format: 010-slug.md
+                    f"{item_order} {item_slug}~{asset_id}.md",    # Format: 10 slug~assetid.md
+                    f"{item_order:03d} {item_slug}~{asset_id}.md", # Format: 010 slug~assetid.md
+                ]
+
+                for filename in possible_filenames:
+                    file_path = rundown_dir / filename
+                    if file_path.exists():
+                        file_path.unlink()
+                        files_deleted.append(filename)
+                        logger.info(f"Deleted file: {file_path}")
+
+                # Also search for any file containing the asset_id
+                if not files_deleted:
+                    for file_path in rundown_dir.glob(f"*{asset_id}*"):
+                        if file_path.is_file():
+                            file_path.unlink()
+                            files_deleted.append(file_path.name)
+                            logger.info(f"Deleted file by asset_id pattern: {file_path}")
+
+                    # Search for any file containing the slug
+                    for file_path in rundown_dir.glob(f"*{item_slug}*"):
+                        if file_path.is_file() and file_path.name not in files_deleted:
+                            file_path.unlink()
+                            files_deleted.append(file_path.name)
+                            logger.info(f"Deleted file by slug pattern: {file_path}")
+
+                if not files_deleted:
+                    logger.info(f"No filesystem files found for asset_id {asset_id} (may already be deleted)")
+
+        except Exception as file_error:
+            # File deletion is secondary - log but don't fail the request
+            logger.warning(f"File cleanup failed (non-critical): {file_error}")
+
+        return {
+            "status": "success",
+            "message": f"Deleted rundown item: {item_title}",
+            "deleted": {
+                "asset_id": asset_id,
+                "title": item_title,
+                "slug": item_slug,
+                "type": item_type,
+                "order": item_order
+            },
+            "files_deleted": files_deleted
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting rundown item by asset_id: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete rundown item: {str(e)}")
+
+
+# ============================================================================
+# SINGLE RUNDOWN ITEM ENDPOINT
+# ============================================================================
+
+@router.get("/rundown-item-by-id/{item_id}")
+async def get_rundown_item_by_id(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Get a single rundown item by its database ID."""
+    from models_v2 import RundownItem
+
+    # Find the rundown item
+    item = db.query(RundownItem).filter(RundownItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Rundown item {item_id} not found")
+
+    return {
+        "id": item.id,
+        "asset_id": item.asset_id,
+        "title": item.title,
+        "slug": item.slug,
+        "item_type": item.item_type,
+        "duration": item.duration,
+        "status": item.status,
+        "order": item.order_in_rundown,
+        "script_content": item.script_content,
+        "description": item.description,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None
+    }
 
 
 # ============================================================================
@@ -3085,7 +3393,8 @@ async def gather_media_for_show(
 
         # Cue block patterns
         cue_pattern = re.compile(r'<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->', re.IGNORECASE)
-        mediaurl_pattern = re.compile(r'\[Mediaurl:\s*([^\]]+)\]', re.IGNORECASE)
+        # Match both "MediaUrl" and "Media Url" (with optional space before colon)
+        mediaurl_pattern = re.compile(r'\[Media\s*Url:\s*([^\]]+)\]', re.IGNORECASE)
         enumerator_pattern = re.compile(r'\[Enumerator:\s*([^\]]+)\]', re.IGNORECASE)
         slug_pattern = re.compile(r'\[Slug:\s*([^\]]+)\]', re.IGNORECASE)
         type_pattern = re.compile(r'\[Type:\s*([^\]]+)\]', re.IGNORECASE)
@@ -3122,24 +3431,53 @@ async def gather_media_for_show(
                 mediaurl_match = mediaurl_pattern.search(cue_content)
                 media_url = mediaurl_match.group(1).strip() if mediaurl_match else None
 
-                # For FSQ cues without MediaURL, construct path from enumerator + slug
-                if not media_url and cue_type_local == 'FSQ' and slug_local:
+                # Check if MediaURL is a blob URL (unprocessed) - treat as no URL
+                is_blob_url = media_url and media_url.startswith('blob:')
+                if is_blob_url:
+                    print(f"   ⏭️ Blob URL detected for {cue_type_local} '{slug_local}', trying fallback...")
+                    media_url = None  # Clear so fallback kicks in
+
+                # For cues without MediaURL (or with blob URLs), try to construct path from slug
+                if not media_url and slug_local:
                     # Normalize slug for filename
                     clean_slug = slug_local.lower().replace(' ', '-').replace('_', '-')
                     clean_slug = re.sub(r'[^\w\-]', '', clean_slug)
-                    # Strip existing enum prefix from slug if present
+                    # Strip existing enum prefix from slug if present (e.g., "40-im-a-narcissist" -> "im-a-narcissist")
                     enum_prefix_match = re.match(r'^(\d+)[-_](.+)$', clean_slug)
                     if enum_prefix_match:
                         clean_slug = enum_prefix_match.group(2)
 
-                    if enumerator_local:
-                        fsq_filename = f"{enumerator_local}-{clean_slug}.png"
+                    # Determine asset folder and extension based on cue type
+                    if cue_type_local == 'FSQ':
+                        asset_folder = 'quotes'
+                        extensions = ['.png']
+                        if enumerator_local:
+                            filename_base = f"{enumerator_local}-{clean_slug}"
+                        else:
+                            filename_base = f"fsq_{clean_slug}"
+                    elif cue_type_local == 'IMG':
+                        asset_folder = 'images'
+                        extensions = ['.png', '.jpg', '.jpeg', '.webp']
+                        filename_base = clean_slug
+                    elif cue_type_local in ['SOT', 'VO', 'PKG']:
+                        asset_folder = 'video'
+                        extensions = ['.mp4', '.mov', '.webm']
+                        filename_base = clean_slug
                     else:
-                        fsq_filename = f"fsq_{clean_slug}.png"
-                    media_url = f"episodes/{episode_id}/assets/quotes/{fsq_filename}"
-                    print(f"   🔧 FSQ path constructed: {media_url}")
+                        asset_folder = None
+                        extensions = []
+                        filename_base = clean_slug
 
-                # Skip if still no media URL (non-FSQ cues without MediaURL)
+                    # Try to find the file
+                    if asset_folder:
+                        for ext in extensions:
+                            test_path = episode_path / "assets" / asset_folder / f"{filename_base}{ext}"
+                            if test_path.exists():
+                                media_url = f"episodes/{episode_id}/assets/{asset_folder}/{filename_base}{ext}"
+                                print(f"   🔧 {cue_type_local} path constructed from slug: {media_url}")
+                                break
+
+                # Skip if still no media URL
                 if not media_url:
                     skipped += 1
                     skipped_cues.append({
@@ -3159,10 +3497,18 @@ async def gather_media_for_show(
                 #   - episodes/XXXX/assets/... (relative to episodes root, no leading /)
                 #   - assets/... (relative to episode directory)
                 #   - http://... (external URL - skip)
-                if media_url.startswith('http'):
-                    # Skip external URLs
-                    print(f"   ⏭️ Skipping external URL: {media_url[:50]}...")
+                #   - blob:... (browser blob URL - skip, indicates unprocessed media)
+                if media_url.startswith('http') or media_url.startswith('blob:'):
+                    # Skip external URLs and blob URLs (unprocessed media)
+                    reason = "blob URL (unprocessed)" if media_url.startswith('blob:') else "external URL"
+                    print(f"   ⏭️ Skipping {reason}: {media_url[:60]}...")
                     skipped += 1
+                    skipped_cues.append({
+                        'type': cue_type,
+                        'slug': slug,
+                        'reason': reason,
+                        'mediaUrl': media_url[:100]
+                    })
                     continue
                 elif media_url.startswith('/episodes/') or media_url.startswith('episodes/'):
                     # Path relative to episodes root
@@ -3245,7 +3591,16 @@ async def gather_media_for_show(
                     print(f"   ❌ Failed to copy {dest_filename}: {e}")
                     failed += 1
 
-        message = f"Media gather complete: {copied} copied, {skipped} skipped (no MediaURL), {failed} failed"
+        # Count blob URLs in skipped cues for better messaging
+        blob_count = sum(1 for s in skipped_cues if s.get('reason') == 'blob URL (unprocessed)')
+        no_url_count = skipped - blob_count
+
+        if blob_count > 0:
+            message = f"Media gather: {copied} copied, {skipped} skipped ({blob_count} unprocessed blob URLs, {no_url_count} no MediaURL), {failed} failed"
+            if copied == 0 and blob_count > 0:
+                message += " - SOT/VO videos need to be processed first (Submit in modal to trigger processing)"
+        else:
+            message = f"Media gather complete: {copied} copied, {skipped} skipped (no MediaURL), {failed} failed"
         print(f"   📊 {message}")
 
         return {
@@ -3256,6 +3611,7 @@ async def gather_media_for_show(
             "copied": copied,
             "skipped": skipped,
             "failed": failed,
+            "blobUrlCount": blob_count,
             "files": gathered_files,
             "failures": failures,
             "skippedCues": skipped_cues,

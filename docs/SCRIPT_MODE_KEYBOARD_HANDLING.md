@@ -49,19 +49,16 @@ handleTextareaKeydown(segmentIndex, event) {
 - New paragraph inherits speaker from current paragraph
 - Automatically focuses new paragraph with retry logic (up to 5 attempts)
 
-### 2. Space Key Debounce Buffer
+### 2. Autosave System with Cursor Preservation
 
-**Problem**: Vue reactivity causes typed spaces to be overwritten during re-render
+**Problem**: Vue reactivity causes typed content to be overwritten during re-render, and autosave operations can steal focus/cursor position.
 
-**Solution**: Edit buffer system with debounced sync (`EditorPanel.vue:2134-2186`)
+**Solution**: Multi-layer protection system (`EditorPanel.vue:3670-3735`)
+
+#### 2.1 Edit Buffer with 5-Second Debounce
 
 ```javascript
 updateTextSegment(segmentIndex, newContent) {
-  // Initialize edit buffer if needed
-  if (!this.segmentEditBuffer) {
-    this.segmentEditBuffer = {};
-  }
-
   // Store the new content in buffer immediately
   this.segmentEditBuffer[segmentIndex] = newContent;
 
@@ -71,35 +68,142 @@ updateTextSegment(segmentIndex, newContent) {
   }
 
   // Debounce the actual update to prevent race conditions during typing
-  this.updateDebounceTimers[segmentIndex] = setTimeout(() => {
-    // Get current segments from parsed content
+  this.updateDebounceTimers[segmentIndex] = setTimeout(async () => {
     const segments = [...this.scriptSegments];
     segments[segmentIndex].content = this.segmentEditBuffer[segmentIndex];
-
-    // Reconstruct raw markdown content
     const newRawContent = this.reconstructRawContent(segments);
-
-    // Update single source of truth
-    this.rawScriptContent = newRawContent;
+    this.$emit('update:scriptContent', newRawContent);
 
     // Clear buffer and timer
     delete this.segmentEditBuffer[segmentIndex];
     delete this.updateDebounceTimers[segmentIndex];
-  }, 1000); // 1 second debounce
+
+    // Clear editing flags BEFORE persist
+    if (this.activelyEditingSegment === segmentIndex) {
+      this.activelyEditingSegment = null;
+      this.isActivelyEditing = false;
+    }
+
+    // Persist to database and show visual feedback
+    await this.persistCurrentItemToDatabase(segmentIndex);
+  }, 5000); // 5 second debounce - longer to avoid cursor disruption
 }
 ```
 
-**How It Works**:
-1. User types → `@update:model-value` fires → content stored in buffer
-2. `getSegmentContent()` returns buffered content to v-model (prevents overwrite)
-3. After 1 second of no typing, buffer syncs to `rawScriptContent` (Code Mode)
-4. When `rawScriptContent` updates, `scriptSegments` recomputes, but buffer takes precedence
+#### 2.2 Active Editing Guard (`isActivelyEditing` Flag)
+
+**Purpose**: Prevents Vue watchers from triggering re-renders that would steal cursor/focus during active typing.
+
+**Data Property**:
+```javascript
+data() {
+  return {
+    activelyEditingSegment: null, // Which segment is being typed in
+    isActivelyEditing: false,     // Master flag to block watchers
+  }
+}
+```
+
+**Set on input**:
+```javascript
+handleContentEditableInput(index, event) {
+  this.activelyEditingSegment = index;
+  this.isActivelyEditing = true; // Block watchers during active editing
+  // ...
+}
+```
+
+**Cleared on blur or after debounce save**:
+```javascript
+handleParagraphBlur(index) {
+  this.activelyEditingSegment = null;
+  this.isActivelyEditing = false; // Re-enable watchers
+}
+```
+
+**Watcher guard**:
+```javascript
+scriptContent: {
+  handler(newVal, oldVal) {
+    // CRITICAL GUARD: Skip disruptive operations while user is actively editing
+    if (this.isActivelyEditing) {
+      console.log('Skipping scriptContent watcher - user is actively editing');
+      return;
+    }
+    // ... rest of handler
+  }
+}
+```
+
+#### 2.3 CSS Animation-Based Flash (Non-Reactive)
+
+**Problem**: The old `flashParagraph()` method used reactive state mutations that triggered Vue re-renders, stealing focus.
+
+**Old Approach** (PROBLEMATIC):
+```javascript
+// BAD: Reactive state mutations cause re-renders
+async flashParagraph(index, type, count) {
+  for (let i = 0; i < count; i++) {
+    this.savedParagraphIndex = index;  // Triggers re-render!
+    await sleep(150);
+    this.savedParagraphIndex = null;   // Triggers another re-render!
+  }
+}
+```
+
+**New Approach** (CSS Animation):
+```javascript
+// GOOD: Pure DOM manipulation, no Vue re-renders
+async flashParagraph(index, type, count) {
+  const element = this.$refs[`textareaRef-${index}`];
+  if (element) {
+    const paragraphDiv = element.closest('.paragraph-content');
+    if (paragraphDiv) {
+      const animationClass = type === 'success' ? 'flash-save-animation' : 'flash-error-animation';
+      paragraphDiv.classList.add(animationClass);
+      setTimeout(() => paragraphDiv.classList.remove(animationClass), 900);
+    }
+  }
+}
+```
+
+**CSS Keyframes**:
+```css
+@keyframes flash-save {
+  0%, 100% { background-color: inherit; }
+  16.67%, 50%, 83.33% { background-color: rgba(33, 150, 243, 0.4); }
+  33.33%, 66.67% { background-color: inherit; }
+}
+
+.paragraph-content.flash-save-animation {
+  animation: flash-save 0.9s ease-in-out;
+}
+```
+
+**Key Benefits**:
+- No Vue re-renders during flash animation
+- Cursor position preserved
+- User can continue typing immediately after autosave
+- Visual feedback (blue blink) still works
+
+**How The Complete System Works**:
+1. User types → `isActivelyEditing = true`, content stored in buffer
+2. `getSegmentContent()` returns buffered content (prevents Vue overwrite)
+3. Watchers see `isActivelyEditing=true` and skip disruptive operations
+4. After 5 seconds of no typing, debounce fires:
+   - Reconstructs markdown and emits to parent
+   - Clears editing flags
+   - Persists to database
+   - Triggers CSS animation (blue blink) - no re-render!
+5. User can continue typing immediately with cursor intact
 
 **Key Benefits**:
 - No lost characters during typing
-- Smooth typing experience
+- Smooth typing experience with preserved cursor
+- 5-second debounce gives user time to think without interruption
 - Automatic sync to Code Mode after pause
 - Per-segment buffer prevents cross-segment interference
+- Blue blink visual feedback without focus disruption
 
 ### 3. Backspace at Beginning Merges Paragraphs
 
@@ -229,8 +333,11 @@ getSegmentContent(segmentIndex) {
 - [ ] New paragraph inherits speaker from previous
 - [ ] Backspace at beginning merges with previous paragraph
 - [ ] Delete at end merges with next paragraph
-- [ ] Code Mode updates after 1 second pause
+- [ ] Code Mode updates after 5 second pause
 - [ ] Changes sync between Script Mode and Code Mode
+- [ ] Cursor stays in place during autosave (blue blink)
+- [ ] Blue blink animation appears after 5 seconds of no typing
+- [ ] User can continue typing immediately after autosave triggers
 
 ## Related Files
 
@@ -241,7 +348,9 @@ getSegmentContent(segmentIndex) {
 
 ## Performance Considerations
 
-- **1-second debounce**: Balances responsiveness with performance
+- **5-second debounce**: Longer delay prevents cursor disruption while maintaining reasonable sync time
 - **Per-segment timers**: Prevents interference between paragraphs
 - **Buffer cleanup**: Timers and buffers are deleted after sync
 - **Retry with backoff**: Focus retry uses 50ms delays to avoid tight loops
+- **CSS animations**: Flash effects use CSS keyframes instead of reactive state to avoid re-renders
+- **Watcher guards**: `isActivelyEditing` flag prevents unnecessary watcher execution during typing

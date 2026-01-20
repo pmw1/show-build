@@ -2,7 +2,7 @@
 
 **Status**: Live Working Document
 **Purpose**: Track ongoing development tasks and priorities
-**Last Updated**: 2026-01-01
+**Last Updated**: 2026-01-18
 
 > **📌 IMPORTANT**: This document serves as the master checklist for Show-Build development. Update task status as work progresses. Reference this in CLAUDE.md for Claude Code to track work.
 
@@ -114,6 +114,37 @@
 **Status**: Analysis complete, implementation pending
 **Reference**: SOT analysis performed 2026-01-05, documented in this file
 **Value**: Critical reliability improvements - prevents ~50% of SOT failures
+
+#### 🔴 CRITICAL BUG: Individual Clips Function Not Working (NEW 2026-01-18)
+
+**Status**: BROKEN - Requires manual workaround
+**Impact**: Users cannot use `individual-clips` clipping method from UI
+**Discovered**: 2026-01-18 during Hannah Spier clip processing
+
+**Problem Description**:
+- User defines multiple clips in SOT modal with `individual-clips` clipping method
+- Job shows as "processing" indefinitely
+- Clips are never extracted or registered
+- Manual workaround required: FFmpeg extraction + AssetID registration + cue block insertion
+
+**Root Cause Analysis Needed**:
+- [ ] Check `_process_individual_clips()` function in `app/services/ffmpeg_tasks.py:980`
+- [ ] Verify Celery task routing for `individual_clips` job_type
+- [ ] Check if clips_data JSON is properly parsed from cue block
+- [ ] Verify working directory and file paths are correct
+- [ ] Check for silent failures in clip extraction subprocess
+
+**Manual Workaround Used** (for reference):
+1. FFmpeg extraction: `ffmpeg -ss {start} -i source.mp4 -t {duration} -c:v libx264 -preset fast -crf 18 output.mp4`
+2. Register AssetIDs via `AssetIDService.request_asset_id()`
+3. Insert cue blocks into script_content manually
+4. Mark original job as completed
+
+**Fix Requirements**:
+- [ ] Debug and fix `_process_individual_clips()` workflow
+- [ ] Add proper error logging/reporting for clip extraction failures
+- [ ] Ensure cue blocks are properly inserted after processing
+- [ ] Test with 2, 3, and 5+ clip configurations
 
 #### TIER 1: Critical Fixes (Est. 10 hours total)
 
@@ -294,6 +325,24 @@
 
 ### Priority 3: Quality of Life Improvements
 
+#### ContentEditor Undo Buffer **COMPLETED 2026-01-18**
+**Status**: Implemented and tested
+**Purpose**: Allow users to recover from accidental content deletions
+
+- [x] **In-Memory Undo Stack Implementation**
+  - [x] Added undo/redo data properties (undoStack, redoStack, maxUndoHistory: 50)
+  - [x] Added debounced capture (300ms) on content changes
+  - [x] Added captureUndoState() before destructive operations (deleteSelectedItem, deleteCue)
+  - [x] Added undo() and redo() methods with cursor position restoration
+  - [x] Added keyboard handlers: Ctrl+Z (undo), Ctrl+Y/Ctrl+Shift+Z (redo)
+  - [x] Clear undo stacks when switching rundown items
+  - [x] All linting passed
+
+**Limitations** (acceptable tradeoffs):
+- Undo history lost on page refresh (use Version History for persistent recovery)
+- Memory limited to 50 states
+- Cursor position restoration is best-effort
+
 #### Windows Worker FSQ Setup
 **Status**: Requested via inter-claude relay (message #423)
 **Dependency**: Requires Windows worker Claude assistance
@@ -403,6 +452,13 @@
 - 🏃 Documentation updates (EPISODE_DIRECTORY_STANDARD.md, UNIVERSAL_LLM_FRAMEWORK_UFDP.md, README.md pending)
 
 ### 🔜 Up Next (This Sprint)
+- **Segment Locking UI Testing** (backend deployed 2026-01-18) - Test concurrent editing protection:
+  - [ ] Open same episode in two browsers with different users
+  - [ ] User A selects segment → should acquire lock
+  - [ ] User B selects same segment → should see locked overlay with User A's name
+  - [ ] User A navigates away → lock should release
+  - [ ] User B can now edit the segment
+  - [ ] Test lock expiration (60s TTL without heartbeat)
 - SOT Robustness - Tier 2 High Priority Fixes
 - Rundown template UI testing (backend complete, frontend already built)
 - Script generation system completion

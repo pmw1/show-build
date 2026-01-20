@@ -759,13 +759,26 @@
   </v-container>
 
   <!-- Add this right after your v-container closing tag -->
-  <div 
-    v-if="showClickOverlay" 
+  <div
+    v-if="showClickOverlay"
     class="click-overlay"
     :class="{ 'single': clickType === 'single', 'double': clickType === 'double' }"
   >
     {{ clickType === 'single' ? 'SINGLE CLICK' : 'DOUBLE CLICK' }}
   </div>
+
+  <!-- Snackbar for messages -->
+  <v-snackbar
+    v-model="snackbar.show"
+    :color="snackbar.color"
+    :timeout="snackbar.timeout"
+    location="bottom"
+  >
+    {{ snackbar.message }}
+    <template v-slot:actions>
+      <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
+    </template>
+  </v-snackbar>
 </template>
 
 <script>
@@ -839,7 +852,13 @@ export default {
         { title: 'Call to Action', value: 'cta' },
         { title: 'Transition', value: 'trans' },
         { title: 'Unknown', value: 'unknown' }
-      ]
+      ],
+      snackbar: {
+        show: false,
+        message: '',
+        color: 'success',
+        timeout: 4000
+      }
     };
   },
   computed: {
@@ -918,6 +937,11 @@ export default {
     // REMOVED route-based watchers
   },
   methods: {
+    showSnackbar(message, color = 'success') {
+      this.snackbar.message = message;
+      this.snackbar.color = color;
+      this.snackbar.show = true;
+    },
     loadEpisodeFromSession() {
       const savedEpisodeId = sessionStorage.getItem('currentEpisodeId');
       if (savedEpisodeId && this.episodes.length > 0) {
@@ -1039,9 +1063,9 @@ export default {
           `/api/episodes/${this.selectedEpisode}/reorder`,
           payload
         );
-        alert("Rundown reordered successfully!");
+        this.showSnackbar("Rundown reordered successfully!");
       } catch (err) {
-        alert("Failed to save rundown: " + err.message);
+        this.showSnackbar("Failed to save rundown: " + err.message, "error");
       }
     },
     revertChanges() {
@@ -1070,19 +1094,19 @@ export default {
     editSelectedItem() {
       if (!this.selectedItem) return;
       // TODO: Implement edit functionality - could open a modal or navigate to edit page
-      alert(`Edit functionality for "${this.selectedItem.slug}" will be implemented soon!`);
+      this.showSnackbar(`Edit functionality for "${this.selectedItem.slug}" will be implemented soon!`, "info");
     },
     
     duplicateSelectedItem() {
       if (!this.selectedItem) return;
       // TODO: Create a copy of the selected item
-      alert(`Duplicate functionality for "${this.selectedItem.slug}" will be implemented soon!`);
+      this.showSnackbar(`Duplicate functionality for "${this.selectedItem.slug}" will be implemented soon!`, "info");
     },
     
     moveSelectedItem() {
       if (!this.selectedItem) return;
       // TODO: Implement move to specific position functionality
-      alert(`Move functionality for "${this.selectedItem.slug}" will be implemented soon!`);
+      this.showSnackbar(`Move functionality for "${this.selectedItem.slug}" will be implemented soon!`, "info");
     },
     
     async deleteSelectedItem() {
@@ -1101,10 +1125,10 @@ export default {
         if (index !== -1) {
           this.segments.splice(index, 1);
           this.selectedItem = null;
-          alert('Item deleted successfully! (Note: This is currently local only)');
+          this.showSnackbar('Item deleted successfully! (Note: This is currently local only)');
         }
       } catch (error) {
-        alert('Failed to delete item: ' + error.message);
+        this.showSnackbar('Failed to delete item: ' + error.message, 'error');
       }
     },
     
@@ -1120,7 +1144,7 @@ export default {
         );
         
         // Show success message
-        alert(`Successfully created: ${response.data.filename}`);
+        this.showSnackbar(`Successfully created: ${response.data.filename}`);
         
         // Reset form and close dialog
         this.resetNewItemForm();
@@ -1130,7 +1154,7 @@ export default {
         await this.loadEpisode(this.selectedEpisode);
         
       } catch (err) {
-        alert("Failed to create new rundown item: " + (err.response?.data?.detail || err.message));
+        this.showSnackbar("Failed to create new rundown item: " + (err.response?.data?.detail || err.message), "error");
       } finally {
         this.creatingItem = false;
       }
@@ -1653,9 +1677,9 @@ export default {
         // Update local episodeInfo
         this.episodeInfo = { ...this.episodeInfo, ...updateData };
         
-        alert('Episode information saved successfully!');
+        this.showSnackbar('Episode information saved successfully!');
       } catch (error) {
-        alert('Failed to save episode information: ' + error.message);
+        this.showSnackbar('Failed to save episode information: ' + error.message, 'error');
       } finally {
         this.updatingEpisode = false;
       }
@@ -1681,9 +1705,9 @@ export default {
         this.populateInlineEpisodeInfo();
         
         this.showEditEpisodeDialog = false;
-        alert('Episode information updated successfully!');
+        this.showSnackbar('Episode information updated successfully!');
       } catch (error) {
-        alert('Failed to update episode information: ' + error.message);
+        this.showSnackbar('Failed to update episode information: ' + error.message, 'error');
       } finally {
         this.updatingEpisode = false;
       }

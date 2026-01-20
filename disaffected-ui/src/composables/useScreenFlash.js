@@ -57,6 +57,25 @@ export function useScreenFlash() {
     flashMessage.value = ''
   }
 
+  /**
+   * Flash blue 3 times fast to indicate successful save
+   * Used after autosave debounce completes
+   */
+  const flashSaveSuccess = async () => {
+    const saveColor = '#2196F3' // Blue
+    flashMessage.value = ''
+    flashMessageStyle.value = 'normal'
+
+    // Flash 3 times fast (80ms on, 80ms off)
+    for (let i = 0; i < 3; i++) {
+      flashColor.value = saveColor
+      showFlash.value = true
+      await new Promise(resolve => setTimeout(resolve, 80))
+      showFlash.value = false
+      await new Promise(resolve => setTimeout(resolve, 80))
+    }
+  }
+
   return {
     showFlash,
     flashColor,
@@ -64,6 +83,7 @@ export function useScreenFlash() {
     flashMessageStyle,
     flashForCue,
     flashUrgent,
-    clearFlash
+    clearFlash,
+    flashSaveSuccess
   }
 }

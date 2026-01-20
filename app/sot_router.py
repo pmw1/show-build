@@ -273,24 +273,35 @@ async def process_sot_multi_phase_endpoint(
         SOTUploadResponse with celery task_id
     """
     try:
+        # DEBUG: Log incoming request
+        logger.info(f"📥 Multi-phase request received: temp_job_id={request.temp_job_id}, episode={request.episode}, slug={request.slug}, asset_id={request.asset_id}")
+
         # Verify job exists
         job = db.query(SOTProcessingJob).filter_by(temp_job_id=request.temp_job_id).first()
         if not job:
+            logger.error(f"❌ Job not found: {request.temp_job_id}")
             raise HTTPException(status_code=404, detail=f"Job {request.temp_job_id} not found")
 
         if job.status != 'uploaded':
+            logger.error(f"❌ Job {request.temp_job_id} has wrong status: {job.status}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Job is in status '{job.status}', expected 'uploaded'"
             )
 
+        logger.info(f"✅ Job found with correct status: {job.status}")
+
         # CRITICAL FIX: Verify upload file exists before submitting to Celery
         # Prevents race condition where file hasn't fully synced to NFS
+        # Use /shared_media which is the Docker container mount point (not /mnt/sync/shared_media)
         from pathlib import Path
-        working_dir = Path("/mnt/sync/shared_media/preproc/working") / request.temp_job_id
+        working_dir = Path("/shared_media/preproc/working") / request.temp_job_id
         upload_file = working_dir / f"{request.temp_job_id}_upload.mp4"
 
+        logger.info(f"🔍 Checking paths: working_dir={working_dir}, exists={working_dir.exists()}")
+
         if not working_dir.exists():
+            logger.error(f"❌ Working directory not found: {working_dir}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Working directory not found: {working_dir}. Background upload may have failed."
@@ -317,6 +328,85 @@ async def process_sot_multi_phase_endpoint(
             )
 
         logger.info(f"✅ Upload file verified: {upload_file} ({file_size:,} bytes)")
+
+        # Pre-processing FFprobe validation
+        # Validates file before submitting to Celery to catch issues early
+        try:
+            import subprocess
+            from platform_utils import get_ffprobe_binary
+
+            ffprobe = get_ffprobe_binary()
+
+            # Get video metadata via FFprobe
+            probe_cmd = [
+                ffprobe, "-v", "error",
+                "-show_entries", "format=duration,size:stream=codec_type,codec_name,width,height",
+                "-of", "json",
+                str(upload_file)
+            ]
+            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+
+            if probe_result.returncode == 0:
+                import json
+                probe_data = json.loads(probe_result.stdout)
+
+                # Extract format info
+                fmt = probe_data.get('format', {})
+                duration = float(fmt.get('duration', 0))
+                probe_size = int(fmt.get('size', 0))
+
+                # Extract stream info
+                streams = probe_data.get('streams', [])
+                has_video = any(s.get('codec_type') == 'video' for s in streams)
+                video_codec = next((s.get('codec_name') for s in streams if s.get('codec_type') == 'video'), None)
+
+                # Validation checks
+                MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB
+                MAX_DURATION = 60 * 60  # 60 minutes
+                MIN_DURATION = 1  # 1 second
+
+                if probe_size > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"File too large: {probe_size / (1024**3):.2f}GB exceeds 10GB limit"
+                    )
+
+                if duration < MIN_DURATION:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Video too short: {duration:.1f}s (minimum 1 second)"
+                    )
+
+                if duration > MAX_DURATION:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Video too long: {duration / 60:.1f} minutes (maximum 60 minutes)"
+                    )
+
+                if not has_video:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No video stream found in file. Please upload a valid video file."
+                    )
+
+                # Log warnings for unusual codecs
+                unusual_codecs = ['mjpeg', 'rawvideo', 'gif', 'webp']
+                if video_codec and video_codec.lower() in unusual_codecs:
+                    logger.warning(f"⚠️ Unusual video codec detected: {video_codec}. Processing may be slower.")
+
+                logger.info(f"✅ FFprobe validation passed: {duration:.1f}s, codec={video_codec}")
+
+            else:
+                # FFprobe failed - log warning but continue (might still be processable)
+                stderr = probe_result.stderr[:200] if probe_result.stderr else 'Unknown error'
+                logger.warning(f"⚠️ FFprobe validation failed: {stderr}. Continuing anyway.")
+
+        except HTTPException:
+            raise
+        except subprocess.TimeoutExpired:
+            logger.warning("⚠️ FFprobe validation timed out. Continuing anyway.")
+        except Exception as e:
+            logger.warning(f"⚠️ FFprobe validation error: {e}. Continuing anyway.")
 
         # Create source AssetID for parent/child architecture
         # Source AssetID stores the original uploaded video
@@ -497,8 +587,9 @@ async def retry_failed_job(
         job.error_message = None
 
         # CRITICAL FIX: Verify upload file still exists before retry
+        # Use /shared_media which is the Docker container mount point
         from pathlib import Path
-        working_dir = Path("/mnt/sync/shared_media/preproc/working") / temp_job_id
+        working_dir = Path("/shared_media/preproc/working") / temp_job_id
         upload_file = working_dir / f"{temp_job_id}_upload.mp4"
 
         if not upload_file.exists():
@@ -875,24 +966,58 @@ async def reprocess_sot_by_asset_id(
 
         # Extract metadata from rundown item (trim times, job type, clips if stored)
         import json
+        import re
         trim_start = "00:00:00"
         trim_end = "00:00:00"
         job_type = "full_process"
         clips = None
 
-        # Try to get processing metadata from cue data if available
+        # Try to get processing metadata from cue block in script_content
         if rundown_item.script_content:
-            try:
-                import frontmatter
-                parsed = frontmatter.loads(rundown_item.script_content)
-                metadata = parsed.metadata
-                trim_start = metadata.get('trim_start', trim_start)
-                trim_end = metadata.get('trim_end', trim_end)
-                job_type = metadata.get('job_type', job_type)
-                if 'clips' in metadata:
-                    clips = metadata['clips']
-            except Exception as e:
-                print(f"Could not parse frontmatter: {e}")
+            # First, find the specific cue block for this AssetID
+            cue_pattern = re.compile(
+                r'<!-- Begin Cue -->.*?\[AssetID: ' + re.escape(asset_id) + r'\].*?<!-- End Cue -->',
+                re.DOTALL
+            )
+            cue_match = cue_pattern.search(rundown_item.script_content)
+
+            if cue_match:
+                cue_block = cue_match.group(0)
+
+                # Extract TrimStart
+                trim_start_match = re.search(r'\[TrimStart:\s*([^\]]+)\]', cue_block)
+                if trim_start_match:
+                    trim_start = trim_start_match.group(1).strip()
+
+                # Extract TrimEnd
+                trim_end_match = re.search(r'\[TrimEnd:\s*([^\]]+)\]', cue_block)
+                if trim_end_match:
+                    trim_end = trim_end_match.group(1).strip()
+
+                # Extract ClippingMethod and map to job_type
+                clipping_match = re.search(r'\[ClippingMethod:\s*([^\]]+)\]', cue_block)
+                if clipping_match:
+                    clipping_method = clipping_match.group(1).strip()
+                    if clipping_method == 'individual-clips':
+                        job_type = 'individual_clips'
+                    elif clipping_method == 'montage':
+                        job_type = 'montage'
+                    elif clipping_method == 'single-trim':
+                        job_type = 'single_trim'
+                    logger.info(f"📋 Extracted clipping method: {clipping_method} -> job_type: {job_type}")
+
+                # Extract Clips array
+                clips_match = re.search(r'\[Clips:\s*"(.+?)"\]', cue_block, re.DOTALL)
+                if clips_match:
+                    try:
+                        # The clips are JSON-escaped inside the cue block
+                        clips_json = clips_match.group(1).replace('\\"', '"')
+                        clips = json.loads(clips_json)
+                        logger.info(f"📋 Extracted {len(clips)} clips from cue block")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Could not parse clips JSON: {e}")
+            else:
+                logger.warning(f"Could not find cue block for AssetID {asset_id}")
 
         # Resubmit to Celery
         task = process_sot_video_multi_phase.apply_async(

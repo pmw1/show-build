@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 from models_episode import BlueprintTemplate, BlueprintNode, Blueprint
 from models_assetid import AssetIDRegistry, AssetIDRelationship, AssetIDPendingMessage
 from models_v2 import Organization, Show, Season, Episode, Break, Rundown, RundownItem, Segment, Script, Element, Cue, AssetLink, AssetMessage, Speaker
+from models_content_library import ContentLibrary, ContentPlacement, ContentTypeSettings
 from services.script_compilation import compile_episode_script
 from websocket import websocket_endpoint, manager
 from celery_app import celery_app
@@ -82,6 +83,7 @@ try:
     from xtts_router import router as xtts_router
     from housekeeping_router import router as housekeeping_router
     from sot_router import router as sot_router
+    from vo_router import router as vo_router
     from llm_proxy_router import router as llm_proxy_router
     from llm_state_router import router as llm_state_router
     from prompts_router import router as prompts_router
@@ -96,6 +98,9 @@ try:
     from repo_router import router as repo_router
     from workers_router import router as workers_router
     from script_generation_router import router as script_generation_router
+    from content_library_router import router as content_library_router
+    from customer_router import router as customer_router
+    from segment_locks_router import router as segment_locks_router
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Current directory: {os.getcwd()}")
@@ -217,6 +222,9 @@ app.include_router(housekeeping_router, prefix="/api")
 # Include SOT processing router
 app.include_router(sot_router)
 
+# Include VO (Voice Over) processing router
+app.include_router(vo_router)
+
 # Include LLM proxy router (for mixed content avoidance)
 app.include_router(llm_proxy_router)
 
@@ -262,6 +270,15 @@ app.include_router(script_generation_router, prefix="/api")
 # Include the media analysis router
 from media_analysis_router import router as media_analysis_router
 app.include_router(media_analysis_router)
+
+# Include the content library router (reusable content system)
+app.include_router(content_library_router)
+
+# Include the customer router (advertiser/sponsor management)
+app.include_router(customer_router)
+
+# Include the segment locks router (concurrent editing protection)
+app.include_router(segment_locks_router)
 
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024

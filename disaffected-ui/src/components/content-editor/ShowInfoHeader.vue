@@ -5,42 +5,65 @@
         <v-progress-linear indeterminate color="primary" height="4" rounded></v-progress-linear>
       </div>
       <div class="header-container">
-        <div class="show-title-area">
-          <!-- Editable Show Title -->
-          <div class="show-title-container">
+        <!-- Section 1: Episode Title and Description -->
+        <div class="header-section section-1">
+          <div class="field-with-label">
+            <label class="field-label">Episode Title</label>
             <v-text-field
-              :model-value="title || 'Disaffected'"
-              @update:model-value="$emit('update:title', $event)"
-              variant="plain"
+              :model-value="episodeTitle"
+              @update:model-value="$emit('update:episodeTitle', $event)"
+              variant="outlined"
               density="compact"
-              class="show-title-input"
+              class="episode-title-input"
               hide-details
               single-line
-              @blur="saveShowTitle"
-              placeholder="Show Title"
+              placeholder="Enter episode title..."
             />
-            <span v-if="isDummy" class="dummy-indicator"> (DUMMY)</span>
           </div>
-
-          <p class="text-caption text-medium-emphasis mb-0">{{ displayEpisodeInfo }}</p>
-          <p v-if="episodeAssetId" class="text-caption text-medium-emphasis mb-0 asset-id-display">{{ episodeAssetId }}</p>
+          <div class="field-with-label">
+            <label class="field-label">Description</label>
+            <v-textarea
+              :model-value="description"
+              @update:model-value="$emit('update:description', $event)"
+              variant="outlined"
+              density="compact"
+              class="episode-description-input"
+              hide-details
+              rows="2"
+              no-resize
+              placeholder="Enter episode description..."
+            />
+          </div>
         </div>
 
-        <!-- Action Buttons (right side) -->
-        <div class="action-buttons-area d-flex align-center gap-2">
+        <!-- Section 2: Reserved for future use -->
+        <div class="header-section section-2">
+          <div class="section-placeholder">
+            <span class="placeholder-text">Section 2</span>
+          </div>
+        </div>
+
+        <!-- Section 3: Reserved for future use -->
+        <div class="header-section section-3">
+          <div class="section-placeholder">
+            <span class="placeholder-text">Section 3</span>
+          </div>
+        </div>
+
+        <!-- Section 4: Action Buttons -->
+        <div class="header-section section-4 d-flex align-center justify-end gap-1">
           <!-- More Options Dropdown -->
           <v-menu>
             <template v-slot:activator="{ props }">
               <v-btn
-                size="small"
+                size="x-small"
                 color="grey"
                 variant="outlined"
-                class="more-options-btn px-3"
-                rounded="0"
+                class="header-action-btn"
                 v-bind="props"
               >
-                <v-icon size="small" class="mr-1">mdi-dots-horizontal</v-icon>
-                More Options
+                <v-icon size="x-small" class="mr-1">mdi-dots-horizontal</v-icon>
+                More
               </v-btn>
             </template>
             <v-list>
@@ -67,32 +90,57 @@
                 </v-list-item-title>
               </v-list-item>
               <v-divider></v-divider>
-              <v-list-item @click="$emit('generate-host-script')" :disabled="!episodeNumber">
-                <v-list-item-title>
-                  <v-icon size="small" class="mr-2" color="primary">mdi-script-text</v-icon>
-                  Generate Host Script
-                </v-list-item-title>
-                <v-list-item-subtitle>
-                  Create formatted HTML script
-                </v-list-item-subtitle>
-              </v-list-item>
+              <!-- Script Generation Submenu -->
+              <v-list-group>
+                <template v-slot:activator="{ props }">
+                  <v-list-item v-bind="props" :disabled="!episodeNumber">
+                    <template v-slot:prepend>
+                      <v-icon size="small" color="primary">mdi-script-text</v-icon>
+                    </template>
+                    <v-list-item-title>Generate Script</v-list-item-title>
+                  </v-list-item>
+                </template>
+                <v-list-item @click="$emit('generate-script', 'host_full')" :disabled="!episodeNumber">
+                  <v-list-item-title>
+                    <v-icon size="small" class="mr-2" color="blue">mdi-file-document</v-icon>
+                    Host Script (Full)
+                  </v-list-item-title>
+                  <v-list-item-subtitle>
+                    Complete script with images, cues, and visuals
+                  </v-list-item-subtitle>
+                </v-list-item>
+                <v-list-item @click="$emit('generate-script', 'host_clean')" :disabled="!episodeNumber">
+                  <v-list-item-title>
+                    <v-icon size="small" class="mr-2" color="green">mdi-text</v-icon>
+                    Host Script (Clean)
+                  </v-list-item-title>
+                  <v-list-item-subtitle>
+                    Teleprompter-friendly, large text, minimal cues
+                  </v-list-item-subtitle>
+                </v-list-item>
+                <v-list-item @click="$emit('generate-script', 'production')" :disabled="!episodeNumber">
+                  <v-list-item-title>
+                    <v-icon size="small" class="mr-2" color="orange">mdi-clipboard-list</v-icon>
+                    Production Rundown
+                  </v-list-item-title>
+                  <v-list-item-subtitle>
+                    Technical details, compact, all cue info
+                  </v-list-item-subtitle>
+                </v-list-item>
+              </v-list-group>
             </v-list>
           </v-menu>
 
-          <!-- Vertical Divider -->
-          <v-divider vertical class="mx-1"></v-divider>
-
           <!-- Save All Button (rightmost) - Always clickable for manual save -->
           <v-btn
-            size="small"
+            size="x-small"
             :color="saveState?.hasChanges ? 'primary' : 'success'"
             variant="elevated"
             @click="$emit('save-all')"
-            class="save-all-btn"
-            rounded="0"
+            class="header-action-btn"
           >
-            <v-icon size="small" class="mr-1">{{ saveState?.hasChanges ? 'mdi-content-save' : 'mdi-check-circle' }}</v-icon>
-            {{ saveState?.hasChanges ? 'Save All' : 'Saved' }}
+            <v-icon size="x-small" class="mr-1">{{ saveState?.hasChanges ? 'mdi-content-save' : 'mdi-check-circle' }}</v-icon>
+            {{ saveState?.hasChanges ? 'Save' : 'Saved' }}
             <v-tooltip activator="parent" location="bottom">{{ saveState?.hasChanges ? 'Save all changes now' : 'Click to force save (already synchronized)' }}</v-tooltip>
           </v-btn>
         </div>
@@ -106,7 +154,7 @@ import { getColorValue, resolveVuetifyColor } from '../../utils/themeColorMap';
 
 export default {
   name: 'ShowInfoHeader',
-  emits: ['update:airDate', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description', 'save-all', 'toggle-metadata-panel', 'toggle-script-reading', 'request-new-episode-assetid', 'show-assetid-info', 'generate-host-script'],
+  emits: ['update:airDate', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description', 'save-all', 'toggle-metadata-panel', 'toggle-script-reading', 'request-new-episode-assetid', 'show-assetid-info', 'generate-script'],
   props: {
     title: {
       type: String,
@@ -320,21 +368,115 @@ export default {
 }
 
 .header-container {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  height: 100%;
+  width: 100%;
+  align-items: stretch;
 }
 
-.show-title-area {
-  min-width: 200px;
-  flex: 1 1 auto;
+.header-section {
   display: flex;
   flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.section-1,
+.section-2,
+.section-3 {
+  border-right: 1px dotted #ccc;
+}
+
+.section-1 {
+  /* Episode title and description */
+}
+
+.section-2,
+.section-3 {
+  /* Reserved for future use */
+}
+
+.section-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.placeholder-text {
+  color: #ccc;
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.section-4 {
+  /* Action buttons - align to top right */
+  flex-direction: row;
   align-items: flex-start;
-  justify-content: flex-start;
+  justify-content: flex-end;
+}
+
+.header-action-btn {
+  min-width: 70px !important;
+  height: 24px !important;
+  font-size: 0.7rem !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.field-with-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.field-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.episode-title-input {
+  width: 100%;
+}
+
+.episode-description-input {
+  width: 100%;
+}
+
+/* Styling for the episode fields */
+:deep(.episode-title-input .v-field__input) {
+  font-size: 0.875rem !important;
+  padding: 4px 8px !important;
+  min-height: 28px !important;
+}
+
+:deep(.episode-description-input .v-field__input) {
+  font-size: 0.875rem !important;
+  padding: 4px 8px !important;
+  line-height: 1.3 !important;
+}
+
+/* Remove borders and style backgrounds */
+:deep(.episode-title-input .v-field__outline),
+:deep(.episode-description-input .v-field__outline) {
+  display: none !important;
+}
+
+:deep(.episode-title-input .v-field) {
+  background-color: #f5f5f5 !important;
+  border-radius: 4px;
+}
+
+:deep(.episode-description-input .v-field) {
+  background-color: #f5f5f5 !important;
+  border-radius: 4px;
 }
 
 .show-title-fit {
@@ -513,7 +655,6 @@ export default {
 }
 
 .slug-input :deep(.v-field__input),
-.episode-title-input :deep(.v-field__input),
 .subtitle-input :deep(.v-field__input),
 .guest-input :deep(.v-field__input) {
   font-size: 0.75rem !important;
@@ -530,7 +671,6 @@ export default {
 }
 
 .slug-input :deep(.v-field__field),
-.episode-title-input :deep(.v-field__field),
 .subtitle-input :deep(.v-field__field),
 .guest-input :deep(.v-field__field),
 .description-input :deep(.v-field__field) {
@@ -539,17 +679,17 @@ export default {
 
 .show-title-input :deep(.v-field__outline),
 .slug-input :deep(.v-field__outline),
-.episode-title-input :deep(.v-field__outline),
 .subtitle-input :deep(.v-field__outline),
 .guest-input :deep(.v-field__outline),
 .description-input :deep(.v-field__outline) {
   display: none !important;
 }
 
+/* Keep visible borders for episode title and description fields */
+
 /* Show subtle underline on hover/focus */
 .show-title-input:hover :deep(.v-field__field),
 .slug-input:hover :deep(.v-field__field),
-.episode-title-input:hover :deep(.v-field__field),
 .subtitle-input:hover :deep(.v-field__field),
 .guest-input:hover :deep(.v-field__field),
 .description-input:hover :deep(.v-field__field) {
@@ -558,7 +698,6 @@ export default {
 
 .show-title-input:focus-within :deep(.v-field__field),
 .slug-input:focus-within :deep(.v-field__field),
-.episode-title-input:focus-within :deep(.v-field__field),
 .subtitle-input:focus-within :deep(.v-field__field),
 .guest-input:focus-within :deep(.v-field__field),
 .description-input:focus-within :deep(.v-field__field) {
@@ -567,7 +706,6 @@ export default {
 
 /* Icon styling for all editable fields with icons */
 .slug-input :deep(.v-field__prepend-inner),
-.episode-title-input :deep(.v-field__prepend-inner),
 .subtitle-input :deep(.v-field__prepend-inner),
 .guest-input :deep(.v-field__prepend-inner),
 .description-input :deep(.v-field__prepend-inner) {
@@ -576,7 +714,6 @@ export default {
 }
 
 .slug-input :deep(.v-field__prepend-inner .v-icon),
-.episode-title-input :deep(.v-field__prepend-inner .v-icon),
 .subtitle-input :deep(.v-field__prepend-inner .v-icon),
 .guest-input :deep(.v-field__prepend-inner .v-icon),
 .description-input :deep(.v-field__prepend-inner .v-icon) {

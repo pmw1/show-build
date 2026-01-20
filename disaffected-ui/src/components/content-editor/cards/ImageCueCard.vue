@@ -31,6 +31,7 @@
           @click.stop="$emit('edit')"
           class="action-btn"
           color="white"
+          tabindex="-1"
         >
           Edit
         </v-btn>
@@ -40,6 +41,7 @@
           @click.stop="$emit('delete')"
           class="action-btn delete-btn"
           color="white"
+          tabindex="-1"
         >
           Delete
         </v-btn>

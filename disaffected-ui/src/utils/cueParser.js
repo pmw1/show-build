@@ -70,10 +70,20 @@ export class CueParser {
     if (existingParagraphs) {
       // Parse each paragraph tag into individual speaker segments
       existingParagraphs.forEach(paragraphHtml => {
-        const match = paragraphHtml.match(/<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/);
+        // Extract class, data-needs-attention, data-flag-note, and content from paragraph
+        const match = paragraphHtml.match(/<p(?:\s+class="([^"]*)")?([^>]*)>([\s\S]*?)<\/p>/);
         if (match) {
           const speaker = match[1] || 'josh'; // Default to josh if no class
-          const content = match[2].trim();
+          const otherAttributes = match[2] || '';
+          const content = match[3].trim();
+
+          // Check for data-needs-attention attribute
+          const needsAttention = otherAttributes.includes('data-needs-attention="true"') ||
+                                 otherAttributes.includes("data-needs-attention='true'");
+
+          // Extract data-flag-note attribute value
+          const flagNoteMatch = otherAttributes.match(/data-flag-note="([^"]*)"/);
+          const flagNote = flagNoteMatch ? flagNoteMatch[1] : '';
 
           // Always push segment, even if empty (allows editing empty paragraphs)
           if (content) {
@@ -86,7 +96,9 @@ export class CueParser {
                   type: 'text',
                   content: paragraph.trim(),
                   speaker: speaker,
-                  needsParagraphTags: true
+                  needsParagraphTags: true,
+                  needsAttention: needsAttention,
+                  flagNote: flagNote
                 });
               });
             } else {
@@ -95,7 +107,9 @@ export class CueParser {
                 type: 'text',
                 content: content,
                 speaker: speaker,
-                needsParagraphTags: true
+                needsParagraphTags: true,
+                needsAttention: needsAttention,
+                flagNote: flagNote
               });
             }
           } else {
@@ -104,7 +118,9 @@ export class CueParser {
               type: 'text',
               content: '',
               speaker: speaker,
-              needsParagraphTags: true
+              needsParagraphTags: true,
+              needsAttention: needsAttention,
+              flagNote: flagNote
             });
           }
         }
@@ -163,10 +179,15 @@ export class CueParser {
     const cueData = {};
 
     // Parse field lines [Field: Value]
-    const fieldPattern = /\[([^:]+):\s*([^\]]*)\]/g;
-    let fieldMatch;
+    // Use a more sophisticated pattern that handles JSON arrays containing brackets
+    // Pattern matches: [FieldName: value] where value can contain balanced brackets
+    const lines = cueContent.split('\n');
 
-    while ((fieldMatch = fieldPattern.exec(cueContent)) !== null) {
+    for (const line of lines) {
+      // Match field pattern [FieldName: Value]
+      const fieldMatch = line.match(/^\s*\[([^:]+):\s*(.*)\]\s*$/);
+      if (!fieldMatch) continue;
+
       const fieldName = fieldMatch[1].trim();
       let fieldValue = fieldMatch[2].trim();
 
@@ -238,11 +259,16 @@ export class CueParser {
 
   /**
    * Convert field name to camelCase
+   * Handles PascalCase (FontSize), spaces (Font Size), and snake_case (font_size)
    * @param {string} fieldName - Field name to convert
    * @returns {string} camelCase field name
    */
   static toCamelCase(fieldName) {
-    return fieldName
+    // First, handle PascalCase by inserting spaces before uppercase letters
+    // This converts "FontSize" → "Font Size", "AssetID" → "Asset ID"
+    const spacedName = fieldName.replace(/([a-z])([A-Z])/g, '$1 $2');
+
+    return spacedName
       .split(/[\s_-]+/)
       .map((word, index) => {
         if (index === 0) {
@@ -329,12 +355,14 @@ export class CueParser {
     if (!cueData) return null;
 
     // Parse thumbnailOptions if it's a JSON string
+    // Check both camelCase (thumbnailOptions) and lowercase (thumbnailoptions) variants
     let thumbnailOptions = null;
-    if (cueData.thumbnailOptions) {
+    const rawThumbnailOptions = cueData.thumbnailOptions || cueData.thumbnailoptions;
+    if (rawThumbnailOptions) {
       try {
-        thumbnailOptions = typeof cueData.thumbnailOptions === 'string'
-          ? JSON.parse(cueData.thumbnailOptions)
-          : cueData.thumbnailOptions;
+        thumbnailOptions = typeof rawThumbnailOptions === 'string'
+          ? JSON.parse(rawThumbnailOptions)
+          : rawThumbnailOptions;
       } catch (e) {
         console.warn('Failed to parse thumbnailOptions:', e);
         thumbnailOptions = null;
@@ -350,10 +378,10 @@ export class CueParser {
       slug: cueData.slug,
       description: cueData.description,
       mediaUrl: cueData.mediaUrl || cueData.mediaurl, // Check both camelCase and lowercase (MediaURL -> mediaurl)
-      thumbnailUrl: cueData.thumbnailUrl,  // SOT thumbnail (primary)
+      thumbnailUrl: cueData.thumbnailUrl || cueData.thumbnailurl,  // SOT thumbnail (primary) - check both cases
       thumbnailOptions: thumbnailOptions,   // All 15 thumbnail URLs as array
-      audioUrl: cueData.audioUrl,          // SOT audio
-      processingStatus: cueData.processingStatus, // SOT processing status
+      audioUrl: cueData.audioUrl || cueData.audiourl,  // SOT audio - check both cases
+      processingStatus: cueData.processingStatus || cueData.processingstatus, // SOT processing status
       transcription: cueData.transcription, // SOT transcription text
       outcue: cueData.outcue, // SOT outcue (last 5 words of transcription)
       imageSrc: cueData.imageSrc,
@@ -361,11 +389,20 @@ export class CueParser {
       duration: cueData.duration,
       quote: cueData.quote,
       attribution: cueData.attribution,
+      // FSQ style fields
+      fontSize: cueData.fontSize,
+      fontFamily: cueData.fontFamily,
+      boxHeight: cueData.boxHeight,
+      boxOpacity: cueData.boxOpacity,
+      lineSpacing: cueData.lineSpacing,
+      alignment: cueData.alignment || cueData.style, // 'style' is legacy field name for alignment
       isImageType: this.isImageCueType(cueData.type),
       analysisState: cueData.analysisState,
       analysisField: cueData.analysisField,
       analysisRecommendations: cueData.analysisRecommendations,
       enumerator: cueData.enumerator,  // Enumeration number for display
+      needsAttention: cueData.needsAttention === 'true' || cueData.needsAttention === true, // Parse boolean from string
+      flagNote: cueData.flagNote || '', // Attention note for flagged cues
       rawData: cueData
     };
   }
@@ -385,7 +422,9 @@ export class CueParser {
       if (segment.type === 'text' && segment.needsParagraphTags) {
         // Create individual paragraph for each text segment
         const speaker = segment.speaker;
-        result.push(`<p class="${speaker}">${segment.content}</p>`);
+        const needsAttentionAttr = segment.needsAttention ? ' data-needs-attention="true"' : '';
+        const flagNoteAttr = segment.flagNote ? ` data-flag-note="${segment.flagNote.replace(/"/g, '&quot;')}"` : '';
+        result.push(`<p class="${speaker}"${needsAttentionAttr}${flagNoteAttr}>${segment.content}</p>`);
         i++;
       } else if (segment.type === 'text') {
         if (segment.hasStructuredParagraphs) {

@@ -40,14 +40,25 @@
             <h3 class="text-h6 mb-2">{{ nextShow.title || 'Untitled Episode' }}</h3>
             <div v-if="nextShow.subtitle" class="text-body-1 text-grey mb-2">{{ nextShow.subtitle }}</div>
           </div>
-          <v-chip
-            :color="getStatusColor(nextShow.status)"
-            size="large"
-            variant="flat"
-            class="px-4"
-          >
-            {{ nextShow.status?.toUpperCase() || 'DRAFT' }}
-          </v-chip>
+          <div class="d-flex flex-column align-end ga-2">
+            <v-chip
+              :color="getStatusColor(nextShow.status)"
+              size="large"
+              variant="flat"
+              class="px-4"
+            >
+              {{ nextShow.status?.toUpperCase() || 'DRAFT' }}
+            </v-chip>
+            <v-btn
+              color="primary"
+              variant="elevated"
+              size="large"
+              :to="`/content-editor/${nextShow.number}`"
+              prepend-icon="mdi-pencil"
+            >
+              Edit Show
+            </v-btn>
+          </div>
         </div>
 
         <!-- Air Date & Time -->
@@ -179,7 +190,7 @@
           :to="`/content-editor/${nextShow.number}`"
           prepend-icon="mdi-pencil"
         >
-          Open Content Editor
+          Edit Show
         </v-btn>
       </v-card-actions>
       <v-card-actions class="pa-3 pt-0">

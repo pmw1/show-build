@@ -838,6 +838,19 @@
         </v-col>
       </v-row>
     </v-card-text>
+
+    <!-- Snackbar for messages -->
+    <v-snackbar
+      v-model="snackbar.show"
+      :color="snackbar.color"
+      :timeout="snackbar.timeout"
+      location="bottom"
+    >
+      {{ snackbar.message }}
+      <template v-slot:actions>
+        <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
+      </template>
+    </v-snackbar>
   </v-card>
 </template>
 
@@ -860,6 +873,20 @@ const configs = computed({
 
 const expandedPanels = ref([])
 const saving = ref(false)
+
+// Snackbar state
+const snackbar = ref({
+  show: false,
+  message: '',
+  color: 'success',
+  timeout: 5000
+})
+
+const showSnackbar = (message, color = 'success') => {
+  snackbar.value.message = message
+  snackbar.value.color = color
+  snackbar.value.show = true
+}
 
 // Twitter OAuth state
 const twitterOAuthStatus = ref({
@@ -911,7 +938,7 @@ async function testConnection(service) {
 
       if (response.ok) {
         const data = await response.json()
-        alert(`✅ ${data.message}\n\nSample files:\n${data.sample_files.map(f => `• ${f.name}`).join('\n')}`)
+        showSnackbar(`${data.message} (${data.sample_files.length} files found)`, 'success')
       } else {
         const error = await response.json()
         throw new Error(error.detail || 'Connection failed')
@@ -928,14 +955,14 @@ async function testConnection(service) {
       })
 
       if (response.ok) {
-        alert(`${service} connection successful!`)
+        showSnackbar(`${service} connection successful!`, 'success')
       } else {
         throw new Error('Connection failed')
       }
     }
   } catch (error) {
     console.error(`Error testing ${service} connection:`, error)
-    alert(`❌ Failed to connect to ${service}: ${error.message}`)
+    showSnackbar(`Failed to connect to ${service}: ${error.message}`, 'error')
   }
 }
 
@@ -981,7 +1008,7 @@ async function initiateTwitterOAuth() {
     }
   } catch (error) {
     console.error('Error initiating Twitter OAuth:', error)
-    alert('❌ Failed to initiate Twitter OAuth: ' + error.message)
+    showSnackbar('Failed to initiate Twitter OAuth: ' + error.message, 'error')
   } finally {
     twitterOAuthLoading.value = false
   }
@@ -993,9 +1020,9 @@ function openTwitterAuthUrl() {
 
 function copyToClipboard(text) {
   navigator.clipboard.writeText(text).then(() => {
-    alert('✅ Copied to clipboard!')
+    showSnackbar('Copied to clipboard!', 'success')
   }).catch(() => {
-    alert('❌ Failed to copy to clipboard')
+    showSnackbar('Failed to copy to clipboard', 'error')
   })
 }
 
@@ -1024,14 +1051,14 @@ async function completeTwitterOAuth() {
       }
       showTwitterOAuthManual.value = false
       twitterAuthCode.value = ''
-      alert('✅ Twitter account connected successfully!')
+      showSnackbar('Twitter account connected successfully!', 'success')
     } else {
       const error = await response.json()
       throw new Error(error.detail || 'Failed to complete OAuth')
     }
   } catch (error) {
     console.error('Error completing Twitter OAuth:', error)
-    alert('❌ Failed to connect Twitter account: ' + error.message)
+    showSnackbar('Failed to connect Twitter account: ' + error.message, 'error')
   } finally {
     twitterOAuthLoading.value = false
   }
@@ -1064,13 +1091,13 @@ async function disconnectTwitterOAuth() {
         name: '',
         profileImage: ''
       }
-      alert('✅ Twitter account disconnected')
+      showSnackbar('Twitter account disconnected', 'success')
     } else {
       throw new Error('Failed to disconnect')
     }
   } catch (error) {
     console.error('Error disconnecting Twitter:', error)
-    alert('❌ Failed to disconnect Twitter account: ' + error.message)
+    showSnackbar('Failed to disconnect Twitter account: ' + error.message, 'error')
   }
 }
 
@@ -1131,13 +1158,13 @@ async function saveSettings() {
 
     if (response.ok) {
       emit('save', configs.value)
-      alert('API configuration saved successfully')
+      showSnackbar('API configuration saved successfully', 'success')
     } else {
       throw new Error('Failed to save configuration')
     }
   } catch (error) {
     console.error('Error saving API configuration:', error)
-    alert('Failed to save API configuration')
+    showSnackbar('Failed to save API configuration', 'error')
   } finally {
     saving.value = false
   }

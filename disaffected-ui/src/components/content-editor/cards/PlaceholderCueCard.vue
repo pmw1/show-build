@@ -56,6 +56,7 @@
             variant="text"
             @click.stop="$emit('edit')"
             class="action-btn"
+            tabindex="-1"
           >
             <v-icon size="small">mdi-pencil</v-icon>
             <v-tooltip activator="parent" location="top">Edit Cue</v-tooltip>
@@ -66,6 +67,7 @@
             variant="text"
             @click.stop="$emit('delete')"
             class="action-btn delete-btn"
+            tabindex="-1"
           >
             <v-icon size="small">mdi-delete</v-icon>
             <v-tooltip activator="parent" location="top">Delete Cue</v-tooltip>
@@ -104,124 +106,177 @@
 
     <!-- Card Content (hidden entirely for RIF) -->
     <v-card-text v-if="cueData.type !== 'RIF'" class="cue-card-content">
-      <!-- FSQ-specific Display - Redesigned 75/25 Layout -->
-      <div v-if="cueData.type === 'FSQ' && cueData.quote" class="fsq-redesigned-container">
-        <!-- Left Side: 75% - Quote Text (selectable/copyable) -->
-        <div class="fsq-quote-side">
-          <div class="fsq-quote-block">
-            <v-icon size="32" :color="cueTypeColor" class="fsq-quote-icon-left">mdi-format-quote-open</v-icon>
-            <div class="fsq-quote-full-text" @click="selectQuoteText">{{ cueData.quote }}</div>
-            <v-icon size="32" :color="cueTypeColor" class="fsq-quote-icon-right">mdi-format-quote-close</v-icon>
-          </div>
-          <div v-if="cueData.attribution" class="fsq-attribution-full">
-            — {{ cueData.attribution }}
+      <!-- FSQ-specific Display - Large Preview + Compact Controls Layout -->
+      <div v-if="cueData.type === 'FSQ' && cueData.quote" class="fsq-preview-layout">
+        <!-- Left Side: 65% - Large Preview with animated background -->
+        <div class="fsq-preview-side">
+          <div
+            class="fsq-large-preview"
+            :class="{ 'clickable': cueData.mediaUrl }"
+            @click.stop="cueData.mediaUrl && openFsqPreviewModal()"
+          >
+            <!-- Video Background -->
+            <video
+              class="fsq-preview-video-bg"
+              autoplay
+              loop
+              muted
+              playsinline
+            >
+              <source :src="fsqBackgroundVideoUrl" type="video/mp4">
+            </video>
+            <!-- Black bar overlay -->
+            <div class="fsq-preview-black-bar"></div>
+            <!-- Quote text overlay (live preview) -->
+            <div class="fsq-preview-quote-overlay" :style="fsqPreviewStyle">
+              <div class="fsq-preview-quote-wrapper">
+                <div class="fsq-preview-quote-text" :style="fsqPreviewTextStyle">{{ cueData.quote }}</div>
+              </div>
+              <div v-if="cueData.attribution" class="fsq-preview-attribution" :style="fsqPreviewAttributionStyle">— {{ cueData.attribution }}</div>
+            </div>
+            <!-- Click indicator if PNG exists -->
+            <div v-if="cueData.mediaUrl" class="fsq-preview-click-hint">
+              <v-icon size="20" color="white">mdi-magnify-plus</v-icon>
+              <span>View Full</span>
+            </div>
+            <!-- PNG Generated indicator -->
+            <div v-if="cueData.mediaUrl" class="fsq-png-indicator">
+              <v-icon size="12" color="success">mdi-check-circle</v-icon>
+              <span>PNG</span>
+            </div>
           </div>
         </div>
 
-        <!-- Right Side: 25% - Thumbnail Preview + Parameters -->
-        <div class="fsq-params-side">
-          <!-- Regenerate Button (sync style) -->
+        <!-- Right Side: 35% - Compact Controls -->
+        <div class="fsq-controls-side">
+          <!-- Generate/Regenerate Button -->
           <v-btn
+            block
             size="small"
-            variant="outlined"
-            color="primary"
+            :variant="cueData.mediaUrl ? 'outlined' : 'elevated'"
+            :color="cueData.mediaUrl ? 'primary' : 'success'"
             @click.stop="handleGeneratePNG"
             :loading="generatingPNG"
-            class="fsq-regenerate-btn"
+            class="mb-2"
           >
-            <v-icon size="small" start>mdi-sync</v-icon>
-            {{ cueData.mediaUrl ? 'Regenerate' : 'Generate' }}
+            <v-icon size="small" start>{{ cueData.mediaUrl ? 'mdi-sync' : 'mdi-creation' }}</v-icon>
+            {{ cueData.mediaUrl ? 'Regenerate' : 'Generate PNG' }}
           </v-btn>
 
-          <!-- Thumbnail Preview with Motion Background -->
-          <div class="fsq-thumbnail-container" :style="thumbnailBackgroundStyle">
-            <img
-              v-if="cueData.mediaUrl"
-              :src="fsqThumbnailUrl"
-              class="fsq-thumbnail-img"
-              @error="handleThumbnailError"
-            />
-            <div v-else class="fsq-thumbnail-placeholder">
-              <v-icon size="24" color="grey-darken-1">mdi-image-off</v-icon>
-              <span class="fsq-placeholder-text">No PNG</span>
-            </div>
+          <!-- Edit FSQ Button -->
+          <v-btn
+            block
+            size="small"
+            variant="text"
+            color="primary"
+            class="mb-2"
+            @click.stop="$emit('edit-fsq', cueData)"
+          >
+            <v-icon size="small" start>mdi-pencil</v-icon>
+            Edit FSQ
+          </v-btn>
+
+          <!-- Status Indicator -->
+          <div v-if="fsqGenerationStatus" class="fsq-status-chip mb-2">
+            <v-chip size="x-small" :color="fsqStatusChipColor" variant="tonal">
+              <v-icon size="x-small" start :class="{ 'mdi-spin': fsqGenerationStatus === 'generating' }">{{ fsqStatusChipIcon }}</v-icon>
+              {{ fsqStatusText }}
+            </v-chip>
           </div>
 
-          <!-- Editable Parameters -->
-          <div class="fsq-params-controls">
+          <!-- Compact Style Controls -->
+          <div class="fsq-compact-controls">
+            <!-- Font Size -->
+            <div class="fsq-control-row fsq-slider-row">
+              <span class="fsq-control-label">Size</span>
+              <v-slider
+                v-model="localFontSize"
+                :min="15"
+                :max="50"
+                :step="1"
+                density="compact"
+                hide-details
+                thumb-label
+                class="fsq-control-slider"
+                @update:model-value="emitParamChange('fontSize', $event)"
+              />
+              <span class="fsq-slider-value">{{ localFontSize }}px</span>
+            </div>
+
             <!-- Font Family -->
-            <div class="fsq-param-row">
-              <label class="fsq-param-label">Font</label>
+            <div class="fsq-control-row">
+              <span class="fsq-control-label">Font</span>
               <v-select
                 v-model="localFontFamily"
                 :items="fontFamilyOptions"
                 density="compact"
                 hide-details
                 variant="outlined"
-                class="fsq-param-select"
+                class="fsq-control-input"
                 @update:model-value="emitParamChange('fontFamily', $event)"
               />
             </div>
 
-            <!-- Box Height % -->
-            <div class="fsq-param-row">
-              <label class="fsq-param-label">Box Height</label>
-              <v-slider
-                v-model="localBoxHeight"
-                :min="50"
-                :max="100"
-                :step="5"
+            <!-- Box Height -->
+            <div class="fsq-control-row">
+              <span class="fsq-control-label">Height</span>
+              <v-text-field
+                v-model.number="localBoxHeight"
+                type="number"
                 density="compact"
                 hide-details
-                thumb-label
-                color="primary"
-                class="fsq-param-slider"
+                variant="outlined"
+                suffix="%"
+                :min="50"
+                :max="100"
+                class="fsq-control-input"
                 @update:model-value="emitParamChange('boxHeight', $event)"
               />
             </div>
 
-            <!-- Box Opacity % -->
-            <div class="fsq-param-row">
-              <label class="fsq-param-label">Opacity</label>
-              <v-slider
-                v-model="localBoxOpacity"
-                :min="50"
-                :max="100"
-                :step="5"
+            <!-- Box Opacity -->
+            <div class="fsq-control-row">
+              <span class="fsq-control-label">Opacity</span>
+              <v-text-field
+                v-model.number="localBoxOpacity"
+                type="number"
                 density="compact"
                 hide-details
-                thumb-label
-                color="primary"
-                class="fsq-param-slider"
+                variant="outlined"
+                suffix="%"
+                :min="50"
+                :max="100"
+                class="fsq-control-input"
                 @update:model-value="emitParamChange('boxOpacity', $event)"
               />
             </div>
 
-            <!-- Line Spacing % -->
-            <div class="fsq-param-row">
-              <label class="fsq-param-label">Line Spacing</label>
-              <v-slider
-                v-model="localLineSpacing"
-                :min="10"
-                :max="60"
-                :step="5"
+            <!-- Line Spacing -->
+            <div class="fsq-control-row">
+              <span class="fsq-control-label">Spacing</span>
+              <v-text-field
+                v-model.number="localLineSpacing"
+                type="number"
                 density="compact"
                 hide-details
-                thumb-label
-                color="primary"
-                class="fsq-param-slider"
+                variant="outlined"
+                suffix="%"
+                :min="10"
+                :max="60"
+                class="fsq-control-input"
                 @update:model-value="emitParamChange('lineSpacing', $event)"
               />
             </div>
 
             <!-- Alignment -->
-            <div class="fsq-param-row">
-              <label class="fsq-param-label">Align</label>
+            <div class="fsq-control-row">
+              <span class="fsq-control-label">Align</span>
               <v-btn-toggle
                 v-model="localAlignment"
                 mandatory
                 density="compact"
-                class="fsq-param-toggle"
+                color="primary"
+                class="fsq-control-toggle"
                 @update:model-value="emitParamChange('alignment', $event)"
               >
                 <v-btn value="left" size="x-small">
@@ -235,6 +290,19 @@
                 </v-btn>
               </v-btn-toggle>
             </div>
+
+            <!-- Revert Button -->
+            <v-btn
+              block
+              size="x-small"
+              variant="text"
+              color="grey"
+              class="mt-2"
+              @click.stop="revertFsqChanges"
+            >
+              <v-icon size="small" start>mdi-undo</v-icon>
+              Revert
+            </v-btn>
           </div>
         </div>
       </div>
@@ -272,8 +340,8 @@
               <img
                 v-if="currentSotThumbnailUrl"
                 :src="currentSotThumbnailUrl"
-                class="sot-thumbnail-img"
-                @click="toggleInlinePlayer"
+                class="sot-thumbnail-img sot-thumbnail-clickable"
+                @click="openSotPreviewModal"
                 @error="handleSotThumbnailError"
               />
               <div v-else class="sot-thumbnail-placeholder">
@@ -281,7 +349,7 @@
                 <span class="sot-placeholder-text">No Thumbnail</span>
               </div>
               <!-- Play overlay icon -->
-              <div v-if="currentSotThumbnailUrl" class="sot-play-overlay" @click.stop="toggleInlinePlayer">
+              <div v-if="currentSotThumbnailUrl" class="sot-play-overlay" @click.stop="openSotPreviewModal">
                 <v-icon size="48" color="white">mdi-play-circle</v-icon>
               </div>
               <!-- Completion badge -->
@@ -374,7 +442,139 @@
         </div>
       </div>
 
-      <!-- Generic Placeholder Display for non-SOT, non-FSQ -->
+      <!-- VO (Voice Over) Display - Similar to SOT but without transcription/outcue -->
+      <div v-else-if="cueData.type?.toUpperCase() === 'VO'" class="sot-container vo-container">
+        <!-- Inline Video Player (discreet, toggleable) -->
+        <div v-if="showInlinePlayer && sotVideoUrl" class="sot-inline-player-container">
+          <div class="sot-inline-player-header">
+            <span class="sot-inline-player-title">B-Roll Preview</span>
+            <v-btn
+              icon
+              size="x-small"
+              variant="text"
+              color="grey-darken-1"
+              @click.stop="showInlinePlayer = false"
+            >
+              <v-icon size="small">mdi-close</v-icon>
+            </v-btn>
+          </div>
+          <video
+            ref="inlineVideoPlayer"
+            :src="sotVideoUrl"
+            controls
+            class="sot-inline-video"
+            @loadedmetadata="onVideoLoaded"
+          ></video>
+        </div>
+
+        <!-- Thumbnail + Info Layout (when completed or has thumbnail) -->
+        <div v-if="sotThumbnailUrl || (jobStatus && jobStatus.status === 'completed')" class="sot-completed-layout">
+          <!-- Left: Thumbnail with navigation -->
+          <div class="sot-thumbnail-wrapper">
+            <div class="sot-thumbnail-section">
+              <img
+                v-if="currentSotThumbnailUrl"
+                :src="currentSotThumbnailUrl"
+                class="sot-thumbnail-img sot-thumbnail-clickable"
+                @click="openSotPreviewModal"
+                @error="handleSotThumbnailError"
+              />
+              <div v-else class="sot-thumbnail-placeholder">
+                <v-icon size="48" color="grey-darken-1">mdi-video-outline</v-icon>
+                <span class="sot-placeholder-text">No Thumbnail</span>
+              </div>
+              <!-- Play overlay icon -->
+              <div v-if="currentSotThumbnailUrl" class="sot-play-overlay" @click.stop="openSotPreviewModal">
+                <v-icon size="48" color="white">mdi-play-circle</v-icon>
+              </div>
+              <!-- VO Badge -->
+              <div class="vo-badge">
+                <v-icon size="14" color="white">mdi-microphone-off</v-icon>
+                <span>B-ROLL</span>
+              </div>
+              <!-- Completion badge -->
+              <div v-if="jobStatus && jobStatus.status === 'completed'" class="sot-complete-badge" style="bottom: 35px;">
+                <v-icon size="16" color="white">mdi-check</v-icon>
+                <span>Complete</span>
+              </div>
+            </div>
+            <!-- Thumbnail Navigation Buttons -->
+            <div v-if="sotThumbnailOptions.length > 1" class="sot-thumbnail-nav">
+              <v-btn
+                size="x-small"
+                variant="outlined"
+                color="primary"
+                :disabled="currentThumbnailIndex === 0"
+                @click.stop="prevThumbnail"
+                class="sot-nav-btn"
+              >
+                <v-icon size="small">mdi-chevron-left</v-icon>
+                Back
+              </v-btn>
+              <span class="sot-thumbnail-counter">{{ currentThumbnailIndex + 1 }} / {{ sotThumbnailOptions.length }}</span>
+              <v-btn
+                size="x-small"
+                variant="outlined"
+                color="primary"
+                :disabled="currentThumbnailIndex >= sotThumbnailOptions.length - 1"
+                @click.stop="nextThumbnail"
+                class="sot-nav-btn"
+              >
+                Next
+                <v-icon size="small">mdi-chevron-right</v-icon>
+              </v-btn>
+            </div>
+          </div>
+
+          <!-- Right: Info (no transcription for VO) -->
+          <div class="sot-info-section">
+            <!-- Duration -->
+            <div v-if="cueData.duration || (jobStatus && jobStatus.post_analysis)" class="sot-info-row">
+              <v-icon size="small" color="primary">mdi-timer-outline</v-icon>
+              <span class="sot-info-label">Duration:</span>
+              <span class="sot-info-value">{{ cueData.duration || jobStatus?.post_analysis?.duration || '—' }}</span>
+            </div>
+
+            <!-- Media URL -->
+            <div v-if="cueData.mediaUrl || (jobStatus && jobStatus.final_video_path)" class="sot-info-row">
+              <v-icon size="small" color="primary">mdi-video</v-icon>
+              <span class="sot-info-label">Video:</span>
+              <span class="sot-info-value sot-media-path">{{ formatMediaPath(cueData.mediaUrl || jobStatus?.final_video_path) }}</span>
+            </div>
+
+            <!-- Processing Status -->
+            <div v-if="cueData.processingStatus" class="sot-info-row">
+              <v-icon size="small" color="success">mdi-check-circle</v-icon>
+              <span class="sot-info-label">Status:</span>
+              <span class="sot-info-value">{{ cueData.processingStatus }}</span>
+            </div>
+
+            <!-- VO indicator (no audio) -->
+            <div class="sot-info-row vo-notice">
+              <v-icon size="small" color="grey">mdi-microphone-off</v-icon>
+              <span class="sot-info-label">Type:</span>
+              <span class="sot-info-value">Voice Over (B-Roll)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Processing In Progress (no thumbnail yet) -->
+        <div v-else-if="jobStatus && jobStatus.status === 'processing'" class="sot-processing-layout">
+          <v-progress-circular indeterminate size="40" width="3" color="primary"></v-progress-circular>
+          <div class="sot-processing-info">
+            <div class="sot-processing-phase">{{ jobStatus.current_phase || 'Processing...' }}</div>
+            <div class="sot-processing-message">B-Roll video is being processed</div>
+          </div>
+        </div>
+
+        <!-- No Job Status Yet -->
+        <div v-else class="sot-pending-layout">
+          <v-icon size="48" color="grey-lighten-1">mdi-video-off-outline</v-icon>
+          <span class="sot-pending-text">Awaiting processing</span>
+        </div>
+      </div>
+
+      <!-- Generic Placeholder Display for non-SOT, non-FSQ, non-VO -->
       <div v-else class="placeholder-container">
         <div class="placeholder-icon-section">
           <v-icon size="small" :color="cueTypeColor" class="placeholder-icon">
@@ -484,6 +684,22 @@
         </v-tooltip>
       </v-chip>
 
+      <!-- Re-upload Button (SOT only) -->
+      <v-btn
+        v-if="showReprocessButton"
+        size="x-small"
+        variant="text"
+        color="white"
+        @click.stop="handleReupload"
+        class="reupload-btn"
+      >
+        <v-icon size="small">mdi-upload</v-icon>
+        <span style="margin-left: 4px;">Re-upload</span>
+        <v-tooltip activator="parent" location="top">
+          Upload new video while keeping metadata
+        </v-tooltip>
+      </v-btn>
+
       <!-- Reprocess Button (SOT only) -->
       <v-btn
         v-if="showReprocessButton"
@@ -517,6 +733,119 @@
         </v-tooltip>
       </v-btn>
     </v-card-actions>
+
+    <!-- FSQ Preview Modal (960x540 - half resolution) -->
+    <v-dialog
+      v-model="showFsqPreviewModal"
+      max-width="960"
+    >
+      <v-card class="fsq-preview-modal-card">
+        <v-card-title class="d-flex align-center pa-2 bg-grey-darken-4">
+          <v-icon class="mr-2" color="white">mdi-format-quote-close</v-icon>
+          <span class="text-white">FSQ Preview</span>
+          <v-spacer></v-spacer>
+          <v-chip size="small" color="info" class="mr-2">960×540</v-chip>
+          <v-btn
+            icon
+            size="small"
+            variant="text"
+            color="white"
+            @click="closeFsqPreviewModal"
+          >
+            <v-icon>mdi-close</v-icon>
+            <v-tooltip activator="parent" location="top">Close (ESC)</v-tooltip>
+          </v-btn>
+        </v-card-title>
+        <v-card-text class="pa-0">
+          <div class="fsq-preview-container">
+            <!-- Video Background -->
+            <video
+              ref="fsqPreviewVideoRef"
+              class="fsq-preview-video-bg"
+              autoplay
+              loop
+              muted
+              playsinline
+            >
+              <source :src="fsqBackgroundVideoUrl" type="video/mp4">
+            </video>
+            <!-- PNG Overlay -->
+            <img
+              v-if="cueData.mediaUrl"
+              :src="fsqThumbnailUrl"
+              class="fsq-preview-png-overlay"
+            />
+          </div>
+        </v-card-text>
+        <v-card-actions class="bg-grey-darken-4 pa-2">
+          <v-chip size="small" color="grey-darken-2">
+            {{ cueData.slug || 'No slug' }}
+          </v-chip>
+          <v-spacer></v-spacer>
+          <span class="text-caption text-grey-lighten-1">Press ESC to close</span>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- SOT Preview Modal (960x540 video player) -->
+    <v-dialog
+      v-model="showSotPreviewModal"
+      max-width="960"
+    >
+      <v-card class="sot-preview-modal-card">
+        <v-card-title class="d-flex align-center pa-2 bg-grey-darken-4">
+          <v-icon class="mr-2" color="white">mdi-video</v-icon>
+          <span class="text-white">SOT Preview</span>
+          <v-spacer></v-spacer>
+          <v-chip size="small" color="info" class="mr-2">960×540</v-chip>
+          <v-btn
+            icon
+            size="small"
+            variant="text"
+            color="white"
+            @click="closeSotPreviewModal"
+          >
+            <v-icon>mdi-close</v-icon>
+            <v-tooltip activator="parent" location="top">Close (ESC)</v-tooltip>
+          </v-btn>
+        </v-card-title>
+        <v-card-text class="pa-0">
+          <div class="sot-preview-container">
+            <!-- Countdown Overlay -->
+            <transition name="countdown-fade">
+              <div v-if="previewCountdown > 0" class="preview-countdown-overlay">
+                <div class="countdown-display">
+                  <div class="countdown-label">PLAYING IN</div>
+                  <div class="countdown-time">{{ previewCountdown.toFixed(1) }}s</div>
+                  <div class="countdown-progress">
+                    <div class="countdown-progress-bar" :style="{ width: ((1.5 - previewCountdown) / 1.5 * 100) + '%' }"></div>
+                  </div>
+                </div>
+              </div>
+            </transition>
+            <video
+              v-if="showSotPreviewModal"
+              ref="sotPreviewVideoRef"
+              :src="sotVideoUrl"
+              class="sot-preview-video"
+              controls
+              @loadeddata="onPreviewVideoReady"
+            ></video>
+          </div>
+        </v-card-text>
+        <v-card-actions class="bg-grey-darken-4 pa-2">
+          <v-chip size="small" color="grey-darken-2">
+            {{ cueData.slug || 'No slug' }}
+          </v-chip>
+          <v-chip v-if="cueData.duration" size="small" color="grey-darken-2" class="ml-2">
+            <v-icon size="small" start>mdi-timer-outline</v-icon>
+            {{ cueData.duration }}
+          </v-chip>
+          <v-spacer></v-spacer>
+          <span class="text-caption text-grey-lighten-1">Press ESC to close</span>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-card>
 </template>
 
@@ -526,7 +855,7 @@ import { useSOTProcessing } from '../../../composables/useSOTProcessing.js';
 
 export default {
   name: 'PlaceholderCueCard',
-  emits: ['select', 'edit', 'delete', 'update-meta'],
+  emits: ['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq'],
   props: {
     cueData: {
       type: Object,
@@ -558,7 +887,10 @@ export default {
   data() {
     return {
       generatingPNG: false,
-      jobStatus: null,        // Current job status from API
+      fsqGenerationStatus: null, // FSQ generation status: null, 'queued', 'generating', 'completed', 'failed'
+      fsqTaskId: null,        // Current FSQ Celery task ID
+      fsqCacheBuster: null,   // Timestamp to bust browser cache after regeneration
+      jobStatus: null,        // Current job status from API (SOT)
       statusPollInterval: null, // Interval ID for polling
       currentThumbnailIndex: 7, // Default to middle thumbnail (index 7 = thumb 8 of 15)
       pollingActive: false,    // Whether we're currently polling
@@ -566,6 +898,7 @@ export default {
       cueStatus: this.cueData?.cue_status || null,
       // FSQ editable parameters (local state)
       localFontFamily: this.cueData?.fontFamily || 'sans-serif',
+      localFontSize: parseInt(this.cueData?.fontSize) || 25,  // Max font size in px for auto-fitting
       localBoxHeight: parseInt(this.cueData?.boxHeight) || 80,
       localBoxOpacity: parseInt(this.cueData?.boxOpacity) || 75,
       localLineSpacing: parseInt(this.cueData?.lineSpacing) || 30,
@@ -577,7 +910,14 @@ export default {
         { title: 'Serif', value: 'serif' }
       ],
       // Inline video player state
-      showInlinePlayer: false
+      showInlinePlayer: false,
+      // FSQ preview modal state
+      showFsqPreviewModal: false,
+      // SOT preview modal state
+      showSotPreviewModal: false,
+      // Preview countdown state
+      previewCountdown: 0,
+      countdownInterval: null
     };
   },
   computed: {
@@ -732,13 +1072,25 @@ export default {
 
       // Check job status for thumbnail_candidates (from database)
       if (this.jobStatus?.thumbnail_candidates && Array.isArray(this.jobStatus.thumbnail_candidates)) {
-        // These are filenames like "sot_xxx_4_thumb_01.jpg", need to build full path
-        const basePath = this.jobStatus.final_video_path?.replace(/\.mp4$/, '') || '';
-        if (basePath) {
-          const dirPath = basePath.substring(0, basePath.lastIndexOf('/'));
-          const slug = basePath.substring(basePath.lastIndexOf('/') + 1);
+        // Use final_thumbnail_path to get correct directory (thumbnails, not video)
+        const thumbnailPath = this.jobStatus.final_thumbnail_path || '';
+        if (thumbnailPath) {
+          // Extract the base pattern from final_thumbnail_path (e.g., "0257/assets/thumbnails/airplane-girl-thumb-01.jpg")
+          const match = thumbnailPath.match(/^(.+)-thumb-\d+\.jpg$/);
+          if (match) {
+            const basePath = match[1];  // "0257/assets/thumbnails/airplane-girl"
+            return this.jobStatus.thumbnail_candidates.map((_, i) => {
+              return `/episodes/${basePath}-thumb-${String(i + 1).padStart(2, '0')}.jpg`;
+            });
+          }
+        }
+        // Fallback: try to build from video path but use thumbnails directory
+        const videoPath = this.jobStatus.final_video_path?.replace(/\.mp4$/, '') || '';
+        if (videoPath) {
+          // Replace /video/ with /thumbnails/ in the path
+          const thumbnailDir = videoPath.replace('/video/', '/thumbnails/');
           return this.jobStatus.thumbnail_candidates.map((_, i) => {
-            return `/episodes/${dirPath}/${slug}-thumb-${String(i + 1).padStart(2, '0')}.jpg`;
+            return `/episodes/${thumbnailDir}-thumb-${String(i + 1).padStart(2, '0')}.jpg`;
           });
         }
       }
@@ -846,13 +1198,129 @@ export default {
      */
     fsqThumbnailUrl() {
       if (!this.cueData?.mediaUrl) return '';
+      let url;
       // If it's already a full URL, use it; otherwise prepend /episodes
       if (this.cueData.mediaUrl.startsWith('http') || this.cueData.mediaUrl.startsWith('/')) {
-        return this.cueData.mediaUrl;
+        url = this.cueData.mediaUrl;
+      } else {
+        // Build episode-relative URL
+        const episode = this.$route?.params?.episode || '';
+        url = `/episodes/${episode}/assets/quotes/${this.cueData.mediaUrl}`;
       }
-      // Build episode-relative URL
-      const episode = this.$route?.params?.episode || '';
-      return `/episodes/${episode}/assets/quotes/${this.cueData.mediaUrl}`;
+      // Add cache buster to force reload after regeneration
+      if (this.fsqCacheBuster) {
+        url += `?t=${this.fsqCacheBuster}`;
+      }
+      return url;
+    },
+
+    /**
+     * Get FSQ generation status text for display
+     */
+    fsqStatusText() {
+      switch (this.fsqGenerationStatus) {
+        case 'queued': return 'Queued';
+        case 'generating': return 'Generating...';
+        case 'completed': return 'Complete';
+        case 'failed': return 'Failed';
+        default: return '';
+      }
+    },
+
+    /**
+     * Get FSQ status chip color
+     */
+    fsqStatusChipColor() {
+      switch (this.fsqGenerationStatus) {
+        case 'queued': return 'info';
+        case 'generating': return 'warning';
+        case 'completed': return 'success';
+        case 'failed': return 'error';
+        default: return 'grey';
+      }
+    },
+
+    /**
+     * Get FSQ status chip icon
+     */
+    fsqStatusChipIcon() {
+      switch (this.fsqGenerationStatus) {
+        case 'queued': return 'mdi-clock-outline';
+        case 'generating': return 'mdi-loading';
+        case 'completed': return 'mdi-check-circle';
+        case 'failed': return 'mdi-alert-circle';
+        default: return 'mdi-help-circle';
+      }
+    },
+
+    /**
+     * Get FSQ preview container style (alignment)
+     */
+    fsqPreviewStyle() {
+      const alignment = this.localAlignment || 'left';
+      return {
+        textAlign: alignment,
+        justifyContent: alignment === 'center' ? 'center' : alignment === 'right' ? 'flex-end' : 'flex-start'
+      };
+    },
+
+    /**
+     * Get FSQ preview text style
+     */
+    fsqPreviewTextStyle() {
+      const fontFamily = this.localFontFamily || 'serif';
+      const fontSize = this.localFontSize || 25;
+      const lineSpacing = this.localLineSpacing || 30;
+      const alignment = this.localAlignment || 'center';
+
+      // Map font family names to CSS
+      const fontMap = {
+        'serif': 'Georgia, "Times New Roman", serif',
+        'sans-serif': 'Arial, Helvetica, sans-serif',
+        'monospace': '"Courier New", Courier, monospace',
+        'cursive': 'cursive'
+      };
+
+      // Scale font size for preview (smaller container)
+      const scaledFontSize = Math.max(10, fontSize * 0.5);
+
+      return {
+        fontFamily: fontMap[fontFamily] || fontFamily,
+        fontSize: `${scaledFontSize}px`,
+        lineHeight: `${100 + lineSpacing}%`,
+        color: 'white',
+        textAlign: alignment,
+        width: '100%'
+      };
+    },
+
+    /**
+     * Get FSQ preview attribution style
+     */
+    fsqPreviewAttributionStyle() {
+      const fontFamily = this.localFontFamily || 'serif';
+      const fontSize = this.localFontSize || 25;
+      const alignment = this.localAlignment || 'center';
+
+      const fontMap = {
+        'serif': 'Georgia, "Times New Roman", serif',
+        'sans-serif': 'Arial, Helvetica, sans-serif',
+        'monospace': '"Courier New", Courier, monospace',
+        'cursive': 'cursive'
+      };
+
+      // Attribution is smaller than main text
+      const scaledFontSize = Math.max(8, fontSize * 0.35);
+
+      return {
+        fontFamily: fontMap[fontFamily] || fontFamily,
+        fontSize: `${scaledFontSize}px`,
+        color: 'rgba(255, 255, 255, 0.8)',
+        marginTop: '8px',
+        fontStyle: 'italic',
+        textAlign: alignment,
+        width: '100%'
+      };
     },
 
     /**
@@ -860,28 +1328,45 @@ export default {
      * Uses fsqBackgroundVideo from settings
      */
     thumbnailBackgroundStyle() {
-      // Get FSQ background video from settings (localStorage)
-      // Note: Video backgrounds require special handling with <video> element
-      // For now, use a gradient as CSS background fallback
-      // TODO: Implement video background with poster frame extraction
+      // Fallback gradient for when video isn't loaded
       return {
         background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
         backgroundSize: 'cover'
       };
     },
 
+    /**
+     * Get FSQ background video URL from settings or use default
+     */
+    fsqBackgroundVideoUrl() {
+      // Try to get from localStorage settings
+      try {
+        const settings = JSON.parse(localStorage.getItem('fsqSettings') || '{}');
+        if (settings.fsq_background_video) {
+          return settings.fsq_background_video;
+        }
+      } catch (e) {
+        console.warn('Failed to parse FSQ settings:', e);
+      }
+      // Default background video path
+      return '/assets/preview-background.mp4';
+    },
+
     showReprocessButton() {
-      const isSOT = this.cueData.type?.toUpperCase() === 'SOT';
+      const cueType = this.cueData.type?.toUpperCase();
+      const isSOTorVO = cueType === 'SOT' || cueType === 'VO';
       // Check both assetId (camelCase) and assetid (lowercase from parser)
       const hasAssetId = !!(this.cueData.assetId || this.cueData.assetid);
       const actualAssetId = this.cueData.assetId || this.cueData.assetid;
-      console.log(`🔍 PlaceholderCueCard: type=${this.cueData.type}, assetId=${this.cueData.assetId}, assetid=${this.cueData.assetid}, actualAssetId=${actualAssetId}, showButton=${isSOT && hasAssetId}`);
-      return isSOT && hasAssetId;
+      console.log(`🔍 PlaceholderCueCard: type=${this.cueData.type}, assetId=${this.cueData.assetId}, assetid=${this.cueData.assetid}, actualAssetId=${actualAssetId}, showButton=${isSOTorVO && hasAssetId}`);
+      return isSOTorVO && hasAssetId;
     },
 
     showJobStatus() {
-      // Show status for SOT cues that have an AssetID (case-insensitive check)
-      return this.cueData.type?.toUpperCase() === 'SOT' && !!(this.cueData.assetId || this.cueData.assetid);
+      // Show status for SOT/VO cues that have an AssetID (case-insensitive check)
+      const cueType = this.cueData.type?.toUpperCase();
+      const isSOTorVO = cueType === 'SOT' || cueType === 'VO';
+      return isSOTorVO && !!(this.cueData.assetId || this.cueData.assetid);
     },
 
     jobStatusText() {
@@ -1112,12 +1597,26 @@ export default {
      */
     toggleInlinePlayer() {
       if (this.sotVideoUrl) {
+        // If closing, pause video first to prevent race condition
+        if (this.showInlinePlayer) {
+          const video = this.$refs.inlineVideoPlayer;
+          if (video) {
+            video.pause();
+            video.currentTime = 0;
+          }
+        }
         this.showInlinePlayer = !this.showInlinePlayer;
-        // Auto-play when opening
+        // Auto-play when opening with proper promise handling
         if (this.showInlinePlayer) {
           this.$nextTick(() => {
-            if (this.$refs.inlineVideoPlayer) {
-              this.$refs.inlineVideoPlayer.play();
+            const video = this.$refs.inlineVideoPlayer;
+            if (video) {
+              const playPromise = video.play();
+              if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                  console.log('Inline video auto-play prevented:', error.message);
+                });
+              }
             }
           });
         }
@@ -1203,6 +1702,19 @@ export default {
     },
 
     /**
+     * Revert FSQ style changes back to saved values
+     */
+    revertFsqChanges() {
+      console.log('↩️ Reverting FSQ changes to saved values');
+      this.localFontFamily = this.cueData?.fontFamily || 'sans-serif';
+      this.localFontSize = parseInt(this.cueData?.fontSize) || 25;
+      this.localBoxHeight = parseInt(this.cueData?.boxHeight) || 80;
+      this.localBoxOpacity = parseInt(this.cueData?.boxOpacity) || 75;
+      this.localLineSpacing = parseInt(this.cueData?.lineSpacing) || 30;
+      this.localAlignment = this.cueData?.alignment || this.cueData?.style || 'center';
+    },
+
+    /**
      * Select quote text for copying
      */
     selectQuoteText(event) {
@@ -1222,6 +1734,110 @@ export default {
     handleThumbnailError() {
       console.warn('FSQ thumbnail failed to load:', this.cueData.mediaUrl);
       this.thumbnailError = true;
+    },
+
+    /**
+     * Open FSQ preview modal with video background
+     */
+    openFsqPreviewModal() {
+      console.log('🖼️ Opening FSQ preview modal');
+      this.showFsqPreviewModal = true;
+      // Add ESC key listener
+      this.$nextTick(() => {
+        document.addEventListener('keydown', this.handlePreviewModalEsc);
+      });
+    },
+
+    /**
+     * Close FSQ preview modal
+     */
+    closeFsqPreviewModal() {
+      console.log('🖼️ Closing FSQ preview modal');
+      this.showFsqPreviewModal = false;
+      document.removeEventListener('keydown', this.handlePreviewModalEsc);
+    },
+
+    /**
+     * Open SOT preview modal with video player
+     */
+    openSotPreviewModal() {
+      console.log('🎬 Opening SOT preview modal');
+      this.showSotPreviewModal = true;
+      // Add ESC key listener
+      this.$nextTick(() => {
+        document.addEventListener('keydown', this.handlePreviewModalEsc);
+      });
+    },
+
+    /**
+     * Close SOT preview modal
+     */
+    closeSotPreviewModal() {
+      console.log('🎬 Closing SOT preview modal');
+      // Clear countdown interval if running
+      if (this.countdownInterval) {
+        clearInterval(this.countdownInterval);
+        this.countdownInterval = null;
+      }
+      this.previewCountdown = 0;
+      // Pause video before closing to prevent play/pause race condition
+      const video = this.$refs.sotPreviewVideoRef;
+      if (video) {
+        video.pause();
+        video.currentTime = 0;
+      }
+      this.showSotPreviewModal = false;
+      document.removeEventListener('keydown', this.handlePreviewModalEsc);
+    },
+
+    /**
+     * Handle preview video ready - start countdown then auto-play
+     */
+    onPreviewVideoReady() {
+      const video = this.$refs.sotPreviewVideoRef;
+      if (video && this.showSotPreviewModal) {
+        // Start 1.5 second countdown before playing
+        this.previewCountdown = 1.5;
+
+        // Clear any existing interval
+        if (this.countdownInterval) {
+          clearInterval(this.countdownInterval);
+        }
+
+        // Update countdown every 100ms for smooth animation
+        this.countdownInterval = setInterval(() => {
+          this.previewCountdown -= 0.1;
+
+          if (this.previewCountdown <= 0) {
+            this.previewCountdown = 0;
+            clearInterval(this.countdownInterval);
+            this.countdownInterval = null;
+
+            // Now play the video with promise handling
+            const playPromise = video.play();
+            if (playPromise !== undefined) {
+              playPromise.catch(error => {
+                // Auto-play was prevented - this is fine, user can click play
+                console.log('Auto-play prevented:', error.message);
+              });
+            }
+          }
+        }, 100);
+      }
+    },
+
+    /**
+     * Handle ESC key to close preview modals
+     */
+    handlePreviewModalEsc(event) {
+      if (event.key === 'Escape') {
+        if (this.showFsqPreviewModal) {
+          this.closeFsqPreviewModal();
+        }
+        if (this.showSotPreviewModal) {
+          this.closeSotPreviewModal();
+        }
+      }
     },
 
     getCueIcon(cueType) {
@@ -1303,6 +1919,42 @@ export default {
     },
 
     /**
+     * Handle re-upload button click - Open SotModal with existing metadata but no mediaUrl
+     * This allows uploading a new video while keeping the slug, description, credits, etc.
+     */
+    handleReupload() {
+      console.log('📤 Re-upload requested for SOT cue:', this.cueData.slug);
+
+      // Clear failed status immediately - we're starting fresh with a new video
+      this.jobStatus = null;
+
+      // Stop polling for old job status
+      if (this.statusPollInterval) {
+        clearInterval(this.statusPollInterval);
+        this.statusPollInterval = null;
+        this.pollingActive = false;
+        console.log('🛑 Stopped polling old job status for re-upload');
+      }
+
+      // Build re-upload data: preserve metadata but clear mediaUrl so user must upload new file
+      const reuploadData = {
+        assetId: this.cueData.assetId || this.cueData.assetid,
+        slug: this.cueData.slug,
+        description: this.cueData.description || this.cueData.text || '',
+        duration: this.cueData.duration,
+        transcription: this.cueData.transcription,
+        credits: this.cueData.credits,
+        // Explicitly do NOT include mediaUrl - user will upload a new video
+        // mediaUrl: null,
+        // thumbnailUrl: null,
+        // trimStart/trimEnd will be set when the new video is loaded
+      };
+
+      console.log('📤 Re-upload data:', reuploadData);
+      this.$emit('reupload-sot-cue', reuploadData);
+    },
+
+    /**
      * Handle reprocess button click - Clean up and restart processing
      */
     async handleReprocess() {
@@ -1328,33 +1980,38 @@ export default {
     async handleGeneratePNG() {
       if (!this.cueData.assetId) {
         console.error('Cannot generate PNG: no assetId found');
-        alert('Error: No Asset ID found for this quote');
         return;
       }
 
       if (!this.cueData.quote) {
         console.error('Cannot generate PNG: no quote text found');
-        alert('Error: No quote text found');
         return;
       }
 
       try {
         this.generatingPNG = true;
+        this.fsqGenerationStatus = 'queued';
         console.log(`🎨 Generating FSQ PNG for: ${this.cueData.assetId}`);
 
         const token = localStorage.getItem('auth-token');
         // Use prop first, then fallback to route params
         const episode = this.currentEpisode || this.$route?.params?.episode || '';
 
+        // Use LOCAL state values (from editable controls) not cueData values
+        // Scale up font size: slider shows 15-50, but renderer needs 60-200px for 1920x1080 canvas
+        const scaledMaxFontSize = this.localFontSize * 4;
         const requestData = {
           episode_id: episode,
           quote: this.cueData.quote,
           attribution: this.cueData.attribution || this.cueData.source || '',
           slug: this.cueData.slug || 'quote',
           asset_id: this.cueData.assetId,
-          alignment: this.cueData.alignment || this.cueData.style || 'center',
-          font_family: this.cueData.fontFamily || 'serif',
-          font_size: this.cueData.fontSize || 70,
+          alignment: this.localAlignment,
+          font_family: this.localFontFamily,
+          max_font_size: scaledMaxFontSize,
+          box_height: this.localBoxHeight,
+          box_opacity: this.localBoxOpacity,
+          line_spacing: this.localLineSpacing,
           duration: this.cueData.duration || '00:00:05:00'
         };
 
@@ -1377,15 +2034,16 @@ export default {
         const result = await response.json();
         console.log('✅ PNG generation queued:', result);
 
-        // Show success notification
-        alert(`FSQ PNG generation started!\n\nTask ID: ${result.task_id}\n\nThe PNG will be generated by a Celery worker. Check the assets folder in a few seconds.`);
+        // Update status to generating and store task ID
+        this.fsqGenerationStatus = 'generating';
+        this.fsqTaskId = result.task_id;
 
-        // Optionally, poll for completion
+        // Poll for completion (silent - no alerts)
         this.pollTaskStatus(result.task_id);
 
       } catch (error) {
         console.error('❌ Error generating FSQ PNG:', error);
-        alert(`Error generating PNG: ${error.message}`);
+        this.fsqGenerationStatus = 'failed';
       } finally {
         this.generatingPNG = false;
       }
@@ -1422,10 +2080,34 @@ export default {
           if (status.ready) {
             if (status.successful) {
               console.log('🎉 PNG generation completed!', status.result);
-              alert(`PNG generated successfully!\n\nFilename: ${status.result.filename}\nPath: ${status.result.asset_path}`);
+              this.fsqGenerationStatus = 'completed';
+
+              // Update the cue block with the generated mediaUrl
+              if (status.result.asset_url) {
+                console.log('📝 Updating cue mediaUrl to:', status.result.asset_url);
+                this.$emit('update-meta', {
+                  assetId: this.cueData.assetId,
+                  field: 'mediaUrl',
+                  value: status.result.asset_url
+                });
+              }
+
+              // Wait 1 second for file to be fully written, then force thumbnail reload
+              setTimeout(() => {
+                console.log('🔄 Forcing thumbnail reload after 1s delay');
+                this.fsqCacheBuster = Date.now();
+              }, 1000);
+
+              // Clear status after 3 seconds
+              setTimeout(() => {
+                if (this.fsqGenerationStatus === 'completed') {
+                  this.fsqGenerationStatus = null;
+                }
+              }, 3000);
+
             } else {
               console.error('❌ PNG generation failed:', status.error);
-              alert(`PNG generation failed: ${status.error}`);
+              this.fsqGenerationStatus = 'failed';
             }
           } else {
             // Still processing, poll again in 2 seconds
@@ -1460,7 +2142,10 @@ export default {
 
       try {
         const token = localStorage.getItem('auth-token');
-        const response = await fetch(`/api/sot/job-status/${assetId}`, {
+        // Use appropriate endpoint based on cue type (SOT or VO)
+        const cueType = this.cueData.type?.toUpperCase();
+        const endpoint = cueType === 'VO' ? `/api/vo/job-status/${assetId}` : `/api/sot/job-status/${assetId}`;
+        const response = await fetch(endpoint, {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
 
@@ -1515,6 +2200,41 @@ export default {
     }
   },
 
+  watch: {
+    // Watch for assetId changes to start/stop polling dynamically
+    showJobStatus: {
+      handler(newVal, oldVal) {
+        console.log('👁️ showJobStatus changed:', oldVal, '->', newVal);
+        if (newVal && !oldVal) {
+          // assetId was added - start polling
+          console.log('🚀 AssetID appeared - starting status polling');
+          this.startPolling();
+        } else if (!newVal && oldVal) {
+          // assetId was removed - stop polling
+          this.stopPolling();
+        }
+      },
+      immediate: false
+    },
+    // Watch jobStatus object for changes (nested path doesn't work when parent is null)
+    jobStatus: {
+      handler(newJobStatus, oldJobStatus) {
+        const newStatus = newJobStatus?.status;
+        const oldStatus = oldJobStatus?.status;
+        console.log('📊 jobStatus watcher fired:', oldStatus, '->', newStatus);
+
+        if (newStatus === 'completed' && oldStatus !== 'completed') {
+          console.log('✅ Job completed - emitting refresh request');
+          this.$emit('status-changed', {
+            status: newStatus,
+            assetId: this.cueData.assetId || this.cueData.assetid
+          });
+        }
+      },
+      deep: true
+    }
+  },
+
   mounted() {
     console.log('🔍 PlaceholderCueCard MOUNTED:', {
       type: this.cueData?.type,
@@ -1533,6 +2253,13 @@ export default {
   beforeUnmount() {
     // Clean up polling interval
     this.stopPolling();
+    // Clean up countdown interval
+    if (this.countdownInterval) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
+    }
+    // Clean up ESC key listener for preview modals
+    document.removeEventListener('keydown', this.handlePreviewModalEsc);
   }
 };
 </script>
@@ -1880,6 +2607,34 @@ export default {
   border-radius: 2px;
 }
 
+/* VO (Voice Over) Badge */
+.vo-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background-color: #9C27B0;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-radius: 2px;
+}
+
+/* VO Container - slight purple tint to distinguish from SOT */
+.vo-container {
+  border-left: 3px solid #9C27B0;
+}
+
+/* VO Notice in info section */
+.vo-notice {
+  color: #7B1FA2;
+  font-style: italic;
+}
+
 .sot-info-section {
   flex: 1;
   display: flex;
@@ -2134,7 +2889,196 @@ export default {
   word-break: break-all;
 }
 
-/* FSQ Redesigned 75/25 Layout */
+/* FSQ Preview Layout - Large preview on left, controls on right */
+.fsq-preview-layout {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  padding: 8px;
+}
+
+/* Left side: 65% - Large preview */
+.fsq-preview-side {
+  flex: 0 0 65%;
+}
+
+.fsq-large-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16/9;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.fsq-large-preview.clickable {
+  cursor: pointer;
+}
+
+.fsq-preview-video-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+
+.fsq-preview-black-bar {
+  position: absolute;
+  top: 10%;
+  left: 0;
+  width: 100%;
+  height: 80%;
+  background: rgba(0, 0, 0, 0.75);
+  z-index: 2;
+}
+
+.fsq-preview-quote-overlay {
+  position: absolute;
+  top: 10%;
+  left: 0;
+  width: 100%;
+  height: 80%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 5% 10% 8% 10%;
+  z-index: 3;
+  box-sizing: border-box;
+}
+
+.fsq-preview-quote-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fsq-preview-quote-text {
+  font-style: italic;
+  word-wrap: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+}
+
+.fsq-preview-attribution {
+  text-align: inherit;
+  flex-shrink: 0;
+  padding-top: 4%;
+}
+
+.fsq-preview-click-hint {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 4;
+  font-size: 11px;
+  color: white;
+}
+
+.fsq-large-preview:hover .fsq-preview-click-hint {
+  opacity: 1;
+}
+
+.fsq-png-indicator {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 4;
+  font-size: 10px;
+  color: #4caf50;
+}
+
+/* Right side: 35% - Compact controls */
+.fsq-controls-side {
+  flex: 0 0 35%;
+  display: flex;
+  flex-direction: column;
+}
+
+.fsq-status-chip {
+  display: flex;
+  justify-content: center;
+}
+
+.fsq-compact-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.02);
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.fsq-control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fsq-control-label {
+  flex: 0 0 50px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.6);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.fsq-control-input {
+  flex: 1;
+}
+
+.fsq-control-input :deep(.v-field__input) {
+  font-size: 12px;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.fsq-control-input :deep(.v-field__append-inner) {
+  padding-top: 2px;
+}
+
+.fsq-control-toggle {
+  flex: 1;
+}
+
+.fsq-slider-row {
+  flex-wrap: nowrap;
+}
+
+.fsq-control-slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.fsq-slider-value {
+  flex: 0 0 40px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.7);
+  text-align: right;
+}
+
+/* Legacy FSQ styles (kept for backwards compatibility) */
 .fsq-redesigned-container {
   display: flex;
   gap: 16px;
@@ -2145,7 +3089,6 @@ export default {
   min-height: 200px;
 }
 
-/* Left side: 75% - Quote text area */
 .fsq-quote-side {
   flex: 0 0 75%;
   display: flex;
@@ -2197,7 +3140,6 @@ export default {
   font-style: normal;
 }
 
-/* Right side: 25% - Parameters and thumbnail */
 .fsq-params-side {
   flex: 0 0 25%;
   display: flex;
@@ -2215,6 +3157,48 @@ export default {
   font-weight: 500;
 }
 
+/* FSQ Generation Status Indicator */
+.fsq-status-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+.fsq-status-queued {
+  background-color: rgba(158, 158, 158, 0.2);
+  color: #9e9e9e;
+}
+
+.fsq-status-generating {
+  background-color: rgba(33, 150, 243, 0.2);
+  color: #2196f3;
+}
+
+.fsq-status-completed {
+  background-color: rgba(76, 175, 80, 0.2);
+  color: #4caf50;
+}
+
+.fsq-status-failed {
+  background-color: rgba(244, 67, 54, 0.2);
+  color: #f44336;
+}
+
+.fsq-status-icon {
+  font-size: 14px;
+}
+
+.fsq-status-text {
+  letter-spacing: 0.5px;
+}
+
 /* Thumbnail container with motion background */
 .fsq-thumbnail-container {
   width: 100%;
@@ -2225,12 +3209,170 @@ export default {
   align-items: center;
   justify-content: center;
   position: relative;
+  background: #000;
+}
+
+.fsq-thumbnail-container.clickable {
+  cursor: pointer;
+}
+
+.fsq-thumbnail-container.clickable:hover .fsq-thumbnail-click-hint {
+  opacity: 1;
+}
+
+.fsq-thumbnail-video-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
 }
 
 .fsq-thumbnail-img {
+  position: relative;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  z-index: 2;
+}
+
+.fsq-thumbnail-click-hint {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  padding: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+/* FSQ Preview Modal Styles */
+.fsq-preview-modal-card {
+  border-radius: 0 !important;
+  overflow: hidden;
+}
+
+.fsq-preview-container {
+  width: 100%;
+  aspect-ratio: 16/9;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+
+.fsq-preview-video-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+
+.fsq-preview-png-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 2;
+}
+
+/* SOT Preview Modal Styles */
+.sot-preview-modal-card {
+  border-radius: 0 !important;
+  overflow: hidden;
+}
+
+.sot-preview-container {
+  width: 100%;
+  aspect-ratio: 16/9;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+
+.sot-preview-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Preview Countdown Overlay */
+.preview-countdown-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 10;
+}
+
+.countdown-display {
+  text-align: center;
+  background: rgba(0, 0, 0, 0.9);
+  padding: 24px 48px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  min-width: 200px;
+}
+
+.countdown-label {
+  color: #90CAF9;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: 'Helvetica', Arial, sans-serif;
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+}
+
+.countdown-time {
+  color: white;
+  font-size: 48px;
+  font-weight: bold;
+  font-family: 'Orbitron', 'Courier New', monospace;
+  letter-spacing: 3px;
+  text-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown-progress {
+  margin-top: 16px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.countdown-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4CAF50, #81C784);
+  transition: width 0.1s linear;
+}
+
+/* Countdown fade transition */
+.countdown-fade-enter-active,
+.countdown-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.countdown-fade-enter-from,
+.countdown-fade-leave-to {
+  opacity: 0;
+}
+
+.sot-thumbnail-clickable {
+  cursor: pointer;
 }
 
 .fsq-thumbnail-placeholder {

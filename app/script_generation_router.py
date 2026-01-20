@@ -1,35 +1,52 @@
 """
 Script Generation Router - API endpoints for generating various script formats.
 
-Supports:
-- Host script (for host/talent to read from)
+Supports three presets:
+- HOST_FULL: Complete script with all cues, visuals, and production info
+- HOST_CLEAN: Spoken text only with minimal cue indicators (teleprompter-friendly)
+- PRODUCTION: Technical rundown with timing, all cues, media references
+
+Plus:
 - Media list (list of all media cues)
-- Teleprompter format (future)
-- Director script (future)
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
+from enum import Enum
 from auth.utils import get_current_user_or_key
-from services.host_script_generator import generate_host_script
+from services.host_script_generator import generate_host_script, ScriptPreset
 from pathlib import Path
 from datetime import datetime
+from database import SessionLocal
+from models_v2 import Episode, Rundown, RundownItem
 import logging
 import subprocess
 import shutil
+import re
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/scripts", tags=["Scripts"])
 
 
+class ScriptPresetEnum(str, Enum):
+    """Available script presets."""
+    host_full = "host_full"
+    host_clean = "host_clean"
+    production = "production"
+
+
 class ScriptGenerationResponse(BaseModel):
     """Response model for script generation."""
     success: bool
     output_path: Optional[str] = None
+    html_path: Optional[str] = None
+    pdf_path: Optional[str] = None
     episode_number: Optional[str] = None
+    preset: Optional[str] = None
     item_count: Optional[int] = None
     block_count: Optional[int] = None
+    revision: Optional[int] = None
     error: Optional[str] = None
 
 
@@ -51,38 +68,77 @@ class MediaListRequest(BaseModel):
     media_items: List[MediaListItem]
 
 
-@router.post("/host/{episode_number}", response_model=ScriptGenerationResponse)
-async def generate_host_script_endpoint(
+@router.post("/generate/{episode_number}", response_model=ScriptGenerationResponse)
+async def generate_script_endpoint(
     episode_number: str,
+    preset: ScriptPresetEnum = Query(ScriptPresetEnum.host_full, description="Script preset"),
     output_dir: Optional[str] = Query(None, description="Custom output directory"),
     current_user: dict = Depends(get_current_user_or_key)
 ) -> ScriptGenerationResponse:
     """
-    Generate a host script for an episode.
+    Generate a script for an episode with the specified preset.
 
-    The host script is an HTML document optimized for PDF conversion with:
-    - Cover page with episode information
-    - Block headers (START BLOCK A / END BLOCK A)
-    - Segment headers with duration
-    - Formatted cue blocks (FSQ, SOT, IMG, GFX)
-    - Speaker attribution for dialogue paragraphs
+    **Presets:**
+    - **host_full**: Complete script with all cues, images, SOT thumbnails, and production info
+    - **host_clean**: Spoken text only with minimal cue markers (teleprompter-friendly, large text)
+    - **production**: Technical rundown with timing, all cue details, media references
 
-    Block detection:
-    - Block A: First content block (before first promo/ad/break)
-    - Block B: Next content block after first break region
-    - Block C, D, etc.: Continue with same logic
+    **Block Structure:**
+    - BLOCK A: All content from show start until BREAK 1
+    - BLOCK B: Content after BREAK 1 until BREAK 2
+    - BLOCK C: Content after BREAK 2 until BREAK 3
+    - And so on...
 
-    The script is saved to the episode's scripts/ folder by default.
+    **Output:**
+    - HTML and PDF files saved to episode's scripts/current/ folder
+    - PDF includes page numbers (Episode XXXX on left, Page X of Y on right)
     """
     try:
-        result = generate_host_script(episode_number, output_dir)
+        result = generate_host_script(episode_number, output_dir, preset=preset.value)
 
         return ScriptGenerationResponse(
             success=result.get("success", False),
             output_path=result.get("output_path"),
+            html_path=result.get("html_path"),
+            pdf_path=result.get("pdf_path"),
             episode_number=result.get("episode_number"),
+            preset=result.get("preset"),
             item_count=result.get("item_count"),
             block_count=result.get("block_count"),
+            revision=result.get("revision"),
+            error=result.get("error")
+        )
+
+    except Exception as e:
+        logger.error(f"Error generating script for episode {episode_number}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/host/{episode_number}", response_model=ScriptGenerationResponse)
+async def generate_host_script_endpoint(
+    episode_number: str,
+    preset: ScriptPresetEnum = Query(ScriptPresetEnum.host_full, description="Script preset"),
+    output_dir: Optional[str] = Query(None, description="Custom output directory"),
+    current_user: dict = Depends(get_current_user_or_key)
+) -> ScriptGenerationResponse:
+    """
+    Generate a host script for an episode (alias for /generate with host_full preset).
+
+    See /generate/{episode_number} for full documentation.
+    """
+    try:
+        result = generate_host_script(episode_number, output_dir, preset=preset.value)
+
+        return ScriptGenerationResponse(
+            success=result.get("success", False),
+            output_path=result.get("output_path"),
+            html_path=result.get("html_path"),
+            pdf_path=result.get("pdf_path"),
+            episode_number=result.get("episode_number"),
+            preset=result.get("preset"),
+            item_count=result.get("item_count"),
+            block_count=result.get("block_count"),
+            revision=result.get("revision"),
             error=result.get("error")
         )
 
@@ -149,18 +205,117 @@ async def generate_media_list_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/media-list/{episode_number}", response_model=ScriptGenerationResponse)
+async def generate_media_list_from_db(
+    episode_number: str,
+    current_user: dict = Depends(get_current_user_or_key)
+) -> ScriptGenerationResponse:
+    """
+    Generate a media list directly from the database.
+
+    Scans all rundown items for cue blocks and extracts media information.
+    This is more reliable than the POST endpoint which requires frontend to send data.
+    """
+    db = SessionLocal()
+    try:
+        ep_num = episode_number.zfill(4)
+
+        # Find episode and rundown
+        episode = db.query(Episode).filter(Episode.episode_number == int(episode_number)).first()
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+
+        rundown = db.query(Rundown).filter(Rundown.episode_id == episode.id).first()
+        if not rundown:
+            raise HTTPException(status_code=404, detail=f"No rundown found for episode {episode_number}")
+
+        # Get all rundown items ordered by position
+        items = db.query(RundownItem).filter(
+            RundownItem.rundown_id == rundown.id
+        ).order_by(RundownItem.order_in_rundown).all()
+
+        # Extract media cues from script content
+        media_items = []
+        cue_types = ['IMG', 'GFX', 'SOT', 'VO', 'NAT', 'PKG', 'BUMP', 'STING', 'FSQ', 'RIF', 'DIR']
+        cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL)
+
+        for item in items:
+            if not item.script_content:
+                continue
+
+            for match in cue_pattern.finditer(item.script_content):
+                cue_content = match.group(1)
+
+                # Extract fields (flexible patterns)
+                type_match = re.search(r'\[Type:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+                slug_match = re.search(r'\[Slug:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+                media_url_match = re.search(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+                asset_id_match = re.search(r'\[Asset\s*[Ii][Dd]:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+                duration_match = re.search(r'\[Duration:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+
+                cue_type = type_match.group(1).strip().upper() if type_match else ''
+
+                if cue_type in cue_types:
+                    media_url = media_url_match.group(1).strip() if media_url_match else ''
+                    media_items.append(MediaListItem(
+                        segmentSlug=item.slug or item.title or 'Unknown',
+                        segmentOrder=item.order_in_rundown,
+                        cueType=cue_type,
+                        slug=slug_match.group(1).strip() if slug_match else '',
+                        mediaUrl=media_url,
+                        assetId=asset_id_match.group(1).strip() if asset_id_match else '',
+                        duration=duration_match.group(1).strip() if duration_match else '',
+                        hasMissingMedia=not media_url
+                    ))
+
+        logger.info(f"Found {len(media_items)} media cues in episode {episode_number}")
+
+        # Generate HTML
+        container_scripts_dir = Path(f"/home/episodes/{ep_num}/scripts")
+        host_scripts_dir = Path(f"/mnt/sync/disaffected/episodes/{ep_num}/scripts")
+
+        if container_scripts_dir.exists():
+            scripts_dir = container_scripts_dir
+        elif host_scripts_dir.exists():
+            scripts_dir = host_scripts_dir
+        else:
+            host_scripts_dir.mkdir(parents=True, exist_ok=True)
+            scripts_dir = host_scripts_dir
+
+        html_content = _generate_media_list_html(ep_num, media_items)
+
+        html_path = scripts_dir / f"{ep_num}-MEDIA-LIST.html"
+        html_path.write_text(html_content, encoding='utf-8')
+
+        # Convert to PDF
+        pdf_path = scripts_dir / f"{ep_num}-MEDIA-LIST.pdf"
+        pdf_generated = _convert_html_to_pdf(html_path, pdf_path, ep_num, "Media List")
+
+        return ScriptGenerationResponse(
+            success=True,
+            output_path=str(pdf_path) if pdf_generated else str(html_path),
+            html_path=str(html_path),
+            pdf_path=str(pdf_path) if pdf_generated else None,
+            episode_number=episode_number,
+            item_count=len(media_items)
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating media list from DB for episode {episode_number}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
 def _generate_media_list_html(episode_number: str, media_items: List[MediaListItem]) -> str:
-    """Generate HTML content for the media list."""
+    """Generate HTML content for the media list in chronological order."""
     missing_count = sum(1 for item in media_items if item.hasMissingMedia)
     total_count = len(media_items)
 
-    # Group items by cue type
-    items_by_type = {}
-    for item in media_items:
-        cue_type = item.cueType
-        if cue_type not in items_by_type:
-            items_by_type[cue_type] = []
-        items_by_type[cue_type].append(item)
+    # Sort items by segment order (chronological)
+    sorted_items = sorted(media_items, key=lambda x: x.segmentOrder or 0)
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -197,37 +352,31 @@ def _generate_media_list_html(episode_number: str, media_items: List[MediaListIt
         .stat.warning {{
             background: rgba(255,152,0,0.5);
         }}
-        .section {{
+        .content {{
             background: white;
             border-radius: 8px;
-            margin-bottom: 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        .section-header {{
-            background: #424242;
-            color: white;
-            padding: 12px 16px;
-            border-radius: 8px 8px 0 0;
-            font-weight: bold;
-        }}
-        .section-content {{
-            padding: 0;
+            overflow: hidden;
         }}
         table {{
             width: 100%;
             border-collapse: collapse;
         }}
         th {{
-            background: #e0e0e0;
-            padding: 10px;
+            background: #424242;
+            color: white;
+            padding: 12px 10px;
             text-align: left;
             font-size: 0.85rem;
             text-transform: uppercase;
+            position: sticky;
+            top: 0;
         }}
         td {{
             padding: 10px;
             border-bottom: 1px solid #eee;
             font-size: 0.9rem;
+            vertical-align: middle;
         }}
         tr:hover {{
             background: #f5f5f5;
@@ -238,11 +387,20 @@ def _generate_media_list_html(episode_number: str, media_items: List[MediaListIt
         .missing td {{
             color: #c62828;
         }}
+        .row-num {{
+            font-weight: bold;
+            color: #666;
+            text-align: center;
+            width: 40px;
+        }}
         .cue-type {{
             font-weight: bold;
-            padding: 2px 8px;
+            padding: 4px 10px;
             border-radius: 4px;
-            font-size: 0.75rem;
+            font-size: 0.8rem;
+            display: inline-block;
+            min-width: 40px;
+            text-align: center;
         }}
         .cue-type.IMG {{ background: #e3f2fd; color: #1565c0; }}
         .cue-type.GFX {{ background: #f3e5f5; color: #7b1fa2; }}
@@ -255,11 +413,26 @@ def _generate_media_list_html(episode_number: str, media_items: List[MediaListIt
         .cue-type.FSQ {{ background: #e8eaf6; color: #3949ab; }}
         .cue-type.RIF {{ background: #efebe9; color: #5d4037; }}
         .cue-type.DIR {{ background: #eceff1; color: #546e7a; }}
-        .media-url {{
+        .slug {{
+            font-weight: 500;
+        }}
+        .segment {{
+            color: #666;
+            font-size: 0.85rem;
+        }}
+        .filename {{
             font-family: monospace;
-            font-size: 0.8rem;
+            font-size: 0.85rem;
             word-break: break-all;
-            max-width: 400px;
+        }}
+        .filename.missing-file {{
+            color: #c62828;
+            font-style: italic;
+        }}
+        .duration {{
+            color: #666;
+            font-size: 0.85rem;
+            text-align: center;
         }}
         .timestamp {{
             color: #666;
@@ -277,49 +450,47 @@ def _generate_media_list_html(episode_number: str, media_items: List[MediaListIt
             <div class="stat {'warning' if missing_count > 0 else ''}">Missing Media: {missing_count}</div>
         </div>
     </div>
+
+    <div class="content">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 40px">#</th>
+                    <th style="width: 60px">Type</th>
+                    <th>Slug</th>
+                    <th>Segment</th>
+                    <th>Filename</th>
+                    <th style="width: 80px">Duration</th>
+                </tr>
+            </thead>
+            <tbody>
 """
 
-    # Add section for each cue type
-    for cue_type in sorted(items_by_type.keys()):
-        items = items_by_type[cue_type]
-        type_missing = sum(1 for item in items if item.hasMissingMedia)
+    # Add each item in chronological order
+    for idx, item in enumerate(sorted_items, 1):
+        row_class = 'missing' if item.hasMissingMedia else ''
+
+        # Extract just the filename from the media URL
+        filename = ''
+        if item.mediaUrl:
+            filename = item.mediaUrl.split('/')[-1] if '/' in item.mediaUrl else item.mediaUrl
+        else:
+            filename = '<span class="missing-file">MISSING</span>'
 
         html += f"""
-    <div class="section">
-        <div class="section-header">
-            {cue_type} ({len(items)} items{f', {type_missing} missing' if type_missing > 0 else ''})
-        </div>
-        <div class="section-content">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Segment</th>
-                        <th>Slug</th>
-                        <th>Media URL</th>
-                        <th>Asset ID</th>
-                        <th>Duration</th>
-                    </tr>
-                </thead>
-                <tbody>
-"""
-        for item in items:
-            row_class = 'missing' if item.hasMissingMedia else ''
-            media_display = item.mediaUrl if item.mediaUrl else '<span style="color:#c62828">MISSING</span>'
-
-            html += f"""
-                    <tr class="{row_class}">
-                        <td>{item.segmentSlug}</td>
-                        <td>{item.slug or '-'}</td>
-                        <td class="media-url">{media_display}</td>
-                        <td>{item.assetId or '-'}</td>
-                        <td>{item.duration or '-'}</td>
-                    </tr>
+                <tr class="{row_class}">
+                    <td class="row-num">{idx}</td>
+                    <td><span class="cue-type {item.cueType}">{item.cueType}</span></td>
+                    <td class="slug">{item.slug or '-'}</td>
+                    <td class="segment">{item.segmentSlug}</td>
+                    <td class="filename">{filename}</td>
+                    <td class="duration">{item.duration or '-'}</td>
+                </tr>
 """
 
-        html += """
-                </tbody>
-            </table>
-        </div>
+    html += """
+            </tbody>
+        </table>
     </div>
 """
 
@@ -340,44 +511,42 @@ async def get_available_formats(
     current_user: dict = Depends(get_current_user_or_key)
 ) -> Dict[str, Any]:
     """
-    Get list of available script formats.
+    Get list of available script formats and presets.
     """
     return {
-        "formats": [
+        "presets": [
             {
-                "id": "host",
-                "name": "Host Script",
-                "description": "HTML script for host/talent to read from, optimized for PDF conversion",
-                "endpoint": "/scripts/host/{episode_number}",
-                "status": "available"
+                "id": "host_full",
+                "name": "Host Script (Full)",
+                "description": "Complete script with all cues, images, SOT thumbnails, and production info. Large readable text.",
+                "endpoint": "/scripts/generate/{episode_number}?preset=host_full",
+                "status": "available",
+                "features": ["Cover page", "Block headers", "Segment headers", "Images rendered", "SOT thumbnails", "FSQ quotes", "Speaker tags", "Page numbers"]
             },
             {
-                "id": "teleprompter",
-                "name": "Teleprompter",
-                "description": "Large text format for teleprompter display",
-                "endpoint": "/scripts/teleprompter/{episode_number}",
-                "status": "planned"
+                "id": "host_clean",
+                "name": "Host Script (Clean)",
+                "description": "Teleprompter-friendly format. Spoken text only with minimal cue markers. Extra large text for easy reading.",
+                "endpoint": "/scripts/generate/{episode_number}?preset=host_clean",
+                "status": "available",
+                "features": ["Cover page", "Block headers", "Segment headers", "Minimal cue markers", "Extra large text (20pt)", "Speaker tags", "Page numbers"]
             },
             {
-                "id": "director",
-                "name": "Director Script",
-                "description": "Technical cue sheet for director with timing marks",
-                "endpoint": "/scripts/director/{episode_number}",
-                "status": "planned"
-            },
+                "id": "production",
+                "name": "Production Rundown",
+                "description": "Technical rundown with compact cue details, timing, and media references. Smaller text for density.",
+                "endpoint": "/scripts/generate/{episode_number}?preset=production",
+                "status": "available",
+                "features": ["Cover page", "Block headers", "Segment headers", "Compact cue info", "Media paths", "Duration info", "Page numbers"]
+            }
+        ],
+        "other_formats": [
             {
                 "id": "media-list",
                 "name": "Media List",
-                "description": "List of all media cues with URLs, grouped by type",
+                "description": "List of all media cues with URLs, grouped by type. Highlights missing media.",
                 "endpoint": "/scripts/media-list/{episode_number}",
                 "status": "available"
-            },
-            {
-                "id": "flat-text",
-                "name": "Flat Text",
-                "description": "Plain text script without formatting",
-                "endpoint": "/scripts/flat-text/{episode_number}",
-                "status": "planned"
             }
         ]
     }
@@ -410,42 +579,54 @@ async def list_generated_scripts(
 
     documents = []
 
-    # List all files in scripts directory (excluding subdirectories like resources/)
-    for file in scripts_dir.iterdir():
-        # Skip directories (like resources/)
-        if file.is_dir():
-            continue
+    # Also check scripts/current/ subdirectory
+    current_dir = scripts_dir / "current"
+    dirs_to_scan = [scripts_dir]
+    if current_dir.exists():
+        dirs_to_scan.append(current_dir)
 
-        # Determine document type from filename
-        doc_type = "unknown"
-        if "HOST-SCRIPT" in file.name:
-            doc_type = "host_script"
-        elif "TELEPROMPTER" in file.name:
-            doc_type = "teleprompter"
-        elif "DIRECTOR" in file.name:
-            doc_type = "director"
-        elif "MEDIA-LIST" in file.name:
-            doc_type = "media_list"
+    # List all files in scripts directories (excluding subdirectories like resources/)
+    for scan_dir in dirs_to_scan:
+        for file in scan_dir.iterdir():
+            # Skip directories (like resources/)
+            if file.is_dir():
+                continue
 
-        # Get file stats
-        stats = file.stat()
-        modified_dt = datetime.fromtimestamp(stats.st_mtime)
+            # Determine document type from filename
+            doc_type = "unknown"
+            if "HOST-FULL" in file.name:
+                doc_type = "host_full"
+            elif "HOST-CLEAN" in file.name:
+                doc_type = "host_clean"
+            elif "PRODUCTION" in file.name:
+                doc_type = "production"
+            elif "HOST-SCRIPT" in file.name:
+                doc_type = "host_script"  # Legacy naming
+            elif "MEDIA-LIST" in file.name:
+                doc_type = "media_list"
 
-        # Build URL for frontend access
-        # The file is served via static mount at /episodes/
-        url_path = f"/episodes/{ep_num}/scripts/{file.name}"
+            # Get file stats
+            stats = file.stat()
+            modified_dt = datetime.fromtimestamp(stats.st_mtime)
 
-        documents.append({
-            "filename": file.name,
-            "type": doc_type,
-            "format": file.suffix.lstrip('.'),
-            "path": str(file),
-            "url": url_path,
-            "size": stats.st_size,
-            "size_formatted": _format_file_size(stats.st_size),
-            "modified": stats.st_mtime,
-            "modified_formatted": modified_dt.strftime("%Y-%m-%d %H:%M")
-        })
+            # Build URL for frontend access
+            # Determine relative path from scripts_dir
+            if scan_dir == current_dir:
+                url_path = f"/episodes/{ep_num}/scripts/current/{file.name}"
+            else:
+                url_path = f"/episodes/{ep_num}/scripts/{file.name}"
+
+            documents.append({
+                "filename": file.name,
+                "type": doc_type,
+                "format": file.suffix.lstrip('.'),
+                "path": str(file),
+                "url": url_path,
+                "size": stats.st_size,
+                "size_formatted": _format_file_size(stats.st_size),
+                "modified": stats.st_mtime,
+                "modified_formatted": modified_dt.strftime("%Y-%m-%d %H:%M")
+            })
 
     # Sort by modification time, newest first
     documents.sort(key=lambda x: x["modified"], reverse=True)

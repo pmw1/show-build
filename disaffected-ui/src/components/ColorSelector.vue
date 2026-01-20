@@ -2,10 +2,10 @@
   <div class="color-selector" :class="{ 'compact': compact }">
     <!-- Container for side-by-side layout -->
     <div class="color-tables-container">
-      <!-- Rundown Items Table -->
+      <!-- Core Rundown Items Table -->
       <div class="color-table-section">
-        <h2 v-if="!compact" class="section-title">Rundown Item Colors</h2>
-        <h3 v-else class="text-subtitle-2 mb-2">Rundown Item Colors</h3>
+        <h2 v-if="!compact" class="section-title">Core Rundown Items</h2>
+        <h3 v-else class="text-subtitle-2 mb-2">Core Rundown Items</h3>
         <table class="color-config-table">
           <thead>
             <tr>
@@ -80,6 +80,89 @@
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Custom Rundown Items Table -->
+      <div v-if="customRundownTypes.length > 0" class="color-table-section">
+        <h2 v-if="!compact" class="section-title">Custom Rundown Items</h2>
+        <h3 v-else class="text-subtitle-2 mb-2">Custom Rundown Items</h3>
+        <table class="color-config-table">
+          <thead>
+            <tr>
+              <th class="type-header">Type</th>
+              <th class="color-header">Base Color</th>
+              <th class="color-header">Variant</th>
+              <th class="preview-header">Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="type in customRundownTypes" :key="type">
+              <td class="type-cell">{{ type }}</td>
+              <td class="color-cell">
+                <v-select
+                  v-model="baseColor[type]"
+                  :items="baseColorOptions"
+                  dense
+                  outlined
+                  hide-details
+                  class="cell-fill-select"
+                  @change="onBaseChange(type)"
+                  item-title="title"
+                  item-value="value"
+                >
+                  <template #item="{ item, props }">
+                    <v-list-item v-if="item && item.value" v-bind="props">
+                      <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                      <span>{{ item.title }}</span>
+                    </v-list-item>
+                  </template>
+                  <template #selection="{ item }">
+                    <div class="color-swatch-container" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '100%', height: '28px', display: 'inline-block', borderRadius: '2px', position: 'relative' }">
+                      <span class="color-label-overlay" :style="{ color: getTextColor(resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify)) }">{{ item.title }}</span>
+                    </div>
+                  </template>
+                </v-select>
+              </td>
+              <td class="color-cell">
+                <v-select
+                  v-model="variant[type]"
+                  :items="variantOptions(baseColor[type])"
+                  dense
+                  outlined
+                  hide-details
+                  class="cell-fill-select"
+                  :disabled="!baseColor[type]"
+                >
+                  <template #item="{ item, props }">
+                    <v-list-item v-if="item" v-bind="props">
+                      <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor((baseColor[type] || '') + (item.value ? '-' + item.value : ''), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                      <span>{{ item.title }}</span>
+                    </v-list-item>
+                  </template>
+                  <template #selection="{ item }">
+                    <div class="color-swatch-container" :style="{ backgroundColor: resolveVuetifyColor((baseColor[type] || '') + (item.value ? '-' + item.value : ''), $vuetify), width: '100%', height: '28px', display: 'inline-block', borderRadius: '2px', position: 'relative' }">
+                      <span class="color-label-overlay" :style="{ color: getTextColor(resolveVuetifyColor((baseColor[type] || '') + (item.value ? '-' + item.value : ''), $vuetify)) }">{{ item.title }}</span>
+                    </div>
+                  </template>
+                </v-select>
+              </td>
+              <td class="preview-cell">
+                <div
+                  class="preview-box-fill"
+                  :style="{
+                    backgroundColor: resolveVuetifyColor(getFullColor(type), $vuetify),
+                    color: getTextColor(resolveVuetifyColor(getFullColor(type), $vuetify))
+                  }"
+                >
+                  {{ type }}
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="customRundownTypes.length === 0" class="text-caption text-grey">
+          No custom rundown types defined. Add custom types in Settings → Content → Content Library.
+        </p>
       </div>
 
       <!-- Rundown Regions Table -->
@@ -401,6 +484,86 @@
           </tbody>
         </table>
       </div>
+
+      <!-- Global Action Colors Table -->
+      <div class="color-table-section">
+        <h2 v-if="!compact" class="section-title">Global Action Colors</h2>
+        <h3 v-else class="text-subtitle-2 mb-2">Global Action Colors</h3>
+        <table class="color-config-table">
+          <thead>
+            <tr>
+              <th class="type-header">Action</th>
+              <th class="color-header">Base Color</th>
+              <th class="color-header">Variant</th>
+              <th class="preview-header">Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="type in globalActionTypes" :key="type">
+              <td class="type-cell">{{ formatGlobalActionName(type) }}</td>
+              <td class="color-cell">
+                <v-select
+                  v-model="baseColor[type + '-global']"
+                  :items="baseColorOptions"
+                  dense
+                  outlined
+                  hide-details
+                  class="cell-fill-select"
+                  @change="onBaseChange(type + '-global')"
+                  item-title="title"
+                  item-value="value"
+                >
+                  <template #item="{ item, props }">
+                    <v-list-item v-if="item && item.value" v-bind="props">
+                      <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                      <span>{{ item.title }}</span>
+                    </v-list-item>
+                  </template>
+                  <template #selection="{ item }">
+                    <div class="color-swatch-container" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '100%', height: '28px', display: 'inline-block', borderRadius: '2px', position: 'relative' }">
+                      <span class="color-label-overlay" :style="{ color: getTextColor(resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify)) }">{{ item.title }}</span>
+                    </div>
+                  </template>
+                </v-select>
+              </td>
+              <td class="color-cell">
+                <v-select
+                  v-model="variant[type + '-global']"
+                  :items="variantOptions(baseColor[type + '-global'])"
+                  dense
+                  outlined
+                  hide-details
+                  class="cell-fill-select"
+                  :disabled="!baseColor[type + '-global']"
+                >
+                  <template #item="{ item, props }">
+                    <v-list-item v-if="item" v-bind="props">
+                      <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor((baseColor[type + '-global'] || '') + (item.value ? '-' + item.value : ''), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                      <span>{{ item.title }}</span>
+                    </v-list-item>
+                  </template>
+                  <template #selection="{ item }">
+                    <div class="color-swatch-container" :style="{ backgroundColor: resolveVuetifyColor((baseColor[type + '-global'] || '') + (item.value ? '-' + item.value : ''), $vuetify), width: '100%', height: '28px', display: 'inline-block', borderRadius: '2px', position: 'relative' }">
+                      <span class="color-label-overlay" :style="{ color: getTextColor(resolveVuetifyColor((baseColor[type + '-global'] || '') + (item.value ? '-' + item.value : ''), $vuetify)) }">{{ item.title }}</span>
+                    </div>
+                  </template>
+                </v-select>
+              </td>
+              <td class="preview-cell">
+                <div
+                  class="preview-box-fill"
+                  :style="{
+                    backgroundColor: resolveVuetifyColor(getFullColor(type + '-global'), $vuetify),
+                    color: getTextColor(resolveVuetifyColor(getFullColor(type + '-global'), $vuetify))
+                  }"
+                >
+                  {{ formatGlobalActionName(type) }}
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Save Button -->
@@ -438,6 +601,19 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Snackbar for error messages -->
+    <v-snackbar
+      v-model="snackbar.show"
+      :color="snackbar.color"
+      :timeout="snackbar.timeout"
+      location="bottom"
+    >
+      {{ snackbar.message }}
+      <template v-slot:actions>
+        <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
+      </template>
+    </v-snackbar>
   </div>
 </template>
 
@@ -477,17 +653,27 @@ export default {
     });
     
     return {
+      // Core Rundown Items (hardcoded)
       rundownTypes: ['segment', 'ad', 'promo', 'cta', 'live', 'tease', 'tag'],
+      // Custom Rundown Items (loaded from API)
+      customRundownTypes: [],
       rundownRegionsTypes: ['break', 'block', 'block-a', 'block-b', 'block-c', 'block-d', 'block-e', 'block-f', 'block-g', 'block-h'],
       elementsCuesTypes: ['trans', 'pkg', 'vo', 'sot', 'interview', 'music', 'reader', 'gfx', 'fsq', 'nat', 'img', 'dir', 'bump', 'sting'],
       interfaceTypes: ['Selection', 'Hover', 'Highlight', 'Dropline', 'DragLight', 'LocatorFlash'],
       scriptStatusTypes: ['Draft', 'Approved', 'Production', 'Promotion', 'Completed'],
+      globalActionTypes: ['AutoSave', 'Needs-Attention'],
       typeColors: {},
       showConfirmation: false,
       isSaving: false,
       baseColor,
       variant,
       isInitializing: true, // Flag to prevent watcher events during initialization
+      snackbar: {
+        show: false,
+        message: '',
+        color: 'error',
+        timeout: 5000
+      }
     }
   },
   computed: {
@@ -592,6 +778,46 @@ export default {
       // Hardcoded rundown types to avoid circular import issues
       return ['segment', 'ad', 'promo', 'cta', 'trans', 'pkg', 'vo', 'sot', 'interview', 'live', 'tease', 'tag', 'music', 'reader'];
     },
+    formatGlobalActionName(type) {
+      // Format global action type names for display
+      const nameMap = {
+        'AutoSave': 'Auto Save Indicator'
+      };
+      return nameMap[type] || type.replace(/([A-Z])/g, ' $1').trim();
+    },
+    async loadCustomTypes() {
+      // Load custom rundown types from API
+      try {
+        const response = await fetch('/api/content-library/custom-types/', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.custom_types && data.custom_types.length > 0) {
+            // Extract type names for color configuration
+            this.customRundownTypes = data.custom_types.map(ct => ct.type_name);
+            // Initialize baseColor and variant for custom types
+            this.customRundownTypes.forEach(type => {
+              if (this.baseColor[type] === undefined) {
+                this.baseColor[type] = null;
+                this.variant[type] = null;
+              }
+              // Apply default color from custom type if available
+              const customType = data.custom_types.find(ct => ct.type_name === type);
+              if (customType && customType.color && !this.baseColor[type]) {
+                const parsed = this.parseColorValue(customType.color);
+                this.baseColor[type] = parsed.base;
+                this.variant[type] = parsed.variant || '';
+              }
+            });
+          }
+        }
+      } catch (error) {
+        console.log('Could not load custom types:', error);
+      }
+    },
     resolveVuetifyColor,
     parseColorValue(colorValue) {
       if (!colorValue) return { base: null, variant: null };
@@ -637,13 +863,20 @@ export default {
       if (!bgColor) return '#000000';
       return getTextColorForBackground(bgColor);
     },
+    showSnackbar(message, color = 'error') {
+      this.snackbar.message = message;
+      this.snackbar.color = color;
+      this.snackbar.show = true;
+    },
     async initializeColors() {
       const allTypes = [
         ...this.rundownTypes,
+        ...this.customRundownTypes,
         ...this.rundownRegionsTypes,
         ...this.elementsCuesTypes,
         ...this.interfaceTypes.map(t => t + '-interface'),
         ...this.scriptStatusTypes.map(t => t + '-script'),
+        ...this.globalActionTypes.map(t => t + '-global'),
       ];
 
       // Load from database (new endpoint)
@@ -678,16 +911,23 @@ export default {
                 lookupKey = interfaceMapping[baseType] || baseType;
               } else if (type.endsWith('-script')) {
                 const baseType = type.replace('-script', '').toLowerCase();
-                // Map script status types to their base colors  
+                // Map script status types to their base colors
                 const scriptMapping = {
                   'draft': 'draft',
                   'approved': 'approved',
-                  'production': 'production', 
+                  'production': 'production',
                   'completed': 'completed'
                 };
                 lookupKey = scriptMapping[baseType] || baseType;
+              } else if (type.endsWith('-global')) {
+                const baseType = type.replace('-global', '').toLowerCase();
+                // Map global action types to their base colors
+                const globalMapping = {
+                  'autosave': 'autosave'
+                };
+                lookupKey = globalMapping[baseType] || baseType;
               }
-              
+
               const colorValue = dbColors[lookupKey];
               if (colorValue) {
                 const parsed = this.parseColorValue(colorValue);
@@ -732,12 +972,18 @@ export default {
             const scriptMapping = {
               'draft': 'draft',
               'approved': 'approved',
-              'production': 'production', 
+              'production': 'production',
               'completed': 'completed'
             };
             lookupKey = scriptMapping[baseType] || baseType;
+          } else if (type.endsWith('-global')) {
+            const baseType = type.replace('-global', '').toLowerCase();
+            const globalMapping = {
+              'autosave': 'autosave'
+            };
+            lookupKey = globalMapping[baseType] || baseType;
           }
-          
+
           const colorValue = getColorValue(lookupKey); // Get color from local storage using mapped key
           if (colorValue) {
             // localStorage might use space or dash format, try both
@@ -768,10 +1014,12 @@ export default {
       this.isSaving = true;
       const allTypes = [
         ...this.rundownTypes,
+        ...this.customRundownTypes,
         ...this.rundownRegionsTypes,
         ...this.elementsCuesTypes,
         ...this.interfaceTypes.map(t => t + '-interface'),
         ...this.scriptStatusTypes.map(t => t + '-script'),
+        ...this.globalActionTypes.map(t => t + '-global'),
       ];
 
       // Build colors object
@@ -802,6 +1050,18 @@ export default {
               'locatorflash': 'locatorflash'
             };
             const baseKey = interfaceMapping[baseType] || baseType;
+            colors[baseKey] = fullColor;
+            updateColor(baseKey, fullColor);
+          }
+
+          // For global action types, also save base keys for content editor
+          if (type.endsWith('-global')) {
+            const baseType = type.replace('-global', '').toLowerCase();
+            // Map global action types to their base colors
+            const globalMapping = {
+              'autosave': 'autosave'
+            };
+            const baseKey = globalMapping[baseType] || baseType;
             colors[baseKey] = fullColor;
             updateColor(baseKey, fullColor);
           }
@@ -848,17 +1108,18 @@ export default {
             category: 'colors', 
             profile: 'default' 
           }));
-          alert(`Failed to save colors: ${response.status} ${response.statusText} - ${errorText}`);
+          this.showSnackbar(`Failed to save colors: ${response.status} ${response.statusText} - ${errorText}`);
           this.isSaving = false;
         }
       } catch (error) {
         console.error('Error saving colors:', error);
-        alert(`Error saving colors: ${error.message}`);
+        this.showSnackbar(`Error saving colors: ${error.message}`);
         this.isSaving = false;
       }
     }, 1000),
   },
-  created() {
+  async created() {
+    await this.loadCustomTypes();
     this.initializeColors();
   },
   mounted() {

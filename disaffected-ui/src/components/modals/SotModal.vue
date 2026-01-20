@@ -332,11 +332,11 @@
                   @click="performMarkInAction"
                   @mouseenter="e => hoverButton(e, '#2196F3')"
                   @mouseleave="e => unhoverButton(e, '#2196F3')"
-                  style="width: calc(25% + 1px); height: 55px; display: flex; flex-direction: column; background: #2196F3; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  style="width: calc(25% + 1px); height: 65px; display: flex; flex-direction: column; background: #2196F3; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
                   title="Mark In point (I key)"
                 >
-                  <div style="background: #1976D2; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">MARK IN</div>
-                  <div style="background: #2196F3; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">I</div>
+                  <div style="background: #1976D2; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">MARK IN</div>
+                  <div style="background: #2196F3; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">I</div>
                 </div>
 
                 <!-- Go to In Button (Cell 3, 12.5% width) -->
@@ -346,15 +346,15 @@
                   @click="performGoToInAction"
                   @mouseenter="e => hoverButton(e, '#64B5F6')"
                   @mouseleave="e => unhoverButton(e, '#64B5F6')"
-                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #64B5F6; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  style="width: 12.5%; height: 65px; display: flex; flex-direction: column; background: #64B5F6; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
                   title="Go to In point (Q key)"
                 >
-                  <div style="background: #42A5F5; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">GO IN</div>
-                  <div style="background: #64B5F6; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">Q</div>
+                  <div style="background: #42A5F5; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">GO IN</div>
+                  <div style="background: #64B5F6; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">Q</div>
                 </div>
 
                 <!-- Empty cells 4-5 (25% total) -->
-                <div v-for="cellNum in [4, 5]" :key="`r1-${cellNum}`" class="grid-cell-empty" style="width: 12.5%; height: 55px; background: #d3d3d3; color: #666; display: flex; align-items: center; justify-content: center; border: none; margin-right: 1px; font-size: 14px; font-weight: bold; font-family: Helvetica, Arial, sans-serif; cursor: pointer; transition: all 0.2s ease;">{{ cellNum }}</div>
+                <div v-for="cellNum in [4, 5]" :key="`r1-${cellNum}`" class="grid-cell-empty" style="width: 12.5%; height: 65px; background: #d3d3d3; color: #666; display: flex; align-items: center; justify-content: center; border: none; margin-right: 1px; font-size: 18px; font-weight: bold; font-family: Helvetica, Arial, sans-serif; cursor: pointer; transition: all 0.2s ease;">{{ cellNum }}</div>
 
                 <!-- Go to Out Button (Cell 6, 12.5% width) -->
                 <div
@@ -363,11 +363,11 @@
                   @click="performGoToOutAction"
                   @mouseenter="e => hoverButton(e, '#FFAB91')"
                   @mouseleave="e => unhoverButton(e, '#FFAB91')"
-                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #FFAB91; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  style="width: 12.5%; height: 65px; display: flex; flex-direction: column; background: #FFAB91; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
                   title="Go to Out point (W key)"
                 >
-                  <div style="background: #FF8A65; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">GO OUT</div>
-                  <div style="background: #FFAB91; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">W</div>
+                  <div style="background: #FF8A65; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">GO OUT</div>
+                  <div style="background: #FFAB91; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">W</div>
                 </div>
 
                 <!-- Mark Out Button (Cells 7-8, 25% width) -->
@@ -377,11 +377,11 @@
                   @click="performMarkOutAction"
                   @mouseenter="e => hoverButton(e, '#FF5722')"
                   @mouseleave="e => unhoverButton(e, '#FF5722')"
-                  style="width: calc(25% + 1px); height: 55px; display: flex; flex-direction: column; background: #FF5722; border: none; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  style="width: calc(25% + 1px); height: 65px; display: flex; flex-direction: column; background: #FF5722; border: none; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
                   title="Mark Out point (O key)"
                 >
-                  <div style="background: #E64A19; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">MARK OUT</div>
-                  <div style="background: #FF5722; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">O</div>
+                  <div style="background: #E64A19; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">MARK OUT</div>
+                  <div style="background: #FF5722; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">O</div>
                 </div>
               </div>
 
@@ -394,11 +394,11 @@
                   @click="performJumpBackTenSeconds"
                   @mouseenter="e => hoverButton(e, '#E65100')"
                   @mouseleave="e => unhoverButton(e, '#E65100')"
-                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #E65100; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  style="width: 12.5%; height: 65px; display: flex; flex-direction: column; background: #E65100; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
                   title="Jump back 10 seconds"
                 >
-                  <div style="background: #BF360C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">-10s</div>
-                  <div style="background: #E65100; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">◄◄</div>
+                  <div style="background: #BF360C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold;">-10s</div>
+                  <div style="background: #E65100; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold;">◄◄</div>
                 </div>
 
                 <!-- -1s (Cell 10) -->
@@ -408,11 +408,11 @@
                   @click="performStepBackSecond"
                   @mouseenter="e => hoverButton(e, '#FF9800')"
                   @mouseleave="e => unhoverButton(e, '#FF9800')"
-                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #FF9800; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  style="width: 12.5%; height: 65px; display: flex; flex-direction: column; background: #FF9800; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
                   title="Step back 1 second (J key)"
                 >
-                  <div style="background: #F57C00; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">-1s</div>
-                  <div style="background: #FF9800; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">◄</div>
+                  <div style="background: #F57C00; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold;">-1s</div>
+                  <div style="background: #FF9800; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold;">◄</div>
                 </div>
 
                 <!-- -1f (Cell 11) -->
@@ -422,11 +422,11 @@
                   @click="performStepBackFrame"
                   @mouseenter="e => hoverButton(e, '#FFB74D')"
                   @mouseleave="e => unhoverButton(e, '#FFB74D')"
-                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #FFB74D; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  style="width: 12.5%; height: 65px; display: flex; flex-direction: column; background: #FFB74D; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
                   title="Step back 1 frame (← key)"
                 >
-                  <div style="background: #FFA726; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">-1f</div>
-                  <div style="background: #FFB74D; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">|◄</div>
+                  <div style="background: #FFA726; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold;">-1f</div>
+                  <div style="background: #FFB74D; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold;">|◄</div>
                 </div>
 
                 <!-- Play/Pause (Cells 12-13, 25% width) -->
@@ -436,11 +436,11 @@
                   @click="performPlayPauseAction"
                   @mouseenter="e => hoverButton(e, '#4CAF50')"
                   @mouseleave="e => unhoverButton(e, '#4CAF50')"
-                  style="width: calc(25% + 1px); height: 55px; display: flex; flex-direction: column; background: #4CAF50; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  style="width: calc(25% + 1px); height: 65px; display: flex; flex-direction: column; background: #4CAF50; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
                   title="Play/Pause - Toggle playback (Space or K)"
                 >
-                  <div style="background: #388E3C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">PLAY/PAUSE</div>
-                  <div style="background: #4CAF50; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">{{ isPlaying ? '⏸' : '▶' }}</div>
+                  <div style="background: #388E3C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">PLAY/PAUSE</div>
+                  <div style="background: #4CAF50; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">{{ isPlaying ? '⏸' : '▶' }}</div>
                 </div>
 
                 <!-- +1f (Cell 14) -->
@@ -450,11 +450,11 @@
                   @click="performStepForwardFrame"
                   @mouseenter="e => hoverButton(e, '#FFB74D')"
                   @mouseleave="e => unhoverButton(e, '#FFB74D')"
-                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #FFB74D; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  style="width: 12.5%; height: 65px; display: flex; flex-direction: column; background: #FFB74D; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
                   title="Step forward 1 frame (→ key)"
                 >
-                  <div style="background: #FFA726; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">+1f</div>
-                  <div style="background: #FFB74D; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">►|</div>
+                  <div style="background: #FFA726; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold;">+1f</div>
+                  <div style="background: #FFB74D; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold;">►|</div>
                 </div>
 
                 <!-- +1s (Cell 15) -->
@@ -464,11 +464,11 @@
                   @click="performStepForwardSecond"
                   @mouseenter="e => hoverButton(e, '#FF9800')"
                   @mouseleave="e => unhoverButton(e, '#FF9800')"
-                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #FF9800; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  style="width: 12.5%; height: 65px; display: flex; flex-direction: column; background: #FF9800; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
                   title="Step forward 1 second (L key)"
                 >
-                  <div style="background: #F57C00; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">+1s</div>
-                  <div style="background: #FF9800; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">►</div>
+                  <div style="background: #F57C00; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold;">+1s</div>
+                  <div style="background: #FF9800; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold;">►</div>
                 </div>
 
                 <!-- +10s (Cell 16) -->
@@ -478,18 +478,18 @@
                   @click="performJumpForwardTenSeconds"
                   @mouseenter="e => hoverButton(e, '#E65100')"
                   @mouseleave="e => unhoverButton(e, '#E65100')"
-                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #E65100; border: none; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
+                  style="width: 12.5%; height: 65px; display: flex; flex-direction: column; background: #E65100; border: none; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif;"
                   title="Jump forward 10 seconds"
                 >
-                  <div style="background: #BF360C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold;">+10s</div>
-                  <div style="background: #E65100; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">►►</div>
+                  <div style="background: #BF360C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold;">+10s</div>
+                  <div style="background: #E65100; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold;">►►</div>
                 </div>
               </div>
 
               <!-- Row 3: Empty cells, Preview, Take -->
               <div class="control-row d-flex">
                 <!-- Empty cells 17-20 -->
-                <div v-for="cellNum in [17, 18, 19, 20]" :key="`r3-${cellNum}`" class="grid-cell-empty" style="width: 12.5%; height: 55px; background: #d3d3d3; color: #666; display: flex; align-items: center; justify-content: center; border: none; margin-right: 1px; font-size: 14px; font-weight: bold; font-family: Helvetica, Arial, sans-serif; cursor: pointer; transition: all 0.2s ease;">{{ cellNum }}</div>
+                <div v-for="cellNum in [17, 18, 19, 20]" :key="`r3-${cellNum}`" class="grid-cell-empty" style="width: 12.5%; height: 65px; background: #d3d3d3; color: #666; display: flex; align-items: center; justify-content: center; border: none; margin-right: 1px; font-size: 18px; font-weight: bold; font-family: Helvetica, Arial, sans-serif; cursor: pointer; transition: all 0.2s ease;">{{ cellNum }}</div>
 
                 <!-- Preview Button (Cell 21) -->
                 <div
@@ -498,15 +498,15 @@
                   @click="performPreviewAction"
                   @mouseenter="e => hoverButton(e, '#9C27B0')"
                   @mouseleave="e => unhoverButton(e, '#9C27B0')"
-                  style="width: 12.5%; height: 55px; display: flex; flex-direction: column; background: #9C27B0; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  style="width: 12.5%; height: 65px; display: flex; flex-direction: column; background: #9C27B0; border: none; margin-right: 1px; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
                   title="Preview - Play from In to Out (Shift+Space)"
                 >
-                  <div style="background: #7B1FA2; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">PREVIEW</div>
-                  <div style="background: #9C27B0; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">▶|</div>
+                  <div style="background: #7B1FA2; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">PREVIEW</div>
+                  <div style="background: #9C27B0; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">▶|</div>
                 </div>
 
                 <!-- Empty cell 22 -->
-                <div class="grid-cell-empty" style="width: 12.5%; height: 55px; background: #d3d3d3; color: #666; display: flex; align-items: center; justify-content: center; border: none; margin-right: 1px; font-size: 14px; font-weight: bold; font-family: Helvetica, Arial, sans-serif; cursor: pointer; transition: all 0.2s ease;">22</div>
+                <div class="grid-cell-empty" style="width: 12.5%; height: 65px; background: #d3d3d3; color: #666; display: flex; align-items: center; justify-content: center; border: none; margin-right: 1px; font-size: 18px; font-weight: bold; font-family: Helvetica, Arial, sans-serif; cursor: pointer; transition: all 0.2s ease;">22</div>
 
                 <!-- Take Button (Cells 23-24, 25% width) -->
                 <div
@@ -515,11 +515,11 @@
                   @click="performTakeAction"
                   @mouseenter="e => hoverButton(e, '#4CAF50')"
                   @mouseleave="e => unhoverButton(e, '#4CAF50')"
-                  style="width: calc(25% + 1px); height: 55px; display: flex; flex-direction: column; background: #4CAF50; border: none; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
+                  style="width: calc(25% + 1px); height: 65px; display: flex; flex-direction: column; background: #4CAF50; border: none; cursor: pointer; transition: all 0.2s ease; font-family: Helvetica, Arial, sans-serif; overflow: hidden;"
                   title="Take - Commit current cut (Ctrl+Enter)"
                 >
-                  <div style="background: #388E3C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">TAKE</div>
-                  <div style="background: #4CAF50; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">✂</div>
+                  <div style="background: #388E3C; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">TAKE</div>
+                  <div style="background: #4CAF50; color: white; height: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">✂</div>
                 </div>
               </div>
             </div>
@@ -1349,6 +1349,12 @@ export default {
     // Keyboard shortcuts setup
     const setupKeyboardShortcuts = () => {
       keyboardHandler.value = (event) => {
+        // SAFETY CHECK: Only handle keyboard events when modal is visible
+        // This prevents blocking space keys when the modal is mounted but not shown
+        if (!props.show) {
+          return
+        }
+
         // ESC key - always handle with confirmation modal
         if (event.key === 'Escape') {
           event.preventDefault()
@@ -1364,6 +1370,17 @@ export default {
               !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
             return
           }
+        }
+
+        // CRITICAL: Always prevent default for space to avoid page scroll
+        // This must happen BEFORE the videoPlayerRef check, so even if no video is loaded,
+        // pressing space won't scroll the page
+        // Using stopPropagation and stopImmediatePropagation to fully block the event
+        // from reaching the scrollable v-card-text container
+        if (event.key === ' ') {
+          event.preventDefault()
+          event.stopPropagation()
+          event.stopImmediatePropagation()
         }
 
         if (!videoPlayerRef.value) return
@@ -1906,6 +1923,21 @@ export default {
         return
       }
 
+      // Validate video upload - must have either a completed background upload (tempJobId)
+      // or an existing mediaUrl (for edit mode on already-processed SOTs)
+      if (!tempJobId.value && !mediaUrl.value) {
+        console.log('❌ Validation failed: No video uploaded')
+        showTopError('ERROR: Please upload a video file before submitting')
+        return
+      }
+
+      // If we have a blob URL but no tempJobId, the upload hasn't completed yet
+      if (blobUrl.value && !tempJobId.value && uploadProgress.value < 100) {
+        console.log('❌ Validation failed: Upload still in progress')
+        showTopError('ERROR: Video upload still in progress. Please wait...')
+        return
+      }
+
       // Set submitting flag
       isSubmitting.value = true
 
@@ -2044,9 +2076,21 @@ export default {
       }
     }
 
-    // Lifecycle
+    // Remove keyboard shortcuts (for when modal closes)
+    const removeKeyboardShortcuts = () => {
+      if (keyboardHandler.value) {
+        document.removeEventListener('keydown', keyboardHandler.value, true)
+        keyboardHandler.value = null
+        console.log('⌨️ SOT Modal keyboard shortcuts removed')
+      }
+    }
+
+    // Lifecycle - DON'T setup keyboard shortcuts here, only when modal is shown
     onMounted(() => {
-      setupKeyboardShortcuts()
+      // Only setup if modal is already showing (edge case)
+      if (props.show) {
+        setupKeyboardShortcuts()
+      }
     })
 
     // Watch for modal visibility changes
@@ -2054,18 +2098,20 @@ export default {
       () => props.show,
       (newValue, oldValue) => {
         console.log(`🔔 SOT Modal visibility changed: ${oldValue} → ${newValue}`)
-        if (!newValue && oldValue) {
-          console.log('🚪 Modal closed - checking why...')
-          console.trace('Modal close stack trace')
-        }
-        // Auto-focus slug field when modal opens
         if (newValue && !oldValue) {
+          // Modal opening - setup keyboard shortcuts
+          setupKeyboardShortcuts()
+          // Auto-focus slug field when modal opens
           nextTick(() => {
             if (slugField.value) {
               slugField.value.focus()
               console.log('🎯 Auto-focused slug field')
             }
           })
+        } else if (!newValue && oldValue) {
+          // Modal closing - remove keyboard shortcuts
+          console.log('🚪 Modal closed - removing keyboard shortcuts')
+          removeKeyboardShortcuts()
         }
       }
     )

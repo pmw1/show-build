@@ -122,6 +122,11 @@ export default {
     }
   },
   methods: {
+    handleEscapeKey(event) {
+      if (event.key === 'Escape' && this.isVisible) {
+        this.isVisible = false
+      }
+    },
     async handleLogin() {
       if (!this.formValid) return
 
@@ -185,10 +190,17 @@ export default {
   watch: {
     isVisible(newValue) {
       if (newValue) {
-        // Reset form when modal opens
+        // Reset form and add escape key listener when modal opens
         this.resetForm()
+        document.addEventListener('keydown', this.handleEscapeKey)
+      } else {
+        // Remove escape key listener when modal closes
+        document.removeEventListener('keydown', this.handleEscapeKey)
       }
     }
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleEscapeKey)
   }
 }
 </script>

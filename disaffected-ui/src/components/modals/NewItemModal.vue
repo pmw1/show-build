@@ -47,10 +47,11 @@
 
 <script>
 import { getColorValue } from '@/utils/themeColorMap.js';
+import { getAllItemTypes, mergeWithCustomTypes } from '@/config/itemTypes.js';
 
 export default {
   name: 'NewItemModal',
-  emits: ['update:show', 'submit'],
+  emits: ['update:show', 'submit', 'open-library-picker'],
   props: {
     show: {
       type: Boolean,
@@ -63,30 +64,35 @@ export default {
   },
   data() {
     return {
-      dynamicColors: {}
+      dynamicColors: {},
+      typeSettings: {},  // Content type settings (is_reusable flag)
+      customTypesLoaded: false
     }
   },
   computed: {
     allTypes() {
-      // All essential broadcast rundown types with dynamic colors
-      return [
-        { title: 'Cold Open', value: 'coldopen', color: this.getTypeColor('coldopen'), icon: 'mdi-play-circle-outline' },
-        { title: 'Tease', value: 'tease', color: this.getTypeColor('tease'), icon: 'mdi-eye-outline' },
-        { title: 'Segment', value: 'segment', color: this.getTypeColor('segment'), icon: 'mdi-television-classic' },
-        { title: 'Promo', value: 'promo', color: this.getTypeColor('promo'), icon: 'mdi-bullhorn' },
-        { title: 'Advertisement', value: 'ad', color: this.getTypeColor('ad'), icon: 'mdi-currency-usd' },
-        { title: 'Reader', value: 'reader', color: this.getTypeColor('reader'), icon: 'mdi-script-text' },
-        { title: 'Call to Action', value: 'cta', color: this.getTypeColor('cta'), icon: 'mdi-hand-pointing-right' },
-        { title: 'Interview', value: 'interview', color: this.getTypeColor('interview'), icon: 'mdi-account-voice' }
-      ]
+      // Get all item types (core + custom) from the merged type system
+      const types = getAllItemTypes();
+      // Map to display format with dynamic colors
+      return types.map(type => ({
+        title: type.title,
+        value: type.value,
+        color: this.getTypeColor(type.value) || type.color,
+        icon: type.icon,
+        isCore: type.isCore,
+        isReusable: type.isReusable || false
+      }));
     }
   },
   async mounted() {
     // Add ESC key listener to document
     document.addEventListener('keydown', this.handleKeydown);
-    
-    // Load dynamic colors
-    await this.loadDynamicColors();
+
+    // Load dynamic colors and type settings in parallel
+    await Promise.all([
+      this.loadDynamicColors(),
+      this.loadTypeSettings()
+    ]);
   },
   beforeUnmount() {
     // Clean up ESC key listener
@@ -97,7 +103,7 @@ export default {
       try {
         console.log('Loading dynamic colors for NewItemModal');
         const response = await fetch('/api/settings/colors?profile=default');
-        
+
         if (response.ok) {
           const data = await response.json();
           if (data.success && data.colors) {
@@ -109,22 +115,106 @@ export default {
         console.log('Could not load dynamic colors, using defaults:', error);
       }
     },
-    
+
+    async loadTypeSettings() {
+      try {
+        console.log('Loading content type settings for NewItemModal');
+        const response = await fetch('/api/content-library/type-settings/', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.settings) {
+            // Convert array to object keyed by type_name
+            this.typeSettings = {};
+            data.settings.forEach(setting => {
+              this.typeSettings[setting.type_name] = setting;
+            });
+            console.log('Type settings loaded:', this.typeSettings);
+
+            // Load custom types (is_core=false) and merge them into the type system
+            await this.loadCustomTypes();
+          }
+        }
+      } catch (error) {
+        console.log('Could not load type settings (content library may not be set up):', error);
+        // This is fine - content library is optional
+      }
+    },
+
+    async loadCustomTypes() {
+      try {
+        console.log('Loading custom types for NewItemModal');
+        const response = await fetch('/api/content-library/custom-types/', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.custom_types && data.custom_types.length > 0) {
+            // Merge custom types into the global type system
+            mergeWithCustomTypes(data.custom_types);
+            this.customTypesLoaded = true;
+            console.log('Custom types merged:', data.custom_types.length, 'types');
+            // Force computed property to re-evaluate
+            this.$forceUpdate();
+          }
+        }
+      } catch (error) {
+        console.log('Could not load custom types:', error);
+      }
+    },
+
+    isTypeReusable(typeValue) {
+      // Map UI type values to backend type names
+      const typeMapping = {
+        'ad': 'advertisement',
+        'coldopen': 'coldopen',
+        'tease': 'tease',
+        'segment': 'segment',
+        'promo': 'promo',
+        'reader': 'reader',
+        'cta': 'cta',
+        'interview': 'interview'
+      };
+      const backendType = typeMapping[typeValue] || typeValue;
+      const setting = this.typeSettings[backendType];
+      return setting?.is_reusable || false;
+    },
+
     getTypeColor(type) {
       // Return dynamic color if available, otherwise use themeColorMap fallback
       return this.dynamicColors[type] || getColorValue(type);
     },
-    
+
     handleKeydown(event) {
       // Handle ESC key when modal is open
       if (event.key === 'Escape' && this.show) {
         this.cancel()
       }
     },
+
     selectType(type) {
       console.log('Selected type:', type);
-      
-      // Create item with basic defaults
+
+      // Check if this type is configured as reusable
+      if (this.isTypeReusable(type.value)) {
+        console.log(`Type ${type.value} is reusable - opening library picker`);
+        // Emit event to open library picker instead of creating directly
+        this.$emit('open-library-picker', {
+          itemType: type.value,
+          displayName: type.title
+        });
+        this.cancel();
+        return;
+      }
+
+      // Create item with basic defaults (for non-reusable types)
       const item = {
         type: type.value,
         title: type.value === 'tease' ? '' : type.title,  // Tease title should be empty initially
@@ -141,10 +231,10 @@ export default {
         link: '',
         status: 'draft'  // Default status
       };
-      
+
       // Emit the item creation
       this.$emit('submit', item);
-      
+
       // Close modal
       this.cancel();
     },

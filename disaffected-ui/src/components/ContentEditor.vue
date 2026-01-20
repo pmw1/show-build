@@ -35,7 +35,7 @@
         @toggle-script-reading="handleToggleScriptReading"
         @request-new-episode-assetid="handleRequestNewEpisodeAssetID"
         @show-assetid-info="handleShowAssetIDInfo"
-        @generate-host-script="handleGenerateHostScript"
+        @generate-script="handleGenerateScript"
       />
 
       <!-- Main Content Area -->
@@ -99,9 +99,11 @@
           :save-state="episodeSaveState"
           :show-rundown-panel="showRundownPanel"
           :show-metadata-panel="showMetadataPanel"
-          @save="saveCurrentItem"
+          :is-segment-locked="segmentLockState?.isLocked?.value && !segmentLockState?.isMyLock?.value"
+          :lock-info="segmentLockState?.lockInfo?.value || { lockedBy: '', lockedAt: null }"
+          @save="() => saveCurrentItem(true)"
           @save-all="saveEverything"
-          @save-current="saveCurrentItem"
+          @save-current="() => saveCurrentItem(true)"
           @toggle-rundown-panel="showRundownPanel = !showRundownPanel"
           @toggle-metadata-panel="showMetadataPanel = !showMetadataPanel"
           @show-asset-browser-modal="showAssetBrowserModal = true"
@@ -111,6 +113,8 @@
           @show-fsq-modal="handleShowFsqModal"
           @show-sot-modal="handleShowSotModal"
           @edit-sot-cue="handleShowSotModal"
+          @reupload-sot-cue="handleReuploadSotCue"
+          @sot-job-complete="handleSotJobComplete"
           @edit-fsq-cue="handleEditFsqCue"
           @edit-gfx-cue="handleEditGfxCue"
           @show-vo-modal="handleShowVoModal"
@@ -141,14 +145,19 @@
         :episode-number="currentEpisodeNumber"
         :media-list-loading="generatingMediaList"
         :host-script-loading="generatingHostScript"
+        :save-state="episodeSaveState"
+        :version-history="versionHistory"
+        :loading-versions="loadingVersions"
         @update-field="handleMetadataFieldUpdate"
         @toggle-width="toggleMetadataWidth"
         @close="showMetadataPanel = false"
         @reset-fields="resetMetadataFields"
         @open-wpm-tool="showWpmTool = true"
-        @generate-host-script="handleGenerateHostScript"
+        @generate-script="handleGenerateScript"
+        @generate-host-script="handleGenerateScript"
         @generate-media-list="handleGenerateMediaList"
         @generate-prompter-files="handleGeneratePrompterFiles"
+        @restore-version="restoreToVersion"
       />
       
       <!-- Reopen Metadata Buttons (when panel is closed) - Tab style -->
@@ -209,7 +218,11 @@
       :initial-data="editingSotCueData"
       @submit="submitSot"
     />
-    <VoModal v-model:show="showVoModal" @submit="submitVo" />
+    <VoModal
+      v-model:show="showVoModal"
+      :episode="currentEpisodeNumber"
+      @submit="submitVo"
+    />
     <NatModal v-model:show="showNatModal" @submit="submitNat" />
     <RifModal v-model:show="showRifModal" @submit="submitRif" />
     <PkgModal v-model:show="showPkgModal" @submit="submitPkg" />
@@ -226,8 +239,18 @@
       :loading="creatingNewItem"
       :rundownItemTypes="rundownItemTypes"
       @submit="createNewItem"
+      @open-library-picker="handleOpenLibraryPicker"
     />
-    
+
+    <ContentLibraryPickerModal
+      v-if="showLibraryPickerModal"
+      v-model:show="showLibraryPickerModal"
+      :item-type="libraryPickerItemType"
+      :episode-number="paddedEpisodeNumber"
+      @select="handleLibraryItemSelected"
+      @create-new="handleCreateNewLibraryItem"
+    />
+
     <NewGFXModal
       v-model:show="showNewGFXModal"
       @submit="createGFXItem"
@@ -287,6 +310,74 @@
         <div class="loading-text" v-else>Loading Episode Content...</div>
       </div>
     </v-overlay>
+
+    <!-- Script Generation Overlay -->
+    <v-overlay
+      v-model="generatingHostScript"
+      persistent
+      class="script-generation-overlay"
+      :scrim="true"
+      scrim-color="rgba(0,0,0,0.7)"
+    >
+      <div class="script-gen-content">
+        <v-progress-circular
+          indeterminate
+          size="80"
+          width="8"
+          color="success"
+        ></v-progress-circular>
+        <div class="script-gen-title">🎬 Generating Host Script</div>
+        <div class="script-gen-episode">Episode {{ currentEpisodeNumber }}</div>
+        <div class="script-gen-status">{{ scriptGenStatus }}</div>
+        <div class="script-gen-steps">
+          <div
+            v-for="(step, idx) in scriptGenSteps"
+            :key="idx"
+            class="script-gen-step"
+            :class="{ 'step-active': idx === scriptGenCurrentStep, 'step-done': idx < scriptGenCurrentStep }"
+          >
+            <v-icon v-if="idx < scriptGenCurrentStep" color="success" size="small">mdi-check-circle</v-icon>
+            <v-progress-circular v-else-if="idx === scriptGenCurrentStep" indeterminate size="16" width="2" color="success"></v-progress-circular>
+            <v-icon v-else color="grey" size="small">mdi-circle-outline</v-icon>
+            <span>{{ step }}</span>
+          </div>
+        </div>
+      </div>
+    </v-overlay>
+
+    <!-- Media List Generation Overlay -->
+    <v-overlay
+      v-model="generatingMediaList"
+      persistent
+      class="script-generation-overlay"
+      :scrim="true"
+      scrim-color="rgba(0,0,0,0.7)"
+    >
+      <div class="script-gen-content media-list-theme">
+        <v-progress-circular
+          indeterminate
+          size="80"
+          width="8"
+          color="primary"
+        ></v-progress-circular>
+        <div class="script-gen-title">📋 Generating Media List</div>
+        <div class="script-gen-episode media-list-ep">Episode {{ currentEpisodeNumber }}</div>
+        <div class="script-gen-status">{{ mediaListStatus }}</div>
+        <div class="script-gen-steps">
+          <div
+            v-for="(step, idx) in mediaListSteps"
+            :key="idx"
+            class="script-gen-step"
+            :class="{ 'step-active-blue': idx === mediaListCurrentStep, 'step-done-blue': idx < mediaListCurrentStep }"
+          >
+            <v-icon v-if="idx < mediaListCurrentStep" color="primary" size="small">mdi-check-circle</v-icon>
+            <v-progress-circular v-else-if="idx === mediaListCurrentStep" indeterminate size="16" width="2" color="primary"></v-progress-circular>
+            <v-icon v-else color="grey" size="small">mdi-circle-outline</v-icon>
+            <span>{{ step }}</span>
+          </div>
+        </div>
+      </div>
+    </v-overlay>
   </div>
 </template>
 
@@ -312,6 +403,7 @@ import VoxModal from './modals/VoxModal.vue';
 import MusModal from './modals/MusModal.vue';
 import LiveModal from './modals/LiveModal.vue';
 import NewItemModal from './modals/NewItemModal.vue';
+import ContentLibraryPickerModal from './modals/ContentLibraryPickerModal.vue';
 import NewGFXModal from './modals/NewGFXModal.vue';
 import NewSOTModal from './modals/NewSOTModal.vue';
 import DeleteCueModal from './content-editor/modals/DeleteCueModal.vue';
@@ -327,6 +419,7 @@ import { useLLM } from '../composables/useLLM';
 import { useLLMState } from '../composables/useLLMState';
 import { useSOTProcessing } from '../composables/useSOTProcessing';
 import { useRequireEpisode } from '../composables/useRequireEpisode';
+import { useSegmentLock } from '../composables/useSegmentLock';
 
 export default {
   name: 'ContentEditor',
@@ -352,6 +445,7 @@ export default {
     PkgModal,
     ShowInfoHeader,
     NewItemModal,
+    ContentLibraryPickerModal,
     NewGFXModal,
     NewSOTModal,
     DeleteCueModal,
@@ -369,11 +463,16 @@ export default {
       handleModalCancelled
     } = useRequireEpisode();
 
+    // Segment locking system
+    const segmentLock = useSegmentLock();
+
     return {
       showEpisodeModal,
       episodeModalAction,
       handleEpisodeSelected,
-      handleModalCancelled
+      handleModalCancelled,
+      // Segment lock state and methods
+      segmentLockState: segmentLock
     };
   },
 
@@ -435,6 +534,10 @@ export default {
     if (this.checkEpisodeInterval) {
       clearInterval(this.checkEpisodeInterval);
     }
+    // Release any held segment locks
+    if (this.segmentLockState) {
+      this.segmentLockState.releaseLock();
+    }
   },
 
   created() {
@@ -448,9 +551,18 @@ export default {
       }
     }
     // Real-time autosave with 500ms debounce (aggressive)
-    this.debouncedAutoSave = debounce(this.saveCurrentItem, 500);
+    // Wrapper to capture the paragraph being edited when debounce starts
+    this.debouncedAutoSave = debounce(() => {
+      // Use the captured paragraph index from when typing started
+      this.saveCurrentItem(false, this.paragraphBeingEdited);
+    }, 500);
+
+    // Debounced capture for undo stack (300ms to group rapid typing)
+    this.debouncedCaptureUndoState = debounce(() => {
+      this.captureUndoState();
+    }, 300);
   },
-  
+
   watch: {
     // Real-time autosave on content changes
     rawMarkdownContent: {
@@ -458,7 +570,14 @@ export default {
         if (newVal !== oldVal && this.selectedItemIndex >= 0) {
           console.log('📝 Content changed, triggering autosave...');
           this.hasUnsavedChanges = true;
+          // Capture which paragraph is being edited NOW, before debounce delay
+          const editorPanel = this.$refs.editorPanel;
+          this.paragraphBeingEdited = editorPanel?.focusedParagraphIndex ?? editorPanel?.activelyEditingSegment ?? null;
+          console.log('📝 Captured paragraph being edited:', this.paragraphBeingEdited);
           this.debouncedAutoSave();
+
+          // Debounced capture for undo stack (groups rapid typing)
+          this.debouncedCaptureUndoState();
         }
       }
     },
@@ -468,7 +587,13 @@ export default {
         if (newVal !== oldVal && this.selectedItemIndex >= 0) {
           console.log('📝 Scratch changed, triggering autosave...');
           this.hasUnsavedChanges = true;
+          // Capture which paragraph is being edited NOW
+          const editorPanel = this.$refs.editorPanel;
+          this.paragraphBeingEdited = editorPanel?.focusedParagraphIndex ?? editorPanel?.activelyEditingSegment ?? null;
           this.debouncedAutoSave();
+
+          // Debounced capture for undo stack (groups rapid typing)
+          this.debouncedCaptureUndoState();
         }
       }
     },
@@ -542,6 +667,7 @@ export default {
       editingItemIndex: -1, // Index of item being edited (grows by 2%)
       generatingItemIndex: -1, // DEPRECATED - Use llmState instead
       hasUnsavedChanges: false,
+      paragraphBeingEdited: null, // Track which paragraph was being edited when autosave debounce started
       loadingRundown: true, // Start with loading overlay visible until episode loads
       loadingEpisode: false, // Prevent duplicate episode loading
       rundownError: null,
@@ -572,7 +698,29 @@ export default {
       saving: false,
       generatingMediaList: false, // Loading state for media list generation
       generatingHostScript: false, // Loading state for host script generation
-      
+
+      // Script generation progress
+      scriptGenStatus: 'Initializing...', // Current status message for script generation
+      scriptGenCurrentStep: 0, // Current step index
+      scriptGenSteps: [
+        'Collecting rundown items',
+        'Processing media assets',
+        'Building HTML content',
+        'Generating PDF',
+        'Finalizing'
+      ],
+
+      // Media list generation progress
+      mediaListStatus: 'Initializing...',
+      mediaListCurrentStep: 0,
+      mediaListSteps: [
+        'Scanning rundown items',
+        'Extracting media cues',
+        'Checking media URLs',
+        'Building media list',
+        'Generating HTML'
+      ],
+
       // Auto-save tracking
       itemContentBackup: {},
       autoSaveOnSwitch: true, // Auto-save when switching items instead of prompting
@@ -580,7 +728,18 @@ export default {
       hoveredItemIndex: -1, // Index of the item being hovered
       dragStartIndex: -1, // Index of the item being dragged
       hasUnsavedRundownChanges: false, // Track if any items in rundown need saving
-      
+
+      // Version History for Undo
+      versionHistory: [],        // List of versions for current item
+      loadingVersions: false,    // Loading state for version history
+
+      // Undo/Redo Stack (in-memory, client-side)
+      undoStack: [],             // Array of state snapshots for undo
+      redoStack: [],             // Array of undone states for redo
+      maxUndoHistory: 50,        // Limit memory usage (50 states max)
+      isUndoingRedoing: false,   // Prevent recursive captures during undo/redo
+      undoCaptureDebounceTimer: null, // Debounce timer for capturing undo states
+
       // Content
       scratchContent: '',
       rawMarkdownContent: '',
@@ -880,6 +1039,8 @@ Good night!
       showNewItemModal: false,
       showNewGFXModal: false,
       showNewSOTModal: false,
+      showLibraryPickerModal: false,
+      libraryPickerItemType: '',
       showRundownOptions: false,
 
       // Cue Modals
@@ -1263,6 +1424,182 @@ Try dropping an image or video file here!`
       }
     },
 
+    // ===== Undo/Redo Stack Management =====
+
+    /**
+     * Capture current state for undo stack
+     * Called on content changes (debounced) and before destructive operations
+     */
+    captureUndoState() {
+      // Don't capture if we're in the middle of an undo/redo operation
+      if (this.isUndoingRedoing) {
+        console.log('⏮️ Skipping undo capture - currently undoing/redoing');
+        return;
+      }
+
+      // Don't capture if no item is selected
+      if (this.selectedItemIndex < 0) {
+        return;
+      }
+
+      const snapshot = {
+        scriptContent: this.rawMarkdownContent,
+        scratchContent: this.scratchContent,
+        cursorPosition: this.getCursorPosition(),
+        timestamp: new Date(),
+        selectedItemIndex: this.selectedItemIndex
+      };
+
+      // Check if snapshot is different from last one (avoid duplicates)
+      const lastSnapshot = this.undoStack[this.undoStack.length - 1];
+      if (lastSnapshot &&
+          lastSnapshot.scriptContent === snapshot.scriptContent &&
+          lastSnapshot.scratchContent === snapshot.scratchContent) {
+        console.log('⏮️ Skipping duplicate undo capture');
+        return;
+      }
+
+      this.undoStack.push(snapshot);
+      this.redoStack = []; // Clear redo on new change
+
+      // Limit stack size
+      if (this.undoStack.length > this.maxUndoHistory) {
+        this.undoStack.shift();
+      }
+
+      console.log(`⏮️ Captured undo state (${this.undoStack.length} states in stack)`);
+    },
+
+    /**
+     * Get current cursor position from EditorPanel
+     * @returns {object|null} Cursor position data
+     */
+    getCursorPosition() {
+      const editorPanel = this.$refs.editorPanel;
+      if (!editorPanel) return null;
+
+      return {
+        segmentIndex: editorPanel.focusedParagraphIndex ?? editorPanel.activelyEditingSegment,
+        savedCursorState: editorPanel.savedCursorState
+      };
+    },
+
+    /**
+     * Restore cursor position in EditorPanel
+     * @param {object} position - Cursor position data from snapshot
+     */
+    restoreCursorPosition(position) {
+      if (!position) return;
+
+      const editorPanel = this.$refs.editorPanel;
+      if (!editorPanel) return;
+
+      // Try to restore the segment focus
+      if (position.segmentIndex !== null && position.segmentIndex !== undefined) {
+        editorPanel.focusedParagraphIndex = position.segmentIndex;
+        editorPanel.activelyEditingSegment = position.segmentIndex;
+
+        // If we have saved cursor state, restore it
+        if (position.savedCursorState) {
+          editorPanel.savedCursorState = position.savedCursorState;
+          this.$nextTick(() => {
+            editorPanel.restoreCursorPosition?.();
+          });
+        }
+      }
+    },
+
+    /**
+     * Undo last change
+     */
+    undo() {
+      if (this.undoStack.length === 0) {
+        console.log('⏮️ Undo stack empty - nothing to undo');
+        return;
+      }
+
+      // Save current state to redo stack before undoing
+      const currentState = {
+        scriptContent: this.rawMarkdownContent,
+        scratchContent: this.scratchContent,
+        cursorPosition: this.getCursorPosition(),
+        timestamp: new Date(),
+        selectedItemIndex: this.selectedItemIndex
+      };
+      this.redoStack.push(currentState);
+
+      // Restore previous state
+      this.isUndoingRedoing = true;
+      const previous = this.undoStack.pop();
+
+      // Only restore if same item is selected
+      if (previous.selectedItemIndex === this.selectedItemIndex) {
+        this.rawMarkdownContent = previous.scriptContent;
+        this.scratchContent = previous.scratchContent;
+
+        this.$nextTick(() => {
+          this.restoreCursorPosition(previous.cursorPosition);
+          this.isUndoingRedoing = false;
+        });
+      } else {
+        // Different item - just restore the flag
+        this.isUndoingRedoing = false;
+        console.log('⏮️ Undo skipped - different item was selected');
+      }
+
+      console.log(`⏮️ Undo performed (${this.undoStack.length} states remaining)`);
+    },
+
+    /**
+     * Redo last undone change
+     */
+    redo() {
+      if (this.redoStack.length === 0) {
+        console.log('⏭️ Redo stack empty - nothing to redo');
+        return;
+      }
+
+      // Save current state to undo stack before redoing
+      const currentState = {
+        scriptContent: this.rawMarkdownContent,
+        scratchContent: this.scratchContent,
+        cursorPosition: this.getCursorPosition(),
+        timestamp: new Date(),
+        selectedItemIndex: this.selectedItemIndex
+      };
+      this.undoStack.push(currentState);
+
+      // Restore redo state
+      this.isUndoingRedoing = true;
+      const next = this.redoStack.pop();
+
+      // Only restore if same item is selected
+      if (next.selectedItemIndex === this.selectedItemIndex) {
+        this.rawMarkdownContent = next.scriptContent;
+        this.scratchContent = next.scratchContent;
+
+        this.$nextTick(() => {
+          this.restoreCursorPosition(next.cursorPosition);
+          this.isUndoingRedoing = false;
+        });
+      } else {
+        // Different item - just restore the flag
+        this.isUndoingRedoing = false;
+        console.log('⏭️ Redo skipped - different item was selected');
+      }
+
+      console.log(`⏭️ Redo performed (${this.redoStack.length} states remaining)`);
+    },
+
+    /**
+     * Clear undo/redo stacks (call when switching items)
+     */
+    clearUndoStacks() {
+      this.undoStack = [];
+      this.redoStack = [];
+      console.log('⏮️ Undo/redo stacks cleared');
+    },
+
     // Get color for segment type from theme settings
     getTypeColor(segmentType) {
       // Map segment types to color keys in themeColorMap
@@ -1338,6 +1675,97 @@ Try dropping an image or video file here!`
         console.error('✅ SotModal opened - showSotModal set to true');
       }
     },
+    /**
+     * Handle re-upload request for SOT cue
+     * Opens SotModal with existing metadata but no mediaUrl (requires new video upload)
+     * This will REPLACE the existing cue block in place (not insert a new one)
+     */
+    handleReuploadSotCue(reuploadData) {
+      console.log('📤 Re-upload SOT cue:', reuploadData);
+      if (!this.showSotModal) {
+        // Store cue data for editing, but this is re-upload mode
+        // The reuploadData doesn't include mediaUrl, so user must upload new video
+        this.editingSotCueData = {
+          ...reuploadData,
+          // Mark as re-upload so submitSot knows to replace in place
+          isReupload: true,
+          // Store original assetId so we can find and replace the cue
+          originalAssetId: reuploadData.assetId,
+          // Ensure mediaUrl is not set so user has to upload a new file
+          mediaUrl: null,
+          thumbnailUrl: null,
+          // Clear trim times since they apply to the old video
+          trimStart: null,
+          trimEnd: null
+        };
+
+        console.log('📤 Opening SotModal in re-upload mode:', this.editingSotCueData);
+        console.log('📤 Original AssetID to replace:', reuploadData.assetId);
+        this.showSotModal = true;
+      }
+    },
+
+    /**
+     * Handle SOT job completion - refresh the cue block content from database
+     * This is triggered when a PlaceholderCueCard detects its job has completed
+     */
+    async handleSotJobComplete({ assetId }) {
+      console.log('🔄 SOT job completed, refreshing content for AssetID:', assetId);
+
+      try {
+        // Get the current rundown item ID
+        const currentItem = this.currentRundownItem;
+        if (!currentItem || !currentItem.db_id) {
+          console.warn('No current item to refresh (missing db_id)');
+          return;
+        }
+
+        // Fetch the updated script_content from the database
+        // Note: db_id is the database integer ID, not asset_id
+        const token = localStorage.getItem('auth-token');
+        const response = await fetch(`/api/episodes/rundown-item-by-id/${currentItem.db_id}`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch updated item: ${response.status}`);
+        }
+
+        const updatedItem = await response.json();
+        console.log('📥 Fetched updated item from database:', updatedItem.id);
+
+        // Update the local rundown item's script field using Vue.set pattern for reactivity
+        const itemIndex = this.rundownItems.findIndex(item => item.id === currentItem.id);
+        if (itemIndex >= 0) {
+          const newScript = updatedItem.script_content || updatedItem.script;
+          // Replace the entire item to ensure Vue detects the change
+          this.rundownItems.splice(itemIndex, 1, {
+            ...this.rundownItems[itemIndex],
+            script: newScript
+          });
+          console.log('✅ Updated rundownItems[', itemIndex, '] with new script content');
+
+          // If this item is currently selected, refresh the editor content
+          if (this.selectedItemIndex === itemIndex) {
+            // Rebuild rawMarkdownContent from the updated item
+            this.loadRawMarkdownContent(this.rundownItems[itemIndex]);
+            console.log('✅ Refreshed rawMarkdownContent for current item');
+
+            // CRITICAL: Force EditorPanel to invalidate its segment cache
+            // This ensures the cue cards re-render with the new data from processing
+            this.$nextTick(() => {
+              if (this.$refs.editorPanel && this.$refs.editorPanel.forceRefreshSegments) {
+                this.$refs.editorPanel.forceRefreshSegments();
+                console.log('✅ Forced EditorPanel segment refresh');
+              }
+            });
+          }
+        }
+
+      } catch (error) {
+        console.error('Failed to refresh SOT content:', error);
+      }
+    },
+
     handleShowVoModal() {
       if (!this.showVoModal) {
         this.showVoModal = true;
@@ -1788,6 +2216,8 @@ Try dropping an image or video file here!`
           // Load interface settings
           if (settings.interface) {
             this.interfaceSettings = { ...this.interfaceSettings, ...settings.interface }
+            // Also save to localStorage for EditorPanel to access
+            localStorage.setItem('showbuild_interface_settings', JSON.stringify(this.interfaceSettings))
             console.log('Interface settings loaded:', this.interfaceSettings)
           }
         }
@@ -2142,7 +2572,9 @@ Try dropping an image or video file here!`
       }
     },
     // Save just the current item (autosave - content only, no order changes)
-    async saveCurrentItem() {
+    // isManualSave: true for manual saves (creates version history), false for autosave
+    // paragraphToFlash: specific paragraph index to flash on success (captured when typing started)
+    async saveCurrentItem(isManualSave = false, paragraphToFlash = null) {
       if (this.selectedItemIndex < 0 || !this.currentRundownItem) {
         console.log('Cannot save - no valid item selected');
         return;
@@ -2208,7 +2640,8 @@ Try dropping an image or video file here!`
           `/api/episodes/${paddedId}/save-rundown`,
           {
             item: currentItem,
-            asset_id: assetId
+            asset_id: assetId,
+            save_type: isManualSave ? 'manual_save' : 'autosave'
           },
           { headers }
         );
@@ -2217,15 +2650,26 @@ Try dropping an image or video file here!`
           this.hasUnsavedChanges = false;
           console.log('✅ Current item autosaved successfully');
 
-          // Update local state with saved content
-          // CRITICAL: Clear rawMarkdown to prevent stale data on next load
-          // The script field should be the source of truth, not rawMarkdown
-          this.rundownItems[this.selectedItemIndex] = {
-            ...this.rundownItems[this.selectedItemIndex],
-            script: this.parsedContent.scriptContent,
-            scratch: this.scratchContent,
-            rawMarkdown: null  // Clear to prevent stale frontmatter-included content
-          };
+          // Flash the specific paragraph that was being edited (not necessarily the currently focused one)
+          console.log('💾 Autosave complete, attempting to flash paragraph:', paragraphToFlash);
+          const editorPanel = this.$refs.editorPanel;
+          if (editorPanel && editorPanel.flashParagraph && paragraphToFlash !== null && paragraphToFlash !== undefined) {
+            console.log('💾 Calling flashParagraph for index:', paragraphToFlash);
+            editorPanel.flashParagraph(paragraphToFlash, 'success', 3);
+          } else {
+            console.log('💾 Skipping flash - no valid paragraph index or editorPanel not ready');
+          }
+
+          // Update local state with saved content IN-PLACE
+          // CRITICAL: Mutate the existing object instead of creating a new reference
+          // Creating a new reference triggers Vue watchers in EditorPanel,
+          // causing re-renders that lose focus and cursor position
+          const currentItem = this.rundownItems[this.selectedItemIndex];
+          if (currentItem) {
+            currentItem.script = this.parsedContent.scriptContent;
+            currentItem.scratch = this.scratchContent;
+            currentItem.rawMarkdown = null;  // Clear to prevent stale frontmatter-included content
+          }
         }
 
       } catch (error) {
@@ -2234,6 +2678,143 @@ Try dropping an image or video file here!`
         throw error; // Re-throw so EditorPanel can show red flash
       } finally {
         this.saving = false;
+      }
+    },
+
+    // Fetch version history for current rundown item
+    async fetchVersionHistory() {
+      if (!this.currentRundownItem) {
+        this.versionHistory = [];
+        return;
+      }
+
+      const assetId = this.currentRundownItem.asset_id || this.currentRundownItem.AssetID;
+      if (!assetId) {
+        this.versionHistory = [];
+        return;
+      }
+
+      this.loadingVersions = true;
+      try {
+        const headers = this.getAuthHeaders();
+        const response = await axios.get(`/api/episodes/rundown-item/${assetId}/versions`, { headers });
+
+        if (response.data && response.data.versions) {
+          this.versionHistory = response.data.versions;
+          console.log(`📜 Loaded ${this.versionHistory.length} versions for ${assetId}`);
+        } else {
+          this.versionHistory = [];
+        }
+      } catch (error) {
+        console.error('Failed to fetch version history:', error);
+        this.versionHistory = [];
+      } finally {
+        this.loadingVersions = false;
+      }
+    },
+
+    // Undo last change - restore to previous version
+    async undoLastChange() {
+      if (!this.currentRundownItem) {
+        notifyUserStandard('No item selected', NOTIFICATION_COLORS.WARNING, 2000);
+        return;
+      }
+
+      const assetId = this.currentRundownItem.asset_id || this.currentRundownItem.AssetID;
+      if (!assetId) {
+        notifyUserStandard('Cannot undo - item has no asset ID', NOTIFICATION_COLORS.WARNING, 2000);
+        return;
+      }
+
+      // Refresh version history first
+      await this.fetchVersionHistory();
+
+      if (this.versionHistory.length < 2) {
+        notifyUserStandard('No previous version to restore', NOTIFICATION_COLORS.INFO, 2000);
+        return;
+      }
+
+      // Get the second-to-last version (current is the latest)
+      const previousVersion = this.versionHistory[1];
+
+      try {
+        const headers = this.getAuthHeaders();
+        const response = await axios.post(
+          `/api/episodes/rundown-item/${assetId}/versions/${previousVersion.version_number}/restore`,
+          {},
+          { headers }
+        );
+
+        if (response.data && response.data.success) {
+          notifyUserStandard(`Restored to version ${previousVersion.version_number}`, NOTIFICATION_COLORS.SUCCESS, 2000);
+
+          // Reload the current item to reflect the restored content
+          await this.loadEpisode(this.currentEpisodeNumber);
+
+          // Re-select the same item
+          const restoredItemIndex = this.rundownItems.findIndex(
+            item => (item.asset_id || item.AssetID) === assetId
+          );
+          if (restoredItemIndex >= 0) {
+            await this.selectItem(restoredItemIndex);
+          }
+
+          // Refresh version history
+          await this.fetchVersionHistory();
+        } else {
+          notifyUserStandard('Failed to restore version', NOTIFICATION_COLORS.ERROR, 3000);
+        }
+      } catch (error) {
+        console.error('Undo failed:', error);
+        const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
+        notifyUserStandard(`Undo failed: ${errorMsg}`, NOTIFICATION_COLORS.ERROR, 3000);
+      }
+    },
+
+    // Restore to a specific version (used by MetadataPanel)
+    async restoreToVersion(versionNumber) {
+      if (!this.currentRundownItem) {
+        notifyUserStandard('No item selected', NOTIFICATION_COLORS.WARNING, 2000);
+        return;
+      }
+
+      const assetId = this.currentRundownItem.asset_id || this.currentRundownItem.AssetID;
+      if (!assetId) {
+        notifyUserStandard('Cannot restore - item has no asset ID', NOTIFICATION_COLORS.WARNING, 2000);
+        return;
+      }
+
+      try {
+        const headers = this.getAuthHeaders();
+        const response = await axios.post(
+          `/api/episodes/rundown-item/${assetId}/versions/${versionNumber}/restore`,
+          {},
+          { headers }
+        );
+
+        if (response.data && response.data.success) {
+          notifyUserStandard(`Restored to version ${versionNumber}`, NOTIFICATION_COLORS.SUCCESS, 2000);
+
+          // Reload the current item to reflect the restored content
+          await this.loadEpisode(this.currentEpisodeNumber);
+
+          // Re-select the same item
+          const restoredItemIndex = this.rundownItems.findIndex(
+            item => (item.asset_id || item.AssetID) === assetId
+          );
+          if (restoredItemIndex >= 0) {
+            await this.selectItem(restoredItemIndex);
+          }
+
+          // Refresh version history
+          await this.fetchVersionHistory();
+        } else {
+          notifyUserStandard('Failed to restore version', NOTIFICATION_COLORS.ERROR, 3000);
+        }
+      } catch (error) {
+        console.error('Restore failed:', error);
+        const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
+        notifyUserStandard(`Restore failed: ${errorMsg}`, NOTIFICATION_COLORS.ERROR, 3000);
       }
     },
 
@@ -2375,7 +2956,8 @@ Try dropping an image or video file here!`
 
         const rundownPayload = {
           items: processedItems,
-          episode_number: paddedId
+          episode_number: paddedId,
+          save_type: 'manual_save'  // Always manual save for saveRundownItems (creates version history)
         };
 
         console.log('🚀 Sending to /save-rundown endpoint...');
@@ -2827,10 +3409,25 @@ Try dropping an image or video file here!`
         }
       }
 
-      // Unregister previous active edit
+      // Clear undo/redo stacks when switching items (undo is item-specific)
+      if (this.selectedItemIndex !== index) {
+        this.clearUndoStacks();
+      }
+
+      // Unregister previous active edit and release lock
       if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
         const prevAssetId = this.rundownItems[this.selectedItemIndex].asset_id;
         if (prevAssetId) {
+          // Release segment lock first
+          if (this.segmentLockState && this.segmentLockState.currentAssetId.value === prevAssetId) {
+            try {
+              await this.segmentLockState.releaseLock();
+              console.log('🔓 Released segment lock for', prevAssetId);
+            } catch (err) {
+              console.warn('Failed to release segment lock:', err);
+            }
+          }
+          // Unregister active edit
           try {
             await axios.post('/api/housekeeping/active-edit/unregister',
               { asset_id: prevAssetId },
@@ -2868,6 +3465,18 @@ Try dropping an image or video file here!`
         console.log('🔍 Loading item at index', index, ':', itemToLoad?.title || itemToLoad?.slug);
         this.loadItemContent(itemToLoad);
 
+        // Reset scroll position to top when switching items
+        this.$nextTick(() => {
+          const scrollWrapper = document.querySelector('.scrollable-content-wrapper');
+          if (scrollWrapper) {
+            scrollWrapper.scrollTop = 0;
+            console.log('📜 Reset scroll to top for new item');
+          }
+        });
+
+        // Fetch version history for undo functionality
+        this.fetchVersionHistory();
+
         // Register new active edit
         const newAssetId = itemToLoad.asset_id;
         if (newAssetId) {
@@ -2879,6 +3488,17 @@ Try dropping an image or video file here!`
             console.log('✅ Registered active edit for', newAssetId);
           } catch (err) {
             console.warn('Failed to register active edit:', err);
+          }
+
+          // Try to acquire segment lock
+          if (this.segmentLockState) {
+            const lockResult = await this.segmentLockState.acquireLock(newAssetId);
+            if (lockResult.success) {
+              console.log('🔒 Acquired segment lock for', newAssetId);
+            } else if (lockResult.locked) {
+              console.log('🔒 Segment locked by:', lockResult.lockedBy);
+              // Lock info is automatically updated in segmentLockState
+            }
           }
         }
       } else {
@@ -2975,8 +3595,14 @@ Try dropping an image or video file here!`
     },
     
     handleKeydown(event) {
-      // Check if user is in editing mode (focused on input/textarea)
-      const isInTextField = ['INPUT', 'TEXTAREA'].includes(event.target.tagName);
+      // Allow space key to pass through to contenteditable elements
+      if ((event.key === ' ' || event.code === 'Space') && event.target.isContentEditable) {
+        return;
+      }
+
+      // Check if user is in editing mode (focused on input/textarea/contenteditable)
+      const isInTextField = ['INPUT', 'TEXTAREA'].includes(event.target.tagName) ||
+                            event.target.isContentEditable;
 
       // Check if any modal is open
       const hasModalOpen = this.showImgCueModal || this.showGfxModal || this.showFsqModal ||
@@ -2985,6 +3611,22 @@ Try dropping an image or video file here!`
                            this.showLiveModal || this.showNewItemModal || this.showNewGFXModal ||
                            this.showNewSOTModal || this.showDeleteCueModal ||
                            this.showAssetBrowserModal || this.showTemplateManagerModal;
+
+      // UNDO (Ctrl+Z / Cmd+Z) - Works in all modes, including text fields
+      if ((event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.undo();
+        return;
+      }
+
+      // REDO (Ctrl+Y / Cmd+Y or Ctrl+Shift+Z / Cmd+Shift+Z)
+      if ((event.ctrlKey || event.metaKey) && (event.key === 'y' || (event.key === 'z' && event.shiftKey) || (event.key === 'Z' && event.shiftKey))) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.redo();
+        return;
+      }
 
       // ESCAPE KEY - Close modal if one is open, otherwise exit editing mode
       if (event.key === 'Escape') {
@@ -3060,6 +3702,17 @@ Try dropping an image or video file here!`
         this.saveEverything();
         return;
       }
+
+      // Handle Ctrl+Z for undo (restore to previous version)
+      if (event.ctrlKey && !event.shiftKey && event.key === 'z' && !event.altKey && !event.metaKey) {
+        // Only intercept Ctrl+Z when NOT in a text field (allow browser undo in text fields)
+        if (!isInTextField) {
+          event.preventDefault();
+          this.undoLastChange();
+          return;
+        }
+      }
+
       // Handle Ctrl+Shift+R for reloading rundown from database
       if (event.ctrlKey && event.shiftKey && event.key === 'R' && !event.altKey && !event.metaKey) {
         event.preventDefault();
@@ -3178,8 +3831,9 @@ Try dropping an image or video file here!`
       }
       // Handle Delete key for deleting selected rundown item
       else if (event.key === 'Delete' && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        // Only trigger if not in a text input/textarea
-        if (!['INPUT', 'TEXTAREA'].includes(event.target.tagName)) {
+        // Only trigger if NOT in any editable field (INPUT, TEXTAREA, or contenteditable)
+        // CRITICAL: Must check isInTextField to avoid deleting segment when user is editing text
+        if (!isInTextField) {
           event.preventDefault();
           this.deleteSelectedItem();
         }
@@ -3187,11 +3841,13 @@ Try dropping an image or video file here!`
     },
     
     async deleteSelectedItem(itemToDelete = null) {
-      console.log('=== DELETE DEBUG START ===');
+      // CRITICAL: Capture undo state before destructive operation
+      this.captureUndoState();
+
+      console.log('=== DELETE BY ASSET_ID START ===');
       console.log('selectedItemIndex:', this.selectedItemIndex);
       console.log('rundownItems length:', this.rundownItems.length);
       console.log('itemToDelete parameter:', itemToDelete);
-      console.log('currentRundownItem:', this.currentRundownItem);
 
       // Use passed item or fall back to current selection
       const item = itemToDelete || this.currentRundownItem;
@@ -3213,90 +3869,39 @@ Try dropping an image or video file here!`
         return;
       }
 
+      // Get asset_id - this is the reliable unique identifier
+      const assetId = item.asset_id || item.id;
+      if (!assetId) {
+        console.error('No asset_id found for item:', item);
+        alert('Cannot delete item: missing asset_id');
+        return;
+      }
+
       const episodeNumber = this.padEpisodeNumber(this.currentEpisodeNumber);
 
-      console.log('Item to delete (index=' + itemIndex + '):', item);
-
-      // Generate filename if it doesn't exist
-      let filename = item.filename;
-      if (!filename) {
-        // Fallback filename generation: "order slug~assetid.md"
-        const order = item.order || (itemIndex + 1) * 10;
-        const slug = (item.slug || item.title || 'untitled').toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-');
-        const assetId = item.asset_id || item.AssetID || item.id || 'unknown';
-        filename = `${order} ${slug}~${assetId}.md`;
-      }
-      
-      console.log('Attempting to delete item:', {
-        filename,
+      console.log('Deleting item by asset_id:', {
+        assetId,
         slug: item.slug,
         title: item.title,
-        AssetID: item.AssetID,
-        order: item.order
+        index: itemIndex
       });
-      
+
       // Confirmation already handled by RundownPanel modal
-      
+
       try {
-        // Debug: Check all available localStorage keys
-        console.log('All localStorage keys:', Object.keys(localStorage));
-        console.log('localStorage contents:', {
-          api_key: localStorage.getItem('api_key'),
-          auth_token: localStorage.getItem('auth_token'), 
-          token: localStorage.getItem('token'),
-          'auth-token': localStorage.getItem('auth-token'),
-          jwt: localStorage.getItem('jwt'),
-          authToken: localStorage.getItem('authToken')
-        });
-        
-        // Get authentication credentials
-        let token = null;
-        let apiKey = localStorage.getItem('api_key');
-        
-        // Try to get token from store if available
-        try {
-          if (this.$store && this.$store.state && this.$store.state.auth) {
-            token = this.$store.state.auth.token;
-            console.log('Found token in store:', token ? 'YES' : 'NO');
-          }
-        } catch (e) {
-          console.log('Store not available, using localStorage fallback');
-        }
-        
-        // Also try localStorage as fallback for token with multiple possible keys
-        if (!token) {
-          token = localStorage.getItem('auth_token') || 
-                   localStorage.getItem('token') || 
-                   localStorage.getItem('auth-token') || 
-                   localStorage.getItem('jwt') || 
-                   localStorage.getItem('authToken');
-          console.log('Token from localStorage:', token ? 'FOUND' : 'NOT FOUND');
-        }
-        
-        const headers = {
-          'Content-Type': 'application/json'
-        };
-        
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-          console.log('Using JWT token for authentication');
-        } else if (apiKey) {
-          headers['X-API-Key'] = apiKey;
-          console.log('Using API key for authentication');
-        } else {
-          console.warn('No authentication credentials found');
-          console.log('Need to check how user is currently authenticated for other API calls');
-        }
-        
-        console.log('Delete request headers:', headers);
-        
-        // Delete from database and file system
-        const response = await fetch(`/api/episodes/${episodeNumber}/rundown/${filename}`, {
+        // Get authentication headers using existing helper
+        const headers = this.getAuthHeaders();
+
+        // DELETE BY ASSET_ID - Database-first approach (more robust)
+        const response = await fetch(`/api/episodes/${episodeNumber}/rundown/by-asset-id/${assetId}`, {
           method: 'DELETE',
           headers
         });
-        
+
         if (response.ok) {
+          const result = await response.json();
+          console.log('Delete response:', result);
+
           const deletedIndex = itemIndex;
 
           // Remove from local rundownItems array
@@ -3331,7 +3936,7 @@ Try dropping an image or video file here!`
             }
           }
 
-          console.log(`Deleted item: ${item.slug || item.title}`);
+          console.log(`✅ Deleted item: ${item.slug || item.title} (asset_id: ${assetId})`);
 
           // Recalculate order for remaining items after deletion
           await this.saveRundownItems({
@@ -3341,9 +3946,9 @@ Try dropping an image or video file here!`
           });
           console.log('✅ Rundown order recalculated after deletion');
         } else {
-          const error = await response.text();
-          console.error('Failed to delete item:', error);
-          alert('Failed to delete item. Please check the console for details.');
+          const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+          console.error('Failed to delete item:', errorData);
+          alert(`Failed to delete item: ${errorData.detail || 'Unknown error'}`);
         }
       } catch (error) {
         console.error('Error deleting item:', error);
@@ -3546,8 +4151,11 @@ Try dropping an image or video file here!`
 
     // Delete the confirmed cue block
     deleteCue(deleteInfo) {
+      // CRITICAL: Capture undo state before destructive operation
+      this.captureUndoState();
+
       console.log('Deleting cue:', deleteInfo);
-      
+
       // Find the textarea that was active
       const textareas = document.querySelectorAll('textarea');
       let activeTextarea = null;
@@ -4009,9 +4617,19 @@ Try dropping an image or video file here!`
     async submitSot(data) {
       try {
         console.log('🎬🎬🎬 ===============================================');
-        console.log('🎬 submitSot CALLED - Starting SOT cue insertion');
+        console.log('🎬 submitSot CALLED - Starting SOT cue handling');
         console.log('🎬 AssetID:', data.assetId);
         console.log('📋 Full SOT data received:', JSON.stringify(data, null, 2));
+
+        // Check if this is a re-upload (replacing existing cue in place)
+        const isReupload = this.editingSotCueData?.isReupload;
+        const originalAssetId = this.editingSotCueData?.originalAssetId;
+
+        if (isReupload) {
+          console.log('📤 RE-UPLOAD MODE - Will replace existing cue in place');
+          console.log('📤 Original AssetID to find:', originalAssetId);
+          console.log('📤 New AssetID:', data.assetId);
+        }
 
         // Build the SOT cue block
         let sotCue = `<!-- Begin Cue -->
@@ -4047,7 +4665,75 @@ Try dropping an image or video file here!`
         this.showSotModal = false;
         console.log('🚪 SOT modal closed');
 
-        // Try placeholder-based insertion first, fall back to paragraph index
+        // RE-UPLOAD: Replace existing cue in place instead of inserting new one
+        if (isReupload && originalAssetId) {
+          console.log('📤 Replacing existing cue block in script content...');
+
+          // Find and replace the existing cue block by its AssetID
+          // The cue block format is: <!-- Begin Cue --> ... [AssetID: xxx] ... <!-- End Cue -->
+          const scriptContent = this.rawMarkdownContent || '';
+
+          // Build regex to find the entire cue block containing the original AssetID
+          // This regex matches from <!-- Begin Cue --> to <!-- End Cue --> that contains the specific AssetID
+          // Note: The field name in cue blocks is "Assetid" (lowercase 'id'), case-insensitive match
+          const escapedAssetId = originalAssetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+          console.log('📤 Script content length:', scriptContent.length);
+          console.log('📤 Looking for AssetID:', originalAssetId);
+          console.log('📤 Escaped AssetID:', escapedAssetId);
+
+          // First try to find just the assetid line to verify it exists
+          const assetIdLineRegex = new RegExp(`\\[Assetid:\\s*${escapedAssetId}\\]`, 'i');
+          const assetIdMatch = scriptContent.match(assetIdLineRegex);
+          console.log('📤 AssetID line found:', !!assetIdMatch, assetIdMatch ? assetIdMatch[0] : 'NOT_FOUND');
+
+          // Full cue block regex - matches from <!-- Begin Cue --> to <!-- End Cue --> containing the AssetID
+          const cueBlockRegex = new RegExp(
+            `<!--\\s*Begin Cue\\s*-->[\\s\\S]*?\\[Assetid:\\s*${escapedAssetId}\\][\\s\\S]*?<!--\\s*End Cue\\s*-->\\s*\\n?`,
+            'i'
+          );
+
+          const match = scriptContent.match(cueBlockRegex);
+
+          if (match) {
+            console.log('✅ Found existing cue block to replace');
+            console.log('📍 Match position:', match.index, 'length:', match[0].length);
+
+            // Replace the old cue block with the new one
+            const updatedContent = scriptContent.replace(cueBlockRegex, sotCue);
+
+            // Update the script content via the rawMarkdownContent property
+            // This is reactive and will propagate to EditorPanel via the scriptContent prop
+            this.rawMarkdownContent = updatedContent;
+
+            console.log('✅ Cue block replaced successfully in place');
+          } else {
+            console.warn('⚠️ Could not find existing cue block with AssetID:', originalAssetId);
+            console.warn('⚠️ Will insert as new cue instead');
+            // Fall through to normal insertion below
+          }
+
+          // Clear the re-upload state
+          this.editingSotCueData = null;
+
+          // Skip normal insertion if we successfully replaced
+          if (match) {
+            this.hasUnsavedChanges = true;
+            this.checkForUnsavedRundownChanges();
+
+            console.log('💾 Saving script content to database before processing...');
+            await this.saveCurrentItem();
+            console.log('💾 Save complete - updated cue block is now in database');
+
+            console.log('🔄 About to trigger SOT processing...');
+            await this.triggerSOTProcessing(data);
+            console.log('🎬🎬🎬 submitSot (RE-UPLOAD) COMPLETED');
+            console.log('🎬🎬🎬 ===============================================');
+            return;
+          }
+        }
+
+        // NORMAL INSERTION: Try placeholder-based insertion first, fall back to paragraph index
         let insertedViaPlaceholder = false;
 
         if (this.cuePlaceholderId) {
@@ -4185,19 +4871,30 @@ Try dropping an image or video file here!`
     async submitVo(data) {
       try {
         console.log('🎬 VO Modal Submit');
-        console.log('📋 VO data received:', data);
+        console.log('📋 VO data received:', JSON.stringify(data, null, 2));
 
-        // Build the VO cue
-        const voCue = `[VO: ${data.text}${data.duration ? ' | ' + data.duration : ''}${data.timestamp ? ' | ' + data.timestamp : ''}]\n`;
+        // Build the VO cue block (similar to SOT but without transcription/credits)
+        let voCue = `<!-- Begin Cue -->
+[Type: VO]
+[AssetID: ${data.assetID || data.assetId || ''}]
+[Slug: ${data.slug || ''}]
+[MediaURL: ${data.mediaURL || data.mediaUrl || ''}]
+[Duration: ${data.duration || ''}]
+[TrimStart: ${data.trimStart || '00:00:00'}]
+[TrimEnd: ${data.trimEnd || '00:00:00'}]
+[ProcessingStatus: ${data.taskId ? 'Processing' : 'Pending'}]
+<!-- End Cue -->
 
-        console.log('📝 Built VO cue, sending to EditorPanel for placement insertion');
+`;
+
+        console.log('📝 Built VO cue block (length:', voCue.length, 'chars)');
+        console.log('📝 Cue block content:\n', voCue);
 
         // Close modal first
         this.showVoModal = false;
+        console.log('🚪 VO modal closed');
 
         // Send cue data to EditorPanel for placement-based insertion
-        // EditorPanel will activate placement overlay for user to click drop zone
-        // After user clicks, the cue will be inserted and we'll auto-save
         if (this.$refs.editorPanel) {
           await this.$refs.editorPanel.handleVoCueSubmit(voCue);
           console.log('✅ VO cue data sent to EditorPanel - placement overlay now active');
@@ -4599,6 +5296,66 @@ Try dropping an image or video file here!`
       console.log('Setting showNewItemModal to true...');
       this.showNewItemModal = true;
       console.log('showNewItemModal is now:', this.showNewItemModal);
+    },
+
+    // Handle opening library picker when a reusable type is selected
+    handleOpenLibraryPicker(data) {
+      console.log('Opening library picker for:', data);
+      this.libraryPickerItemType = data.itemType;
+      this.showLibraryPickerModal = true;
+    },
+
+    // Handle library item selection
+    async handleLibraryItemSelected(data) {
+      console.log('Library item selected:', data);
+
+      try {
+        const paddedEpisodeNumber = this.padEpisodeNumber(this.currentEpisodeNumber);
+        const calculatedIndex = this.calculateNewItemIndex(data.libraryItem.item_type);
+
+        // Place the library content in the rundown via API
+        const response = await axios.post(
+          `/api/content-library/place/${paddedEpisodeNumber}`,
+          {
+            library_asset_id: data.libraryItem.asset_id,
+            order_in_rundown: calculatedIndex
+          }
+        );
+
+        if (response.data && response.data.success) {
+          console.log('Library content placed successfully:', response.data);
+
+          // Reload rundown to show the new placement
+          await this.reloadFromDatabase();
+
+          // Show success notification
+          const message = `Added "${data.libraryItem.title}" to rundown`;
+          notifyUserStandard(message, NOTIFICATION_COLORS.SUCCESS, 2000);
+        } else {
+          throw new Error(response.data?.message || 'Failed to place content');
+        }
+      } catch (error) {
+        console.error('Error placing library content:', error);
+        const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
+        notifyUserStandard(`Failed to add content: ${errorMsg}`, NOTIFICATION_COLORS.ERROR, 3000);
+      }
+    },
+
+    // Handle request to create new library item
+    handleCreateNewLibraryItem(data) {
+      console.log('Create new library item requested:', data);
+      // For now, fall back to regular item creation
+      // Later this could open a dedicated library item creation modal
+      const itemData = {
+        type: data.itemType,
+        title: '',
+        subtitle: '',
+        slug: '',
+        duration: '00:00:30:00',
+        description: '',
+        status: 'draft'
+      };
+      this.createNewItem(itemData);
     },
 
     // Handle region selection from RundownPanel
@@ -5104,17 +5861,15 @@ Try dropping an image or video file here!`
     },
 
     handleDescriptionChange(newDescription) {
-      console.log('Description change from header:', newDescription);
-      if (this.currentRundownItem) {
-        this.currentRundownItem.description = newDescription;
-        this.onMetadataChange({ field: 'description', value: newDescription });
-      }
+      console.log('Episode description change from header:', newDescription);
+      this.currentEpisodeDescription = newDescription;
+      this.hasUnsavedChanges = true;
     },
 
     handleEpisodeTitleChange(newEpisodeTitle) {
       console.log('Episode title change from header:', newEpisodeTitle);
       this.currentEpisodeTitle = newEpisodeTitle;
-      // You can add additional logic here to save to episode metadata
+      this.hasUnsavedChanges = true;
     },
 
     handleGuestChange(newGuest) {
@@ -5157,124 +5912,180 @@ Try dropping an image or video file here!`
       }
     },
 
-    // Generate host script for current episode
-    async handleGenerateHostScript() {
+    // Generate script for current episode with specified preset
+    async handleGenerateScript(preset = 'host_full') {
+      console.log('🎬 handleGenerateScript called with preset:', preset);
+      console.log('🎬 currentEpisodeNumber:', this.currentEpisodeNumber);
+
       if (!this.currentEpisodeNumber) {
         this.$toast.warning('No episode loaded');
         return;
       }
 
+      // Reset progress state
+      this.scriptGenCurrentStep = 0;
+      this.scriptGenStatus = 'Starting script generation...';
       this.generatingHostScript = true;
 
+      // Preset display names
+      const presetNames = {
+        'host_full': 'Host Script (Full)',
+        'host_clean': 'Host Script (Clean)',
+        'production': 'Production Rundown'
+      };
+      const presetName = presetNames[preset] || preset;
+
+      // Animate through steps (simulated progress since API is single call)
+      const animateProgress = () => {
+        const statusMessages = [
+          'Collecting rundown items...',
+          'Processing media assets...',
+          'Building HTML content...',
+          'Generating PDF...',
+          'Finalizing...'
+        ];
+
+        let step = 0;
+        const interval = setInterval(() => {
+          if (step < 4 && this.generatingHostScript) {
+            step++;
+            this.scriptGenCurrentStep = step;
+            this.scriptGenStatus = statusMessages[step];
+          } else {
+            clearInterval(interval);
+          }
+        }, 800); // Advance every 800ms
+
+        return interval;
+      };
+
+      const progressInterval = animateProgress();
+
       try {
-        console.log('🎬 Generating host script for episode:', this.currentEpisodeNumber);
-        this.$toast.info('Generating host script...');
-        const response = await this.$axios.post(`/scripts/host/${this.currentEpisodeNumber}`);
+        console.log(`🎬 Generating ${presetName} for episode:`, this.currentEpisodeNumber);
+
+        const response = await this.$axios.post(`/scripts/generate/${this.currentEpisodeNumber}?preset=${preset}`);
         console.log('🎬 Script generation response:', response.data);
 
+        // Complete progress animation
+        clearInterval(progressInterval);
+        this.scriptGenCurrentStep = 5;
+        this.scriptGenStatus = 'Complete!';
+
         if (response.data.success) {
-          this.$toast.success(`Host script generated: ${response.data.output_path}`);
+          const revision = response.data.revision || 1;
+          const revisionText = revision > 1 ? ` (Revision ${revision})` : '';
+          const filename = response.data.pdf_path ? response.data.pdf_path.split('/').pop() : '';
+
+          // Brief delay to show completion
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          this.$toast.success(`✅ ${presetName} generated${revisionText}!\n${filename}`, { timeout: 5000 });
+
           // Refresh the generated scripts list in MetadataPanel
           if (this.$refs.metadataPanel && this.$refs.metadataPanel.loadGeneratedDocuments) {
             this.$refs.metadataPanel.loadGeneratedDocuments();
           }
         } else {
-          this.$toast.error(`Error: ${response.data.error}`);
+          this.scriptGenStatus = 'Error!';
+          this.$toast.error(`❌ Error generating script: ${response.data.error}`, { timeout: 8000 });
         }
       } catch (error) {
+        clearInterval(progressInterval);
+        this.scriptGenStatus = 'Error!';
         console.error('🎬 Script generation failed:', error);
         console.error('🎬 Error response:', error.response);
-        this.$toast.error(`Failed to generate script: ${error.response?.data?.detail || error.message}`);
+        const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message;
+        this.$toast.error(`❌ Failed to generate script: ${errorMsg}`, { timeout: 8000 });
       } finally {
-        this.generatingHostScript = false;
+        // Reset after a brief delay so user sees completion state
+        setTimeout(() => {
+          this.generatingHostScript = false;
+          this.scriptGenCurrentStep = 0;
+          this.scriptGenStatus = 'Initializing...';
+        }, 300);
       }
     },
 
     // Generate media list for current episode
-    // Media list contains all cues that have or should have a mediaURL
+    // Uses backend GET endpoint which reads directly from database
     async handleGenerateMediaList() {
       if (!this.currentEpisodeNumber) {
         this.$toast.warning('No episode loaded');
         return;
       }
 
+      // Reset progress state
+      this.mediaListCurrentStep = 0;
+      this.mediaListStatus = 'Starting media list generation...';
       this.generatingMediaList = true;
+
+      // Animate progress while waiting for backend
+      const animateProgress = () => {
+        const statusMessages = [
+          'Scanning rundown items...',
+          'Extracting media cues...',
+          'Checking media URLs...',
+          'Building media list...',
+          'Generating HTML...'
+        ];
+
+        let step = 0;
+        const interval = setInterval(() => {
+          if (step < 4 && this.generatingMediaList) {
+            step++;
+            this.mediaListCurrentStep = step;
+            this.mediaListStatus = statusMessages[step];
+          } else {
+            clearInterval(interval);
+          }
+        }, 600);
+
+        return interval;
+      };
+
+      const progressInterval = animateProgress();
 
       try {
         console.log('📋 Generating media list for episode:', this.currentEpisodeNumber);
-        this.$toast.info('Generating media list...');
 
-        // Collect all cues with mediaURL from all rundown items
-        const mediaItems = [];
-        const cueTypes = ['IMG', 'GFX', 'SOT', 'VO', 'NAT', 'PKG', 'BUMP', 'STING', 'FSQ', 'RIF', 'DIR'];
+        // Use GET endpoint - backend reads directly from database
+        const response = await this.$axios.get(`/scripts/media-list/${this.currentEpisodeNumber}`);
+        console.log('📋 Media list response:', response.data);
 
-        for (const item of this.rundownItems) {
-          if (!item.script_content) continue;
-
-          // Parse cue blocks from script content
-          const cueBlockPattern = /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g;
-          let match;
-
-          while ((match = cueBlockPattern.exec(item.script_content)) !== null) {
-            const cueContent = match[1];
-
-            // Extract fields from cue block
-            const typeMatch = cueContent.match(/\[Type:\s*([^\]]+)\]/i);
-            const slugMatch = cueContent.match(/\[Slug:\s*([^\]]+)\]/i);
-            const mediaUrlMatch = cueContent.match(/\[Media\s*URL:\s*([^\]]+)\]/i);
-            const assetIdMatch = cueContent.match(/\[Asset\s*ID:\s*([^\]]+)\]/i);
-            const durationMatch = cueContent.match(/\[Duration:\s*([^\]]+)\]/i);
-            const descriptionMatch = cueContent.match(/\[Description:\s*([^\]]+)\]/i);
-
-            const cueType = typeMatch ? typeMatch[1].trim().toUpperCase() : '';
-
-            // Only include cues that should have media
-            if (cueTypes.includes(cueType)) {
-              mediaItems.push({
-                segmentSlug: item.slug || item.title || 'Unknown Segment',
-                segmentOrder: item.order_in_rundown,
-                cueType: cueType,
-                slug: slugMatch ? slugMatch[1].trim() : '',
-                mediaUrl: mediaUrlMatch ? mediaUrlMatch[1].trim() : '',
-                assetId: assetIdMatch ? assetIdMatch[1].trim() : '',
-                duration: durationMatch ? durationMatch[1].trim() : '',
-                description: descriptionMatch ? descriptionMatch[1].trim() : '',
-                hasMissingMedia: !mediaUrlMatch || !mediaUrlMatch[1].trim()
-              });
-            }
-          }
-        }
-
-        // Sort by segment order
-        mediaItems.sort((a, b) => (a.segmentOrder || 0) - (b.segmentOrder || 0));
-
-        console.log('📋 Found', mediaItems.length, 'media cues');
-
-        // Send to backend to generate the media list file
-        const response = await this.$axios.post(`/scripts/media-list/${this.currentEpisodeNumber}`, {
-          media_items: mediaItems
-        });
+        // Complete progress animation
+        clearInterval(progressInterval);
+        this.mediaListCurrentStep = 5;
+        this.mediaListStatus = 'Complete!';
 
         if (response.data.success) {
-          const missingCount = mediaItems.filter(m => m.hasMissingMedia).length;
-          if (missingCount > 0) {
-            this.$toast.warning(`Media list generated with ${missingCount} missing media URLs`);
-          } else {
-            this.$toast.success('Media list generated successfully');
-          }
+          const itemCount = response.data.item_count || 0;
+
+          // Brief delay to show completion
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          this.$toast.success(`📋 Media list generated! ${itemCount} items`, { timeout: 5000 });
 
           // Refresh the generated scripts list in MetadataPanel
           if (this.$refs.metadataPanel && this.$refs.metadataPanel.loadGeneratedDocuments) {
             this.$refs.metadataPanel.loadGeneratedDocuments();
           }
         } else {
-          this.$toast.error(`Error: ${response.data.error}`);
+          this.mediaListStatus = 'Error!';
+          this.$toast.error(`❌ Error: ${response.data.error}`, { timeout: 8000 });
         }
       } catch (error) {
+        clearInterval(progressInterval);
+        this.mediaListStatus = 'Error!';
         console.error('📋 Media list generation failed:', error);
-        this.$toast.error(`Failed to generate media list: ${error.response?.data?.detail || error.message}`);
+        this.$toast.error(`❌ Failed to generate media list: ${error.response?.data?.detail || error.message}`, { timeout: 8000 });
       } finally {
-        this.generatingMediaList = false;
+        // Reset after a brief delay
+        setTimeout(() => {
+          this.generatingMediaList = false;
+          this.mediaListCurrentStep = 0;
+          this.mediaListStatus = 'Initializing...';
+        }, 300);
       }
     },
 
@@ -5637,10 +6448,111 @@ Try dropping an image or video file here!`
   margin-top: -10px;
 }
 
+/* Script Generation Overlay */
+.script-generation-overlay {
+  z-index: 10000 !important;
+}
+
+.script-generation-overlay :deep(.v-overlay__content) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.script-gen-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 40px 60px;
+  background: rgba(30, 30, 30, 0.95);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  min-width: 320px;
+}
+
+.script-gen-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  margin-top: 8px;
+}
+
+.script-gen-episode {
+  font-size: 1.1rem;
+  color: #4caf50;
+  font-weight: 500;
+}
+
+.script-gen-status {
+  font-size: 0.95rem;
+  color: #aaa;
+  min-height: 24px;
+}
+
+.script-gen-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  width: 100%;
+}
+
+.script-gen-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: #888;
+  transition: all 0.3s ease;
+}
+
+.script-gen-step.step-active {
+  background: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+  font-weight: 500;
+}
+
+.script-gen-step.step-done {
+  color: #4caf50;
+}
+
+.script-gen-step.step-done span {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+/* Media List Theme (Blue) */
+.media-list-theme {
+  border: 1px solid rgba(33, 150, 243, 0.3);
+}
+
+.media-list-ep {
+  color: #2196f3 !important;
+}
+
+.script-gen-step.step-active-blue {
+  background: rgba(33, 150, 243, 0.15);
+  color: #2196f3;
+  font-weight: 500;
+}
+
+.script-gen-step.step-done-blue {
+  color: #2196f3;
+}
+
+.script-gen-step.step-done-blue span {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
 .rundown-panel {
   width: 40%;
-  height: auto; /* Grow with content */
-  overflow-y: visible; /* No internal scroll - scrolls with page */
+  max-height: 100vh; /* Limit to viewport height */
+  overflow-y: auto; /* Internal scroll for rundown items */
   /* Remove static border-right so only dynamic border shows */
   /* border-right: 1px solid var(--v-divider-color, #E0E0E0); */
   display: flex;
@@ -5649,9 +6561,10 @@ Try dropping an image or video file here!`
   border: none; /* Remove all borders */
   border-radius: 0 !important;
   box-sizing: border-box;
-  position: relative;
+  position: sticky; /* Stick to top when scrolling */
+  top: 0; /* Stick at the top of the scroll container */
   z-index: 10; /* Appear above editor panel */
-  padding-bottom: 50vh; /* Add whitespace equal to 50% of viewport height */
+  align-self: flex-start; /* Required for sticky to work in flex container */
 }
 
 .script-status-horizontal-bar {

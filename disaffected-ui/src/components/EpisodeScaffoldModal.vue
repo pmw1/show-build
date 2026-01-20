@@ -271,15 +271,55 @@
       </v-card-actions>
     </v-card>
   </v-dialog>
+
+  <!-- Snackbar for messages -->
+  <v-snackbar
+    v-model="snackbar.show"
+    :color="snackbar.color"
+    :timeout="snackbar.timeout"
+    location="bottom"
+  >
+    {{ snackbar.message }}
+    <template v-slot:actions>
+      <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
+    </template>
+  </v-snackbar>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
+// Auth helper - get headers with JWT token
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('auth-token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 // Props and emits
 const emit = defineEmits(['episode-created'])
+
+// Escape key handler for persistent dialog
+const handleEscapeKey = (event) => {
+  if (event.key === 'Escape' && dialog.value) {
+    closeDialog()
+  }
+}
+
+// Snackbar state
+const snackbar = ref({
+  show: false,
+  message: '',
+  color: 'error',
+  timeout: 5000
+})
+
+const showSnackbar = (message, color = 'error') => {
+  snackbar.value.message = message
+  snackbar.value.color = color
+  snackbar.value.show = true
+}
 
 // Reactive data
 const dialog = ref(false)
@@ -347,7 +387,7 @@ const debounceCheckNumber = () => {
 const loadTemplates = async () => {
   try {
     loadingTemplates.value = true
-    const response = await axios.get('/api/episodes/templates')
+    const response = await axios.get('/api/episodes/templates', { headers: getAuthHeaders() })
     templates.value = response.data
 
     // Auto-select default template and set duration
@@ -380,7 +420,8 @@ const loadRundownTemplates = async (episodeTemplateId) => {
       params: {
         episode_template_id: episodeTemplateId,
         is_active: true
-      }
+      },
+      headers: getAuthHeaders()
     })
     rundownTemplates.value = response.data
 
@@ -402,7 +443,7 @@ const loadRundownTemplates = async (episodeTemplateId) => {
 const getNextNumber = async () => {
   try {
     loadingNextNumber.value = true
-    const response = await axios.get('/api/episodes/next-number')
+    const response = await axios.get('/api/episodes/next-number', { headers: getAuthHeaders() })
     // API returns 'next_number', translate to 'next_episode_number' for form context
     episodeNumber.value = response.data.next_number
     numberAvailable.value = true
@@ -421,7 +462,7 @@ const checkEpisodeNumber = async () => {
   
   try {
     checkingNumber.value = true
-    const response = await axios.get(`/api/episodes/validate-number/${episodeNumber.value}`)
+    const response = await axios.get(`/api/episodes/validate-number/${episodeNumber.value}`, { headers: getAuthHeaders() })
     numberAvailable.value = response.data.is_available
   } catch (error) {
     console.error('Error checking episode number:', error)
@@ -445,12 +486,12 @@ const createEpisode = async () => {
       description: episodeDescription.value || undefined,
       episode_metadata: {
         duration: episodeDuration.value,
-        air_date: airDate.value || undefined,
+        airdate: airDate.value || undefined,  // Note: backend expects 'airdate' (no underscore)
         is_dummy: isDummy.value
       }
     }
 
-    const response = await axios.post('/api/episodes/create', payload)
+    const response = await axios.post('/api/episodes/create', payload, { headers: getAuthHeaders() })
     const createdEpisode = response.data
 
     // Emit success event
@@ -470,7 +511,7 @@ const createEpisode = async () => {
 
     // Show error message
     const errorMessage = error.response?.data?.detail || 'Failed to create episode'
-    alert(`Error: ${errorMessage}`)
+    showSnackbar(`Error: ${errorMessage}`)
 
   } finally {
     creating.value = false
@@ -507,17 +548,25 @@ watch(selectedTemplate, (newTemplateId) => {
   }
 })
 
-// Watch for dialog open to load data
+// Watch for dialog open to load data and setup escape key handler
 watch(dialog, async (isOpen) => {
   if (isOpen) {
+    document.addEventListener('keydown', handleEscapeKey)
     loadTemplates()
     await getNextNumber()
+  } else {
+    document.removeEventListener('keydown', handleEscapeKey)
   }
 })
 
 // Load templates on mount
 onMounted(() => {
   loadTemplates()
+})
+
+// Cleanup escape key listener on unmount
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleEscapeKey)
 })
 </script>
 

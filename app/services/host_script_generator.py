@@ -1,49 +1,67 @@
 """
 Host Script Generator - Database-based script compilation for PDF output.
 
-Generates nicely formatted HTML scripts from database rundown items with:
-- Block detection (A, B, C, D...) based on break regions
-- Styled block headers (START BLOCK A / END BLOCK A)
-- Segment headers
-- IMG elements at 500px width
-- FSQ with blockquote styling
-- SOT with thumbnails
-- Speaker attribution from paragraph classes
-- Media resources copied to scripts/resources/ for portability
+Generates formatted HTML scripts from database rundown items with three preset modes:
+1. HOST_FULL - Complete script with all cues, visuals, and production info
+2. HOST_CLEAN - Spoken text only with minimal cue indicators (teleprompter-friendly)
+3. PRODUCTION - Technical rundown with timing, all cues, media references
+
+Block Structure:
+- BLOCK A: All content from show start until BREAK 1
+- BLOCK B: Content after BREAK 1 until BREAK 2
+- BLOCK C: Content after BREAK 2 until BREAK 3
+- And so on...
+
+Each block has clear START/END headers for easy navigation.
 """
 import re
 import html
 import logging
 import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Set
+from typing import Dict, Any, List, Optional, Tuple
+from enum import Enum
 from database import SessionLocal
-from models_v2 import Episode, Rundown, RundownItem, Season, Show
+from models_v2 import Episode, Rundown, RundownItem, Season, Show, SOTProcessingJob
 
 logger = logging.getLogger(__name__)
 
-# Item types that define a break/commercial region
-BREAK_ITEM_TYPES = {'advertisement', 'promo', 'transition', 'break', 'stinger', 'rejoin'}
 
-# Speaker display names and colors
+class ScriptPreset(Enum):
+    """Script generation presets."""
+    HOST_FULL = "host_full"        # Everything: text, cues, visuals
+    HOST_CLEAN = "host_clean"      # Spoken text + minimal cue markers
+    PRODUCTION = "production"      # Technical view with all details
+
+
+# Item types that represent a BREAK (commercial/transition period)
+BREAK_ITEM_TYPES = {'break', 'advertisement', 'ad'}
+
+# Speaker display configuration
 SPEAKER_CONFIG = {
-    'josh': {'name': 'JOSH', 'color': '#1976d2'},
-    'guest': {'name': 'GUEST', 'color': '#388e3c'},
-    'caller': {'name': 'CALLER', 'color': '#f57c00'},
+    'josh': {'name': 'JOSH', 'color': '#1565c0'},
+    'host': {'name': 'HOST', 'color': '#1565c0'},
+    'guest': {'name': 'GUEST', 'color': '#2e7d32'},
+    'caller': {'name': 'CALLER', 'color': '#ef6c00'},
     'announcer': {'name': 'ANNOUNCER', 'color': '#7b1fa2'},
     'narrator': {'name': 'NARRATOR', 'color': '#5d4037'},
-    'host': {'name': 'HOST', 'color': '#1976d2'},
 }
 
 
-def generate_host_script(episode_number: str, output_dir: Optional[str] = None) -> Dict[str, Any]:
+def generate_host_script(
+    episode_number: str,
+    output_dir: Optional[str] = None,
+    preset: str = "host_full"
+) -> Dict[str, Any]:
     """
-    Generate a host script HTML from database rundown items.
+    Generate a host script from database rundown items.
 
     Args:
         episode_number: Episode number (e.g., "0249")
-        output_dir: Optional output directory. Defaults to episode's scripts/ folder.
+        output_dir: Optional output directory. Defaults to episode's scripts/current/ folder.
+        preset: Script preset - "host_full", "host_clean", or "production"
 
     Returns:
         Dict with success status, output path, and metadata
@@ -51,25 +69,24 @@ def generate_host_script(episode_number: str, output_dir: Optional[str] = None) 
     db = SessionLocal()
 
     try:
-        # Find episode in database
+        # Validate preset
+        try:
+            script_preset = ScriptPreset(preset.lower())
+        except ValueError:
+            script_preset = ScriptPreset.HOST_FULL
+
+        # Find episode
         episode = db.query(Episode).filter(
             Episode.episode_number == int(episode_number)
         ).first()
 
         if not episode:
-            return {
-                "success": False,
-                "error": f"Episode {episode_number} not found in database"
-            }
+            return {"success": False, "error": f"Episode {episode_number} not found"}
 
-        # Get rundown for this episode
+        # Get rundown
         rundown = db.query(Rundown).filter(Rundown.episode_id == episode.id).first()
-
         if not rundown:
-            return {
-                "success": False,
-                "error": f"No rundown found for episode {episode_number}"
-            }
+            return {"success": False, "error": f"No rundown found for episode {episode_number}"}
 
         # Get all rundown items ordered by position
         items = db.query(RundownItem).filter(
@@ -77,62 +94,60 @@ def generate_host_script(episode_number: str, output_dir: Optional[str] = None) 
         ).order_by(RundownItem.order_in_rundown).all()
 
         if not items:
-            return {
-                "success": False,
-                "error": f"No rundown items found for episode {episode_number}"
-            }
+            return {"success": False, "error": f"No rundown items found for episode {episode_number}"}
 
-        # Get episode info for cover page
-        episode_info = _get_episode_info(episode, db)
+        # Get episode metadata (pass items for runtime calculation)
+        episode_info = _get_episode_info(episode, db, items)
 
         # Determine output path
-        # Use /home/episodes inside container, /mnt/sync/disaffected/episodes on host
         ep_num_padded = episode_number.zfill(4)
         if output_dir:
             output_path = Path(output_dir)
         else:
-            # Try container path first, fall back to host path
-            container_path = Path(f"/home/episodes/{ep_num_padded}/scripts")
-            host_path = Path(f"/mnt/sync/disaffected/episodes/{ep_num_padded}/scripts")
-
-            if container_path.parent.exists():
-                output_path = container_path
-            elif host_path.parent.exists():
-                output_path = host_path
-            else:
-                output_path = container_path  # Default, will create if possible
+            container_path = Path(f"/home/episodes/{ep_num_padded}/scripts/current")
+            host_path = Path(f"/mnt/sync/disaffected/episodes/{ep_num_padded}/scripts/current")
+            output_path = container_path if container_path.parent.parent.exists() else host_path
 
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # Use scripts/current/ subdirectory for generated scripts
-        current_scripts_path = output_path / "current"
-        current_scripts_path.mkdir(parents=True, exist_ok=True)
-
-        # Create resources subfolder for media assets
-        resources_path = current_scripts_path / "resources"
+        # Create resources folder
+        resources_path = output_path / "resources"
         resources_path.mkdir(parents=True, exist_ok=True)
 
-        # Collect and copy all media resources, get URL mapping
-        url_mapping = _collect_and_copy_resources(items, resources_path, ep_num_padded)
-        logger.info(f"Collected {len(url_mapping)} media resources")
+        # Collect media resources
+        url_mapping = _collect_media_resources(items, resources_path, ep_num_padded)
 
-        # Generate HTML content with mapped URLs
-        html_content = _generate_html(episode_info, items, episode_number, url_mapping)
+        # Build transcription cache from SOTProcessingJob records
+        transcription_cache = _build_transcription_cache(items, db)
 
-        # Generate filename - save to current/ subdirectory
+        # Detect blocks
+        blocks = _detect_blocks(items)
+
+        # Generate HTML
+        html_content = _generate_html(episode_info, blocks, script_preset, url_mapping, transcription_cache)
+
+        # Generate filenames with revision numbers
         date_str = datetime.now().strftime("%Y%m%d")
-        html_filename = f"{ep_num_padded}-HOST-SCRIPT-{date_str}.html"
-        pdf_filename = f"{ep_num_padded}-HOST-SCRIPT-{date_str}.pdf"
-        html_path = current_scripts_path / html_filename
-        pdf_path = current_scripts_path / pdf_filename
+        preset_suffix = script_preset.value.upper().replace("_", "-")
 
-        # Write HTML file
+        # Determine next revision number
+        revision = _get_next_revision(output_path, ep_num_padded, preset_suffix, date_str)
+        revision_suffix = f"-r{revision}" if revision > 1 else ""
+
+        html_filename = f"{ep_num_padded}-{preset_suffix}-{date_str}{revision_suffix}.html"
+        pdf_filename = f"{ep_num_padded}-{preset_suffix}-{date_str}{revision_suffix}.pdf"
+        html_path = output_path / html_filename
+        pdf_path = output_path / pdf_filename
+
+        logger.info(f"Generating script revision {revision}: {pdf_filename}")
+
+        # Write HTML
         with open(html_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
 
-        logger.info(f"Generated host script HTML: {html_path}")
+        logger.info(f"Generated {preset} script HTML: {html_path}")
 
-        # Convert to PDF with page numbers
+        # Convert to PDF
         pdf_generated = _convert_to_pdf(html_path, pdf_path, episode_info)
 
         return {
@@ -141,41 +156,1124 @@ def generate_host_script(episode_number: str, output_dir: Optional[str] = None) 
             "pdf_path": str(pdf_path) if pdf_generated else None,
             "output_path": str(pdf_path) if pdf_generated else str(html_path),
             "episode_number": episode_number,
+            "preset": script_preset.value,
             "item_count": len(items),
-            "block_count": _count_blocks(items)
+            "block_count": len(blocks),
+            "revision": revision
         }
 
     except Exception as e:
-        logger.error(f"Error generating host script for episode {episode_number}: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"Error generating script for episode {episode_number}: {e}")
+        return {"success": False, "error": str(e)}
     finally:
         db.close()
 
 
+def _get_next_revision(output_path: Path, episode: str, preset: str, date_str: str) -> int:
+    """
+    Determine the next revision number for a script file.
+
+    Checks for existing files matching the pattern and returns the next revision.
+    First generation of the day has no suffix, subsequent ones get -r2, -r3, etc.
+
+    Args:
+        output_path: Directory where scripts are saved
+        episode: Episode number (e.g., "0257")
+        preset: Preset suffix (e.g., "HOST-FULL")
+        date_str: Date string (e.g., "20260118")
+
+    Returns:
+        Next revision number (1 for first, 2 for second, etc.)
+    """
+    # Pattern matches: 0257-HOST-FULL-20260118.pdf, 0257-HOST-FULL-20260118-r2.pdf, etc.
+    base_pattern = f"{episode}-{preset}-{date_str}"
+
+    existing_revisions = []
+
+    for file in output_path.glob(f"{base_pattern}*.pdf"):
+        filename = file.stem  # Remove .pdf extension
+
+        if filename == base_pattern:
+            # First revision (no suffix)
+            existing_revisions.append(1)
+        elif filename.startswith(base_pattern + "-r"):
+            # Extract revision number
+            rev_part = filename[len(base_pattern) + 2:]  # Skip "-r"
+            try:
+                rev_num = int(rev_part)
+                existing_revisions.append(rev_num)
+            except ValueError:
+                pass
+
+    if not existing_revisions:
+        return 1  # First generation of the day
+
+    return max(existing_revisions) + 1
+
+
+def _get_episode_info(episode: Episode, db, items: List[RundownItem] = None) -> Dict[str, Any]:
+    """Extract episode information for cover page."""
+    show_name = "DISAFFECTED"
+    if episode.season_id:
+        season = db.query(Season).filter(Season.id == episode.season_id).first()
+        if season and season.show_id:
+            show = db.query(Show).filter(Show.id == season.show_id).first()
+            if show:
+                show_name = show.name.upper()
+
+    # Format air date
+    date_str = ""
+    if episode.air_date:
+        date_str = episode.air_date.strftime("%B %d, %Y")
+    elif episode.publish_date:
+        date_str = episode.publish_date.strftime("%B %d, %Y")
+
+    # Calculate total runtime from items if not set on episode
+    duration = episode.duration_formatted or ""
+    if not duration and items:
+        duration = _calculate_total_runtime(items)
+
+    return {
+        "show_name": show_name,
+        "episode_number": str(episode.episode_number).zfill(4),
+        "title": episode.title or f"Episode {episode.episode_number}",
+        "date_str": date_str,
+        "guest_name": episode.guest_name or "",
+        "guest_bio": getattr(episode, 'guest_bio', "") or "",
+        "duration": duration,
+    }
+
+
+def _calculate_total_runtime(items: List[RundownItem]) -> str:
+    """Calculate total runtime from rundown items."""
+    total_seconds = 0
+    for item in items:
+        dur = item.duration or '00:00:00'
+        # Parse duration (handle HH:MM:SS:FF format)
+        parts = dur.replace('.', ':').split(':')
+        if len(parts) >= 3:
+            try:
+                h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
+                total_seconds += h * 3600 + m * 60 + s
+            except ValueError:
+                pass
+
+    if total_seconds == 0:
+        return ""
+
+    total_h = total_seconds // 3600
+    total_m = (total_seconds % 3600) // 60
+    total_s = total_seconds % 60
+    return f"{total_h:02d}:{total_m:02d}:{total_s:02d}"
+
+
+def _detect_blocks(items: List[RundownItem]) -> List[Dict[str, Any]]:
+    """
+    Detect content blocks based on BREAK items.
+
+    Block structure:
+    - BLOCK A: All content from start until first BREAK
+    - BLOCK B: Content after BREAK 1 until BREAK 2
+    - BLOCK C: Content after BREAK 2 until BREAK 3
+    - etc.
+
+    Returns list of blocks with:
+    - letter: Block letter (A, B, C...)
+    - items: List of content RundownItems (excludes breaks)
+    - break_after: The break item that follows this block (if any)
+    """
+    blocks = []
+    current_items = []
+    block_index = 0
+
+    for item in items:
+        item_type = (item.item_type or 'segment').lower()
+        is_break = item_type in BREAK_ITEM_TYPES
+
+        if is_break:
+            # End current block
+            if current_items:
+                letter = chr(ord('A') + block_index)
+                blocks.append({
+                    'letter': letter,
+                    'items': current_items,
+                    'break_after': item  # The break that ends this block
+                })
+                current_items = []
+                block_index += 1
+        else:
+            # Content item - add to current block
+            current_items.append(item)
+
+    # Final block (after last break, or only block if no breaks)
+    if current_items:
+        letter = chr(ord('A') + block_index)
+        blocks.append({
+            'letter': letter,
+            'items': current_items,
+            'break_after': None
+        })
+
+    return blocks
+
+
+def _collect_media_resources(
+    items: List[RundownItem],
+    resources_path: Path,
+    episode_number: str
+) -> Dict[str, str]:
+    """
+    Collect and copy media files from cue blocks.
+
+    Returns mapping of original URL -> local relative path.
+    """
+    url_mapping = {}
+    cue_counter = 0
+
+    # Base paths for media files
+    container_base = Path("/home/episodes")
+    host_base = Path("/mnt/sync/disaffected/episodes")
+
+    # Pattern to find cue blocks
+    cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL | re.IGNORECASE)
+
+    # Patterns for media URLs - handle both "Media Url" (with space) and "MediaUrl" (no space)
+    media_patterns = [
+        re.compile(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', re.IGNORECASE),
+        re.compile(r'\[Thumbnail\s*[Uu]rl:\s*([^\]]+)\]', re.IGNORECASE),
+        re.compile(r'<img[^>]+src="([^"]+)"', re.IGNORECASE),
+    ]
+
+    for item in items:
+        if not item.script_content:
+            continue
+
+        for cue_match in cue_pattern.finditer(item.script_content):
+            cue_content = cue_match.group(1)
+            cue_counter += 10
+
+            # Extract slug for filename
+            slug_match = re.search(r'\[Slug:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+            slug = slug_match.group(1).strip() if slug_match else 'media'
+
+            for pattern in media_patterns:
+                for match in pattern.finditer(cue_content):
+                    original_url = match.group(1).strip()
+
+                    if not original_url or original_url in url_mapping:
+                        continue
+
+                    # Skip blob and http URLs
+                    if original_url.startswith(('http://', 'https://', 'blob:')):
+                        continue
+
+                    # Find and copy the file
+                    source_path = _find_media_file(original_url, episode_number, container_base, host_base)
+
+                    if source_path and source_path.exists():
+                        dest_filename = source_path.name
+                        dest_path = resources_path / dest_filename
+                        try:
+                            if not dest_path.exists():
+                                shutil.copy2(source_path, dest_path)
+                            url_mapping[original_url] = f"resources/{dest_filename}"
+                        except Exception as e:
+                            logger.warning(f"Failed to copy {source_path}: {e}")
+
+    return url_mapping
+
+
+def _find_media_file(
+    url: str,
+    episode_number: str,
+    container_base: Path,
+    host_base: Path
+) -> Optional[Path]:
+    """Find a media file from a URL."""
+    url = url.strip()
+
+    # Handle /episodes/... paths
+    if url.startswith('/episodes/'):
+        url = url[1:]
+
+    # Absolute path
+    if url.startswith('/'):
+        path = Path(url)
+        if path.exists():
+            return path
+        return None
+
+    # Relative path starting with episodes/
+    if url.startswith('episodes/'):
+        for base in [container_base.parent, host_base.parent]:
+            path = base / url
+            if path.exists():
+                return path
+
+    # Relative path with assets/
+    if url.startswith(('../assets/', 'assets/')):
+        clean_url = url.replace('../', '')
+        for base in [container_base, host_base]:
+            path = base / episode_number / clean_url
+            if path.exists():
+                return path
+
+    # Just a filename - search common locations
+    filename = Path(url).name
+    search_dirs = ['assets/images', 'assets/video', 'assets/graphics', 'assets/quotes', 'assets/thumbnails']
+
+    for base in [container_base, host_base]:
+        for subdir in search_dirs:
+            candidate = base / episode_number / subdir / filename
+            if candidate.exists():
+                return candidate
+
+    return None
+
+
+def _build_transcription_cache(items: List[RundownItem], db) -> Dict[str, str]:
+    """
+    Build a cache of transcriptions from SOTProcessingJob records.
+
+    Returns mapping of AssetID -> transcription text.
+    """
+    cache = {}
+
+    # Extract all Asset IDs from SOT cues
+    asset_ids = set()
+    for item in items:
+        if not item.script_content:
+            continue
+        # Find all SOT cues and extract Asset IDs
+        for cue in re.findall(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', item.script_content, re.DOTALL):
+            if '[Type: SOT]' in cue:
+                asset_match = re.search(r'\[Asset\s*Id:\s*([^\]]+)\]', cue, re.IGNORECASE)
+                if asset_match:
+                    asset_ids.add(asset_match.group(1).strip())
+
+    if not asset_ids:
+        return cache
+
+    # Query SOTProcessingJob for transcriptions
+    try:
+        jobs = db.query(SOTProcessingJob).filter(
+            SOTProcessingJob.asset_id.in_(asset_ids)
+        ).all()
+
+        for job in jobs:
+            if job.transcription:
+                cache[job.asset_id] = job.transcription
+                logger.debug(f"Found transcription for {job.asset_id}: {job.transcription[:50]}...")
+    except Exception as e:
+        logger.warning(f"Failed to fetch transcriptions: {e}")
+
+    return cache
+
+
+def _generate_html(
+    episode_info: Dict[str, Any],
+    blocks: List[Dict[str, Any]],
+    preset: ScriptPreset,
+    url_mapping: Dict[str, str],
+    transcription_cache: Dict[str, str] = None
+) -> str:
+    """Generate the complete HTML document."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    # Get CSS for the preset
+    css = _get_css(preset, episode_info['episode_number'])
+
+    html_parts = [
+        '<!DOCTYPE html>',
+        '<html lang="en">',
+        '<head>',
+        '<meta charset="UTF-8">',
+        f'<title>{episode_info["show_name"]} - Episode {episode_info["episode_number"]}</title>',
+        '<style>',
+        css,
+        '</style>',
+        '</head>',
+        '<body>',
+    ]
+
+    # Cover page
+    html_parts.append(_generate_cover_page(episode_info, blocks, preset))
+
+    # Content blocks
+    for block in blocks:
+        html_parts.append(_generate_block(block, preset, url_mapping, transcription_cache))
+
+    html_parts.extend(['</body>', '</html>'])
+
+    return '\n'.join(html_parts)
+
+
+def _get_css(preset: ScriptPreset, episode_number: str) -> str:
+    """Get CSS styles based on preset."""
+
+    # Base font size varies by preset
+    if preset == ScriptPreset.HOST_CLEAN:
+        body_font = "20pt"  # Larger for teleprompter/easy reading
+        line_height = "1.8"
+    elif preset == ScriptPreset.PRODUCTION:
+        body_font = "11pt"  # Smaller for more info density
+        line_height = "1.4"
+    else:  # HOST_FULL
+        body_font = "16pt"
+        line_height = "1.6"
+
+    return f"""
+        @page {{
+            size: letter;
+            margin: 0.75in;
+            @bottom-left {{
+                content: "Episode {episode_number}";
+                font-size: 9pt;
+                color: #666;
+            }}
+            @bottom-right {{
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 9pt;
+                color: #666;
+            }}
+        }}
+
+        * {{ box-sizing: border-box; }}
+
+        body {{
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: {body_font};
+            line-height: {line_height};
+            color: #111;
+            margin: 0;
+            padding: 0.5in;
+            background: #fff;
+        }}
+
+        /* Cover Page */
+        .cover-page {{
+            text-align: center;
+            page-break-after: always;
+            padding-top: 1.5in;
+        }}
+
+        .show-title {{
+            font-size: 42pt;
+            font-weight: bold;
+            letter-spacing: 0.15em;
+            margin-bottom: 0.3in;
+            color: #111;
+        }}
+
+        .episode-number {{
+            font-size: 24pt;
+            color: #444;
+            margin-bottom: 0.15in;
+        }}
+
+        .episode-date {{
+            font-size: 14pt;
+            color: #666;
+            margin-bottom: 0.4in;
+        }}
+
+        .episode-title {{
+            font-size: 28pt;
+            font-weight: 600;
+            margin-bottom: 0.3in;
+            color: #222;
+        }}
+
+        .guest-info {{
+            font-size: 16pt;
+            color: #444;
+            font-style: italic;
+            margin-bottom: 0.5in;
+        }}
+
+        .duration-info {{
+            font-size: 14pt;
+            color: #666;
+            margin-top: 0.5in;
+        }}
+
+        .block-summary {{
+            margin-top: 0.75in;
+            text-align: left;
+            padding: 0.3in;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }}
+
+        .block-summary h3 {{
+            margin: 0 0 0.15in 0;
+            font-size: 14pt;
+            color: #333;
+        }}
+
+        .block-summary ul {{
+            margin: 0;
+            padding-left: 1.2em;
+            font-size: 12pt;
+            color: #555;
+        }}
+
+        /* Block Headers */
+        .block-header {{
+            text-align: center;
+            font-size: 22pt;
+            font-weight: bold;
+            padding: 0.25in 0;
+            margin: 0.5in 0 0.3in 0;
+            border-top: 4px solid #222;
+            border-bottom: 4px solid #222;
+            background: #f8f8f8;
+            letter-spacing: 0.2em;
+            page-break-before: always;
+        }}
+
+        .block-header.first {{
+            page-break-before: auto;
+        }}
+
+        .block-end {{
+            text-align: center;
+            font-size: 16pt;
+            font-weight: bold;
+            padding: 0.2in 0;
+            margin: 0.4in 0;
+            border-top: 2px solid #666;
+            border-bottom: 2px solid #666;
+            color: #555;
+            letter-spacing: 0.15em;
+        }}
+
+        /* Segment Headers */
+        .segment {{
+            margin-bottom: 0.3in;
+        }}
+
+        .segment-header {{
+            font-size: 18pt;
+            font-weight: bold;
+            color: #1565c0;
+            margin: 0.3in 0 0.15in 0;
+            padding-bottom: 0.1in;
+            border-bottom: 2px solid #1565c0;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }}
+
+        .segment-duration {{
+            font-size: 12pt;
+            color: #888;
+            font-weight: normal;
+            float: right;
+            text-transform: none;
+        }}
+
+        /* Script Content */
+        .script-content {{
+            margin: 0.15in 0;
+        }}
+
+        .script-paragraph {{
+            text-align: left;
+            margin: 0.2in 0;
+            text-indent: 0;
+        }}
+
+        /* Speaker Attribution */
+        .speaker-tag {{
+            font-weight: bold;
+            font-size: 11pt;
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 4px;
+            margin-right: 10px;
+            margin-bottom: 5px;
+        }}
+
+        .speaker-josh, .speaker-host {{ background: #e3f2fd; color: #1565c0; }}
+        .speaker-guest {{ background: #e8f5e9; color: #2e7d32; }}
+        .speaker-caller {{ background: #fff3e0; color: #ef6c00; }}
+        .speaker-announcer {{ background: #f3e5f5; color: #7b1fa2; }}
+        .speaker-narrator {{ background: #efebe9; color: #5d4037; }}
+
+        /* Cue Blocks - Full preset */
+        .cue-block {{
+            margin: 0.25in 0;
+            padding: 0.2in;
+            border-radius: 6px;
+            page-break-inside: avoid;
+        }}
+
+        .cue-label {{
+            font-size: 11pt;
+            font-weight: bold;
+            margin-bottom: 0.1in;
+        }}
+
+        /* FSQ */
+        .cue-fsq {{
+            background: #fafafa;
+            border-left: 5px solid #9e9e9e;
+            border-right: 5px solid #9e9e9e;
+        }}
+
+        .cue-fsq .cue-label {{ color: #666; }}
+
+        .cue-fsq blockquote {{
+            font-size: 18pt;
+            font-style: italic;
+            color: #333;
+            margin: 0.1in 0;
+            line-height: 1.5;
+        }}
+
+        .cue-fsq .attribution {{
+            text-align: right;
+            font-size: 13pt;
+            color: #555;
+            margin-top: 0.1in;
+        }}
+
+        /* SOT */
+        .cue-sot {{
+            background: #fff8e1;
+            border: 2px solid #ffc107;
+        }}
+
+        .cue-sot .cue-label {{ color: #f57c00; }}
+
+        .sot-content {{
+            display: flex;
+            align-items: flex-start;
+            gap: 0.2in;
+            justify-content: space-between;
+        }}
+
+        .sot-thumbnail {{
+            max-width: 280px;
+            max-height: 280px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            order: 2;
+            flex-shrink: 0;
+            margin-left: auto;
+        }}
+
+        .sot-info {{ flex: 1; order: 1; }}
+        .sot-slug {{ font-weight: bold; font-size: 13pt; }}
+        .sot-duration {{ font-size: 11pt; color: #666; }}
+        .sot-outcue {{ font-size: 12pt; color: #d84315; font-weight: bold; margin-top: 0.05in; }}
+        .sot-transcription {{ font-size: 11pt; color: #444; font-style: italic; margin-top: 0.1in; }}
+
+        /* IMG/GFX */
+        .cue-img, .cue-gfx {{
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            text-align: center;
+        }}
+
+        .cue-img .cue-label, .cue-gfx .cue-label {{ color: #666; }}
+
+        .cue-img img, .cue-gfx img {{
+            max-width: 675px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }}
+
+        .img-caption {{
+            font-size: 11pt;
+            color: #666;
+            margin-top: 0.1in;
+            font-style: italic;
+        }}
+
+        /* Clean preset - minimal cue markers */
+        .cue-marker {{
+            display: inline-block;
+            background: #eee;
+            color: #666;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12pt;
+            font-weight: bold;
+            margin: 0.15in 0;
+        }}
+
+        /* Production preset - compact tables */
+        .production-cue {{
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 0.1in;
+            margin: 0.1in 0;
+            font-size: 10pt;
+        }}
+
+        .production-cue .cue-type {{
+            font-weight: bold;
+            color: #333;
+        }}
+
+        /* Break indicator */
+        .break-indicator {{
+            text-align: center;
+            padding: 0.15in;
+            margin: 0.3in 0;
+            background: #fff3e0;
+            border: 2px dashed #ff9800;
+            color: #e65100;
+            font-weight: bold;
+            font-size: 14pt;
+        }}
+
+        @media print {{
+            body {{ padding: 0; }}
+            .block-header {{ page-break-before: always; }}
+            .block-header.first {{ page-break-before: avoid; }}
+        }}
+    """
+
+
+def _generate_cover_page(
+    episode_info: Dict[str, Any],
+    blocks: List[Dict[str, Any]],
+    preset: ScriptPreset
+) -> str:
+    """Generate the cover page."""
+
+    parts = [
+        '<div class="cover-page">',
+        f'<div class="show-title">{html.escape(episode_info["show_name"])}</div>',
+        f'<div class="episode-number">EPISODE {html.escape(episode_info["episode_number"])}</div>',
+    ]
+
+    if episode_info["date_str"]:
+        parts.append(f'<div class="episode-date">{html.escape(episode_info["date_str"])}</div>')
+
+    parts.append(f'<div class="episode-title">{html.escape(episode_info["title"])}</div>')
+
+    if episode_info["guest_name"]:
+        guest_text = f'Guest: {episode_info["guest_name"]}'
+        if episode_info.get("guest_bio"):
+            guest_text += f'<br><small>{episode_info["guest_bio"][:150]}</small>'
+        parts.append(f'<div class="guest-info">{guest_text}</div>')
+
+    if episode_info["duration"]:
+        parts.append(f'<div class="duration-info">Total Runtime: {html.escape(episode_info["duration"])}</div>')
+
+    # Block summary
+    if len(blocks) > 1:
+        parts.append('<div class="block-summary">')
+        parts.append('<h3>SHOW STRUCTURE</h3>')
+        parts.append('<ul>')
+        for block in blocks:
+            item_count = len(block['items'])
+            first_title = block['items'][0].title if block['items'] else "Content"
+            parts.append(f'<li><strong>BLOCK {block["letter"]}</strong>: {item_count} segment(s) — starts with "{html.escape(first_title or "Segment")}"</li>')
+        parts.append('</ul>')
+        parts.append('</div>')
+
+    parts.append('</div>')
+
+    return '\n'.join(parts)
+
+
+def _generate_block(
+    block: Dict[str, Any],
+    preset: ScriptPreset,
+    url_mapping: Dict[str, str],
+    transcription_cache: Dict[str, str] = None
+) -> str:
+    """Generate HTML for a single block."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    parts = []
+    letter = block['letter']
+    is_first = letter == 'A'
+
+    # Block start header
+    header_class = "block-header first" if is_first else "block-header"
+    parts.append(f'<div class="{header_class}">★ ★ ★  BLOCK {letter}  ★ ★ ★</div>')
+
+    # Process each segment in the block
+    last_speaker = None
+    for item in block['items']:
+        segment_html, last_speaker = _process_segment(item, last_speaker, preset, url_mapping, transcription_cache)
+        if segment_html:
+            parts.append(segment_html)
+
+    # Block end header
+    parts.append(f'<div class="block-end">— — —  END BLOCK {letter}  — — —</div>')
+
+    # Break indicator (if there's a break after this block)
+    if block.get('break_after'):
+        break_item = block['break_after']
+        # Use "BREAK" as fallback for empty or "Untitled" titles
+        break_title = break_item.title
+        if not break_title or break_title.lower() == 'untitled':
+            break_title = "BREAK"
+        parts.append(f'<div class="break-indicator">▶ {html.escape(break_title.upper())} ◀</div>')
+
+    return '\n'.join(parts)
+
+
+def _process_segment(
+    item: RundownItem,
+    last_speaker: Optional[str],
+    preset: ScriptPreset,
+    url_mapping: Dict[str, str],
+    transcription_cache: Dict[str, str] = None
+) -> Tuple[str, Optional[str]]:
+    """Process a single rundown item (segment)."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    # Check if item has content
+    if not item.script_content or not item.script_content.strip():
+        return '', last_speaker
+
+    # Remove frontmatter and check for actual content
+    content = item.script_content
+    content_check = re.sub(r'^---.*?---\s*', '', content, flags=re.DOTALL)
+    content_check = re.sub(r'<!--.*?-->', '', content_check, flags=re.DOTALL)
+    content_check = re.sub(r'<p[^>]*>\s*</p>', '', content_check)
+
+    if not content_check.strip():
+        return '', last_speaker
+
+    parts = ['<div class="segment">']
+
+    # Segment header - use slug as fallback for empty or "Untitled" titles
+    title = item.title
+    if not title or title.lower() == 'untitled':
+        title = item.slug or "Segment"
+    duration = item.duration or ""
+
+    parts.append(f'<div class="segment-header">{html.escape(title)}')
+    if duration:
+        parts.append(f'<span class="segment-duration">{html.escape(duration)}</span>')
+    parts.append('</div>')
+
+    # Process content based on preset
+    content_html, last_speaker = _process_content(content, last_speaker, preset, url_mapping, transcription_cache)
+
+    if content_html.strip():
+        parts.append('<div class="script-content">')
+        parts.append(content_html)
+        parts.append('</div>')
+
+    parts.append('</div>')
+
+    return '\n'.join(parts), last_speaker
+
+
+def _process_content(
+    content: str,
+    last_speaker: Optional[str],
+    preset: ScriptPreset,
+    url_mapping: Dict[str, str],
+    transcription_cache: Dict[str, str] = None
+) -> Tuple[str, Optional[str]]:
+    """Process script content with cue blocks and paragraphs."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    parts = []
+    current_speaker = last_speaker
+
+    # Pattern for cue blocks
+    cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL | re.IGNORECASE)
+
+    # Split by cue blocks and process
+    last_end = 0
+    for match in cue_pattern.finditer(content):
+        # Text before cue
+        text_before = content[last_end:match.start()]
+        if text_before.strip():
+            text_html, current_speaker = _process_text(text_before, current_speaker, preset)
+            parts.append(text_html)
+
+        # Cue block
+        cue_html = _process_cue(match.group(1), preset, url_mapping, transcription_cache)
+        if cue_html:
+            parts.append(cue_html)
+
+        last_end = match.end()
+
+    # Text after last cue
+    text_after = content[last_end:]
+    if text_after.strip():
+        text_html, current_speaker = _process_text(text_after, current_speaker, preset)
+        parts.append(text_html)
+
+    return '\n'.join(parts), current_speaker
+
+
+def _process_text(
+    text: str,
+    last_speaker: Optional[str],
+    preset: ScriptPreset
+) -> Tuple[str, Optional[str]]:
+    """Process text content (paragraphs with speaker classes)."""
+
+    parts = []
+    current_speaker = last_speaker
+
+    # Remove frontmatter
+    text = re.sub(r'^---.*?---\s*', '', text, flags=re.DOTALL)
+    text = re.sub(r'^-\s*-\s*-.*?-\s*-\s*-\s*', '', text, flags=re.DOTALL)
+
+    # Remove markdown headers
+    text = re.sub(r'^#+\s+.*$', '', text, flags=re.MULTILINE)
+
+    # Fix double-nested paragraphs
+    text = re.sub(r'<p([^>]*)>\s*<p[^>]*>', r'<p\1>', text, flags=re.IGNORECASE)
+
+    # Pattern for paragraphs
+    para_pattern = re.compile(r'<p(?:\s+class="([^"]*)")?[^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE)
+
+    for match in para_pattern.finditer(text):
+        speaker_class = match.group(1) or 'josh'
+        content = match.group(2).strip()
+
+        if not content:
+            continue
+
+        # Clean content - remove unwanted HTML tags
+        content = re.sub(r'<div>\s*</div>', '', content)
+        content = re.sub(r'<div[^>]*>\s*</div>', '', content)
+        content = re.sub(r'<span[^>]*>', '', content)  # Remove opening span tags
+        content = re.sub(r'</span>', '', content)  # Remove closing span tags
+        content = re.sub(r'<br\s*/?>', ' ', content)
+        content = re.sub(r'\s+', ' ', content)
+
+        # Check if speaker changed
+        show_speaker = (speaker_class != current_speaker)
+        current_speaker = speaker_class
+
+        speaker_info = SPEAKER_CONFIG.get(speaker_class, {'name': speaker_class.upper()})
+
+        parts.append('<p class="script-paragraph">')
+
+        if show_speaker:
+            parts.append(
+                f'<span class="speaker-tag speaker-{html.escape(speaker_class)}">'
+                f'{html.escape(speaker_info["name"])}</span>'
+            )
+
+        parts.append(html.escape(content))
+        parts.append('</p>')
+
+    return '\n'.join(parts), current_speaker
+
+
+def _process_cue(
+    cue_content: str,
+    preset: ScriptPreset,
+    url_mapping: Dict[str, str],
+    transcription_cache: Dict[str, str] = None
+) -> str:
+    """Process a cue block based on preset."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    # Extract cue type
+    type_match = re.search(r'\[Type:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    if not type_match:
+        return ''
+
+    cue_type = type_match.group(1).strip().upper()
+
+    # Extract slug
+    slug_match = re.search(r'\[Slug:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    slug = slug_match.group(1).strip() if slug_match else 'cue'
+
+    # HOST_CLEAN: Just show a simple marker
+    if preset == ScriptPreset.HOST_CLEAN:
+        return f'<div class="cue-marker">[{cue_type}: {html.escape(slug)}]</div>'
+
+    # PRODUCTION: Compact technical view
+    if preset == ScriptPreset.PRODUCTION:
+        return _format_production_cue(cue_content, cue_type, slug, url_mapping)
+
+    # HOST_FULL: Full visual rendering
+    if cue_type == 'FSQ':
+        return _format_fsq(cue_content, slug, url_mapping)
+    elif cue_type == 'SOT':
+        return _format_sot(cue_content, slug, url_mapping, transcription_cache)
+    elif cue_type in ('IMG', 'GFX'):
+        return _format_img(cue_content, slug, cue_type, url_mapping)
+    else:
+        return f'<div class="cue-marker">[{cue_type}: {html.escape(slug)}]</div>'
+
+
+def _format_fsq(cue_content: str, slug: str, url_mapping: Dict[str, str]) -> str:
+    """Format Full Screen Quote cue."""
+
+    quote_match = re.search(r'\[Quote:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    quote = quote_match.group(1).strip().strip('"\'') if quote_match else ''
+
+    attr_match = re.search(r'\[Attribution:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    attribution = attr_match.group(1).strip() if attr_match else ''
+
+    media_match = re.search(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    media_url = ''
+    if media_match:
+        original_url = media_match.group(1).strip()
+        media_url = url_mapping.get(original_url, '')
+
+    parts = [
+        '<div class="cue-block cue-fsq">',
+        f'<div class="cue-label">FSQ: {html.escape(slug)}</div>',
+    ]
+
+    if media_url:
+        parts.append(f'<img src="{html.escape(media_url)}" alt="{html.escape(slug)}" style="max-width:450px; margin-bottom:0.1in;">')
+
+    parts.append(f'<blockquote>"{html.escape(quote)}"</blockquote>')
+
+    if attribution:
+        parts.append(f'<div class="attribution">— {html.escape(attribution)}</div>')
+
+    parts.append('</div>')
+
+    return '\n'.join(parts)
+
+
+def _format_sot(cue_content: str, slug: str, url_mapping: Dict[str, str], transcription_cache: Dict[str, str] = None) -> str:
+    """Format Sound On Tape cue."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    duration_match = re.search(r'\[Duration:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    duration = duration_match.group(1).strip() if duration_match else ''
+
+    thumb_match = re.search(r'\[Thumbnail\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    thumbnail_url = ''
+    if thumb_match:
+        original_url = thumb_match.group(1).strip()
+        thumbnail_url = url_mapping.get(original_url, '')
+
+    # Get transcription - first check cue block, then transcription cache by Asset ID
+    trans_match = re.search(r'\[Transcription:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    transcription = trans_match.group(1).strip() if trans_match else ''
+
+    if not transcription:
+        # Look up by Asset ID in transcription cache
+        asset_match = re.search(r'\[Asset\s*Id:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+        if asset_match:
+            asset_id = asset_match.group(1).strip()
+            transcription = transcription_cache.get(asset_id, '')
+
+    # Calculate outcue from last 5 words of transcription
+    outcue = ''
+    if transcription:
+        words = transcription.split()
+        if len(words) >= 5:
+            outcue = ' '.join(words[-5:])
+        elif words:
+            outcue = ' '.join(words)
+
+    parts = [
+        '<div class="cue-block cue-sot">',
+        f'<div class="cue-label">▶ SOT: {html.escape(slug)}</div>',
+        '<div class="sot-content">',
+    ]
+
+    if thumbnail_url:
+        parts.append(f'<img class="sot-thumbnail" src="{html.escape(thumbnail_url)}" alt="thumbnail">')
+
+    parts.append('<div class="sot-info">')
+    parts.append(f'<div class="sot-slug">{html.escape(slug)}</div>')
+
+    if duration:
+        parts.append(f'<div class="sot-duration">Duration: {html.escape(duration)}</div>')
+
+    if outcue:
+        parts.append(f'<div class="sot-outcue">Outcue: "{html.escape(outcue)}"</div>')
+
+    parts.extend(['</div>', '</div>', '</div>'])
+
+    return '\n'.join(parts)
+
+
+def _format_img(cue_content: str, slug: str, cue_type: str, url_mapping: Dict[str, str]) -> str:
+    """Format IMG or GFX cue."""
+
+    media_match = re.search(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    media_url = ''
+    if media_match:
+        original_url = media_match.group(1).strip()
+        media_url = url_mapping.get(original_url, '')
+
+    if not media_url:
+        img_match = re.search(r'<img[^>]+src="([^"]+)"', cue_content, re.IGNORECASE)
+        if img_match:
+            original_url = img_match.group(1)
+            media_url = url_mapping.get(original_url, '')
+
+    desc_match = re.search(r'\[Description:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    description = desc_match.group(1).strip() if desc_match else ''
+
+    css_class = 'cue-gfx' if cue_type == 'GFX' else 'cue-img'
+
+    parts = [
+        f'<div class="cue-block {css_class}">',
+        f'<div class="cue-label">{cue_type}: {html.escape(slug)}</div>',
+    ]
+
+    if media_url:
+        parts.append(f'<img src="{html.escape(media_url)}" alt="{html.escape(slug)}">')
+    else:
+        parts.append(f'<div style="padding:0.5in; background:#eee; color:#888;">[{cue_type}: {html.escape(slug)}]</div>')
+
+    if description:
+        parts.append(f'<div class="img-caption">{html.escape(description)}</div>')
+
+    parts.append('</div>')
+
+    return '\n'.join(parts)
+
+
+def _format_production_cue(cue_content: str, cue_type: str, slug: str, url_mapping: Dict[str, str]) -> str:
+    """Format cue for production preset (compact technical view)."""
+
+    parts = [f'<div class="production-cue">']
+    parts.append(f'<span class="cue-type">[{cue_type}]</span> <strong>{html.escape(slug)}</strong>')
+
+    # Duration
+    duration_match = re.search(r'\[Duration:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    if duration_match:
+        parts.append(f' — {html.escape(duration_match.group(1).strip())}')
+
+    # Media URL
+    media_match = re.search(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    if media_match:
+        parts.append(f'<br><small>Media: {html.escape(media_match.group(1).strip())}</small>')
+
+    parts.append('</div>')
+
+    return '\n'.join(parts)
+
+
 def _convert_to_pdf(html_path: Path, pdf_path: Path, episode_info: Dict[str, Any]) -> bool:
-    """
-    Convert HTML to PDF with page numbers using wkhtmltopdf.
+    """Convert HTML to PDF with page numbers using wkhtmltopdf."""
 
-    Returns True if PDF was generated successfully, False otherwise.
-    """
-    import subprocess
-    import shutil
-
-    # Check if wkhtmltopdf is available
     wkhtmltopdf = shutil.which('wkhtmltopdf')
     if not wkhtmltopdf:
         logger.warning("wkhtmltopdf not found - skipping PDF generation")
         return False
 
     try:
-        # Build wkhtmltopdf command with page numbers
-        # Footer format: Episode number on left, page X of Y on right
         episode_num = episode_info.get('episode_number', '0000')
-        footer_left = f"Episode {episode_num}"
-        footer_right = "Page [page] of [topage]"
 
         cmd = [
             wkhtmltopdf,
@@ -184,8 +1282,8 @@ def _convert_to_pdf(html_path: Path, pdf_path: Path, episode_info: Dict[str, Any
             '--margin-bottom', '0.75in',
             '--margin-left', '0.75in',
             '--margin-right', '0.75in',
-            '--footer-left', footer_left,
-            '--footer-right', footer_right,
+            '--footer-left', f'Episode {episode_num}',
+            '--footer-right', 'Page [page] of [topage]',
             '--footer-font-size', '9',
             '--footer-spacing', '5',
             '--enable-local-file-access',
@@ -194,12 +1292,7 @@ def _convert_to_pdf(html_path: Path, pdf_path: Path, episode_info: Dict[str, Any
             str(pdf_path)
         ]
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
         if result.returncode == 0:
             logger.info(f"Generated PDF: {pdf_path}")
@@ -216,1108 +1309,23 @@ def _convert_to_pdf(html_path: Path, pdf_path: Path, episode_info: Dict[str, Any
         return False
 
 
-def _get_episode_info(episode: Episode, db) -> Dict[str, Any]:
-    """Extract episode information for cover page."""
-    # Get show name via season relationship
-    show_name = "DISAFFECTED"
-    if episode.season:
-        season = db.query(Season).filter(Season.id == episode.season_id).first()
-        if season:
-            show = db.query(Show).filter(Show.id == season.show_id).first()
-            if show:
-                show_name = show.name.upper()
-
-    # Format air date
-    date_str = ""
-    if episode.air_date:
-        date_str = episode.air_date.strftime("%B %d, %Y at 9:00 PM")
-    elif episode.publish_date:
-        date_str = episode.publish_date.strftime("%B %d, %Y")
-
-    return {
-        "show_name": show_name,
-        "episode_number": str(episode.episode_number).zfill(4) if episode.episode_number else "0000",
-        "title": episode.title or f"Episode {episode.episode_number}",
-        "date_str": date_str,
-        "guest_name": episode.guest_name or "",
-        "duration": episode.duration_formatted or "",
-    }
-
-
-def _collect_and_copy_resources(items: List[RundownItem], resources_path: Path, episode_number: str) -> Dict[str, str]:
-    """
-    Collect all media URLs from rundown items and copy them to the list folder.
-
-    Iterates through each cue in order, extracting media URLs and copying files
-    with enumerated names (e.g., "10-eirika-kirk.png", "20-charlie-kirk.png").
-
-    Files are copied to the rundown/list/ subdirectory.
-
-    Returns a mapping of original URL -> (relative path, cue_number) for HTML generation.
-    """
-    url_mapping = {}
-    cue_counter = 0
-
-    # Create media-list folder in the rundown directory (sibling to scripts/)
-    # resources_path is scripts/resources, we want rundown/media-list
-    media_list_path = resources_path.parent.parent / "rundown" / "media-list"
-    media_list_path.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Media list folder: {media_list_path}")
-
-    # Also keep resources folder for HTML script
-    resources_path.mkdir(parents=True, exist_ok=True)
-
-    # Base paths to search for media files
-    container_base = Path("/home/episodes")
-    host_base = Path("/mnt/sync/disaffected/episodes")
-
-    # Cue block pattern
-    cue_pattern = re.compile(
-        r'<!-- Begin Cue -->(.*?)<!-- End Cue -->',
-        re.DOTALL | re.IGNORECASE
-    )
-
-    # Patterns to find media URLs within cue blocks
-    media_patterns = [
-        re.compile(r'\[Media[Uu][Rr][Ll]:\s*([^\]]+)\]', re.IGNORECASE),
-        re.compile(r'\[Thumbnail[Uu]rl:\s*([^\]]+)\]', re.IGNORECASE),
-        re.compile(r'<img[^>]+src="([^"]+)"', re.IGNORECASE),
-    ]
-
-    # Iterate through items in order
-    for item in items:
-        if not item.script_content:
-            continue
-
-        # Find each cue block in order within this item
-        for cue_match in cue_pattern.finditer(item.script_content):
-            cue_content = cue_match.group(1)
-
-            # Increment cue counter for each cue block (by 10)
-            cue_counter += 10
-
-            # Extract cue type for logging
-            type_match = re.search(r'\[Type:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-            cue_type = type_match.group(1).strip().upper() if type_match else 'UNKNOWN'
-
-            # Extract slug for filename
-            slug_match = re.search(r'\[Slug:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-            slug = slug_match.group(1).strip() if slug_match else 'unknown'
-
-            # Find all media URLs in this cue block
-            for pattern in media_patterns:
-                for match in pattern.finditer(cue_content):
-                    original_url = match.group(1).strip()
-
-                    if not original_url or original_url in url_mapping:
-                        continue
-
-                    # Skip http/https URLs (external resources)
-                    if original_url.startswith('http://') or original_url.startswith('https://'):
-                        continue
-
-                    # Try to find the actual file
-                    source_path = _find_media_file(original_url, episode_number, container_base, host_base)
-
-                    if source_path and source_path.exists():
-                        # Generate enumerated filename: "10-eirika-kirk.png"
-                        original_filename = source_path.name
-                        enumerated_filename = f"{cue_counter}-{original_filename}"
-
-                        # Copy to media-list folder with enumerated name
-                        media_list_dest_path = media_list_path / enumerated_filename
-                        try:
-                            shutil.copy2(source_path, media_list_dest_path)
-                            logger.info(f"[{cue_type}] Copied {source_path.name} -> {enumerated_filename}")
-                        except Exception as e:
-                            logger.warning(f"Failed to copy to media-list: {e}")
-
-                        # Also copy to resources folder (original name for backwards compat)
-                        resources_dest_path = resources_path / original_filename
-                        try:
-                            if not resources_dest_path.exists():
-                                shutil.copy2(source_path, resources_dest_path)
-                        except Exception as e:
-                            logger.warning(f"Failed to copy to resources: {e}")
-
-                        # Store mapping: original URL -> resources path
-                        # The cue formatter will add enumeration when referencing
-                        url_mapping[original_url] = f"resources/{original_filename}"
-                        logger.debug(f"Mapped {original_url} -> resources/{original_filename}")
-                    else:
-                        logger.warning(f"Media file not found: {original_url}")
-
-    logger.info(f"Processed {cue_counter // 10} cues, copied {len(url_mapping)} media files to rundown/media-list/")
-    return url_mapping
-
-
-def _find_media_file(url: str, episode_number: str, container_base: Path, host_base: Path) -> Optional[Path]:
-    """
-    Find a media file from a URL, trying various path resolutions.
-
-    Returns the Path to the file if found, None otherwise.
-    """
-    # Clean the URL
-    url = url.strip()
-
-    # Handle /episodes/... paths (web URL format) - strip leading slash
-    if url.startswith('/episodes/'):
-        url = url[1:]  # Remove leading slash, treat as relative path
-
-    # Already an absolute path (real filesystem path like /mnt/... or /home/...)
-    if url.startswith('/'):
-        path = Path(url)
-        if path.exists():
-            return path
-        return None
-
-    # Relative path starting with "episodes/"
-    if url.startswith('episodes/'):
-        # Try container path
-        container_path = container_base.parent / url
-        if container_path.exists():
-            return container_path
-
-        # Try host path
-        host_path = host_base.parent / url
-        if host_path.exists():
-            return host_path
-
-    # Relative path starting with "../assets/" or "assets/"
-    if url.startswith('../assets/') or url.startswith('assets/'):
-        clean_url = url.replace('../', '')
-        # Try container path
-        container_path = container_base / episode_number / clean_url
-        if container_path.exists():
-            return container_path
-
-        # Try host path
-        host_path = host_base / episode_number / clean_url
-        if host_path.exists():
-            return host_path
-
-    # Just a filename - search in common locations
-    filename = Path(url).name
-    search_dirs = [
-        container_base / episode_number / "assets" / "images",
-        container_base / episode_number / "assets" / "video",
-        container_base / episode_number / "assets" / "graphics",
-        container_base / episode_number / "assets" / "quotes",
-        host_base / episode_number / "assets" / "images",
-        host_base / episode_number / "assets" / "video",
-        host_base / episode_number / "assets" / "graphics",
-        host_base / episode_number / "assets" / "quotes",
-    ]
-
-    for search_dir in search_dirs:
-        if search_dir.exists():
-            candidate = search_dir / filename
-            if candidate.exists():
-                return candidate
-
-    return None
-
-
-def _count_blocks(items: List[RundownItem]) -> int:
-    """Count the number of content blocks in the rundown."""
-    blocks = _detect_blocks(items)
-    return len(blocks)
-
-
-def _detect_blocks(items: List[RundownItem]) -> List[Dict[str, Any]]:
-    """
-    Detect content blocks based on break regions.
-
-    A block starts with the first non-break item and ends when a break item is encountered.
-    Block A is the first block, Block B is after the first break region, etc.
-
-    Returns list of blocks, each containing:
-    - letter: Block letter (A, B, C, D...)
-    - items: List of RundownItem objects in this block
-    - start_index: Index of first item
-    - end_index: Index of last item
-    """
-    blocks = []
-    current_block_items = []
-    block_letter_index = 0
-    in_break_region = False
-
-    for i, item in enumerate(items):
-        item_type = (item.item_type or 'segment').lower()
-        is_break_item = item_type in BREAK_ITEM_TYPES
-
-        if is_break_item:
-            # End current block if we have items
-            if current_block_items and not in_break_region:
-                block_letter = chr(ord('A') + block_letter_index)
-                blocks.append({
-                    'letter': block_letter,
-                    'items': current_block_items,
-                    'start_index': i - len(current_block_items),
-                    'end_index': i - 1
-                })
-                current_block_items = []
-                block_letter_index += 1
-            in_break_region = True
-        else:
-            # Content item - add to current block
-            in_break_region = False
-            current_block_items.append(item)
-
-    # Don't forget the last block
-    if current_block_items:
-        block_letter = chr(ord('A') + block_letter_index)
-        blocks.append({
-            'letter': block_letter,
-            'items': current_block_items,
-            'start_index': len(items) - len(current_block_items),
-            'end_index': len(items) - 1
-        })
-
-    return blocks
-
-
-def _generate_html(episode_info: Dict[str, Any], items: List[RundownItem], episode_number: str = "0000", url_mapping: Optional[Dict[str, str]] = None) -> str:
-    """Generate the complete HTML document.
-
-    Args:
-        episode_info: Episode metadata for cover page
-        items: List of rundown items
-        episode_number: Episode number string
-        url_mapping: Optional mapping of original URL -> relative path in resources folder
-    """
-    if url_mapping is None:
-        url_mapping = {}
-
-    ep_num = episode_info.get('episode_number', episode_number)
-
-    # CSS styles with page numbering via CSS counters
-    css = """
-        @page {
-            size: letter;
-            margin: 0.75in 0.75in 1in 0.75in;
-            @bottom-left {
-                content: "Episode """ + ep_num + """";
-                font-size: 9pt;
-                color: #666;
-            }
-            @bottom-right {
-                content: "Page " counter(page) " of " counter(pages);
-                font-size: 9pt;
-                color: #666;
-            }
-        }
-
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-size: 14pt;
-            line-height: 1.6;
-            color: #1a1a1a;
-            margin: 0;
-            padding: 0;
-            background: #fff;
-        }
-
-        .container {
-            max-width: 7.5in;
-            margin: 0 auto;
-            padding: 0.5in;
-        }
-
-        /* Cover Page */
-        .cover-page {
-            text-align: center;
-            page-break-after: always;
-            padding-top: 2in;
-        }
-
-        .show-title {
-            font-size: 36pt;
-            font-weight: bold;
-            letter-spacing: 0.1em;
-            margin-bottom: 0.5in;
-        }
-
-        .episode-number {
-            font-size: 18pt;
-            color: #666;
-            margin-bottom: 0.25in;
-        }
-
-        .episode-date {
-            font-size: 14pt;
-            color: #888;
-            margin-bottom: 0.5in;
-        }
-
-        .episode-title {
-            font-size: 24pt;
-            font-weight: 600;
-            margin-top: 0.5in;
-        }
-
-        .guest-name {
-            font-size: 16pt;
-            color: #444;
-            margin-top: 0.25in;
-            font-style: italic;
-        }
-
-        /* Block Headers */
-        .block-start, .block-end {
-            text-align: center;
-            font-size: 16pt;
-            font-weight: bold;
-            padding: 0.3in 0;
-            margin: 0.4in 0;
-            border-top: 3px double #333;
-            border-bottom: 3px double #333;
-            background: linear-gradient(to right, #f8f8f8, #fff, #f8f8f8);
-            letter-spacing: 0.15em;
-        }
-
-        .block-end {
-            background: linear-gradient(to right, #eee, #f5f5f5, #eee);
-            color: #555;
-        }
-
-        /* Segment Headers */
-        .segment-header {
-            font-size: 16pt;
-            font-weight: bold;
-            color: #1565c0;
-            margin-top: 0.4in;
-            margin-bottom: 0.15in;
-            padding-bottom: 0.1in;
-            border-bottom: 2px solid #1565c0;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .segment-duration {
-            font-size: 10pt;
-            color: #888;
-            font-weight: normal;
-            float: right;
-            text-transform: none;
-        }
-
-        /* Script Content */
-        .script-content {
-            margin: 0.2in 0;
-        }
-
-        .script-paragraph {
-            text-align: justify;
-            margin: 0.15in 0;
-            text-indent: 0;
-        }
-
-        /* Speaker Attribution */
-        .speaker-tag {
-            font-weight: bold;
-            font-size: 10pt;
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 3px;
-            margin-right: 8px;
-            margin-bottom: 4px;
-        }
-
-        .speaker-josh { background: #e3f2fd; color: #1565c0; }
-        .speaker-guest { background: #e8f5e9; color: #2e7d32; }
-        .speaker-caller { background: #fff3e0; color: #ef6c00; }
-        .speaker-announcer { background: #f3e5f5; color: #7b1fa2; }
-        .speaker-narrator { background: #efebe9; color: #5d4037; }
-        .speaker-host { background: #e3f2fd; color: #1565c0; }
-
-        /* FSQ - Full Screen Quote */
-        .cue-fsq {
-            margin: 0.3in 0;
-            padding: 0.3in;
-            background: #fafafa;
-            border-left: 6px solid #ccc;
-            border-right: 6px solid #ccc;
-            page-break-inside: avoid;
-        }
-
-        .cue-fsq .cue-label {
-            font-size: 10pt;
-            font-weight: bold;
-            color: #888;
-            margin-bottom: 0.1in;
-        }
-
-        .cue-fsq blockquote {
-            font-size: 16pt;
-            font-style: italic;
-            color: #444;
-            margin: 0;
-            padding: 0;
-            line-height: 1.5;
-        }
-
-        .cue-fsq .attribution {
-            text-align: right;
-            font-size: 12pt;
-            color: #666;
-            margin-top: 0.15in;
-        }
-
-        /* SOT - Sound on Tape */
-        .cue-sot {
-            margin: 0.3in 0;
-            padding: 0.2in;
-            background: #fff8e1;
-            border: 2px solid #ffc107;
-            border-radius: 8px;
-            page-break-inside: avoid;
-        }
-
-        .cue-sot .cue-label {
-            font-size: 10pt;
-            font-weight: bold;
-            color: #ff8f00;
-            margin-bottom: 0.1in;
-        }
-
-        .cue-sot .sot-content {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.2in;
-        }
-
-        .cue-sot .sot-thumbnail {
-            width: 120px;
-            height: 68px;
-            object-fit: cover;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-
-        .cue-sot .sot-info {
-            flex: 1;
-        }
-
-        .cue-sot .sot-slug {
-            font-weight: bold;
-            font-size: 12pt;
-        }
-
-        .cue-sot .sot-duration {
-            font-size: 10pt;
-            color: #666;
-        }
-
-        .cue-sot .sot-transcription {
-            font-size: 10pt;
-            color: #555;
-            font-style: italic;
-            margin-top: 0.1in;
-        }
-
-        /* IMG - Image/GFX */
-        .cue-img {
-            margin: 0.3in 0;
-            text-align: center;
-            page-break-inside: avoid;
-        }
-
-        .cue-img .cue-label {
-            font-size: 10pt;
-            font-weight: bold;
-            color: #888;
-            margin-bottom: 0.1in;
-        }
-
-        .cue-img img {
-            max-width: 500px;
-            width: 100%;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-
-        .cue-img .img-caption {
-            font-size: 10pt;
-            color: #666;
-            margin-top: 0.1in;
-            font-style: italic;
-        }
-
-        /* GFX - Graphics (same as IMG) */
-        .cue-gfx {
-            margin: 0.3in 0;
-            text-align: center;
-            page-break-inside: avoid;
-        }
-
-        .cue-gfx .cue-label {
-            font-size: 10pt;
-            font-weight: bold;
-            color: #888;
-            margin-bottom: 0.1in;
-        }
-
-        .cue-gfx img {
-            max-width: 500px;
-            width: 100%;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-
-        /* Page breaks */
-        .page-break {
-            page-break-before: always;
-        }
-
-        /* Print optimizations */
-        @media print {
-            body {
-                font-size: 12pt;
-            }
-            .container {
-                padding: 0;
-            }
-        }
-    """
-
-    # Build HTML
-    html_parts = [
-        '<!DOCTYPE html>',
-        '<html lang="en">',
-        '<head>',
-        '<meta charset="UTF-8">',
-        f'<title>{episode_info["show_name"]} - Episode {episode_info["episode_number"]} - Host Script</title>',
-        '<style>',
-        css,
-        '</style>',
-        '</head>',
-        '<body>',
-        '<div class="container">',
-    ]
-
-    # Cover page
-    html_parts.append(_generate_cover_page(episode_info))
-
-    # Detect blocks
-    blocks = _detect_blocks(items)
-
-    # Initialize cue counter for enumeration (tracks across all blocks)
-    cue_counter = {'count': 0}
-
-    # Generate content for each block
-    for block in blocks:
-        html_parts.append(_generate_block_content(block, url_mapping, cue_counter))
-
-    html_parts.extend([
-        '</div>',
-        '</body>',
-        '</html>'
-    ])
-
-    return '\n'.join(html_parts)
-
-
-def _generate_cover_page(episode_info: Dict[str, Any]) -> str:
-    """Generate the cover page HTML."""
-    cover = [
-        '<div class="cover-page">',
-        f'<div class="show-title">{html.escape(episode_info["show_name"])}</div>',
-        f'<div class="episode-number">EPISODE {html.escape(episode_info["episode_number"])}</div>',
-    ]
-
-    if episode_info["date_str"]:
-        cover.append(f'<div class="episode-date">{html.escape(episode_info["date_str"])}</div>')
-
-    cover.append(f'<div class="episode-title">{html.escape(episode_info["title"])}</div>')
-
-    if episode_info["guest_name"]:
-        cover.append(f'<div class="guest-name">Guest: {html.escape(episode_info["guest_name"])}</div>')
-
-    cover.append('</div>')
-
-    return '\n'.join(cover)
-
-
-def _generate_block_content(block: Dict[str, Any], url_mapping: Dict[str, str], cue_counter: Dict[str, int]) -> str:
-    """Generate HTML content for a single block.
-
-    Args:
-        block: Block data with letter and items
-        url_mapping: URL to local path mapping
-        cue_counter: Mutable dict with 'count' key to track cue enumeration across blocks
-    """
-    parts = []
-
-    # Block start header
-    parts.append(f'<div class="block-start">★ ★ ★  START BLOCK {block["letter"]}  ★ ★ ★</div>')
-
-    # Process each item in the block
-    last_speaker = None
-    for item in block['items']:
-        segment_html, last_speaker = _process_rundown_item(item, last_speaker, url_mapping, cue_counter)
-        parts.append(segment_html)
-
-    # Block end header
-    parts.append(f'<div class="block-end">— — —  END BLOCK {block["letter"]}  — — —</div>')
-
-    return '\n'.join(parts)
-
-
-def _process_rundown_item(item: RundownItem, last_speaker: Optional[str], url_mapping: Dict[str, str], cue_counter: Dict[str, int]) -> Tuple[str, Optional[str]]:
-    """
-    Process a single rundown item and return HTML content.
-
-    Args:
-        item: The rundown item to process
-        last_speaker: Last speaker used for attribution
-        url_mapping: URL to local path mapping
-        cue_counter: Mutable dict with 'count' key to track cue enumeration
-
-    Returns tuple of (html_content, last_speaker_used)
-    """
-    parts = []
-    current_speaker = last_speaker
-
-    # Get item type
-    item_type = (item.item_type or 'segment').lower()
-
-    # Skip empty items (ads with no content, empty segments, etc.)
-    has_content = item.script_content and item.script_content.strip()
-
-    # Clean script content to check if it's truly empty
-    if has_content:
-        # Remove frontmatter and check if there's actual content
-        cleaned = re.sub(r'^---.*?---\s*', '', item.script_content, flags=re.DOTALL)
-        cleaned = re.sub(r'<p[^>]*>\s*</p>', '', cleaned)
-        cleaned = re.sub(r'<!--.*?-->', '', cleaned, flags=re.DOTALL)
-        has_content = bool(cleaned.strip())
-
-    # Skip items that are truly empty
-    if not has_content:
-        return '', current_speaker
-
-    # Segment header
-    title = item.title or item.slug or "Untitled Segment"
-    duration_str = item.duration or ""
-
-    # Clean up duration format (remove extra colons if present)
-    if duration_str and duration_str.count(':') > 2:
-        # Format is likely HH:MM:SS:FF - convert to HH:MM:SS
-        parts_list = duration_str.split(':')
-        if len(parts_list) >= 3:
-            duration_str = ':'.join(parts_list[:3])
-
-    parts.append('<div class="segment">')
-    parts.append(f'<div class="segment-header">{html.escape(title)}')
-    if duration_str:
-        parts.append(f'<span class="segment-duration">{html.escape(duration_str)}</span>')
-    parts.append('</div>')
-
-    # Process script content
-    if item.script_content:
-        content_html, current_speaker = _process_script_content(
-            item.script_content,
-            last_speaker,
-            url_mapping,
-            cue_counter
-        )
-        if content_html.strip():
-            parts.append('<div class="script-content">')
-            parts.append(content_html)
-            parts.append('</div>')
-
-    parts.append('</div>')
-
-    return '\n'.join(parts), current_speaker
-
-
-def _process_script_content(content: str, last_speaker: Optional[str], url_mapping: Dict[str, str], cue_counter: Dict[str, int]) -> Tuple[str, Optional[str]]:
-    """
-    Process script content, handling cue blocks and paragraphs.
-
-    Args:
-        content: Raw script content with cue blocks
-        last_speaker: Last speaker used for attribution
-        url_mapping: URL to local path mapping
-        cue_counter: Mutable dict with 'count' key to track cue enumeration
-
-    Returns tuple of (html_content, last_speaker_used)
-    """
-    parts = []
-    current_speaker = last_speaker
-
-    # Pattern to match cue blocks
-    cue_pattern = re.compile(
-        r'<!-- Begin Cue -->(.*?)<!-- End Cue -->',
-        re.DOTALL | re.IGNORECASE
-    )
-
-    # Pattern to match paragraphs with speaker class
-    para_pattern = re.compile(
-        r'<p(?:\s+class="([^"]*)")?[^>]*>(.*?)</p>',
-        re.DOTALL | re.IGNORECASE
-    )
-
-    # Split content by cue blocks
-    last_end = 0
-    for match in cue_pattern.finditer(content):
-        # Process text before this cue
-        text_before = content[last_end:match.start()]
-        if text_before.strip():
-            text_html, current_speaker = _process_text_content(text_before, current_speaker)
-            parts.append(text_html)
-
-        # Process cue block - increment counter for each cue
-        cue_content = match.group(1)
-        cue_counter['count'] += 10  # Increment by 10 for each cue (e.g., 10, 20, 30...)
-        cue_html = _process_cue_block(cue_content, url_mapping, cue_counter['count'])
-        if cue_html:
-            parts.append(cue_html)
-
-        last_end = match.end()
-
-    # Process remaining text after last cue
-    text_after = content[last_end:]
-    if text_after.strip():
-        text_html, current_speaker = _process_text_content(text_after, current_speaker)
-        parts.append(text_html)
-
-    return '\n'.join(parts), current_speaker
-
-
-def _process_text_content(text: str, last_speaker: Optional[str]) -> Tuple[str, Optional[str]]:
-    """
-    Process text content (paragraphs with speaker classes).
-
-    Returns tuple of (html_content, last_speaker_used)
-    """
-    parts = []
-    current_speaker = last_speaker
-
-    # Remove YAML frontmatter first (handles both --- and - - - variants)
-    text = re.sub(r'^-\s*-\s*-.*?-\s*-\s*-\s*', '', text, flags=re.DOTALL)
-    text = re.sub(r'^---.*?---\s*', '', text, flags=re.DOTALL)
-
-    # Remove markdown headers
-    text = re.sub(r'^#+\s+.*$', '', text, flags=re.MULTILINE)
-
-    # Fix double-nested paragraph tags (data quality issue)
-    # <p class="josh"><p class="josh">content</p> -> <p class="josh">content</p>
-    text = re.sub(r'<p([^>]*)>\s*<p[^>]*>', r'<p\1>', text, flags=re.IGNORECASE)
-
-    # Pattern to match paragraphs with optional speaker class
-    para_pattern = re.compile(
-        r'<p(?:\s+class="([^"]*)")?[^>]*>(.*?)</p>',
-        re.DOTALL | re.IGNORECASE
-    )
-
-    for match in para_pattern.finditer(text):
-        speaker_class = match.group(1) or 'josh'
-        content = match.group(2).strip()
-
-        if not content:
-            continue
-
-        # Clean up content (remove nested tags, normalize whitespace)
-        content = re.sub(r'<br\s*/?>', ' ', content)
-        content = re.sub(r'\s+', ' ', content)
-
-        # Check if speaker changed or coming back from break
-        show_speaker = (speaker_class != current_speaker)
-        current_speaker = speaker_class
-
-        # Get speaker config
-        speaker_info = SPEAKER_CONFIG.get(speaker_class, {'name': speaker_class.upper(), 'color': '#666'})
-
-        parts.append('<p class="script-paragraph">')
-
-        if show_speaker:
-            parts.append(
-                f'<span class="speaker-tag speaker-{html.escape(speaker_class)}">'
-                f'{html.escape(speaker_info["name"])}</span>'
-            )
-
-        parts.append(html.escape(content))
-        parts.append('</p>')
-
-    # If no paragraphs found, try to process as plain text
-    if not parts and text.strip():
-        # Remove any remaining raw <p> tags that weren't matched
-        text = re.sub(r'<p[^>]*>\s*</p>', '', text)
-        text = re.sub(r'</?p[^>]*>', '', text)
-
-        paragraphs = text.strip().split('\n\n')
-        for para in paragraphs:
-            para = para.strip()
-            # Skip empty, metadata, or comment lines
-            if para and not para.startswith('[') and not para.startswith('<!--') and not para.startswith('---'):
-                # Skip lines that look like YAML
-                if ':' in para and para.count(':') > para.count(' '):
-                    continue
-                parts.append(f'<p class="script-paragraph">{html.escape(para)}</p>')
-
-    return '\n'.join(parts), current_speaker
-
-
-def _process_cue_block(cue_content: str, url_mapping: Dict[str, str], cue_number: int) -> str:
-    """Process a cue block and return formatted HTML.
-
-    Args:
-        cue_content: Raw cue block content
-        url_mapping: URL to local path mapping
-        cue_number: Enumerated cue number for this cue (10, 20, 30, etc.)
-    """
-
-    # Extract cue type
-    type_match = re.search(r'\[Type:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    if not type_match:
-        return ''
-
-    cue_type = type_match.group(1).strip().upper()
-
-    # Extract common fields
-    slug_match = re.search(r'\[Slug:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    slug = slug_match.group(1).strip() if slug_match else 'unknown'
-
-    # Create enumerated slug: "80-eirika-kirk" format
-    enumerated_slug = f"{cue_number}-{slug}"
-
-    if cue_type == 'FSQ':
-        return _format_fsq_cue(cue_content, enumerated_slug, url_mapping, cue_number)
-    elif cue_type == 'SOT':
-        return _format_sot_cue(cue_content, enumerated_slug, url_mapping, cue_number)
-    elif cue_type in ('IMG', 'GFX'):
-        return _format_img_cue(cue_content, enumerated_slug, cue_type, url_mapping, cue_number)
-    else:
-        # Generic cue display
-        return f'<div class="cue-generic"><strong>[{cue_type}]</strong> {html.escape(enumerated_slug)}</div>'
-
-
-def _format_fsq_cue(cue_content: str, slug: str, url_mapping: Dict[str, str], cue_number: int) -> str:
-    """Format a Full Screen Quote (FSQ) cue.
-
-    Args:
-        cue_content: Raw cue block content
-        slug: Enumerated slug (e.g., "80-quote-name")
-        url_mapping: URL to local path mapping
-        cue_number: Enumerated cue number for media filename
-    """
-
-    # Extract quote
-    quote_match = re.search(r'\[Quote:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    quote = quote_match.group(1).strip().strip('"\'') if quote_match else ''
-
-    # Extract attribution
-    attr_match = re.search(r'\[Attribution:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    attribution = attr_match.group(1).strip() if attr_match else ''
-
-    # Extract media URL for FSQ image (if present)
-    media_match = re.search(r'\[Media[Uu][Rr][Ll]:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    media_url = media_match.group(1).strip() if media_match else ''
-
-    # Apply URL mapping if available - use mapped path directly (already has correct filename)
-    if media_url and media_url in url_mapping:
-        media_url = url_mapping[media_url]
-
-    parts = [
-        '<div class="cue-fsq">',
-        f'<div class="cue-label">FSQ: {html.escape(slug)}</div>',
-    ]
-
-    # Include FSQ image if present
-    if media_url:
-        parts.append(f'<img src="{html.escape(media_url)}" alt="{html.escape(slug)}" style="max-width:500px; margin-bottom:0.15in;">')
-
-    parts.append(f'<blockquote>{html.escape(quote)}</blockquote>')
-
-    if attribution:
-        parts.append(f'<div class="attribution">— {html.escape(attribution)}</div>')
-
-    parts.append('</div>')
-
-    return '\n'.join(parts)
-
-
-def _format_sot_cue(cue_content: str, slug: str, url_mapping: Dict[str, str], cue_number: int) -> str:
-    """Format a Sound On Tape (SOT) cue.
-
-    Args:
-        cue_content: Raw cue block content
-        slug: Enumerated slug (e.g., "80-clip-name")
-        url_mapping: URL to local path mapping
-        cue_number: Enumerated cue number for media filename
-    """
-
-    # Extract duration
-    duration_match = re.search(r'\[Duration:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    duration = duration_match.group(1).strip() if duration_match else ''
-
-    # Extract thumbnail URL
-    thumb_match = re.search(r'\[Thumbnail[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    thumbnail_url = thumb_match.group(1).strip() if thumb_match else ''
-
-    # Apply URL mapping if available - use mapped path directly (already has correct filename)
-    if thumbnail_url and thumbnail_url in url_mapping:
-        thumbnail_url = url_mapping[thumbnail_url]
-
-    # Extract transcription
-    trans_match = re.search(r'\[Transcription:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    transcription = trans_match.group(1).strip() if trans_match else ''
-
-    parts = [
-        '<div class="cue-sot">',
-        f'<div class="cue-label">▶ SOT: {html.escape(slug)}</div>',
-        '<div class="sot-content">',
-    ]
-
-    if thumbnail_url:
-        parts.append(f'<img class="sot-thumbnail" src="{html.escape(thumbnail_url)}" alt="SOT thumbnail">')
-
-    parts.append('<div class="sot-info">')
-    parts.append(f'<div class="sot-slug">{html.escape(slug)}</div>')
-
-    if duration:
-        parts.append(f'<div class="sot-duration">Duration: {html.escape(duration)}</div>')
-
-    if transcription:
-        # Truncate long transcriptions for print
-        if len(transcription) > 200:
-            transcription = transcription[:200] + '...'
-        parts.append(f'<div class="sot-transcription">"{html.escape(transcription)}"</div>')
-
-    parts.extend([
-        '</div>',
-        '</div>',
-        '</div>'
-    ])
-
-    return '\n'.join(parts)
-
-
-def _get_enumerated_media_path(mapped_path: str, cue_number: int) -> str:
-    """
-    Convert a mapped media path to an enumerated filename.
-
-    Example: "resources/eirika-kirk.png" with cue_number=80 becomes "resources/80-eirika-kirk.png"
-
-    Args:
-        mapped_path: The path from url_mapping (e.g., "resources/filename.png")
-        cue_number: The cue enumeration number
-
-    Returns:
-        Path with enumerated filename
-    """
-    if not mapped_path:
-        return mapped_path
-
-    # Split path into directory and filename
-    path = Path(mapped_path)
-    directory = path.parent
-    filename = path.name
-
-    # Prepend cue number to filename
-    enumerated_filename = f"{cue_number}-{filename}"
-
-    # Reconstruct path
-    if str(directory) == '.':
-        return enumerated_filename
-    return str(directory / enumerated_filename)
-
-
-def _resolve_media_url(url: str) -> str:
-    """
-    Convert relative media URLs to absolute file paths for PDF generation.
-    """
-    if not url:
-        return url
-
-    # Already absolute
-    if url.startswith('/') or url.startswith('file://') or url.startswith('http'):
-        return url
-
-    # Relative path like "episodes/0249/assets/images/..."
-    if url.startswith('episodes/'):
-        # Try container path first
-        container_path = Path('/home') / url
-        if container_path.exists():
-            return f'file://{container_path}'
-
-        # Try host path
-        host_path = Path('/mnt/sync/disaffected') / url
-        if host_path.exists():
-            return f'file://{host_path}'
-
-    return url
-
-
-def _format_img_cue(cue_content: str, slug: str, cue_type: str, url_mapping: Dict[str, str], cue_number: int) -> str:
-    """Format an IMG or GFX cue.
-
-    Args:
-        cue_content: Raw cue block content
-        slug: Enumerated slug (e.g., "80-image-name")
-        cue_type: IMG or GFX
-        url_mapping: URL to local path mapping
-        cue_number: Enumerated cue number for media filename
-    """
-
-    # Extract media URL
-    media_match = re.search(r'\[Media[Uu][Rr][Ll]:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    original_media_url = media_match.group(1).strip() if media_match else ''
-
-    # Also check for embedded img tag
-    if not original_media_url:
-        img_match = re.search(r'<img[^>]+src="([^"]+)"', cue_content, re.IGNORECASE)
-        original_media_url = img_match.group(1) if img_match else ''
-
-    # Apply URL mapping if available - use mapped path directly (already has correct filename)
-    if original_media_url and original_media_url in url_mapping:
-        media_url = url_mapping[original_media_url]
-    else:
-        # Fallback to resolved absolute path
-        media_url = _resolve_media_url(original_media_url)
-
-    # Extract description/caption
-    desc_match = re.search(r'\[Description:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    description = desc_match.group(1).strip() if desc_match else ''
-
-    css_class = 'cue-gfx' if cue_type == 'GFX' else 'cue-img'
-
-    parts = [
-        f'<div class="{css_class}">',
-        f'<div class="cue-label">{cue_type}: {html.escape(slug)}</div>',
-    ]
-
-    if media_url:
-        parts.append(f'<img src="{html.escape(media_url)}" alt="{html.escape(slug)}">')
-    else:
-        parts.append(f'<div style="padding: 1in; background: #f0f0f0; color: #888;">[Image: {html.escape(slug)}]</div>')
-
-    if description:
-        parts.append(f'<div class="img-caption">{html.escape(description)}</div>')
-
-    parts.append('</div>')
-
-    return '\n'.join(parts)
-
-
-# CLI support for testing
+# CLI support
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) < 2:
-        print("Usage: python host_script_generator.py <episode_number>")
+        print("Usage: python host_script_generator.py <episode_number> [preset]")
+        print("Presets: host_full (default), host_clean, production")
         sys.exit(1)
 
     episode_num = sys.argv[1]
-    result = generate_host_script(episode_num)
+    preset = sys.argv[2] if len(sys.argv) > 2 else "host_full"
+
+    result = generate_host_script(episode_num, preset=preset)
 
     if result["success"]:
-        print(f"Success! Script generated at: {result['output_path']}")
+        print(f"Success! Generated {result['preset']} script")
+        print(f"Output: {result['output_path']}")
         print(f"Items: {result['item_count']}, Blocks: {result['block_count']}")
     else:
         print(f"Error: {result['error']}")

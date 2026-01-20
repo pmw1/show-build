@@ -43,6 +43,7 @@ const defaultColors = {
   'draglight': 'cyan-lighten-4', // #B2EBF2 - Very light cyan
   'highlight': 'yellow-lighten-3', // #FFF9C4 - Very light yellow
   'dropline': 'green-lighten-4', // #C8E6C9 - Very light green
+  'needs-attention': 'orange-lighten-3', // #FFCC80 - Light orange for flagged paragraphs
   
   // Status highlight colors
   'draft': 'grey-darken-2',  // #616161 - Dark grey

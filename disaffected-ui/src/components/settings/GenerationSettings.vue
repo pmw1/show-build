@@ -1009,6 +1009,19 @@
         Save Generation Settings
       </v-btn>
     </v-card-actions>
+
+    <!-- Snackbar for messages -->
+    <v-snackbar
+      v-model="snackbar.show"
+      :color="snackbar.color"
+      :timeout="snackbar.timeout"
+      location="bottom"
+    >
+      {{ snackbar.message }}
+      <template v-slot:actions>
+        <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
+      </template>
+    </v-snackbar>
   </v-card>
 </template>
 
@@ -1132,7 +1145,13 @@ export default {
         { title: 'Very Fast (200 WPM)', value: '200' }
       ],
       testQuote: '',
-      splitPreview: null
+      splitPreview: null,
+      snackbar: {
+        show: false,
+        message: '',
+        color: 'error',
+        timeout: 5000
+      }
     }
   },
   computed: {
@@ -1158,6 +1177,11 @@ export default {
     this.loadLLMSettings()
   },
   methods: {
+    showSnackbar(message, color = 'error') {
+      this.snackbar.message = message
+      this.snackbar.color = color
+      this.snackbar.show = true
+    },
     save() {
       this.$emit('update:modelValue', this.localSettings)
       this.$emit('save', this.localSettings)
@@ -1190,7 +1214,7 @@ export default {
         this.$emit('save', this.localSettings)
       } catch (error) {
         console.error('❌ Failed to save LLM settings to database:', error)
-        alert('Failed to save LLM routing settings')
+        this.showSnackbar('Failed to save LLM routing settings')
       }
     },
 

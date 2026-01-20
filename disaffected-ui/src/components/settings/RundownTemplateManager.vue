@@ -379,6 +379,19 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Error/Success Snackbar -->
+    <v-snackbar
+      v-model="snackbar.show"
+      :color="snackbar.color"
+      :timeout="snackbar.timeout"
+      location="bottom"
+    >
+      {{ snackbar.message }}
+      <template v-slot:actions>
+        <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
+      </template>
+    </v-snackbar>
   </v-card>
 </template>
 
@@ -386,6 +399,12 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 import draggable from 'vuedraggable'
+
+// Auth helper - get headers with JWT token
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('auth-token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
 
 // Reactive state
 const templates = ref([])
@@ -405,6 +424,20 @@ const showAddItemDialog = ref(false)
 const showItemDialog = ref(false)
 const showDeleteTemplateDialog = ref(false)
 const showCloneDialog = ref(false)
+
+// Snackbar state
+const snackbar = ref({
+  show: false,
+  message: '',
+  color: 'error',
+  timeout: 5000
+})
+
+const showSnackbar = (message, color = 'error') => {
+  snackbar.value.message = message
+  snackbar.value.color = color
+  snackbar.value.show = true
+}
 
 // Form states
 const templateFormValid = ref(false)
@@ -494,7 +527,7 @@ watch(showAddItemDialog, (val) => {
 const loadTemplates = async () => {
   try {
     loading.value = true
-    const response = await axios.get('/api/rundown-templates/')
+    const response = await axios.get('/api/rundown-templates/', { headers: getAuthHeaders() })
     templates.value = response.data
   } catch (error) {
     console.error('Error loading templates:', error)
@@ -505,7 +538,7 @@ const loadTemplates = async () => {
 
 const loadEpisodeTemplates = async () => {
   try {
-    const response = await axios.get('/api/episodes/templates')
+    const response = await axios.get('/api/episodes/templates', { headers: getAuthHeaders() })
     episodeTemplates.value = response.data
   } catch (error) {
     console.error('Error loading episode templates:', error)
@@ -514,7 +547,7 @@ const loadEpisodeTemplates = async () => {
 
 const loadOrganizations = async () => {
   try {
-    const response = await axios.get('/api/organizations')
+    const response = await axios.get('/api/organizations', { headers: getAuthHeaders() })
     organizations.value = response.data
   } catch (error) {
     console.error('Error loading organizations:', error)
@@ -524,7 +557,7 @@ const loadOrganizations = async () => {
 const selectTemplate = async (template) => {
   try {
     // Fetch full template with items
-    const response = await axios.get(`/api/rundown-templates/${template.id}`)
+    const response = await axios.get(`/api/rundown-templates/${template.id}`, { headers: getAuthHeaders() })
     selectedTemplate.value = response.data
     selectedItemId.value = null
   } catch (error) {
@@ -585,17 +618,17 @@ const saveTemplate = async () => {
 
     if (editingTemplate.value) {
       // Update existing template
-      await axios.put(`/api/rundown-templates/${editingTemplate.value.id}`, templateForm.value)
+      await axios.put(`/api/rundown-templates/${editingTemplate.value.id}`, templateForm.value, { headers: getAuthHeaders() })
     } else {
       // Create new template
-      await axios.post('/api/rundown-templates/', templateForm.value)
+      await axios.post('/api/rundown-templates/', templateForm.value, { headers: getAuthHeaders() })
     }
 
     await loadTemplates()
     closeTemplateDialog()
   } catch (error) {
     console.error('Error saving template:', error)
-    alert(`Error saving template: ${error.response?.data?.detail || error.message}`)
+    showSnackbar(`Error saving template: ${error.response?.data?.detail || error.message}`)
   } finally {
     saving.value = false
   }
@@ -626,10 +659,10 @@ const saveItem = async () => {
 
     if (editingItem.value) {
       // Update existing item
-      await axios.put(`/api/rundown-templates/items/${editingItem.value.id}`, itemForm.value)
+      await axios.put(`/api/rundown-templates/items/${editingItem.value.id}`, itemForm.value, { headers: getAuthHeaders() })
     } else {
       // Create new item
-      await axios.post(`/api/rundown-templates/${selectedTemplate.value.id}/items`, itemForm.value)
+      await axios.post(`/api/rundown-templates/${selectedTemplate.value.id}/items`, itemForm.value, { headers: getAuthHeaders() })
     }
 
     // Reload template to get updated items
@@ -637,7 +670,7 @@ const saveItem = async () => {
     closeItemDialog()
   } catch (error) {
     console.error('Error saving item:', error)
-    alert(`Error saving item: ${error.response?.data?.detail || error.message}`)
+    showSnackbar(`Error saving item: ${error.response?.data?.detail || error.message}`)
   } finally {
     saving.value = false
   }
@@ -647,11 +680,11 @@ const deleteItem = async (item) => {
   if (!confirm(`Delete item "${item.title || item.slug}"?`)) return
 
   try {
-    await axios.delete(`/api/rundown-templates/items/${item.id}`)
+    await axios.delete(`/api/rundown-templates/items/${item.id}`, { headers: getAuthHeaders() })
     await selectTemplate(selectedTemplate.value)
   } catch (error) {
     console.error('Error deleting item:', error)
-    alert(`Error deleting item: ${error.response?.data?.detail || error.message}`)
+    showSnackbar(`Error deleting item: ${error.response?.data?.detail || error.message}`)
   }
 }
 
@@ -663,7 +696,7 @@ const confirmDeleteTemplate = (template) => {
 const deleteTemplate = async () => {
   try {
     deleting.value = true
-    await axios.delete(`/api/rundown-templates/${templateToDelete.value.id}`)
+    await axios.delete(`/api/rundown-templates/${templateToDelete.value.id}`, { headers: getAuthHeaders() })
 
     if (selectedTemplate.value?.id === templateToDelete.value.id) {
       selectedTemplate.value = null
@@ -674,7 +707,7 @@ const deleteTemplate = async () => {
     templateToDelete.value = null
   } catch (error) {
     console.error('Error deleting template:', error)
-    alert(`Error deleting template: ${error.response?.data?.detail || error.message}`)
+    showSnackbar(`Error deleting template: ${error.response?.data?.detail || error.message}`)
   } finally {
     deleting.value = false
   }
@@ -693,7 +726,7 @@ const saveClone = async () => {
     await axios.post(`/api/rundown-templates/${templateToClone.value.id}/clone`, {
       name: cloneName.value,
       description: cloneDescription.value
-    })
+    }, { headers: getAuthHeaders() })
 
     await loadTemplates()
     showCloneDialog.value = false
@@ -702,7 +735,7 @@ const saveClone = async () => {
     cloneDescription.value = ''
   } catch (error) {
     console.error('Error cloning template:', error)
-    alert(`Error cloning template: ${error.response?.data?.detail || error.message}`)
+    showSnackbar(`Error cloning template: ${error.response?.data?.detail || error.message}`)
   } finally {
     cloning.value = false
   }
@@ -723,7 +756,7 @@ const handleDragEnd = async () => {
   // Reorder on backend
   try {
     const itemIds = templateItems.value.map(item => item.id)
-    await axios.post(`/api/rundown-templates/${selectedTemplate.value.id}/items/reorder`, itemIds)
+    await axios.post(`/api/rundown-templates/${selectedTemplate.value.id}/items/reorder`, itemIds, { headers: getAuthHeaders() })
   } catch (error) {
     console.error('Error reordering items:', error)
   }

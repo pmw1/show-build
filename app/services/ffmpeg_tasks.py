@@ -93,14 +93,21 @@ def transcribe_audio_simple(audio_path: str, max_retries: int = 3) -> str:
     import httpx
     import time
 
+    # Whisper servers - use Docker container names when running inside Docker network
+    # Worker must be connected to kairo_kairo-network for container names to resolve
     whisper_servers = [
         {
-            "name": "whisper-medium",
+            "name": "whisper-medium (docker)",
+            "url": "http://whisper-medium:5000/v1/audio/transcriptions",
+            "timeout": 120.0
+        },
+        {
+            "name": "whisper-medium (host)",
             "url": "http://192.168.51.197:8887/v1/audio/transcriptions",
             "timeout": 120.0
         },
         {
-            "name": "openwebui-whisper-api",
+            "name": "openwebui-whisper-api (host)",
             "url": "http://192.168.51.197:8886/v1/audio/transcriptions",
             "timeout": 180.0
         }
@@ -228,6 +235,105 @@ def send_notification(title: str, message: str, priority: str = "normal", task_i
 # Log worker platform on module load
 _platform_info = get_platform_info()
 logger.info(f"🖥️  FFmpeg Tasks Module Loaded on {_platform_info['platform']} ({_platform_info['hostname']})")
+
+
+def calculate_frame_sharpness(image_path: str, ffmpeg: str = None) -> float:
+    """
+    Calculate frame sharpness using Laplacian variance method.
+
+    Uses FFmpeg to compute edge detection and measures variance.
+    Higher values = sharper image, lower values = blurry.
+
+    Typical thresholds:
+    - < 50: Very blurry (motion blur, out of focus)
+    - 50-100: Somewhat blurry
+    - 100-200: Acceptable sharpness
+    - > 200: Sharp/detailed image
+
+    Args:
+        image_path: Path to the image file
+        ffmpeg: Path to ffmpeg binary (auto-detected if None)
+
+    Returns:
+        float: Sharpness score (higher = sharper)
+    """
+    if ffmpeg is None:
+        ffmpeg = get_ffmpeg_binary()
+
+    try:
+        # Use FFmpeg to calculate edge variance via the 'entropy' of edge-detected image
+        # This applies a Laplacian edge detection and measures the standard deviation
+        cmd = [
+            ffmpeg, "-y",
+            "-i", str(image_path),
+            "-vf", "format=gray,convolution=0 -1 0 -1 4 -1 0 -1 0:0 -1 0 -1 4 -1 0 -1 0:0 -1 0 -1 4 -1 0 -1 0,signalstats",
+            "-f", "null", "-"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        # Parse signalstats output for YAVG (average luminance of edge-detected image)
+        # Higher edge content = sharper image
+        stderr = result.stderr
+
+        # Look for lavfi.signalstats.YAVG or similar metrics
+        import re
+
+        # Try to find YAVG (average luminance after edge detection)
+        yavg_match = re.search(r'YAVG:\s*([\d.]+)', stderr)
+        if yavg_match:
+            sharpness = float(yavg_match.group(1))
+            return sharpness
+
+        # Fallback: measure file size as proxy (more detail = larger compressed size)
+        # This is a rough approximation but works for comparing similar frames
+        file_size = os.path.getsize(image_path)
+        # Normalize to a 0-500 range based on typical thumbnail sizes
+        sharpness = min(500, file_size / 100)
+        logger.debug(f"Using file size proxy for sharpness: {sharpness:.1f}")
+        return sharpness
+
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Sharpness calculation timed out for {image_path}")
+        return 0.0
+    except Exception as e:
+        logger.warning(f"Failed to calculate sharpness for {image_path}: {str(e)}")
+        # Fallback to file size proxy
+        try:
+            file_size = os.path.getsize(image_path)
+            return min(500, file_size / 100)
+        except:
+            return 0.0
+
+
+def calculate_sharpness_simple(image_path: str) -> float:
+    """
+    Simple sharpness calculation using file size and image analysis.
+
+    More detailed/sharp images compress to larger files because they have
+    more high-frequency content that's harder to compress.
+
+    This is a fast, reliable proxy when FFmpeg filter analysis fails.
+
+    Args:
+        image_path: Path to the image file
+
+    Returns:
+        float: Sharpness score (higher = sharper)
+    """
+    try:
+        file_size = os.path.getsize(image_path)
+        # Normalize: typical thumbnail 10KB-50KB
+        # Very blurry: < 10KB, Sharp: > 30KB
+        sharpness = file_size / 100  # Scale to roughly 0-500
+        return sharpness
+    except Exception as e:
+        logger.warning(f"Failed to get file size for {image_path}: {str(e)}")
+        return 0.0
+
+
+# Sharpness thresholds
+SHARPNESS_THRESHOLD_BLURRY = 100  # Below this = blurry
+SHARPNESS_THRESHOLD_WARNING = 150  # Below this = warn user
 
 
 @shared_task(bind=True, queue='media', name='services.ffmpeg_tasks.process_sot_video')
@@ -868,7 +974,7 @@ def _update_sot_cue_block(episode: str, slug: str, asset_id: str, updates: dict)
 def _generate_asset_id() -> str:
     """Generate a unique AssetID for SOT clips."""
     from services.asset_id import AssetIDService
-    return AssetIDService.generate_id('AST')
+    return AssetIDService.generate('AST')
 
 
 def _process_individual_clips(temp_job_id, episode, slug, clips, parent_asset_id, working_dir, normalized_slug):
@@ -943,7 +1049,11 @@ def _process_individual_clips(temp_job_id, episode, slug, clips, parent_asset_id
             "-c", "copy",  # Fast extraction, no re-encoding
             str(clip_extracted)
         ]
-        subprocess.run(extract_cmd, check=True, capture_output=True)
+        result = subprocess.run(extract_cmd, capture_output=True)
+        if result.returncode != 0:
+            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else 'Unknown'
+            logger.error(f"FFmpeg clip extraction failed for clip {i}: {stderr[:500]}")
+            raise RuntimeError(f"Failed to extract clip {i}: {stderr[:200]}")
         logger.info(f"✅ Clip {i} extracted: {clip_extracted}")
 
         # Now run full processing pipeline on this clip
@@ -998,6 +1108,44 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
 
     logger.info(f"📊 Clip {clip_index} duration: {duration_formatted}")
 
+    # PHASE 0.5: Audio extraction and Whisper transcription
+    logger.info(f"Clip {clip_index} Phase 0.5: Extracting audio for transcription")
+
+    phase05_audio = working_dir / f"clip{clip_index}_audio_for_whisper.wav"
+    audio_extract_cmd = [
+        ffmpeg, "-y",
+        "-i", str(clip_file),
+        "-vn",
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",
+        "-ac", "1",
+        str(phase05_audio)
+    ]
+
+    # Extract audio with error capture
+    audio_result = subprocess.run(audio_extract_cmd, capture_output=True)
+    if audio_result.returncode != 0:
+        stderr = audio_result.stderr.decode('utf-8', errors='replace') if audio_result.stderr else 'Unknown'
+        logger.warning(f"Phase 0.5 Clip {clip_index}: Audio extraction failed: {stderr[:200]}")
+        # Continue without transcription rather than failing entirely
+        transcription_text = '[Audio extraction failed]'
+        outcue_text = ''
+    else:
+        # Transcribe with Whisper
+        transcription_text = None
+        outcue_text = ""
+        try:
+            transcription_text = transcribe_audio_simple(str(phase05_audio))
+            outcue_text = derive_outcue(transcription_text, word_count=5)
+            logger.info(f"✅ Phase 0.5 Clip {clip_index}: Transcription complete ({len(transcription_text)} chars)")
+        except Exception as e:
+            logger.warning(f"Phase 0.5 Clip {clip_index}: Transcription failed: {e}")
+            transcription_text = f'[Transcription failed: {str(e)[:100]}]'
+            outcue_text = ''
+        finally:
+            if phase05_audio.exists():
+                phase05_audio.unlink()
+
     # PHASE 1: Video normalization
     # Determine video encoder based on platform
     from platform_utils import IS_WINDOWS, has_nvidia_gpu
@@ -1017,7 +1165,11 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
         "-b:a", "192k",
         str(phase1_output)
     ]
-    subprocess.run(phase1_cmd, check=True, capture_output=True)
+    result = subprocess.run(phase1_cmd, capture_output=True)
+    if result.returncode != 0:
+        stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else 'Unknown'
+        logger.error(f"Phase 1 video normalization failed for clip {clip_index}: {stderr[:500]}")
+        raise RuntimeError(f"Phase 1 failed: {stderr[:200]}")
 
     # PHASE 2: Audio normalization (EBU R128)
     phase2_output = working_dir / f"clip{clip_index}_2_audio_normalized.mp4"
@@ -1030,7 +1182,11 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
         "-b:a", "192k",
         str(phase2_output)
     ]
-    subprocess.run(phase2_cmd, check=True, capture_output=True)
+    result = subprocess.run(phase2_cmd, capture_output=True)
+    if result.returncode != 0:
+        stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else 'Unknown'
+        logger.error(f"Phase 2 audio normalization failed for clip {clip_index}: {stderr[:500]}")
+        raise RuntimeError(f"Phase 2 failed: {stderr[:200]}")
 
     # PHASE 3: Skip (no trimming needed for already-extracted clips)
     phase3_output = phase2_output
@@ -1047,7 +1203,11 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
         "-q:v", "2",
         str(thumb_file)
     ]
-    subprocess.run(thumb_cmd, check=True, capture_output=True)
+    result = subprocess.run(thumb_cmd, capture_output=True)
+    if result.returncode != 0:
+        stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else 'Unknown'
+        logger.error(f"Phase 4 thumbnail generation failed for clip {clip_index}: {stderr[:500]}")
+        raise RuntimeError(f"Phase 4 thumbnail failed: {stderr[:200]}")
 
     # Extract MP3
     mp3_file = working_dir / f"clip{clip_index}_audio.mp3"
@@ -1059,7 +1219,11 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
         "-b:a", "192k",
         str(mp3_file)
     ]
-    subprocess.run(mp3_cmd, check=True, capture_output=True)
+    result = subprocess.run(mp3_cmd, capture_output=True)
+    if result.returncode != 0:
+        stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else 'Unknown'
+        logger.error(f"Phase 4 MP3 extraction failed for clip {clip_index}: {stderr[:500]}")
+        raise RuntimeError(f"Phase 4 MP3 failed: {stderr[:200]}")
 
     # PHASE 5: Move to final location (cross-platform)
     # Videos/audio go to assets/video/, thumbnails go to assets/thumbnails/
@@ -1085,7 +1249,9 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
         "media_url": f"/episodes/{episode}/assets/video/{normalized_clip_slug}.mp4",
         "thumbnail_url": f"/episodes/{episode}/assets/thumbnails/{normalized_clip_slug}-thumb.jpg",
         "audio_url": f"/episodes/{episode}/assets/video/{normalized_clip_slug}.mp3",
-        "duration": duration_formatted
+        "duration": duration_formatted,
+        "transcription": transcription_text,
+        "outcue": outcue_text
     }
 
 
@@ -1139,6 +1305,10 @@ def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
                     # Build cue blocks for each clip
                     new_cues = []
                     for clip in clip_results:
+                        # Get transcription and outcue with fallbacks
+                        transcription = clip.get('transcription', '')
+                        outcue = clip.get('outcue', '')
+
                         cue_block = f"""
 <!-- Begin Cue -->
 [Type: SOT]
@@ -1149,6 +1319,8 @@ def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
 [Duration: {clip['duration']}]
 [ThumbnailURL: {clip['thumbnail_url']}]
 [AudioURL: {clip['audio_url']}]
+[Transcription: {transcription}]
+[Outcue: {outcue}]
 [Credits: {{}}]
 <!-- End Cue -->
 """
@@ -1175,14 +1347,254 @@ def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
 def _process_montage(temp_job_id, episode, slug, clips, asset_id, working_dir, normalized_slug):
     """
     Process montage workflow:
-    1. Extract clips individually
-    2. Concatenate into single video
-    3. Run full processing pipeline on montage
-    4. Insert single cue block
+    1. Extract clips individually from source video
+    2. Concatenate into single video using FFmpeg concat demuxer
+    3. Run full processing pipeline on montage (including Whisper transcription)
+    4. Update existing cue block with montage result
 
-    TODO: Implement montage concatenation logic
+    Args:
+        temp_job_id: Job ID
+        episode: Episode number
+        slug: Base slug for naming
+        clips: List of clip objects with time_start, time_end
+        asset_id: AssetID of the cue block to update
+        working_dir: Working directory path
+        normalized_slug: Normalized slug for filenames
+
+    Returns:
+        dict: Processing results with montage output
     """
-    raise NotImplementedError("Montage workflow not yet implemented")
+    logger.info(f"🎬 MONTAGE: Processing {len(clips)} clips for {temp_job_id}")
+
+    # Get platform-appropriate binaries
+    ffmpeg = get_ffmpeg_binary()
+    ffprobe = get_ffprobe_binary()
+
+    input_file = working_dir / f"{temp_job_id}_upload.mp4"
+    if not input_file.exists():
+        raise FileNotFoundError(f"Upload file not found: {input_file}")
+
+    # Helper function to convert timecode to seconds
+    def timecode_to_seconds(tc):
+        """Convert HH:MM:SS:FF to seconds (ignoring frames)"""
+        parts = tc.split(':')
+        if len(parts) == 4:
+            h, m, s, f = parts
+            return int(h) * 3600 + int(m) * 60 + int(s) + (int(f) / 30.0)
+        elif len(parts) == 3:
+            h, m, s = parts
+            return int(h) * 3600 + int(m) * 60 + float(s)
+        return 0
+
+    # Create temp directory for extracted clips
+    temp_montage_dir = working_dir / "montage_clips"
+    temp_montage_dir.mkdir(exist_ok=True)
+
+    extracted_clips = []
+    total_duration = 0.0
+
+    # Determine video encoder based on platform
+    from platform_utils import IS_WINDOWS, has_nvidia_gpu
+    if IS_WINDOWS and has_nvidia_gpu():
+        video_encoder_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
+    else:
+        video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "23"]
+
+    # Step 1: Extract each clip from source video
+    for idx, clip in enumerate(clips, 1):
+        clip_start = clip.get('time_start', '00:00:00:00')
+        clip_end = clip.get('time_end', '00:00:00:00')
+
+        start_sec = timecode_to_seconds(clip_start)
+        end_sec = timecode_to_seconds(clip_end)
+        clip_duration = end_sec - start_sec
+
+        # Skip invalid duration clips
+        if clip_duration <= 0:
+            logger.warning(f"Montage clip {idx} has invalid duration ({start_sec}s to {end_sec}s), skipping")
+            continue
+
+        extracted_clip_path = temp_montage_dir / f"clip_{idx:03d}.mp4"
+
+        # Extract with re-encoding to ensure consistent format for concatenation
+        extract_cmd = [
+            ffmpeg, "-y",
+            "-ss", str(start_sec),
+            "-i", str(input_file),
+            "-t", str(clip_duration),
+            *video_encoder_args,
+            "-c:a", "aac",
+            "-b:a", "192k",
+            str(extracted_clip_path)
+        ]
+
+        logger.info(f"📹 Extracting montage clip {idx}: {start_sec}s to {end_sec}s ({clip_duration}s)")
+
+        result = subprocess.run(extract_cmd, capture_output=True)
+        if result.returncode != 0:
+            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else 'Unknown'
+            logger.error(f"FFmpeg clip extraction failed for clip {idx}: {stderr[:500]}")
+            raise RuntimeError(f"Failed to extract clip {idx}: {stderr[:200]}")
+
+        extracted_clips.append(extracted_clip_path)
+        total_duration += clip_duration
+        logger.info(f"✅ Montage clip {idx} extracted: {extracted_clip_path}")
+
+    if not extracted_clips:
+        raise ValueError("No valid clips to concatenate for montage")
+
+    # Step 2: Create concat demuxer file
+    concat_file = temp_montage_dir / "concat_list.txt"
+    with open(concat_file, 'w') as f:
+        for clip_path in extracted_clips:
+            # FFmpeg concat requires forward slashes even on Windows
+            f.write(f"file '{clip_path.as_posix()}'\n")
+
+    logger.info(f"📝 Created concat file with {len(extracted_clips)} clips")
+
+    # Step 3: Concatenate all clips into single montage video
+    montage_concat_output = temp_montage_dir / f"{temp_job_id}_montage_concat.mp4"
+
+    concat_cmd = [
+        ffmpeg, "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", str(concat_file),
+        "-c", "copy",  # Stream copy since clips are already encoded
+        str(montage_concat_output)
+    ]
+
+    logger.info(f"🔗 Concatenating {len(extracted_clips)} clips into montage")
+
+    result = subprocess.run(concat_cmd, capture_output=True)
+    if result.returncode != 0:
+        stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else 'Unknown'
+        logger.error(f"FFmpeg concatenation failed: {stderr[:500]}")
+        raise RuntimeError(f"Montage concatenation failed: {stderr[:200]}")
+
+    logger.info(f"✅ Montage concatenated: {montage_concat_output}")
+
+    # Step 4: Run full processing pipeline on the concatenated montage
+    # Generate a new AssetID for the montage output (use existing if provided)
+    montage_asset_id = asset_id if asset_id else _generate_asset_id()
+
+    logger.info(f"🔄 Running full pipeline on montage (AssetID: {montage_asset_id})")
+
+    # Update job status
+    _update_job_status(temp_job_id, 'montage_processing', 'processing')
+
+    # Process the concatenated montage through _process_single_clip
+    # This includes transcription, normalization, thumbnails, etc.
+    montage_result = _process_single_clip(
+        montage_concat_output,
+        slug,
+        montage_asset_id,
+        episode,
+        working_dir,
+        0,  # clip_index 0 for montage
+        temp_job_id
+    )
+
+    # Step 5: Clean up temp files
+    for clip_path in extracted_clips:
+        if clip_path.exists():
+            clip_path.unlink()
+    if concat_file.exists():
+        concat_file.unlink()
+    if montage_concat_output.exists():
+        montage_concat_output.unlink()
+    if temp_montage_dir.exists():
+        try:
+            temp_montage_dir.rmdir()
+        except OSError:
+            pass  # Directory not empty, leave it
+
+    logger.info(f"🧹 Cleaned up {len(extracted_clips)} temp montage files")
+
+    # Step 6: Update the existing cue block with montage result
+    _update_cue_block_with_result(episode, asset_id, montage_result)
+
+    # Mark job as complete
+    _update_job_status(temp_job_id, 'complete', 'completed')
+
+    logger.info(f"✅ MONTAGE: Completed processing {len(clips)} clips into single montage")
+
+    return {
+        "status": "completed",
+        "montage": montage_result,
+        "clip_count": len(extracted_clips),
+        "total_duration": total_duration,
+        "message": f"Processed {len(clips)} clips into montage successfully"
+    }
+
+
+def _update_cue_block_with_result(episode, asset_id, result):
+    """
+    Update an existing SOT cue block with processing results.
+
+    Args:
+        episode: Episode number
+        asset_id: AssetID of the cue block to update
+        result: Processing result dict with media_url, thumbnail_url, etc.
+    """
+    try:
+        from models_v2 import Rundown, RundownItem, Episode
+        import re
+
+        with db_session() as db:
+            # Find the rundown for this episode
+            rundown = db.query(Rundown).join(Episode).filter(Episode.episode_number == episode).first()
+            if not rundown:
+                logger.warning(f"No rundown found for episode {episode}")
+                return
+
+            # Search all rundown items for the cue with matching AssetID
+            items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
+
+            for item in items:
+                if not item.script_content:
+                    continue
+
+                # Look for the SOT cue block with matching AssetID
+                cue_pattern = re.compile(
+                    r'(<!-- Begin Cue -->.*?\[AssetID: ' + re.escape(asset_id) + r'\].*?<!-- End Cue -->)',
+                    re.DOTALL
+                )
+
+                match = cue_pattern.search(item.script_content)
+                if match:
+                    old_cue = match.group(1)
+
+                    # Get transcription and outcue with fallbacks
+                    transcription = result.get('transcription', '')
+                    outcue = result.get('outcue', '')
+
+                    # Build updated cue block
+                    new_cue = f"""<!-- Begin Cue -->
+[Type: SOT]
+[AssetID: {asset_id}]
+[Slug: {result.get('slug', '')}]
+[Description: ]
+[MediaURL: {result.get('media_url', '')}]
+[Duration: {result.get('duration', '')}]
+[ThumbnailURL: {result.get('thumbnail_url', '')}]
+[AudioURL: {result.get('audio_url', '')}]
+[Transcription: {transcription}]
+[Outcue: {outcue}]
+[Credits: {{}}]
+<!-- End Cue -->"""
+
+                    # Replace the old cue with the new one
+                    item.script_content = item.script_content.replace(old_cue, new_cue)
+
+                    db.commit()
+                    logger.info(f"✅ Updated cue block {asset_id} with montage result")
+                    return
+
+            logger.warning(f"SOT cue {asset_id} not found in episode {episode}")
+
+    except Exception as e:
+        logger.error(f"Failed to update cue block: {e}")
 
 
 @shared_task(
@@ -1654,9 +2066,19 @@ def process_sot_video_multi_phase(
         channel_levels = []
         for line in astats_output.split('\n'):
             if 'Peak level dB' in line:
-                match = re.search(r'Peak level dB: ([-\d.]+)', line)
-                if match:
-                    channel_levels.append(float(match.group(1)))
+                # Handle -inf (silence), inf, and regular dB values
+                if '-inf' in line.lower():
+                    channel_levels.append(-96.0)  # Treat -inf as very quiet
+                elif 'inf' in line.lower():
+                    channel_levels.append(0.0)  # Treat inf as 0 dB
+                else:
+                    match = re.search(r'Peak level dB:\s*([-]?\d+\.?\d*)', line)
+                    if match:
+                        try:
+                            channel_levels.append(float(match.group(1)))
+                        except ValueError:
+                            logger.warning(f"Could not parse dB level from: {line}")
+                            channel_levels.append(-96.0)  # Default to very quiet
 
         logger.info(f"Phase 1.1: Channel levels: {channel_levels}")
 
@@ -1876,11 +2298,20 @@ def process_sot_video_multi_phase(
         video_duration = float(duration_probe.stdout.strip())
 
         # Generate 15 thumbnail options at evenly spaced intervals
-        # Skip first 2 seconds and last 2 seconds to avoid fade/black
-        start_offset = 2
-        end_offset = max(2, video_duration - 2)
-        usable_duration = end_offset - start_offset
+        # Use smaller offsets for short videos to ensure we get usable frames
         num_thumbnails = 15  # Generate 15 options for user selection
+
+        if video_duration < 10:
+            # Short video: use minimal offsets (0.5s) to maximize usable range
+            start_offset = min(0.5, video_duration * 0.1)
+            end_offset = max(start_offset, video_duration - start_offset)
+            logger.info(f"Phase 4: Short video ({video_duration:.1f}s), using reduced offsets: {start_offset:.1f}s")
+        else:
+            # Normal video: skip first/last 2 seconds to avoid fade/black
+            start_offset = 2
+            end_offset = max(2, video_duration - 2)
+
+        usable_duration = end_offset - start_offset
 
         thumbnail_times = []
         if usable_duration > 0:
@@ -1889,36 +2320,66 @@ def process_sot_video_multi_phase(
                 time_point = start_offset + (usable_duration * i / (num_thumbnails - 1))
                 thumbnail_times.append(time_point)
         else:
-            # Video too short, just use 1 second mark
-            thumbnail_times = [1] * num_thumbnails
+            # Video extremely short, spread across full duration
+            for i in range(num_thumbnails):
+                time_point = video_duration * i / (num_thumbnails - 1)
+                thumbnail_times.append(max(0.1, time_point))
+            logger.warning(f"Phase 4: Very short video, using full duration for thumbnails")
 
         phase4_thumbs = []
-        thumbnail_filenames = []  # Store just filenames for database
+        thumbnail_data = []  # Store (filename, sharpness, time_point) tuples
         for i, time_point in enumerate(thumbnail_times, 1):
             thumb_file = working_dir / f"{temp_job_id}_4_thumb_{i:02d}.jpg"
+            # Use accurate seeking (-ss after -i) for better frame quality
+            # This decodes from nearest keyframe ensuring sharp frames
             thumb_cmd = [
                 ffmpeg, "-y",
-                "-ss", str(time_point),
                 "-i", str(phase3_output),
+                "-ss", str(time_point),
                 "-vframes", "1",
                 "-q:v", "2",
                 str(thumb_file)
             ]
             subprocess.run(thumb_cmd, check=True, capture_output=True)
             phase4_thumbs.append(thumb_file)
-            thumbnail_filenames.append(f"{temp_job_id}_4_thumb_{i:02d}.jpg")
-            logger.info(f"Phase 4: Generated thumbnail {i}/{num_thumbnails} at {time_point:.1f}s")
+
+            # Calculate sharpness score for this thumbnail
+            sharpness = calculate_sharpness_simple(str(thumb_file))
+            thumbnail_data.append({
+                'filename': f"{temp_job_id}_4_thumb_{i:02d}.jpg",
+                'sharpness': sharpness,
+                'time': time_point,
+                'index': i
+            })
+            logger.info(f"Phase 4: Generated thumbnail {i}/{num_thumbnails} at {time_point:.1f}s (sharpness: {sharpness:.1f})")
+
+        # Sort thumbnails by sharpness (highest first) for better default selection
+        thumbnail_data_sorted = sorted(thumbnail_data, key=lambda x: x['sharpness'], reverse=True)
+
+        # Check for blur warning
+        max_sharpness = thumbnail_data_sorted[0]['sharpness'] if thumbnail_data_sorted else 0
+        avg_sharpness = sum(t['sharpness'] for t in thumbnail_data) / len(thumbnail_data) if thumbnail_data else 0
+
+        if max_sharpness < SHARPNESS_THRESHOLD_BLURRY:
+            logger.warning(f"⚠️ Phase 4: ALL thumbnails appear blurry! Max sharpness: {max_sharpness:.1f} (threshold: {SHARPNESS_THRESHOLD_BLURRY})")
+            logger.warning(f"⚠️ Source video may contain motion blur or be out of focus")
+        elif avg_sharpness < SHARPNESS_THRESHOLD_WARNING:
+            logger.warning(f"⚠️ Phase 4: Thumbnails have below-average sharpness. Avg: {avg_sharpness:.1f}")
+
+        # Keep original order for filenames list but track best thumbnail
+        thumbnail_filenames = [t['filename'] for t in thumbnail_data]
+        best_thumbnail_idx = next((i for i, t in enumerate(thumbnail_data) if t['filename'] == thumbnail_data_sorted[0]['filename']), 0)
 
         # Store thumbnail candidates in database for user selection
         with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job:
                 job.thumbnail_candidates = thumbnail_filenames
-                # Set first thumbnail as default selection
-                job.selected_thumbnail = thumbnail_filenames[7] if len(thumbnail_filenames) >= 8 else thumbnail_filenames[0]
+                # Select the SHARPEST thumbnail as default (not middle anymore)
+                job.selected_thumbnail = thumbnail_data_sorted[0]['filename'] if thumbnail_data_sorted else thumbnail_filenames[0]
                 db.commit()
 
-        logger.info(f"Phase 4: Stored {len(thumbnail_filenames)} thumbnail candidates in database")
+        logger.info(f"Phase 4: Stored {len(thumbnail_filenames)} thumbnail candidates (best sharpness: {max_sharpness:.1f} at index {best_thumbnail_idx + 1})")
 
         # Audio extract (full segment)
         phase4_audio = working_dir / f"{temp_job_id}_4_audio.mp3"
@@ -2161,4 +2622,599 @@ def process_sot_video_multi_phase(
         error_msg = f"Unexpected error: {str(e)}"
         logger.error(error_msg)
         _update_job_status(temp_job_id, 'unknown', 'failed', error_msg)
+        raise
+
+
+# ============================================================================
+# VO (VOICE OVER) VIDEO PROCESSING
+# ============================================================================
+# Simplified processing for B-roll video that will be voiced over live.
+# NO audio requirements - skips transcription, audio normalization, MP3 extraction.
+# ============================================================================
+
+def _update_vo_cue_block(episode: str, slug: str, asset_id: str, updates: dict):
+    """
+    Update a VO cue block in the database with processing status.
+    Same as SOT cue block update but for VO-type cues.
+    """
+    try:
+        with db_session() as db:
+            from models_v2 import RundownItem
+
+            # Find the rundown item containing this asset_id
+            items = db.query(RundownItem).filter(
+                RundownItem.episode_number == episode,
+                RundownItem.script_content.contains(asset_id)
+            ).all()
+
+            for item in items:
+                if not item.script_content:
+                    continue
+
+                import frontmatter
+                try:
+                    parsed = frontmatter.loads(item.script_content)
+                except Exception:
+                    continue
+
+                # Check if this is the right cue block by looking for our asset_id
+                cues = parsed.metadata.get('cues', [])
+                for cue in cues:
+                    if cue.get('AssetID') == asset_id and cue.get('type') == 'vo':
+                        # Update the cue with new values
+                        for key, value in updates.items():
+                            cue[key] = value
+
+                        # Write back
+                        parsed.metadata['cues'] = cues
+                        item.script_content = frontmatter.dumps(parsed)
+                        db.commit()
+                        logger.info(f"✅ Updated VO cue block {asset_id} with {list(updates.keys())}")
+                        return True
+
+            logger.warning(f"⚠️ VO cue block not found for asset_id={asset_id} in episode={episode}")
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ Failed to update VO cue block: {e}")
+        return False
+
+
+@shared_task(
+    bind=True,
+    name='services.ffmpeg_tasks.process_vo_video',
+    queue='media',
+    soft_time_limit=1200,      # Warn at 20 minutes (shorter than SOT - no audio processing)
+    time_limit=1800,           # Hard kill at 30 minutes
+    acks_late=True,
+    reject_on_worker_lost=True
+)
+def process_vo_video(
+    self,
+    temp_job_id: str,
+    episode: str,
+    slug: str,
+    trim_start: str = "00:00:00",
+    trim_end: str = "00:00:00",
+    asset_id: str = None
+):
+    """
+    VO (Voice Over) video processing - simplified pipeline for B-roll.
+
+    This is a streamlined version of SOT processing that:
+    - Does NOT require audio tracks
+    - Does NOT transcribe audio (no Whisper)
+    - Does NOT normalize audio (no EBU R128)
+    - Does NOT extract MP3
+    - DOES normalize video codec/resolution
+    - DOES generate thumbnails for selection
+    - DOES support trimming
+
+    Use case: B-roll footage that host will voice over live during the show.
+
+    Phases:
+    - Phase 0: Pre-Analysis (video only, no audio validation)
+    - Phase 1: Trimming (if trim points provided)
+    - Phase 2: Video Normalization (codec, resolution, framerate)
+    - Phase 3: Generate Thumbnails (10-15 candidates)
+    - Phase 4: Final Move to Assets
+    - Phase 5: Post-Analysis
+
+    Args:
+        temp_job_id: Temporary job ID (e.g., "vo_20251011_143022_abc123")
+        episode: Episode number (e.g., "0245")
+        slug: Item slug for final naming
+        trim_start: Start time for trimming (HH:MM:SS)
+        trim_end: End time for trimming (HH:MM:SS)
+        asset_id: AssetID for linking to cue block
+
+    Returns:
+        dict: Final file paths, processing metadata
+    """
+    import json
+    import shutil
+    from models_v2 import SOTProcessingJob
+
+    # Cross-platform working directory
+    media_root = get_media_root()
+    if platform.system() == 'Windows':
+        shared_media_root = Path('W:/mnt/sync/shared_media')
+    elif Path('/shared_media').exists():
+        shared_media_root = Path('/shared_media')
+    else:
+        shared_media_root = Path('/mnt/sync/shared_media')
+    working_dir = shared_media_root / "preproc" / "working" / temp_job_id
+    normalized_slug = _normalize_slug(slug)
+
+    worker_name = platform.node()
+    worker_platform = platform.system()
+
+    try:
+        logger.info(f"🎥 Starting VO processing on {worker_name} ({worker_platform}) for {temp_job_id}")
+
+        # Initialize processing report
+        processing_report = {
+            "job_id": temp_job_id,
+            "job_category": "vo",
+            "overall_status": "in_progress",
+            "start_time": str(func.now()),
+            "phases": {},
+            "warnings": []
+        }
+
+        # Get platform-appropriate binaries
+        ffmpeg = get_ffmpeg_binary()
+        ffprobe = get_ffprobe_binary()
+
+        # Input file from background upload
+        input_file = working_dir / f"{temp_job_id}_upload.mp4"
+        if not input_file.exists():
+            raise FileNotFoundError(f"Upload file not found: {input_file}")
+
+        # ================================================================
+        # PHASE 0: Technical Analysis (VIDEO ONLY - no audio validation)
+        # ================================================================
+        logger.info(f"Phase 0: Technical analysis for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase0', 'processing')
+
+        # Get video stream info
+        video_probe_cmd = [
+            ffprobe,
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,r_frame_rate,duration",
+            "-of", "json",
+            str(input_file)
+        ]
+        video_probe_result = subprocess.run(video_probe_cmd, capture_output=True, text=True, check=True)
+        video_info = json.loads(video_probe_result.stdout)
+        video_stream = video_info['streams'][0] if video_info.get('streams') else {}
+
+        # Get container duration
+        duration_probe_cmd = [
+            ffprobe,
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(input_file)
+        ]
+        duration_probe_result = subprocess.run(duration_probe_cmd, capture_output=True, text=True, check=True)
+        duration_seconds = float(duration_probe_result.stdout.strip())
+
+        # Parse technical details
+        width = int(video_stream.get('width', 0))
+        height = int(video_stream.get('height', 0))
+
+        frame_rate_str = video_stream.get('r_frame_rate', '0/1')
+        if '/' in frame_rate_str:
+            num, denom = map(int, frame_rate_str.split('/'))
+            frame_rate = round(num / denom, 2) if denom != 0 else 0
+        else:
+            frame_rate = float(frame_rate_str)
+
+        # Determine orientation
+        if width > height:
+            orientation = 'horizontal'
+        elif height > width:
+            orientation = 'vertical'
+        else:
+            orientation = 'square'
+
+        # Format duration
+        hours = int(duration_seconds // 3600)
+        minutes = int((duration_seconds % 3600) // 60)
+        seconds = int(duration_seconds % 60)
+        duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        logger.info(f"Phase 0 analysis: {width}x{height} {orientation}, {frame_rate}fps, {duration_formatted}")
+
+        # Validation (minimal for VO - no audio requirement)
+        validation_errors = []
+        if width < 100 or height < 100:
+            validation_errors.append(f"Resolution too small: {width}x{height}")
+        if width == 0 or height == 0:
+            validation_errors.append(f"Invalid resolution: {width}x{height}")
+        if duration_seconds < 1:
+            validation_errors.append(f"Video too short: {duration_seconds:.2f}s")
+
+        if validation_errors:
+            error_msg = "; ".join(validation_errors)
+            logger.error(f"❌ VO validation failed: {error_msg}")
+            _update_job_status(temp_job_id, 'validation', 'failed', error_msg)
+            raise ValueError(f"VO validation failed: {error_msg}")
+
+        pre_analysis_data = {
+            "duration": duration_formatted,
+            "duration_seconds": duration_seconds,
+            "resolution": f"{width}x{height}",
+            "width": width,
+            "height": height,
+            "orientation": orientation,
+            "framerate": frame_rate,
+            "audio_required": False  # Key difference from SOT
+        }
+
+        with db_session() as db:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.pre_analysis = pre_analysis_data
+                db.commit()
+
+        processing_report["phases"]["phase0"] = {"status": "success", "data": pre_analysis_data}
+
+        if asset_id:
+            _update_vo_cue_block(episode, slug, asset_id, {
+                'ProcessingStatus': 'Phase 0 Complete: Analysis',
+                'Duration': duration_formatted,
+                'Resolution': f'{width}x{height}',
+                'Orientation': orientation
+            })
+
+        # ================================================================
+        # PHASE 1: Trimming (if needed)
+        # ================================================================
+        def is_zero_time(time_str):
+            return time_str in ("00:00:00", "00:00:00:00", "0", "0.0", "")
+
+        def time_to_seconds(time_str):
+            parts = time_str.split(':')
+            if len(parts) == 3:
+                h, m, s = map(float, parts)
+                return h * 3600 + m * 60 + s
+            elif len(parts) == 4:
+                h, m, s, f = map(float, parts)
+                return h * 3600 + m * 60 + s + (f / 30.0)
+            return 0.0
+
+        current_input = input_file
+
+        if not is_zero_time(trim_start) or not is_zero_time(trim_end):
+            logger.info(f"Phase 1: Trimming for {temp_job_id} (start={trim_start}, end={trim_end})")
+            _update_job_status(temp_job_id, 'phase1', 'processing')
+
+            phase1_output = working_dir / f"{temp_job_id}_1_trimmed.mp4"
+
+            if not is_zero_time(trim_end):
+                start_sec = time_to_seconds(trim_start)
+                end_sec = time_to_seconds(trim_end)
+                trim_duration = end_sec - start_sec
+
+                phase1_cmd = [
+                    ffmpeg, "-y",
+                    "-ss", str(start_sec),
+                    "-i", str(current_input),
+                    "-t", str(trim_duration),
+                    "-c", "copy",
+                    str(phase1_output)
+                ]
+            else:
+                start_sec = time_to_seconds(trim_start)
+                phase1_cmd = [
+                    ffmpeg, "-y",
+                    "-ss", str(start_sec),
+                    "-i", str(current_input),
+                    "-c", "copy",
+                    str(phase1_output)
+                ]
+
+            subprocess.run(phase1_cmd, check=True, capture_output=True)
+            current_input = phase1_output
+            logger.info(f"Phase 1 complete: Trimmed to {phase1_output}")
+
+            if asset_id:
+                _update_vo_cue_block(episode, slug, asset_id, {
+                    'ProcessingStatus': 'Phase 1 Complete: Trimmed'
+                })
+        else:
+            logger.info(f"Phase 1: Skipped (no trimming needed)")
+
+        # ================================================================
+        # PHASE 2: Video Normalization
+        # - H.264/AAC MP4
+        # - 29.97fps
+        # - Max width 1920
+        # - Audio passed through as-is (if present)
+        # ================================================================
+        logger.info(f"Phase 2: Video normalization for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase2', 'processing')
+
+        phase2_output = working_dir / f"{temp_job_id}_2_normalized.mp4"
+
+        from platform_utils import IS_WINDOWS, has_nvidia_gpu
+        if IS_WINDOWS and has_nvidia_gpu():
+            video_encoder_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18", "-maxrate", "8M", "-bufsize", "16M"]
+        else:
+            video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
+
+        # Check if video has audio - if so, copy it through
+        audio_check_cmd = [
+            ffprobe, "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=codec_type",
+            "-of", "csv=p=0",
+            str(current_input)
+        ]
+        audio_check = subprocess.run(audio_check_cmd, capture_output=True, text=True)
+        has_audio = audio_check.stdout.strip() == "audio"
+
+        if has_audio:
+            # Video has audio - copy it through
+            phase2_cmd = [
+                ffmpeg, "-y",
+                "-i", str(current_input),
+                *video_encoder_args,
+                "-r", "29.97",
+                "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",
+                "-c:a", "copy",  # Pass audio through unchanged
+                str(phase2_output)
+            ]
+        else:
+            # Video has no audio
+            phase2_cmd = [
+                ffmpeg, "-y",
+                "-i", str(current_input),
+                *video_encoder_args,
+                "-r", "29.97",
+                "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",
+                "-an",  # No audio output
+                str(phase2_output)
+            ]
+
+        subprocess.run(phase2_cmd, check=True, capture_output=True)
+        current_input = phase2_output
+        logger.info(f"Phase 2 complete: Video normalized to {phase2_output}")
+
+        if asset_id:
+            _update_vo_cue_block(episode, slug, asset_id, {
+                'ProcessingStatus': 'Phase 2 Complete: Normalized'
+            })
+
+        # ================================================================
+        # PHASE 3: Generate Thumbnails (15 candidates)
+        # ================================================================
+        logger.info(f"Phase 3: Thumbnail generation for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase3', 'processing')
+
+        # Get updated duration after trimming
+        duration_probe = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(current_input)],
+            capture_output=True, text=True, check=True
+        )
+        video_duration = float(duration_probe.stdout.strip())
+
+        # Generate 15 thumbnails with adaptive offsets for short videos
+        num_thumbnails = 15
+
+        if video_duration < 10:
+            # Short video: use minimal offsets (0.5s) to maximize usable range
+            start_offset = min(0.5, video_duration * 0.1)
+            end_offset = max(start_offset, video_duration - start_offset)
+            logger.info(f"Phase 3: Short video ({video_duration:.1f}s), using reduced offsets: {start_offset:.1f}s")
+        else:
+            # Normal video: skip first/last 2 seconds to avoid fade/black
+            start_offset = 2
+            end_offset = max(2, video_duration - 2)
+
+        usable_duration = end_offset - start_offset
+
+        thumbnail_times = []
+        if usable_duration > 0:
+            for i in range(num_thumbnails):
+                time_point = start_offset + (usable_duration * i / (num_thumbnails - 1))
+                thumbnail_times.append(time_point)
+        else:
+            # Video extremely short, spread across full duration
+            for i in range(num_thumbnails):
+                time_point = video_duration * i / (num_thumbnails - 1)
+                thumbnail_times.append(max(0.1, time_point))
+            logger.warning(f"Phase 3: Very short video, using full duration for thumbnails")
+
+        phase3_thumbs = []
+        thumbnail_data = []  # Store (filename, sharpness, time_point) tuples
+        for i, time_point in enumerate(thumbnail_times, 1):
+            thumb_file = working_dir / f"{temp_job_id}_thumb_{i:02d}.jpg"
+            # Use accurate seeking (-ss after -i) for better frame quality
+            # This decodes from nearest keyframe ensuring sharp frames
+            thumb_cmd = [
+                ffmpeg, "-y",
+                "-i", str(current_input),
+                "-ss", str(time_point),
+                "-vframes", "1",
+                "-q:v", "2",
+                str(thumb_file)
+            ]
+            subprocess.run(thumb_cmd, check=True, capture_output=True)
+            phase3_thumbs.append(thumb_file)
+
+            # Calculate sharpness score for this thumbnail
+            sharpness = calculate_sharpness_simple(str(thumb_file))
+            thumbnail_data.append({
+                'filename': f"{temp_job_id}_thumb_{i:02d}.jpg",
+                'sharpness': sharpness,
+                'time': time_point,
+                'index': i
+            })
+            logger.info(f"Phase 3: Generated thumbnail {i}/{num_thumbnails} at {time_point:.1f}s (sharpness: {sharpness:.1f})")
+
+        # Sort thumbnails by sharpness (highest first) for better default selection
+        thumbnail_data_sorted = sorted(thumbnail_data, key=lambda x: x['sharpness'], reverse=True)
+
+        # Check for blur warning
+        max_sharpness = thumbnail_data_sorted[0]['sharpness'] if thumbnail_data_sorted else 0
+        avg_sharpness = sum(t['sharpness'] for t in thumbnail_data) / len(thumbnail_data) if thumbnail_data else 0
+
+        if max_sharpness < SHARPNESS_THRESHOLD_BLURRY:
+            logger.warning(f"⚠️ Phase 3: ALL thumbnails appear blurry! Max sharpness: {max_sharpness:.1f} (threshold: {SHARPNESS_THRESHOLD_BLURRY})")
+            logger.warning(f"⚠️ Source video may contain motion blur or be out of focus")
+        elif avg_sharpness < SHARPNESS_THRESHOLD_WARNING:
+            logger.warning(f"⚠️ Phase 3: Thumbnails have below-average sharpness. Avg: {avg_sharpness:.1f}")
+
+        # Keep original order for filenames list but track best thumbnail
+        thumbnail_filenames = [t['filename'] for t in thumbnail_data]
+        best_thumbnail_idx = next((i for i, t in enumerate(thumbnail_data) if t['filename'] == thumbnail_data_sorted[0]['filename']), 0)
+
+        # Store thumbnails in database
+        with db_session() as db:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.thumbnail_candidates = thumbnail_filenames
+                # Select the SHARPEST thumbnail as default (not middle anymore)
+                job.selected_thumbnail = thumbnail_data_sorted[0]['filename'] if thumbnail_data_sorted else thumbnail_filenames[0]
+                db.commit()
+
+        logger.info(f"Phase 3 complete: {len(thumbnail_filenames)} thumbnails (best sharpness: {max_sharpness:.1f} at index {best_thumbnail_idx + 1})")
+
+        if asset_id:
+            _update_vo_cue_block(episode, slug, asset_id, {
+                'ProcessingStatus': 'Phase 3 Complete: Thumbnails Generated'
+            })
+
+        # ================================================================
+        # PHASE 4: Final Move to Assets
+        # ================================================================
+        logger.info(f"Phase 4: Final move for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase4', 'processing')
+
+        # Create output directories
+        final_video_dir = media_root / "episodes" / episode / "assets" / "video"
+        final_thumb_dir = media_root / "episodes" / episode / "assets" / "thumbnails"
+        final_video_dir.mkdir(parents=True, exist_ok=True)
+        final_thumb_dir.mkdir(parents=True, exist_ok=True)
+
+        # Move video
+        final_video = final_video_dir / f"{normalized_slug}.mp4"
+        shutil.move(str(current_input), str(final_video))
+
+        # Move thumbnails
+        final_thumbs = []
+        for i, thumb_file in enumerate(phase3_thumbs, 1):
+            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.jpg"
+            shutil.move(str(thumb_file), str(final_thumb))
+            final_thumbs.append(final_thumb)
+
+        logger.info(f"Phase 4 complete: Video and thumbnails moved to assets")
+
+        # Get final duration
+        duration_cmd = [
+            ffprobe, "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(final_video)
+        ]
+        duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, check=True)
+        final_duration = float(duration_result.stdout.strip())
+
+        hours = int(final_duration // 3600)
+        minutes = int((final_duration % 3600) // 60)
+        seconds = int(final_duration % 60)
+        final_duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        # ================================================================
+        # PHASE 5: Post-Analysis and Completion
+        # ================================================================
+        logger.info(f"Phase 5: Post-analysis for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase5', 'processing')
+
+        post_video_probe = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height,r_frame_rate,codec_name",
+             "-of", "json", str(final_video)],
+            capture_output=True, text=True, check=True
+        )
+        post_video_info = json.loads(post_video_probe.stdout)
+        post_video_stream = post_video_info['streams'][0] if post_video_info.get('streams') else {}
+
+        post_analysis_data = {
+            "duration": final_duration_formatted,
+            "duration_seconds": final_duration,
+            "resolution": f"{post_video_stream.get('width', 0)}x{post_video_stream.get('height', 0)}",
+            "codec": post_video_stream.get('codec_name', 'unknown'),
+            "file_size_mb": round(final_video.stat().st_size / (1024 * 1024), 2)
+        }
+
+        episodes_root = media_root / "episodes"
+
+        with db_session() as db:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.current_phase = 'completed'
+                job.status = 'completed'
+                job.final_video_path = str(final_video.relative_to(episodes_root))
+                job.final_thumbnail_path = str(final_thumbs[0].relative_to(episodes_root))
+                job.post_analysis = post_analysis_data
+                job.processing_report = processing_report
+                db.commit()
+
+        # Build thumbnail URLs
+        thumbnail_urls = [
+            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.jpg"
+            for i in range(1, 16)
+        ]
+
+        # Update cue block with final completion
+        if asset_id:
+            _update_vo_cue_block(episode, slug, asset_id, {
+                'ProcessingStatus': 'Complete',
+                'MediaURL': f"/episodes/{episode}/assets/video/{normalized_slug}.mp4",
+                'ThumbnailURL': thumbnail_urls[7],
+                'ThumbnailOptions': json.dumps(thumbnail_urls),
+                'Duration': final_duration_formatted
+            })
+
+        # Cleanup working directory
+        logger.info(f"Cleaning up working directory: {working_dir}")
+        shutil.rmtree(working_dir)
+
+        logger.info(f"✅ VO processing complete for {temp_job_id}")
+
+        return {
+            "temp_job_id": temp_job_id,
+            "episode": episode,
+            "slug": normalized_slug,
+            "asset_id": asset_id,
+            "video_path": str(final_video.relative_to(episodes_root)),
+            "thumbnail_path": str(final_thumbs[7].relative_to(episodes_root)),
+            "thumbnail_options": [str(t.relative_to(episodes_root)) for t in final_thumbs],
+            "duration": final_duration,
+            "duration_formatted": final_duration_formatted,
+            "status": "completed",
+            "pre_analysis": pre_analysis_data,
+            "post_analysis": post_analysis_data,
+            "processing_report": processing_report
+        }
+
+    except subprocess.CalledProcessError as e:
+        if hasattr(e, 'stderr') and e.stderr:
+            stderr_text = e.stderr.decode('utf-8', errors='replace') if isinstance(e.stderr, bytes) else str(e.stderr)
+        else:
+            stderr_text = f"Exit code {e.returncode}"
+        error_msg = f"FFmpeg error: {stderr_text}"
+        logger.error(error_msg)
+        _update_job_status(temp_job_id, 'failed', 'failed', error_msg)
+        raise
+    except Exception as e:
+        error_msg = f"VO processing error: {str(e)}"
+        logger.error(error_msg)
+        _update_job_status(temp_job_id, 'failed', 'failed', error_msg)
         raise

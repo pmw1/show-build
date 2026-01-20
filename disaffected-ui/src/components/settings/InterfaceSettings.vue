@@ -107,6 +107,15 @@
               class="mb-3"
             />
 
+            <v-switch
+              v-model="interfaceSettings.pastePlainTextOnly"
+              label="Paste as plain text only"
+              hint="Strip all formatting when pasting (removes colors, fonts, styles from copied text)"
+              persistent-hint
+              color="primary"
+              class="mb-3"
+            />
+
             <v-select
               v-model="interfaceSettings.cueCardAlignment"
               :items="[

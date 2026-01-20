@@ -23,7 +23,29 @@
       </v-btn>
     </div>
 
-    <v-card class="h-auto" flat>
+    <v-card class="metadata-card" flat>
+      <!-- Slug Header -->
+      <div v-if="item && item.slug" class="slug-header" :class="saveState?.hasChanges ? 'has-changes' : 'saved'">
+        {{ item.slug }}
+      </div>
+
+      <!-- AssetID Display -->
+      <div v-if="item && (item.asset_id || item.id)" class="asset-id-row">
+        <span class="asset-id-label">AssetID:</span>
+        <span class="asset-id-value">{{ item.asset_id || item.id }}</span>
+        <v-btn
+          icon
+          size="x-small"
+          variant="text"
+          class="copy-btn"
+          @click="copyAssetId"
+        >
+          <v-icon size="small">mdi-content-copy</v-icon>
+          <v-tooltip activator="parent" location="top">Copy AssetID</v-tooltip>
+        </v-btn>
+        <span v-if="assetIdCopied" class="copied-indicator">Copied!</span>
+      </div>
+
       <!-- Metadata Content -->
       <v-card-text class="pa-2 metadata-content">
         <div v-if="!item" class="text-center py-8">
@@ -245,6 +267,71 @@
               <v-icon left>mdi-refresh</v-icon>
               Reset
             </v-btn>
+          </div>
+
+          <!-- Version History Section -->
+          <div class="metadata-section mt-4 version-history-section">
+            <h4 class="section-title">
+              <v-icon size="small" class="mr-1">mdi-history</v-icon>
+              Version History
+            </h4>
+
+            <!-- Loading State -->
+            <div v-if="loadingVersions" class="text-center py-2">
+              <v-progress-circular indeterminate size="20" width="2" color="primary" />
+            </div>
+
+            <!-- No Versions -->
+            <div v-else-if="versionHistory.length === 0" class="text-center py-2">
+              <p class="text-caption text-grey">No saved versions yet</p>
+              <p class="text-caption text-grey-lighten-1">Versions are created on manual save (Ctrl+S)</p>
+            </div>
+
+            <!-- Version List -->
+            <v-list v-else density="compact" class="version-list pa-0">
+              <v-list-item
+                v-for="(version, idx) in versionHistory.slice(0, 10)"
+                :key="version.version_number"
+                class="version-item px-2"
+                :class="{ 'current-version': idx === 0 }"
+              >
+                <template v-slot:prepend>
+                  <v-chip
+                    size="x-small"
+                    :color="idx === 0 ? 'primary' : 'grey'"
+                    class="mr-2"
+                  >
+                    v{{ version.version_number }}
+                  </v-chip>
+                </template>
+                <v-list-item-title class="text-body-2">
+                  {{ formatVersionDate(version.created_at) }}
+                </v-list-item-title>
+                <v-list-item-subtitle class="text-caption">
+                  {{ version.content_length || 0 }} chars
+                  <span v-if="version.created_by"> &bull; {{ version.created_by }}</span>
+                </v-list-item-subtitle>
+                <template v-slot:append>
+                  <v-btn
+                    v-if="idx > 0"
+                    icon
+                    size="x-small"
+                    variant="text"
+                    color="primary"
+                    @click="$emit('restore-version', version.version_number)"
+                  >
+                    <v-icon size="small">mdi-restore</v-icon>
+                    <v-tooltip activator="parent" location="left">Restore this version</v-tooltip>
+                  </v-btn>
+                  <v-chip v-else size="x-small" color="success" variant="tonal">Current</v-chip>
+                </template>
+              </v-list-item>
+            </v-list>
+
+            <!-- Show more versions hint -->
+            <div v-if="versionHistory.length > 10" class="text-caption text-grey text-center mt-1">
+              Showing 10 of {{ versionHistory.length }} versions
+            </div>
           </div>
         </div>
 
@@ -566,7 +653,8 @@ export default {
     'generate-media-list',
     'generate-prompter-files',
     'refresh-rundown',
-    'show-notification'
+    'show-notification',
+    'restore-version'
   ],
   props: {
     panelWidth: {
@@ -599,6 +687,20 @@ export default {
     hostScriptLoading: {
       type: Boolean,
       default: false
+    },
+    saveState: {
+      type: Object,
+      default: () => ({
+        hasChanges: false
+      })
+    },
+    versionHistory: {
+      type: Array,
+      default: () => []
+    },
+    loadingVersions: {
+      type: Boolean,
+      default: false
     }
   },
   data() {
@@ -627,7 +729,8 @@ export default {
       gatherProgress: 0,
       gatherStatus: '',
       gatherResults: null,
-      showGatherResultsModal: false
+      showGatherResultsModal: false,
+      assetIdCopied: false
     }
   },
   watch: {
@@ -717,6 +820,20 @@ export default {
   methods: {
     updateField(fieldName, value) {
       this.$emit('update-field', { field: fieldName, value: value })
+    },
+    async copyAssetId() {
+      const assetId = this.item?.asset_id || this.item?.id
+      if (!assetId) return
+
+      try {
+        await navigator.clipboard.writeText(String(assetId))
+        this.assetIdCopied = true
+        setTimeout(() => {
+          this.assetIdCopied = false
+        }, 2000)
+      } catch (err) {
+        console.error('Failed to copy AssetID:', err)
+      }
     },
     resetFields() {
       // Reset to original item values (would need to track original values)
@@ -942,21 +1059,122 @@ export default {
         .join(' ')
 
       return name
+    },
+
+    formatVersionDate(dateString) {
+      if (!dateString) return 'Unknown date'
+      try {
+        const date = new Date(dateString)
+        const now = new Date()
+        const diffMs = now - date
+        const diffMins = Math.floor(diffMs / 60000)
+        const diffHours = Math.floor(diffMs / 3600000)
+        const diffDays = Math.floor(diffMs / 86400000)
+
+        // Relative time for recent versions
+        if (diffMins < 1) return 'Just now'
+        if (diffMins < 60) return `${diffMins} min ago`
+        if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`
+        if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
+
+        // Absolute date for older versions
+        return date.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      } catch {
+        return dateString
+      }
     }
   }
 }
 </script>
 
 <style scoped>
+/* Slug Header at top of panel */
+.slug-header {
+  padding: 12px 16px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: white;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.slug-header.has-changes {
+  background-color: rgb(var(--v-theme-primary));
+}
+
+.slug-header.saved {
+  background-color: rgb(var(--v-theme-success));
+}
+
+/* AssetID Display Row */
+.asset-id-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background-color: rgba(0, 0, 0, 0.03);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  font-size: 0.7rem;
+}
+
+.asset-id-label {
+  color: rgba(0, 0, 0, 0.5);
+  font-weight: 500;
+}
+
+.asset-id-value {
+  font-family: 'Roboto Mono', monospace;
+  color: rgba(0, 0, 0, 0.7);
+  font-weight: 600;
+}
+
+.asset-id-row .copy-btn {
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.asset-id-row .copy-btn:hover {
+  opacity: 1;
+}
+
+.copied-indicator {
+  color: rgb(var(--v-theme-success));
+  font-size: 0.65rem;
+  font-weight: 600;
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .metadata-panel {
-  height: auto; /* Grow with content */
+  height: 100vh; /* Full viewport height */
   border-left: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
-  overflow: visible; /* Scrolls with page */
+  overflow: hidden; /* Panel itself doesn't scroll - content inside does */
   display: flex;
   flex-direction: column;
-  position: relative;
+  position: sticky !important; /* Stick to top when scrolling */
+  top: 0 !important;
   z-index: 15 !important; /* Highest - appear above all other panels */
-  padding-bottom: 50vh; /* Add whitespace equal to 50% of viewport height */
+  align-self: flex-start; /* Required for sticky to work in flex container */
+}
+
+/* Card fills the panel and allows content to scroll */
+.metadata-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Critical: allows flex child to shrink for scrolling */
+  overflow: hidden;
 }
 
 .metadata-title {
@@ -985,9 +1203,11 @@ export default {
 }
 
 .metadata-content {
-  overflow-y: visible; /* No internal scroll - page scrolls */
-  flex: 1; /* Take remaining space after metadata-title */
+  overflow-y: auto !important; /* Independent scrolling for content area */
+  flex: 1 1 0 !important; /* Flex grow, shrink, and basis 0 for proper scrolling */
   overflow-x: hidden;
+  min-height: 0 !important; /* Critical: Allow flex shrinking for scroll to work */
+  max-height: none !important; /* Override any Vuetify max-height */
 }
 
 /* Compact section styling */
@@ -1047,41 +1267,38 @@ export default {
   max-width: none;
 }
 
-/* Status-themed fields with dynamic coloring based on episode status */
+/* Clean minimal field styling - matching ShowInfoHeader */
 :deep(.status-themed-field .v-field) {
-  background-color: v-bind('statusThemeColors.primary') !important;
-  border: 1px solid v-bind('statusThemeColors.border') !important;
+  background-color: #f5f5f5 !important;
+  border-radius: 4px !important;
 }
 
 :deep(.status-themed-field .v-field__outline) {
-  border-color: v-bind('statusThemeColors.border') !important;
-}
-
-:deep(.status-themed-field .v-field__outline--focused) {
-  border-color: v-bind('statusThemeColors.accent') !important;
-  border-width: 2px !important;
+  display: none !important;
 }
 
 :deep(.status-themed-field .v-field-label) {
-  color: v-bind('statusThemeColors.accent') !important;
+  color: rgba(0, 0, 0, 0.6) !important;
   font-weight: 500 !important;
-}
-
-:deep(.status-themed-field .v-field-label--floating) {
-  color: v-bind('statusThemeColors.accent') !important;
-}
-
-:deep(.status-themed-field .v-select__selection) {
-  font-weight: 600 !important;
-  color: v-bind('statusThemeColors.accent') !important;
+  font-size: 0.75rem !important;
 }
 
 :deep(.status-themed-field .v-field__input) {
-  color: v-bind('statusThemeColors.accent') !important;
+  font-size: 0.875rem !important;
+  padding: 4px 8px !important;
+  color: rgba(0, 0, 0, 0.87) !important;
 }
 
 :deep(.status-themed-field textarea) {
-  color: v-bind('statusThemeColors.accent') !important;
+  font-size: 0.875rem !important;
+  padding: 4px 8px !important;
+  color: rgba(0, 0, 0, 0.87) !important;
+  line-height: 1.3 !important;
+}
+
+:deep(.status-themed-field .v-select__selection) {
+  font-size: 0.875rem !important;
+  color: rgba(0, 0, 0, 0.87) !important;
 }
 
 .metadata-actions {
@@ -1123,20 +1340,26 @@ export default {
 /* Ultra-compact field styling */
 :deep(.compact-field .v-field) {
   font-size: 0.75rem !important;
-  border-radius: 0 !important;
+  border-radius: 4px !important;
+  background-color: #f5f5f5 !important;
 }
 
-/* Remove rounded corners from all input fields */
+:deep(.compact-field .v-field__outline) {
+  display: none !important;
+}
+
+/* Clean minimal styling for all input fields */
 :deep(.v-field) {
-  border-radius: 0 !important;
+  border-radius: 4px !important;
+  background-color: #f5f5f5 !important;
 }
 
 :deep(.v-field__outline) {
-  border-radius: 0 !important;
+  display: none !important;
 }
 
 :deep(.v-field__field) {
-  border-radius: 0 !important;
+  border-radius: 4px !important;
 }
 
 :deep(.compact-field .v-field__input) {
@@ -1167,7 +1390,7 @@ export default {
 }
 
 :deep(.compact-field .v-field__outline) {
-  --v-field-border-width: 1px !important;
+  display: none !important;
 }
 
 /* Compact select dropdown */
@@ -1326,6 +1549,32 @@ export default {
 
 .gather-results-list .v-list-item:last-child {
   border-bottom: none;
+}
+
+/* Version History Section */
+.version-history-section {
+  border-left-color: var(--v-info-base);
+}
+
+.version-list {
+  background: transparent !important;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.version-item {
+  background: #f5f5f5;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  min-height: 40px !important;
+}
+
+.version-item.current-version {
+  background: rgba(var(--v-theme-primary), 0.08);
+}
+
+.version-item:hover {
+  background: rgba(var(--v-theme-primary), 0.12);
 }
 
 </style>
