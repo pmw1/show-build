@@ -1,8 +1,8 @@
 <template>
   <v-app>
-    <!-- Top App Bar -->
+    <!-- Top App Bar (hidden on iPad scroll view) -->
     <v-app-bar
-      v-if="isAuthenticated"
+      v-if="isAuthenticated && $route.name !== 'ipad-scroll'"
       color="surface"
       elevation="1"
       style="padding-top: 5px; padding-bottom: 5px;"
@@ -110,9 +110,9 @@
       </v-btn>
     </v-app-bar>
 
-    <!-- Navigation Drawer -->
+    <!-- Navigation Drawer (hidden on iPad scroll view) -->
     <v-navigation-drawer
-      v-if="isAuthenticated"
+      v-if="isAuthenticated && $route.name !== 'ipad-scroll'"
       v-model="drawer"
       permanent
       width="320"
@@ -152,15 +152,18 @@
             <v-list-item-title>Reusables Studio</v-list-item-title>
           </v-list-item>
 
-          <!-- Preshow submenu within ShowFactory -->
-          <v-list-group value="brainstorm" subgroup>
+          <!-- Preproduction submenu within ShowFactory -->
+          <v-list-group value="preproduction" subgroup>
             <template v-slot:activator="{ props }">
               <v-list-item v-bind="props" prepend-icon="mdi-lightbulb-on">
-                <v-list-item-title>Preshow</v-list-item-title>
+                <v-list-item-title>Preproduction</v-list-item-title>
               </v-list-item>
             </template>
             <v-list-item to="/whiteboard" prepend-icon="mdi-notebook-edit">
               <v-list-item-title>Whiteboard</v-list-item-title>
+            </v-list-item>
+            <v-list-item to="/generator" prepend-icon="mdi-creation">
+              <v-list-item-title>Generator</v-list-item-title>
             </v-list-item>
             <v-list-item to="/voice-meeting" prepend-icon="mdi-microphone">
               <v-list-item-title>Production Meeting</v-list-item-title>
@@ -198,7 +201,11 @@
         <v-list-item to="/organization" prepend-icon="mdi-domain">
           <v-list-item-title>Organization</v-list-item-title>
         </v-list-item>
-        <v-list-item to="/settings" prepend-icon="mdi-cog">
+        <v-list-item
+          to="/settings"
+          prepend-icon="mdi-cog"
+          @click="navigateToSettings"
+        >
           <v-list-item-title>Settings</v-list-item-title>
         </v-list-item>
       </v-list>
@@ -534,7 +541,12 @@ export default {
         nfsModalRef.value.open()
       }
     }
-    
+
+    // Explicit navigation to settings (backup for v-list-item to prop)
+    const navigateToSettings = () => {
+      router.push('/settings')
+    }
+
     // Fetch episodes for selector
     async function fetchEpisodes() {
       try {
@@ -682,6 +694,7 @@ export default {
       standardNotification,
       nfsModalRef,
       openNfsModal,
+      navigateToSettings,
       health,
       loading,
       userGroups,
@@ -739,15 +752,22 @@ export default {
 }
 
 .episode-selector .v-field__input {
-  font-size: 0.825rem !important;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+  font-size: 0.95rem !important;
   font-weight: 500 !important;
-  padding: 2px 8px !important;
+  padding: 0 8px !important;
   min-height: 28px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding-bottom: 2px !important;
 }
 
 .episode-selector .v-select__selection-text {
-  font-size: 0.825rem !important;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+  font-size: 0.95rem !important;
   font-weight: 500 !important;
+  line-height: 1 !important;
+  margin-top: -2px !important;
 }
 
 .episode-selector .v-field {
@@ -796,6 +816,8 @@ export default {
 
 .episode-selector + .v-overlay .v-list-item {
   border-radius: 0 !important;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+  font-size: 0.9rem !important;
 }
 
 .episode-selector + .v-overlay .v-list-item:hover {

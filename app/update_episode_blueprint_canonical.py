@@ -90,7 +90,13 @@ CANONICAL_STRUCTURE = {
                 {
                     "name": "graphics",
                     "description": "Graphic assets with AssetID naming",
-                    "children": []
+                    "children": [
+                        {
+                            "name": "quotes",
+                            "description": "Full-screen quote graphics",
+                            "children": []
+                        }
+                    ]
                 }
             ]
         },
@@ -130,6 +136,13 @@ CANONICAL_STRUCTURE = {
         {
             "name": "exports",
             "description": "Distribution-ready content (blocks, full episode, audio, thumbnails)",
+            "children": []
+        },
+
+        # preshow/ - Preshow preparation materials
+        {
+            "name": "preshow",
+            "description": "Preshow preparation materials (notes, research, planning)",
             "children": []
         }
     ]

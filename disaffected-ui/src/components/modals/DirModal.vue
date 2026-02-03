@@ -51,6 +51,10 @@ export default {
     cueType: {
       type: String,
       default: 'dir'
+    },
+    editingCueData: {
+      type: Object,
+      default: null
     }
   },
   data() {
@@ -97,15 +101,35 @@ export default {
       this.assetId = '';
       this.noteText = '';
       this.duration = '';
+    },
+    handleKeydown(event) {
+      if (event.key === 'Escape' && this.show) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.handleAbort();
+      }
     }
   },
   watch: {
     show(newVal) {
+      // Populate fields when opening in edit mode
+      if (newVal && this.editingCueData) {
+        this.slug = this.editingCueData.slug || '';
+        this.assetId = this.editingCueData.assetId || '';
+        this.noteText = this.editingCueData.noteText || '';
+        this.duration = this.editingCueData.duration || '';
+      }
       // Only reset when closing, mixin handles opening/focus
       if (!newVal) {
         this.reset();
       }
     }
+  },
+  mounted() {
+    document.addEventListener('keydown', this.handleKeydown);
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleKeydown);
   }
 };
 </script>

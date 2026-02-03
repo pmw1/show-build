@@ -78,41 +78,20 @@ async def list_organizations(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user_or_key)
 ):
-    """Get organizations - admins see all, users see only their own"""
-    
-    if current_user.get("access_level") == "admin":
-        # Admins can see all organizations
-        sql_query = """
-            SELECT id, asset_id, name, legal_name, trade_name, organization_type, 
-                   industry, sector, registration_number, tax_id,
-                   address_line1, address_line2, city, state_province, postal_code, country,
-                   phone, email, website, founded_date, number_of_employees, annual_revenue,
-                   status, created_at, updated_at, created_by, notes
-            FROM organizations
-            ORDER BY created_at DESC
-        """
-        result = db.execute(text(sql_query))
-    else:
-        # Regular users can only see their own organization
-        # First get the user's organization_id
-        user_result = db.execute(text("SELECT organization_id FROM users WHERE username = :username"), 
-                                {"username": current_user.get("username")})
-        user_row = user_result.first()
-        
-        if not user_row or not user_row.organization_id:
-            return []  # User has no organization assigned
-            
-        sql_query = """
-            SELECT id, asset_id, name, legal_name, trade_name, organization_type, 
-                   industry, sector, registration_number, tax_id,
-                   address_line1, address_line2, city, state_province, postal_code, country,
-                   phone, email, website, founded_date, number_of_employees, annual_revenue,
-                   status, created_at, updated_at, created_by, notes
-            FROM organizations
-            WHERE id = :org_id
-            ORDER BY created_at DESC
-        """
-        result = db.execute(text(sql_query), {"org_id": user_row.organization_id})
+    """Get organizations - returns all organizations for authenticated users"""
+
+    # Return all organizations for any authenticated user
+    # This is needed for features like Rundown Template creation
+    sql_query = """
+        SELECT id, asset_id, name, legal_name, trade_name, organization_type,
+               industry, sector, registration_number, tax_id,
+               address_line1, address_line2, city, state_province, postal_code, country,
+               phone, email, website, founded_date, number_of_employees, annual_revenue,
+               status, created_at, updated_at, created_by, notes
+        FROM organizations
+        ORDER BY name ASC
+    """
+    result = db.execute(text(sql_query))
     
     organizations = []
     for row in result:

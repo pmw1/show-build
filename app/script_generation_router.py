@@ -42,6 +42,7 @@ class ScriptGenerationResponse(BaseModel):
     output_path: Optional[str] = None
     html_path: Optional[str] = None
     pdf_path: Optional[str] = None
+    md_path: Optional[str] = None
     episode_number: Optional[str] = None
     preset: Optional[str] = None
     item_count: Optional[int] = None
@@ -287,6 +288,13 @@ async def generate_media_list_from_db(
         html_path = scripts_dir / f"{ep_num}-MEDIA-LIST.html"
         html_path.write_text(html_content, encoding='utf-8')
 
+        # Generate Markdown
+        md_content = _generate_media_list_markdown(ep_num, media_items)
+        md_path = scripts_dir / f"{ep_num}-MEDIA-LIST.md"
+        md_path.write_text(md_content, encoding='utf-8')
+
+        logger.info(f"Generated media list Markdown: {md_path}")
+
         # Convert to PDF
         pdf_path = scripts_dir / f"{ep_num}-MEDIA-LIST.pdf"
         pdf_generated = _convert_html_to_pdf(html_path, pdf_path, ep_num, "Media List")
@@ -296,6 +304,7 @@ async def generate_media_list_from_db(
             output_path=str(pdf_path) if pdf_generated else str(html_path),
             html_path=str(html_path),
             pdf_path=str(pdf_path) if pdf_generated else None,
+            md_path=str(md_path),
             episode_number=episode_number,
             item_count=len(media_items)
         )
@@ -506,6 +515,76 @@ def _generate_media_list_html(episode_number: str, media_items: List[MediaListIt
     return html
 
 
+def _generate_media_list_markdown(episode_number: str, media_items: List[MediaListItem]) -> str:
+    """Generate Markdown content for the media list."""
+    missing_count = sum(1 for item in media_items if item.hasMissingMedia)
+    total_count = len(media_items)
+
+    # Sort items by segment order (chronological)
+    sorted_items = sorted(media_items, key=lambda x: x.segmentOrder or 0)
+
+    md_parts = []
+
+    # Header
+    md_parts.append(f"# Episode {episode_number} - Media List")
+    md_parts.append("")
+
+    # Summary
+    md_parts.append("## Summary")
+    md_parts.append("")
+    md_parts.append(f"- **Total Items:** {total_count}")
+    md_parts.append(f"- **Missing Media:** {missing_count}")
+    md_parts.append(f"- **Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    md_parts.append("")
+
+    # Table header
+    md_parts.append("## Media Items")
+    md_parts.append("")
+    md_parts.append("| # | Type | Slug | Segment | Filename | Duration |")
+    md_parts.append("|---|------|------|---------|----------|----------|")
+
+    # Table rows
+    for idx, item in enumerate(sorted_items, 1):
+        # Extract just the filename from the media URL
+        filename = ''
+        if item.mediaUrl:
+            filename = item.mediaUrl.split('/')[-1] if '/' in item.mediaUrl else item.mediaUrl
+        else:
+            filename = '⚠️ MISSING'
+
+        slug = item.slug or '-'
+        segment = item.segmentSlug or '-'
+        duration = item.duration or '-'
+
+        md_parts.append(f"| {idx} | {item.cueType} | {slug} | {segment} | `{filename}` | {duration} |")
+
+    md_parts.append("")
+
+    # Group by type summary
+    md_parts.append("## By Type")
+    md_parts.append("")
+
+    type_counts = {}
+    for item in media_items:
+        type_counts[item.cueType] = type_counts.get(item.cueType, 0) + 1
+
+    for cue_type, count in sorted(type_counts.items()):
+        md_parts.append(f"- **{cue_type}:** {count}")
+
+    md_parts.append("")
+
+    # Missing media section (if any)
+    if missing_count > 0:
+        md_parts.append("## ⚠️ Missing Media")
+        md_parts.append("")
+        for item in sorted_items:
+            if item.hasMissingMedia:
+                md_parts.append(f"- [{item.cueType}] {item.slug} (Segment: {item.segmentSlug})")
+        md_parts.append("")
+
+    return '\n'.join(md_parts)
+
+
 @router.get("/available-formats")
 async def get_available_formats(
     current_user: dict = Depends(get_current_user_or_key)
@@ -559,6 +638,7 @@ async def list_generated_scripts(
 ) -> Dict[str, Any]:
     """
     List all generated documents for an episode (scripts, PDFs, etc.).
+    Returns only the latest version of each document type, with past revisions nested.
     """
     ep_num = episode_number.zfill(4)
 
@@ -577,7 +657,7 @@ async def list_generated_scripts(
             "message": "No scripts directory found"
         }
 
-    documents = []
+    all_files = []
 
     # Also check scripts/current/ subdirectory
     current_dir = scripts_dir / "current"
@@ -605,18 +685,23 @@ async def list_generated_scripts(
             elif "MEDIA-LIST" in file.name:
                 doc_type = "media_list"
 
+            # Extract revision number from filename (e.g., "0257-HOST-FULL-20260120-r3.pdf" -> 3)
+            revision = 1
+            rev_match = re.search(r'-r(\d+)\.', file.name)
+            if rev_match:
+                revision = int(rev_match.group(1))
+
             # Get file stats
             stats = file.stat()
             modified_dt = datetime.fromtimestamp(stats.st_mtime)
 
             # Build URL for frontend access
-            # Determine relative path from scripts_dir
             if scan_dir == current_dir:
                 url_path = f"/episodes/{ep_num}/scripts/current/{file.name}"
             else:
                 url_path = f"/episodes/{ep_num}/scripts/{file.name}"
 
-            documents.append({
+            all_files.append({
                 "filename": file.name,
                 "type": doc_type,
                 "format": file.suffix.lstrip('.'),
@@ -625,11 +710,45 @@ async def list_generated_scripts(
                 "size": stats.st_size,
                 "size_formatted": _format_file_size(stats.st_size),
                 "modified": stats.st_mtime,
-                "modified_formatted": modified_dt.strftime("%Y-%m-%d %H:%M")
+                "modified_formatted": modified_dt.strftime("%Y-%m-%d %H:%M"),
+                "revision": revision
             })
 
-    # Sort by modification time, newest first
-    documents.sort(key=lambda x: x["modified"], reverse=True)
+    # Group files by type AND format (so PDF and HTML are separate)
+    grouped = {}
+    for doc in all_files:
+        key = f"{doc['type']}_{doc['format']}"
+        if key not in grouped:
+            grouped[key] = []
+        grouped[key].append(doc)
+
+    # For each group, sort by revision (highest first) and modification time
+    documents = []
+    for key, docs in grouped.items():
+        # Sort by revision descending, then by modification time descending
+        docs.sort(key=lambda x: (x["revision"], x["modified"]), reverse=True)
+
+        # Latest is the first one
+        latest = docs[0]
+
+        # Past revisions are all the others
+        past_revisions = docs[1:] if len(docs) > 1 else []
+
+        # Add past revisions to the latest document
+        latest["pastRevisions"] = past_revisions
+
+        documents.append(latest)
+
+    # Sort final list by type for consistent display order
+    type_order = ["host_full", "host_clean", "production", "host_script", "media_list", "unknown"]
+    format_order = ["pdf", "html", "txt"]
+
+    def sort_key(doc):
+        type_idx = type_order.index(doc["type"]) if doc["type"] in type_order else 99
+        format_idx = format_order.index(doc["format"]) if doc["format"] in format_order else 99
+        return (type_idx, format_idx)
+
+    documents.sort(key=sort_key)
 
     return {
         "episode_number": episode_number,
@@ -710,3 +829,113 @@ def _convert_html_to_pdf(html_path: Path, pdf_path: Path, episode_number: str, d
     except Exception as e:
         logger.error(f"PDF conversion failed: {e}")
         return False
+
+
+@router.get("/ipad-scroll/{episode_number}")
+async def get_ipad_scroll_content(
+    episode_number: str,
+    preset: ScriptPresetEnum = Query(ScriptPresetEnum.host_full, description="Script preset"),
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """
+    Get compiled host script content optimized for iPad scroll view.
+
+    Returns the same compiled content as PDF generation but as structured data
+    for rendering in a responsive, touch-friendly web view.
+
+    **Response includes:**
+    - episode_info: Episode metadata (title, number, date, guest, etc.)
+    - blocks: List of script blocks with compiled HTML content
+    - html_content: Full compiled HTML (for direct rendering if needed)
+    """
+    from services.host_script_generator import (
+        generate_host_script,
+        _get_episode_info,
+        _detect_blocks,
+        _collect_media_resources,
+        _build_transcription_cache,
+        _generate_html
+    )
+
+    db = SessionLocal()
+
+    try:
+        # Validate preset
+        try:
+            from services.host_script_generator import ScriptPreset as GeneratorPreset
+            script_preset = GeneratorPreset(preset.value)
+        except ValueError:
+            from services.host_script_generator import ScriptPreset as GeneratorPreset
+            script_preset = GeneratorPreset.HOST_FULL
+
+        # Find episode
+        episode = db.query(Episode).filter(
+            Episode.episode_number == int(episode_number)
+        ).first()
+
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+
+        # Get rundown
+        rundown = db.query(Rundown).filter(Rundown.episode_id == episode.id).first()
+        if not rundown:
+            raise HTTPException(status_code=404, detail=f"No rundown found for episode {episode_number}")
+
+        # Get all rundown items ordered by position
+        items = db.query(RundownItem).filter(
+            RundownItem.rundown_id == rundown.id
+        ).order_by(RundownItem.order_in_rundown).all()
+
+        if not items:
+            raise HTTPException(status_code=404, detail=f"No rundown items found for episode {episode_number}")
+
+        # Get episode metadata
+        episode_info = _get_episode_info(episode, db, items)
+
+        # Create temporary resources path for media collection
+        ep_num_padded = episode_number.zfill(4)
+        container_path = Path(f"/home/episodes/{ep_num_padded}/scripts/current")
+        host_path = Path(f"/mnt/sync/disaffected/episodes/{ep_num_padded}/scripts/current")
+        output_path = container_path if container_path.parent.parent.exists() else host_path
+        resources_path = output_path / "resources"
+        resources_path.mkdir(parents=True, exist_ok=True)
+
+        # Collect media resources
+        url_mapping = _collect_media_resources(items, resources_path, ep_num_padded)
+
+        # Build transcription cache
+        transcription_cache = _build_transcription_cache(items, db)
+
+        # Detect blocks
+        blocks = _detect_blocks(items)
+
+        # Generate HTML content
+        html_content = _generate_html(episode_info, blocks, script_preset, url_mapping, transcription_cache)
+
+        # Fix relative image/resource paths to absolute URLs for web viewing
+        # Replace resources/ with /episodes/{episode}/scripts/current/resources/
+        html_content = html_content.replace(
+            'src="resources/',
+            f'src="/episodes/{ep_num_padded}/scripts/current/resources/'
+        )
+        html_content = html_content.replace(
+            "src='resources/",
+            f"src='/episodes/{ep_num_padded}/scripts/current/resources/"
+        )
+
+        return {
+            "success": True,
+            "episode_info": episode_info,
+            "html_content": html_content,
+            "block_count": len(blocks),
+            "item_count": len(items),
+            "preset": preset.value
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating iPad scroll content for episode {episode_number}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()

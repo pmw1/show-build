@@ -84,9 +84,22 @@ export default {
         this.reset();
       } catch (error) { this.$toast.error('Failed to add PKG cue'); }
     },
-    reset() { this.slug = ''; this.title = ''; this.duration = ''; this.timestamp = ''; this.file = null; this.$emit('update:show', false); }
+    reset() { this.slug = ''; this.title = ''; this.duration = ''; this.timestamp = ''; this.file = null; this.$emit('update:show', false); },
+    handleKeydown(event) {
+      if (event.key === 'Escape' && this.show) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.handleAbort();
+      }
+    }
   },
-  watch: { show(val) { if (!val) this.reset(); } }
+  watch: { show(val) { if (!val) this.reset(); } },
+  mounted() {
+    document.addEventListener('keydown', this.handleKeydown);
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleKeydown);
+  }
 }
 </script>
 <style scoped>

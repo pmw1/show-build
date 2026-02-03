@@ -130,7 +130,20 @@ export default {
     cancel() {
       this.$emit('cancelled');
       this.$emit('update:show', false);
+    },
+    handleKeydown(event) {
+      if (event.key === 'Escape' && this.show) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.cancel();
+      }
     }
+  },
+  mounted() {
+    document.addEventListener('keydown', this.handleKeydown);
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleKeydown);
   }
 };
 </script>

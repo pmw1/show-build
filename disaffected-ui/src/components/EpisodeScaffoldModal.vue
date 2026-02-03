@@ -194,46 +194,97 @@
                             <strong>episodes/{{ episodeNumber || 'XXXX' }}/</strong>
                           </div>
                           <div class="ms-4">
+                            <!-- projects/ -->
+                            <div class="d-flex align-center mb-1">
+                              <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                              projects/
+                            </div>
+                            <div class="ms-6 mb-1">
+                              <div class="d-flex align-center mb-1">
+                                <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                                teasers/
+                              </div>
+                              <div class="d-flex align-center">
+                                <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                                graphics/
+                              </div>
+                            </div>
+                            <!-- captures/ -->
+                            <div class="d-flex align-center mb-1">
+                              <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                              captures/
+                            </div>
+                            <!-- thumbnails/ -->
+                            <div class="d-flex align-center mb-1">
+                              <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                              thumbnails/
+                            </div>
+                            <!-- assets/ -->
                             <div class="d-flex align-center mb-1">
                               <v-icon size="small" class="me-2">mdi-folder</v-icon>
                               assets/
                             </div>
-                            <div class="ms-4">
-                              <div class="ms-2">
-                              <div class="d-flex align-center mb-1">
-                                <v-icon size="small" class="me-2">mdi-folder</v-icon>
-                                audio/
-                              </div>
+                            <div class="ms-6 mb-1">
                               <div class="d-flex align-center mb-1">
                                 <v-icon size="small" class="me-2">mdi-folder</v-icon>
                                 video/
                               </div>
                               <div class="d-flex align-center mb-1">
                                 <v-icon size="small" class="me-2">mdi-folder</v-icon>
-                                graphics/
+                                images/
                               </div>
                               <div class="d-flex align-center mb-1">
                                 <v-icon size="small" class="me-2">mdi-folder</v-icon>
-                                images/
+                                audio/
                               </div>
-                              <div class="d-flex align-center">
+                              <div class="d-flex align-center mb-1">
                                 <v-icon size="small" class="me-2">mdi-folder</v-icon>
-                                quotes/
+                                graphics/
+                              </div>
+                              <div class="ms-6">
+                                <div class="d-flex align-center">
+                                  <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                                  quotes/
+                                </div>
                               </div>
                             </div>
-                            </div>
+                            <!-- rundown/ -->
                             <div class="d-flex align-center mb-1">
                               <v-icon size="small" class="me-2">mdi-folder</v-icon>
                               rundown/
                             </div>
+                            <div class="ms-6 mb-1">
+                              <div class="d-flex align-center">
+                                <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                                media-list/
+                              </div>
+                            </div>
+                            <!-- scripts/ -->
+                            <div class="d-flex align-center mb-1">
+                              <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                              scripts/
+                            </div>
+                            <div class="ms-6 mb-1">
+                              <div class="d-flex align-center mb-1">
+                                <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                                versions/
+                              </div>
+                              <div class="d-flex align-center">
+                                <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                                current/
+                              </div>
+                            </div>
+                            <!-- preshow/ -->
+                            <div class="d-flex align-center mb-1">
+                              <v-icon size="small" class="me-2">mdi-folder</v-icon>
+                              preshow/
+                            </div>
+                            <!-- exports/ -->
                             <div class="d-flex align-center mb-1">
                               <v-icon size="small" class="me-2">mdi-folder</v-icon>
                               exports/
                             </div>
-                            <div class="d-flex align-center mb-1">
-                              <v-icon size="small" class="me-2">mdi-folder</v-icon>
-                              distribute/
-                            </div>
+                            <!-- info.md -->
                             <div class="d-flex align-center">
                               <v-icon size="small" class="me-2">mdi-file-document</v-icon>
                               info.md
@@ -568,6 +619,13 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleEscapeKey)
 })
+
+// Expose open method for external control
+const open = () => {
+  dialog.value = true
+}
+
+defineExpose({ open })
 </script>
 
 <style scoped>

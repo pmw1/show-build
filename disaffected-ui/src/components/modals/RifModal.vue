@@ -91,12 +91,25 @@ export default {
       this.slug = '';
       this.duration = '';
       this.$emit('update:show', false);
+    },
+    handleKeydown(event) {
+      if (event.key === 'Escape' && this.show) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.handleAbort();
+      }
     }
   },
   watch: {
     show(val) {
       if (!val) this.reset();
     }
+  },
+  mounted() {
+    document.addEventListener('keydown', this.handleKeydown);
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleKeydown);
   }
 }
 </script>

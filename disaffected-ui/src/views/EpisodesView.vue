@@ -609,6 +609,71 @@
       </v-card>
     </v-dialog>
 
+    <!-- Segment Lock Delete Confirmation Dialog -->
+    <v-dialog
+      v-model="segmentLockDialog"
+      max-width="550"
+      persistent
+    >
+      <v-card>
+        <v-card-title class="text-warning">
+          <v-icon class="mr-2" color="warning">mdi-lock-alert</v-icon>
+          Active Segment Locks
+        </v-card-title>
+        <v-card-text class="pb-2">
+          <div class="mb-3">
+            <strong>Episode:</strong> {{ episodeToDelete?.episode_number }}: "{{ episodeToDelete?.title || 'Untitled' }}"
+          </div>
+
+          <v-alert
+            type="warning"
+            variant="tonal"
+            class="mb-3"
+          >
+            <strong>This episode has {{ segmentLockInfo?.lock_count || 0 }} active segment lock(s).</strong>
+            <p class="mt-2 mb-0">
+              Someone may be editing content in this episode. Breaking locks could cause their unsaved changes to be lost.
+            </p>
+          </v-alert>
+
+          <v-alert
+            type="info"
+            variant="tonal"
+            class="mb-3"
+          >
+            <strong>Locked segments:</strong>
+            <ul class="mt-2 mb-0" style="max-height: 150px; overflow-y: auto;">
+              <li v-for="lock in segmentLockInfo?.locks" :key="lock.lock_id">
+                Asset: {{ lock.rundown_item_asset_id }} (User ID: {{ lock.user_id }})
+              </li>
+            </ul>
+          </v-alert>
+
+          <div class="text-warning font-weight-bold">
+            Do you want to break the locks and delete this episode anyway?
+          </div>
+        </v-card-text>
+        <v-card-actions class="pa-4">
+          <v-spacer />
+          <v-btn
+            variant="text"
+            @click="cancelSegmentLockDelete"
+          >
+            Cancel
+          </v-btn>
+          <v-btn
+            color="warning"
+            variant="flat"
+            @click="confirmSegmentLockDelete"
+            :loading="deleting"
+            prepend-icon="mdi-lock-open-remove"
+          >
+            Break Locks & Delete
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- AssetID Info Modal -->
     <v-dialog
       v-model="assetIdInfoDialog"
@@ -818,6 +883,8 @@ export default {
     const episodeDialog = ref(false);
     const deleteDialog = ref(false);
     const phantomDeleteDialog = ref(false);  // For phantom record confirmation
+    const segmentLockDialog = ref(false);  // For segment lock confirmation
+    const segmentLockInfo = ref(null);  // Store lock info from server
     const editingEpisode = ref(false);
     const episodeToDelete = ref(null);
     const assetIdInfoDialog = ref(false);
@@ -1272,6 +1339,17 @@ export default {
           return;
         }
 
+        // Check for segment locks response (409 Conflict)
+        if (error.response?.status === 409 && error.response?.data?.detail?.error === 'segment_locks_exist') {
+          // Close regular delete dialog and show segment lock confirmation
+          deleteDialog.value = false;
+          phantomDeleteDialog.value = false;
+          segmentLockInfo.value = error.response.data.detail;
+          segmentLockDialog.value = true;
+          deleting.value = false;
+          return;
+        }
+
         // Handle other errors
         const errorDetail = error.response?.data?.detail;
         const errorMessage = typeof errorDetail === 'object'
@@ -1279,7 +1357,7 @@ export default {
           : errorDetail || error.response?.data?.error || error.message;
         alert(`Failed to delete episode: ${errorMessage}`);
       } finally {
-        if (!phantomDeleteDialog.value) {
+        if (!phantomDeleteDialog.value && !segmentLockDialog.value) {
           deleting.value = false;
           episodeToDelete.value = null;
         } else {
@@ -1294,6 +1372,49 @@ export default {
 
     const cancelPhantomDelete = () => {
       phantomDeleteDialog.value = false;
+      episodeToDelete.value = null;
+    };
+
+    const confirmSegmentLockDelete = async () => {
+      if (!episodeToDelete.value) return;
+
+      deleting.value = true;
+      try {
+        // Call delete with break_locks=true (and force=true in case it's also a phantom)
+        const url = `/api/episodes/${episodeToDelete.value.episode_number}?force=true&break_locks=true`;
+        await axios.delete(url, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
+        });
+
+        console.log(`Episode ${episodeToDelete.value.episode_number} deleted successfully (locks broken)`);
+
+        // Remove from local list
+        const index = episodes.value.findIndex(ep => ep.episode_number === episodeToDelete.value.episode_number);
+        if (index > -1) {
+          episodes.value.splice(index, 1);
+        }
+
+        alert(`Episode ${episodeToDelete.value.episode_number} has been deleted. Segment locks were broken.`);
+        segmentLockDialog.value = false;
+        segmentLockInfo.value = null;
+      } catch (error) {
+        console.error('Failed to delete episode with lock break:', error);
+        const errorDetail = error.response?.data?.detail;
+        const errorMessage = typeof errorDetail === 'object'
+          ? errorDetail.message || JSON.stringify(errorDetail)
+          : errorDetail || error.response?.data?.error || error.message;
+        alert(`Failed to delete episode: ${errorMessage}`);
+      } finally {
+        deleting.value = false;
+        episodeToDelete.value = null;
+        segmentLockDialog.value = false;
+        segmentLockInfo.value = null;
+      }
+    };
+
+    const cancelSegmentLockDelete = () => {
+      segmentLockDialog.value = false;
+      segmentLockInfo.value = null;
       episodeToDelete.value = null;
     };
 
@@ -1470,6 +1591,8 @@ export default {
       episodeDialog,
       deleteDialog,
       phantomDeleteDialog,
+      segmentLockDialog,
+      segmentLockInfo,
       editingEpisode,
       episodeToDelete,
       episodeForm,
@@ -1499,6 +1622,8 @@ export default {
       confirmDelete,
       confirmPhantomDelete,
       cancelPhantomDelete,
+      confirmSegmentLockDelete,
+      cancelSegmentLockDelete,
       openStatusModal,
       closeStatusModal,
       changeEpisodeStatus,

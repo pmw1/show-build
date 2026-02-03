@@ -10,6 +10,7 @@ services:
     volumes:
       - ./app:/app
       - ./app/storage:/app/storage
+      - ./tools/blueprints:/tools/blueprints:ro  # Blueprint templates for document generation
       - /mnt/sync/disaffected/logs:/home/logs
       - /mnt/sync/shared_media:/shared_media
       - /mnt/sync/disaffected/episodes:/home/episodes

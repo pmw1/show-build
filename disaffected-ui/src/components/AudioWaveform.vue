@@ -1,5 +1,13 @@
 <template>
-  <div class="audio-waveform-container" :style="containerStyle">
+  <div
+    class="audio-waveform-container"
+    :style="containerStyle"
+    @click="handleClick"
+    @mousedown="handleMouseDown"
+    @mousemove="handleMouseMove"
+    @mouseup="handleMouseUp"
+    @mouseleave="handleMouseUp"
+  >
     <canvas
       ref="waveformCanvas"
       :width="canvasWidth"
@@ -13,6 +21,15 @@
       class="playhead"
       :style="playheadStyle"
     ></div>
+
+    <!-- Hover time indicator -->
+    <div
+      v-if="hoverTime !== null"
+      class="hover-indicator"
+      :style="hoverIndicatorStyle"
+    >
+      <span class="hover-time">{{ formatTime(hoverTime) }}</span>
+    </div>
   </div>
 </template>
 
@@ -56,11 +73,15 @@ export default {
       default: '#FF5722'
     }
   },
-  setup(props) {
+  emits: ['seek'],
+  setup(props, { emit }) {
     const waveformCanvas = ref(null)
     const canvasWidth = ref(800)
     const canvasHeight = computed(() => props.height)
     const resizeObserver = ref(null)
+    const isDragging = ref(false)
+    const hoverTime = ref(null)
+    const hoverX = ref(0)
 
     // Container style
     const containerStyle = computed(() => ({
@@ -82,6 +103,70 @@ export default {
         transform: 'translateX(-50%)'
       }
     })
+
+    // Hover indicator style
+    const hoverIndicatorStyle = computed(() => {
+      return {
+        left: `${hoverX.value}px`,
+        transform: 'translateX(-50%)'
+      }
+    })
+
+    // Format time for display (HH:MM:SS)
+    const formatTime = (seconds) => {
+      const h = Math.floor(seconds / 3600)
+      const m = Math.floor((seconds % 3600) / 60)
+      const s = Math.floor(seconds % 60)
+      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+    }
+
+    // Calculate time from mouse position
+    const getTimeFromEvent = (event) => {
+      if (!waveformCanvas.value || props.duration === 0) return null
+      const rect = waveformCanvas.value.getBoundingClientRect()
+      const x = event.clientX - rect.left
+      const progress = Math.max(0, Math.min(1, x / rect.width))
+      return progress * props.duration
+    }
+
+    // Handle click to seek
+    const handleClick = (event) => {
+      const time = getTimeFromEvent(event)
+      if (time !== null) {
+        emit('seek', time)
+      }
+    }
+
+    // Handle mouse down for drag scrubbing
+    const handleMouseDown = (event) => {
+      isDragging.value = true
+      const time = getTimeFromEvent(event)
+      if (time !== null) {
+        emit('seek', time)
+      }
+    }
+
+    // Handle mouse move for hover preview and drag scrubbing
+    const handleMouseMove = (event) => {
+      const rect = waveformCanvas.value?.getBoundingClientRect()
+      if (rect) {
+        hoverX.value = event.clientX - rect.left
+        hoverTime.value = getTimeFromEvent(event)
+      }
+
+      if (isDragging.value) {
+        const time = getTimeFromEvent(event)
+        if (time !== null) {
+          emit('seek', time)
+        }
+      }
+    }
+
+    // Handle mouse up to stop dragging
+    const handleMouseUp = () => {
+      isDragging.value = false
+      hoverTime.value = null
+    }
 
     /**
      * Draw waveform on canvas
@@ -174,7 +259,14 @@ export default {
       canvasWidth,
       canvasHeight,
       containerStyle,
-      playheadStyle
+      playheadStyle,
+      hoverIndicatorStyle,
+      hoverTime,
+      formatTime,
+      handleClick,
+      handleMouseDown,
+      handleMouseMove,
+      handleMouseUp
     }
   }
 }
@@ -184,6 +276,7 @@ export default {
 .audio-waveform-container {
   position: relative;
   user-select: none;
+  cursor: pointer;
 }
 
 .waveform-canvas {
@@ -207,5 +300,22 @@ export default {
   box-shadow: 0 0 8px rgba(255, 87, 34, 0.8);
   pointer-events: none;
   z-index: 10;
+}
+
+.hover-indicator {
+  position: absolute;
+  top: -30px;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.hover-time {
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'Roboto Mono', monospace;
+  white-space: nowrap;
 }
 </style>

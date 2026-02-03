@@ -125,7 +125,10 @@ class Show(Base):
     # Basic info
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    
+
+    # Show settings
+    timezone = Column(String(50), nullable=True, default='America/New_York')  # IANA timezone (e.g., America/New_York, America/Los_Angeles)
+
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -312,7 +315,9 @@ class Episode(Base):
     # Scheduling
     publish_date = Column(DateTime, nullable=True)
     air_date = Column(DateTime, nullable=True)
-    
+    air_time = Column(String(50), nullable=True)  # Time of day for airing (HH:MM format)
+    air_timezone = Column(String(50), nullable=True, default='America/New_York')  # Timezone for air time
+
     # Timing
     target_duration = Column(Integer, nullable=True)  # Target duration in seconds
     actual_duration = Column(Integer, nullable=True)  # Actual duration after production

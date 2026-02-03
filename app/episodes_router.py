@@ -617,6 +617,7 @@ Show opening and introduction
 async def delete_episode(
     episode_number: str,
     force: bool = False,
+    break_locks: bool = False,
     current_user: dict = Depends(get_current_user_or_key),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -624,8 +625,10 @@ async def delete_episode(
 
     If the filesystem directory doesn't exist but database records do (phantom record),
     use force=true to confirm database-only deletion.
+
+    If there are active segment locks, use break_locks=true to force-remove them.
     """
-    from models_v2 import Episode
+    from models_v2 import Episode, Rundown, RundownItem, SegmentLock
 
     episode_dir = EPISODES_ROOT / episode_number
     filesystem_exists = episode_dir.exists()
@@ -633,9 +636,59 @@ async def delete_episode(
     # Check for database record
     try:
         episode_num_int = int(episode_number)
-        db_record_exists = db.query(Episode).filter(Episode.episode_number == episode_num_int).first() is not None
+        episode_record = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
+        db_record_exists = episode_record is not None
     except ValueError:
+        episode_record = None
         db_record_exists = False
+
+    # Check for segment locks BEFORE attempting any deletion
+    if episode_record:
+        # Get all rundown item asset_ids for this episode
+        rundown_ids = db.query(Rundown.id).filter(Rundown.episode_id == episode_record.id).all()
+        rundown_ids = [r[0] for r in rundown_ids]
+
+        if rundown_ids:
+            rundown_item_asset_ids = db.query(RundownItem.asset_id).filter(
+                RundownItem.rundown_id.in_(rundown_ids)
+            ).all()
+            rundown_item_asset_ids = [r[0] for r in rundown_item_asset_ids if r[0]]
+
+            if rundown_item_asset_ids:
+                # Check for segment locks on these items
+                segment_locks = db.query(SegmentLock).filter(
+                    SegmentLock.rundown_item_asset_id.in_(rundown_item_asset_ids)
+                ).all()
+
+                if segment_locks and not break_locks:
+                    # Return information about the locks
+                    lock_info = []
+                    for lock in segment_locks:
+                        lock_info.append({
+                            "lock_id": lock.id,
+                            "asset_id": lock.asset_id,
+                            "rundown_item_asset_id": lock.rundown_item_asset_id,
+                            "user_id": lock.user_id,
+                            "locked_at": lock.locked_at.isoformat() if lock.locked_at else None,
+                            "expires_at": lock.expires_at.isoformat() if lock.expires_at else None
+                        })
+
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": "segment_locks_exist",
+                            "message": f"Episode {episode_number} has {len(segment_locks)} active segment lock(s). Use break_locks=true to force-remove them and delete the episode.",
+                            "episode_number": episode_number,
+                            "lock_count": len(segment_locks),
+                            "locks": lock_info,
+                            "action_required": "confirm_break_locks"
+                        }
+                    )
+                elif segment_locks and break_locks:
+                    # User confirmed - delete the segment locks
+                    for lock in segment_locks:
+                        db.delete(lock)
+                    logger.info(f"Force-deleted {len(segment_locks)} segment locks for episode {episode_number}")
 
     # Handle phantom records (database exists but no filesystem)
     if not filesystem_exists:
@@ -661,25 +714,26 @@ async def delete_episode(
     try:
         import shutil
         from datetime import datetime
-        from models_v2 import Episode, RundownItem, Segment, Break, Rundown
-        # from models import Asset, ProcessingJob, ExtractedQuote  # REMOVED - models.py deleted
+        from models_v2 import Segment, Break
         from models_episode import Blueprint
-        
+
         # First, delete from database to ensure data consistency
         logger.info(f"Starting deletion of episode {episode_number} from database")
 
         # Initialize counters for response
         rundown_item_count = 0
         segment_count = 0
-        
-        # Find episode record from episodes table (models_v2) - don't delete yet
-        # Convert episode_number string to int for database query
-        try:
-            episode_num_int = int(episode_number)
-            episode_record = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
-        except ValueError:
-            logger.error(f"Invalid episode number format: {episode_number}")
-            episode_record = None
+
+        # episode_record already fetched above, reuse it
+        if not episode_record:
+            # Try again in case it wasn't fetched earlier
+            try:
+                episode_num_int = int(episode_number)
+                episode_record = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
+            except ValueError:
+                logger.error(f"Invalid episode number format: {episode_number}")
+                episode_record = None
+
         if not episode_record:
             logger.warning(f"No episode record found for {episode_number} in episodes table")
         
@@ -1044,7 +1098,7 @@ async def get_episode_script(
 @router.get("/{episode_number}/info")
 async def get_episode_info(episode_number: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get episode metadata from database."""
-    from models_v2 import Episode
+    from models_v2 import Episode, Season, Show
 
     try:
         # Convert episode number to int
@@ -1055,6 +1109,17 @@ async def get_episode_info(episode_number: str, db: Session = Depends(get_db)) -
         if not episode:
             raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
 
+        # Get show timezone via Season -> Show relationship
+        show_timezone = "America/New_York"  # Default fallback
+        show_name = None
+        if episode.season_id:
+            season = db.query(Season).filter(Season.id == episode.season_id).first()
+            if season and season.show_id:
+                show = db.query(Show).filter(Show.id == season.show_id).first()
+                if show:
+                    show_timezone = show.timezone or "America/New_York"
+                    show_name = show.name
+
         # Convert database record to info format
         info = {
             "episode_number": f"{episode.episode_number:04d}",
@@ -1062,6 +1127,10 @@ async def get_episode_info(episode_number: str, db: Session = Depends(get_db)) -
             "slug": episode.slug or f"episode-{episode_number}",
             "status": episode.status or "draft",
             "airdate": episode.air_date.isoformat() if episode.air_date else None,
+            "airtime": episode.air_time or "",
+            "airtimezone": episode.air_timezone or show_timezone,
+            "show_timezone": show_timezone,
+            "show_name": show_name,
             "publish_date": episode.publish_date.isoformat() if episode.publish_date else None,
             "duration": episode.duration_formatted or "01:00:00",
             "guest": episode.guest_name or "",
@@ -1086,6 +1155,224 @@ async def get_episode_info(episode_number: str, db: Session = Depends(get_db)) -
     except Exception as e:
         logger.error(f"Error reading episode info from database: {e}")
         raise HTTPException(status_code=500, detail="Error reading episode info from database")
+
+
+@router.get("/{episode_number}/thumbnails")
+async def get_episode_thumbnails(episode_number: str) -> Dict[str, Any]:
+    """Get available thumbnail/poster images for an episode.
+
+    Searches the exports directory for poster images matching patterns like:
+    - poster_16x9.jpg, poster16x9.jpg, Poster_16x9.jpg
+    - poster_16x9_2.png (versioned)
+    - poster16x9-monday.jpg (suffixed variants)
+
+    Returns list of available thumbnails with URLs for frontend display.
+    """
+    from core.paths import paths as path_manager
+
+    try:
+        # Use path manager to get exports directory
+        exports_dir = path_manager.get_exports_dir(episode_number)
+        episode_num = path_manager._normalize_episode_id(episode_number)
+
+        if not exports_dir.exists():
+            return {"thumbnails": [], "selected": None, "message": "Exports directory not found"}
+
+        # Pattern to match poster files (case-insensitive)
+        # Matches: poster.jpg, poster_16x9.jpg, poster16x9.png, Poster_16x9_2.jpg, poster16x9-monday.jpg, etc.
+        poster_pattern = re.compile(
+            r'^poster[_-]?(16x9)?[_-]?.*\.(jpg|jpeg|png|webp)$',
+            re.IGNORECASE
+        )
+
+        thumbnails = []
+        for file in exports_dir.iterdir():
+            if file.is_file() and poster_pattern.match(file.name):
+                # Build URL path (served via /episodes static mount)
+                url = f"/episodes/{episode_num}/exports/{file.name}"
+                # Get file modification time for sorting
+                mtime = file.stat().st_mtime
+                thumbnails.append({
+                    "filename": file.name,
+                    "url": url,
+                    "modified": mtime,
+                    "size": file.stat().st_size
+                })
+
+        # Sort by modification time (newest first)
+        thumbnails.sort(key=lambda x: x["modified"], reverse=True)
+
+        # Determine selected thumbnail (first one by default, or from database if stored)
+        selected = thumbnails[0]["url"] if thumbnails else None
+
+        logger.info(f"Found {len(thumbnails)} thumbnail(s) for episode {episode_number}")
+        return {
+            "thumbnails": thumbnails,
+            "selected": selected,
+            "count": len(thumbnails)
+        }
+
+    except Exception as e:
+        logger.error(f"Error finding thumbnails for episode {episode_number}: {e}")
+        return {"thumbnails": [], "selected": None, "error": str(e)}
+
+
+class TakeThumbnailRequest(BaseModel):
+    """Request body for taking/confirming a thumbnail."""
+    source_url: str = Field(..., description="The URL path of the thumbnail to take (e.g., /episodes/0257/exports/poster16x9.jpg)")
+
+
+@router.post("/{episode_number}/thumbnail/take")
+async def take_episode_thumbnail(
+    episode_number: str,
+    request: TakeThumbnailRequest,
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    'Take' a thumbnail - copy it to a protected location with an AssetID filename.
+
+    This protects the selected thumbnail from user filesystem changes by:
+    1. Copying it to assets/thumbnails/ with an AssetID-based filename
+    2. Storing the protected path in the database
+
+    The original file in exports/ remains untouched.
+    """
+    from core.paths import paths as path_manager
+    from models_v2 import Episode
+    import shutil
+    import uuid
+
+    try:
+        episode_num = path_manager._normalize_episode_id(episode_number)
+
+        # Get episode from database
+        episode = db.query(Episode).filter(Episode.episode_number == int(episode_number)).first()
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found in database")
+
+        # Parse source URL to get the actual file path
+        # URL format: /episodes/0257/exports/poster16x9.jpg
+        source_url = request.source_url
+        if not source_url.startswith('/episodes/'):
+            raise HTTPException(status_code=400, detail="Invalid source URL format")
+
+        # Convert URL to filesystem path
+        relative_path = source_url.replace('/episodes/', '')
+        source_path = path_manager.episodes_root / relative_path
+
+        if not source_path.exists():
+            raise HTTPException(status_code=404, detail=f"Source file not found: {source_url}")
+
+        # Get file extension
+        ext = source_path.suffix.lower()
+
+        # Generate a unique protected filename using episode asset_id or generate new
+        if episode.asset_id:
+            protected_filename = f"{episode.asset_id}_poster{ext}"
+        else:
+            # Fallback: use episode number + UUID
+            unique_id = uuid.uuid4().hex[:8].upper()
+            protected_filename = f"EP{episode_num}_{unique_id}_poster{ext}"
+
+        # Destination: assets/thumbnails/protected/ directory
+        thumbnails_dir = path_manager.get_asset_type_dir(episode_number, 'thumbnails')
+        protected_dir = thumbnails_dir / 'protected'
+        protected_dir.mkdir(parents=True, exist_ok=True)
+
+        dest_path = protected_dir / protected_filename
+
+        # Copy the file to protected location
+        shutil.copy2(source_path, dest_path)
+        logger.info(f"Copied thumbnail from {source_path} to {dest_path}")
+
+        # Build the protected URL path
+        protected_url = f"/episodes/{episode_num}/assets/thumbnails/protected/{protected_filename}"
+
+        # Update database with protected thumbnail path
+        episode.poster_16x9 = protected_url
+        db.commit()
+
+        logger.info(f"Saved protected thumbnail for episode {episode_number}: {protected_url}")
+
+        return {
+            "success": True,
+            "message": "Thumbnail confirmed and protected",
+            "original_url": source_url,
+            "protected_url": protected_url,
+            "protected_filename": protected_filename
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error taking thumbnail for episode {episode_number}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to take thumbnail: {str(e)}")
+
+
+@router.get("/{episode_number}/thumbnail/confirmed")
+async def get_confirmed_thumbnail(
+    episode_number: str,
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Get the confirmed/protected thumbnail for an episode from the database.
+
+    Also attempts to find the original source URL by scanning the exports directory.
+    """
+    from models_v2 import Episode
+    from core.paths import paths as path_manager
+
+    try:
+        episode = db.query(Episode).filter(Episode.episode_number == int(episode_number)).first()
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+
+        if episode.poster_16x9:
+            # Verify the file still exists
+            episode_num = path_manager._normalize_episode_id(episode_number)
+            relative_path = episode.poster_16x9.replace('/episodes/', '')
+            file_path = path_manager.episodes_root / relative_path
+
+            # Try to find the original source URL by matching file content/size
+            source_url = None
+            if file_path.exists():
+                protected_size = file_path.stat().st_size
+                exports_dir = path_manager.get_exports_dir(episode_number)
+
+                if exports_dir.exists():
+                    # Pattern to match poster files
+                    poster_pattern = re.compile(
+                        r'^poster[_-]?(16x9)?[_-]?.*\.(jpg|jpeg|png|webp)$',
+                        re.IGNORECASE
+                    )
+
+                    for export_file in exports_dir.iterdir():
+                        if export_file.is_file() and poster_pattern.match(export_file.name):
+                            # Match by file size (quick check)
+                            if export_file.stat().st_size == protected_size:
+                                source_url = f"/episodes/{episode_num}/exports/{export_file.name}"
+                                break
+
+            return {
+                "confirmed": True,
+                "url": episode.poster_16x9,
+                "source_url": source_url,
+                "exists": file_path.exists()
+            }
+        else:
+            return {
+                "confirmed": False,
+                "url": None,
+                "source_url": None,
+                "exists": False
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting confirmed thumbnail for episode {episode_number}: {e}")
+        return {"confirmed": False, "url": None, "source_url": None, "error": str(e)}
+
 
 @router.get("/{episode_number}/rundown")
 async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
@@ -1320,22 +1607,29 @@ async def enumerate_cue_blocks(
     current_user: dict = Depends(get_current_user_or_key)
 ):
     """
-    Enumerate all cue blocks in an episode with sequential numbering.
+    Enumerate all MEDIA-BEARING cue blocks in an episode with sequential numbering.
 
     Process:
     1. Iterate through all rundown items in chronological order
     2. Find all cue blocks (<!-- Begin Cue --> ... <!-- End Cue -->)
-    3. Strip any existing enumeration prefix from slugs
-    4. Add new enumeration prefix (10, 20, 30, ...)
-    5. Add/update [Enumerator: XX] field for display
-    6. Rename associated media files
-    7. Update MediaUrl fields
-    8. Save changes to database
+    3. Skip non-media cue types (RIF, DIR) - only enumerate media cues
+    4. Strip any existing enumeration prefix from slugs
+    5. Add new enumeration prefix (10, 20, 30, ...)
+    6. Add/update [Enumerator: XX] field for display
+    7. Rename associated media files
+    8. Update MediaUrl fields
+    9. Save changes to database
+
+    Media cue types: IMG, GFX, SOT, FSQ, VO, NAT, PKG, BUMP, STING, VOX, MUS, LIVE
+    Non-media cue types (skipped): RIF, DIR
 
     This is idempotent - running again will re-enumerate cleanly.
     """
     from models_v2 import RundownItem, Rundown, Episode
     import shutil
+
+    # Cue types that have media and should be enumerated
+    MEDIA_CUE_TYPES = {'IMG', 'GFX', 'SOT', 'FSQ', 'VO', 'NAT', 'PKG', 'BUMP', 'STING', 'VOX', 'MUS', 'LIVE'}
 
     try:
         logger.info(f"Starting cue block enumeration for episode {episode_number}")
@@ -1372,13 +1666,107 @@ async def enumerate_cue_blocks(
         mediaurl_pattern = re.compile(r'\[Mediaurl:\s*([^\]]+)\]', re.IGNORECASE)
         enumerator_pattern = re.compile(r'\[Enumerator:\s*[^\]]*\]\n?', re.IGNORECASE)
         enum_prefix_pattern = re.compile(r'^(\d+)[-_](.+)$')
+        type_pattern = re.compile(r'\[Type:\s*([^\]]+)\]', re.IGNORECASE)
 
         # Track statistics
         total_cues = 0
+        de_enumerated = 0
+        files_de_enumerated = 0
+        skipped_non_media = 0
         updated_cues = 0
         renamed_files = 0
 
-        # First pass: collect all cue blocks across all items to enumerate globally
+        # ============================================================
+        # PHASE 1: DE-ENUMERATE - Remove all existing enumeration
+        # ============================================================
+        # This cleans up ALL cues (including non-media) to start fresh
+        logger.info(f"Phase 1: De-enumerating all cues for episode {episode_number}")
+
+        for item in rundown_items:
+            if not item.script_content:
+                continue
+
+            content = item.script_content
+            modified = False
+
+            # Find all cue blocks in this item
+            cue_block_pattern = re.compile(
+                r'<!-- Begin Cue -->(.*?)<!-- End Cue -->',
+                re.DOTALL
+            )
+
+            def de_enumerate_cue(match):
+                nonlocal de_enumerated, files_de_enumerated, modified
+                cue_body = match.group(1)
+                original_body = cue_body
+
+                # Remove [Enumerator: XX] field
+                cue_body = enumerator_pattern.sub('', cue_body)
+
+                # Strip enumeration prefix from slug
+                slug_match = slug_pattern.search(cue_body)
+                if slug_match:
+                    current_slug = slug_match.group(1).strip()
+                    enum_match = enum_prefix_pattern.match(current_slug)
+                    if enum_match:
+                        base_slug = enum_match.group(2)
+                        cue_body = slug_pattern.sub(f'[Slug: {base_slug}]', cue_body)
+
+                        # Also update MediaUrl to remove prefix from filename
+                        mediaurl_match = mediaurl_pattern.search(cue_body)
+                        if mediaurl_match:
+                            old_url = mediaurl_match.group(1).strip()
+                            old_path = Path(old_url)
+                            old_filename = old_path.name
+
+                            # Check if filename has enum prefix
+                            filename_enum_match = enum_prefix_pattern.match(old_filename)
+                            if filename_enum_match:
+                                base_filename = filename_enum_match.group(2)
+                                new_url = str(old_path.parent / base_filename)
+                                cue_body = mediaurl_pattern.sub(f'[Mediaurl: {new_url}]', cue_body)
+
+                                # Rename actual file on disk
+                                old_file = episodes_root / old_url.lstrip('/').replace('episodes/', '')
+                                new_file = old_file.parent / base_filename
+
+                                if old_file.exists() and str(old_file) != str(new_file):
+                                    try:
+                                        # Don't overwrite if target exists
+                                        if not new_file.exists():
+                                            shutil.move(str(old_file), str(new_file))
+                                            files_de_enumerated += 1
+                                            logger.debug(f"De-enumerated file: {old_file.name} -> {new_file.name}")
+                                    except Exception as e:
+                                        logger.warning(f"Could not de-enumerate file {old_file}: {e}")
+
+                if cue_body != original_body:
+                    de_enumerated += 1
+                    modified = True
+
+                return f'<!-- Begin Cue -->{cue_body}<!-- End Cue -->'
+
+            content = cue_block_pattern.sub(de_enumerate_cue, content)
+
+            if modified:
+                item.script_content = content
+                db.add(item)
+
+        # Commit de-enumeration changes
+        db.flush()
+        logger.info(f"Phase 1 complete: De-enumerated {de_enumerated} cues, renamed {files_de_enumerated} files")
+
+        # ============================================================
+        # PHASE 2: RE-ENUMERATE - Assign fresh numbers to media cues
+        # ============================================================
+        logger.info(f"Phase 2: Re-enumerating media cues for episode {episode_number}")
+
+        # Re-fetch items to get updated content
+        rundown_items = db.query(RundownItem).filter(
+            RundownItem.rundown_id == rundown.id
+        ).order_by(RundownItem.order_in_rundown).all()
+
+        # Collect all MEDIA cue blocks across all items to enumerate globally
         all_cue_data = []
 
         for item in rundown_items:
@@ -1396,6 +1784,16 @@ async def enumerate_cue_blocks(
                 total_cues += 1
                 cue_body = match.group(1)
 
+                # Extract cue type and check if it's a media cue
+                type_match = type_pattern.search(cue_body)
+                cue_type = type_match.group(1).strip().upper() if type_match else None
+
+                # Skip non-media cue types (RIF, DIR, etc.)
+                if cue_type and cue_type not in MEDIA_CUE_TYPES:
+                    skipped_non_media += 1
+                    logger.debug(f"Skipping non-media cue type: {cue_type}")
+                    continue
+
                 # Extract current slug
                 slug_match = slug_pattern.search(cue_body)
                 if not slug_match:
@@ -1406,7 +1804,8 @@ async def enumerate_cue_blocks(
                     'match_start': match.start(),
                     'match_end': match.end(),
                     'cue_body': cue_body,
-                    'current_slug': slug_match.group(1).strip()
+                    'current_slug': slug_match.group(1).strip(),
+                    'cue_type': cue_type
                 })
 
         # Second pass: enumerate and update
@@ -1561,14 +1960,17 @@ async def enumerate_cue_blocks(
         # Commit all changes
         db.commit()
 
-        logger.info(f"Cue enumeration completed: {updated_cues}/{total_cues} cues updated, {renamed_files} files renamed")
+        logger.info(f"Cue enumeration completed: Phase 1 de-enumerated {de_enumerated} cues/{files_de_enumerated} files, Phase 2 enumerated {updated_cues}/{total_cues} media cues, {skipped_non_media} non-media skipped, {renamed_files} files renamed")
 
         return {
             "success": True,
+            "phase1_de_enumerated": de_enumerated,
+            "phase1_files_renamed": files_de_enumerated,
             "total": total_cues,
-            "updated": updated_cues,
-            "renamed": renamed_files,
-            "message": f"Enumerated {updated_cues} cue blocks, renamed {renamed_files} files"
+            "enumerated": updated_cues,
+            "skipped_non_media": skipped_non_media,
+            "files_renamed": renamed_files,
+            "message": f"Phase 1: De-enumerated {de_enumerated} cues, {files_de_enumerated} files. Phase 2: Enumerated {updated_cues} media cues, skipped {skipped_non_media} non-media (RIF, DIR), renamed {renamed_files} files."
         }
 
     except HTTPException:
@@ -3208,6 +3610,72 @@ async def get_rundown_item_by_id(
     }
 
 
+@router.get("/rundown-item/{asset_id}")
+async def get_rundown_item_by_asset_id(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """
+    Get a single rundown item by its asset_id with full content.
+
+    This endpoint is optimized for single-item fetches after SOT processing
+    completes, allowing the frontend to update just the affected item
+    instead of reloading the entire rundown.
+
+    Returns the item in the same format as the rundown list endpoint
+    for direct array merge compatibility.
+
+    Args:
+        asset_id: AssetID of the rundown item
+
+    Returns:
+        Dict with full item data including script_content
+    """
+    from models_v2 import RundownItem, Rundown, Episode
+
+    logger.info(f"🔍 Single-item fetch requested for asset_id: {asset_id}")
+
+    # Find the rundown item by asset_id
+    item = db.query(RundownItem).filter(RundownItem.asset_id == asset_id).first()
+
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Rundown item {asset_id} not found")
+
+    # Get the rundown to find episode info
+    rundown = db.query(Rundown).filter(Rundown.id == item.rundown_id).first()
+    episode_number = None
+    if rundown:
+        episode = db.query(Episode).filter(Episode.id == rundown.episode_id).first()
+        if episode:
+            episode_number = episode.episode_number
+
+    # Return item in same format as rundown list endpoint for direct merge
+    return {
+        "id": item.asset_id,  # Legacy: asset_id as primary identifier for frontend
+        "db_id": item.id,     # Database integer ID for API operations
+        "asset_id": item.asset_id,
+        "type": item.item_type or 'segment',
+        "title": item.title or '',
+        "slug": item.slug or '',
+        "subtitle": item.subtitle,
+        "description": item.description,
+        "duration": item.duration or '00:00:00',
+        "status": item.status or 'draft',
+        "priority": item.priority,
+        "guests": item.guests,
+        "resources": item.resources,
+        "tags": item.tags,
+        "order": item.order_in_rundown or 0,
+        "script_content": item.script_content,
+        "airdate": item.airdate.isoformat() if item.airdate else None,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "episode_number": episode_number,
+        "source": "rundown_item"  # Distinguish from library placements
+    }
+
+
 # ============================================================================
 # CONTENT VERSIONING ENDPOINTS
 # ============================================================================
@@ -3344,13 +3812,17 @@ async def gather_media_for_show(
     db: Session = Depends(get_db)
 ):
     """
-    Gather all media files referenced in cue blocks and copy them to media-list directory.
+    Gather media files from ENUMERATED cue blocks and copy them to media-list directory.
 
     Creates: {episode}/rundown/media-list/
-    Copies each cue's MediaURL source file with enumerated filename.
+    Copies each ENUMERATED cue's MediaURL source file with enumerated filename.
+
+    IMPORTANT: Only cues with [Enumerator: XX] field are gathered.
+    Non-media cues (RIF, DIR) are never enumerated, so they are automatically skipped.
+    Run enumerate-cues endpoint first to enumerate media cues.
 
     Returns:
-        Summary of gathered files with counts
+        Summary of gathered files with counts including skipped non-enumerated cues
     """
     import shutil
     from models_v2 import RundownItem, Rundown, Episode
@@ -3401,6 +3873,7 @@ async def gather_media_for_show(
 
         copied = 0
         skipped = 0
+        skipped_not_enumerated = 0
         failed = 0
         total = 0
         gathered_files = []
@@ -3426,6 +3899,13 @@ async def gather_media_for_show(
                 cue_type_local = type_match_local.group(1).strip().upper() if type_match_local else 'UNKNOWN'
                 slug_local = slug_match_local.group(1).strip() if slug_match_local else None
                 enumerator_local = enumerator_match_local.group(1).strip() if enumerator_match_local else None
+
+                # Only gather media for ENUMERATED cues (those with [Enumerator: XX] field)
+                # Non-media cues (RIF, DIR) are not enumerated and should be skipped
+                if not enumerator_local:
+                    skipped_not_enumerated += 1
+                    print(f"   ⏭️ Skipping non-enumerated cue: {cue_type_local} '{slug_local}' (run enumerate-cues first for media cues)")
+                    continue
 
                 # Extract MediaURL
                 mediaurl_match = mediaurl_pattern.search(cue_content)
@@ -3595,12 +4075,21 @@ async def gather_media_for_show(
         blob_count = sum(1 for s in skipped_cues if s.get('reason') == 'blob URL (unprocessed)')
         no_url_count = skipped - blob_count
 
-        if blob_count > 0:
-            message = f"Media gather: {copied} copied, {skipped} skipped ({blob_count} unprocessed blob URLs, {no_url_count} no MediaURL), {failed} failed"
-            if copied == 0 and blob_count > 0:
-                message += " - SOT/VO videos need to be processed first (Submit in modal to trigger processing)"
-        else:
-            message = f"Media gather complete: {copied} copied, {skipped} skipped (no MediaURL), {failed} failed"
+        # Build detailed message
+        parts = [f"{copied} copied"]
+        if skipped_not_enumerated > 0:
+            parts.append(f"{skipped_not_enumerated} non-enumerated (RIF/DIR)")
+        if skipped > 0:
+            if blob_count > 0:
+                parts.append(f"{skipped} skipped ({blob_count} blob URLs, {no_url_count} no MediaURL)")
+            else:
+                parts.append(f"{skipped} skipped (no MediaURL)")
+        if failed > 0:
+            parts.append(f"{failed} failed")
+
+        message = f"Media gather: {', '.join(parts)}"
+        if copied == 0 and blob_count > 0:
+            message += " - SOT/VO videos need to be processed first (Submit in modal to trigger processing)"
         print(f"   📊 {message}")
 
         return {
@@ -3610,6 +4099,7 @@ async def gather_media_for_show(
             "total": total,
             "copied": copied,
             "skipped": skipped,
+            "skipped_not_enumerated": skipped_not_enumerated,
             "failed": failed,
             "blobUrlCount": blob_count,
             "files": gathered_files,

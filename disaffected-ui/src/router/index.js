@@ -160,7 +160,7 @@ const routes = [
     component: () => import('@/views/ConsolidationView.vue'),
     meta: { requiresAuth: true }
   },
-  // Brainstorm section
+  // Preproduction section
   {
     path: '/whiteboard',
     name: 'whiteboard',
@@ -168,10 +168,30 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/generator',
+    name: 'generator',
+    component: () => import('@/views/GeneratorView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/ipad-scroll/:episodeNumber',
+    name: 'ipad-scroll',
+    component: () => import('@/views/IpadScrollView.vue'),
+    props: true,
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/voice-meeting',
     name: 'voice-meeting',
     component: () => import('@/views/VoiceMeetingView.vue'),
     meta: { requiresAuth: true }
+  },
+  // Admin-only developer tools
+  {
+    path: '/dev-tools',
+    name: 'dev-tools',
+    component: () => import('@/views/DevToolsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true }
   }
 ]
 
@@ -234,6 +254,18 @@ router.beforeEach(async (to, from, next) => {
         next({ path: '/dashboard', query: { error: 'access_denied', group: to.meta.requiresGroup } })
         return
       }
+    }
+  }
+
+  // Check admin requirement for admin-only routes
+  if (to.meta.requiresAdmin) {
+    const { currentUser } = useAuth()
+    const isAdmin = currentUser.value?.access_level === 'admin'
+
+    if (!isAdmin) {
+      console.warn('Access denied: Admin access required')
+      next({ path: '/dashboard', query: { error: 'admin_required' } })
+      return
     }
   }
 

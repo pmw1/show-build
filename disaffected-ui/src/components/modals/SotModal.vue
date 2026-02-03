@@ -42,18 +42,23 @@
     </transition>
 
     <!-- Top Left: IN Point Display -->
-    <div style="position: absolute; top: 150px; left: 50px;">
-      <div class="in-point-display" style="background: rgba(33, 150, 243, 0.9); padding: 30px; border-radius: 12px; border-left: 8px solid #1976D2; margin-bottom: 15px;">
-        <div style="color: white; font-size: 16px; font-weight: bold; margin-bottom: 10px;">◄ IN POINT</div>
-        <div style="color: white; font-size: 48px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 2px;">{{ trimStart || '--:--:--:--' }}</div>
+    <div style="position: absolute; top: 5px; left: 50px;">
+      <div class="in-point-display" style="background: rgba(33, 150, 243, 0.9); padding: 14px 20px; border-radius: 9px; border-left: 6px solid #1976D2; border: 2px solid rgba(33, 150, 243, 0.5); min-width: 200px;">
+        <div style="color: rgba(255,255,255,0.8); font-size: 10px; font-weight: bold; margin-bottom: 4px;">◄ IN POINT</div>
+        <div style="color: white; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(33, 150, 243, 0.5);">{{ trimStart || '--:--:--:--' }}</div>
       </div>
+    </div>
 
-      <!-- Hotkeys List -->
-      <div class="hotkeys-list" style="background: rgba(0, 0, 0, 0.85); padding: 20px; border-radius: 8px; max-width: 300px;">
-        <div style="color: white; font-size: 16px; font-weight: bold; margin-bottom: 12px; border-bottom: 2px solid rgba(255, 255, 255, 0.3); padding-bottom: 8px;">
-          ⌨️ HOTKEYS
+    <!-- Left Side: Hotkeys List (below center timecode, extends to bottom) -->
+    <div style="position: absolute; top: 100px; left: 50px; bottom: 70px; z-index: 999999;">
+      <div class="hotkeys-list" style="background: rgba(0, 0, 0, 0.92); padding: 15px; border-radius: 8px; width: 350px; height: 100%; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+        <!-- Header at top -->
+        <div @click="showHotkeys = !showHotkeys" style="color: white; font-size: 14px; font-weight: bold; border-bottom: 2px solid rgba(255, 255, 255, 0.3); padding-bottom: 6px; cursor: pointer; margin-bottom: 8px;">
+          ⌨️ HOTKEYS <span style="font-size: 10px; opacity: 0.6;">{{ showHotkeys ? '▼' : '▶' }}</span>
+          <span style="color: rgba(255,255,255,0.5); font-size: 9px; margin-left: 10px;">CTRL+1</span>
         </div>
-        <div style="color: white; font-size: 12px; line-height: 1.8; font-family: 'Helvetica', Arial, sans-serif;">
+        <!-- Content expands downward to fill available space -->
+        <div v-show="showHotkeys" style="color: white; font-size: 11px; line-height: 1.6; font-family: 'Helvetica', Arial, sans-serif; flex: 1; overflow-y: auto; padding-right: 8px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">SPACE</span><span>Play/Pause</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">SHIFT+SPACE</span><span>Preview</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">I</span><span>Mark IN</span></div>
@@ -68,64 +73,88 @@
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #4CAF50; font-weight: bold;">\</span><span style="color: #4CAF50;">Speed 1×</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #9C27B0; font-weight: bold;">ALT+T</span><span style="color: #9C27B0;">Mark Thumb</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #FF9800; font-weight: bold;">CTRL+ENTER</span><span style="color: #FF9800;">Take Clip</span></div>
+          <div v-if="clippingMethod === 'individual-clips'" style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #FFEB3B; font-weight: bold;">ENTER×2</span><span style="color: #FFEB3B;">Take Clip</span></div>
+          <!-- Type of Cut Hotkeys -->
+          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2); margin-bottom: 6px; color: rgba(255,255,255,0.7); font-size: 10px;">TYPE OF CUT</div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">N</span><span style="color: #64B5F6;">None</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">S</span><span style="color: #64B5F6;">Single Trim</span></div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">M</span><span style="color: #64B5F6;">Multiple Clips</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2);"><span style="color: #4CAF50; font-weight: bold;">ALT+ENTER</span><span style="color: #4CAF50;">Submit</span></div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #F44336; font-weight: bold;">ESC</span><span style="color: #F44336;">Cancel</span></div>
         </div>
       </div>
     </div>
 
-    <!-- Top Right: OUT Point Display -->
-    <div style="position: absolute; top: 150px; right: 50px;">
-      <div class="out-point-display" style="background: rgba(255, 87, 34, 0.9); padding: 30px; border-radius: 12px; border-right: 8px solid #E64A19; margin-bottom: 15px;">
-        <div style="color: white; font-size: 16px; font-weight: bold; margin-bottom: 10px; text-align: right;">OUT POINT ►</div>
-        <div style="color: white; font-size: 48px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 2px; text-align: right;">{{ trimEnd || '--:--:--:--' }}</div>
+    <!-- Top Right: OUT Point Display (aligned with center timecode) -->
+    <div style="position: absolute; top: 5px; right: 50px;">
+      <div class="out-point-display" style="background: rgba(255, 87, 34, 0.9); padding: 14px 20px; border-radius: 9px; border-right: 6px solid #E64A19; border: 2px solid rgba(255, 87, 34, 0.5); min-width: 200px;">
+        <div style="color: rgba(255,255,255,0.8); font-size: 10px; font-weight: bold; margin-bottom: 4px; text-align: right;">OUT POINT ►</div>
+        <div style="color: white; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(255, 87, 34, 0.5); text-align: right;">{{ trimEnd || '--:--:--:--' }}</div>
       </div>
 
-      <!-- Thumbnail Marker Display (only when thumbnail is set) -->
+      <!-- Thumbnail Marker Display (only when thumbnail is set) - pushed down to clear toast area -->
       <transition name="clip-drop">
-        <div v-if="thumbnailTimecode && thumbnailTimecode !== '00:00:00:00'" class="thumbnail-marker-display" style="background: rgba(156, 39, 176, 0.9); padding: 12px 15px; border-radius: 10px; border-right: 8px solid #7B1FA2; margin-bottom: 15px; pointer-events: auto; max-width: 350px;">
-          <div style="color: white; font-size: 14px; font-weight: bold; margin-bottom: 6px; text-align: right;">📸 THUMBNAIL</div>
-          <div style="color: white; font-size: 18px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 1px; text-align: right;">{{ thumbnailTimecode }}</div>
+        <div v-if="thumbnailTimecode && thumbnailTimecode !== '00:00:00:00'" class="thumbnail-marker-display" style="background: rgba(156, 39, 176, 0.9); padding: 14px 18px; border-radius: 10px; border-right: 8px solid #7B1FA2; margin-top: 70px; margin-bottom: 15px; pointer-events: auto; max-width: 400px;">
+          <div style="color: white; font-size: 16px; font-weight: bold; margin-bottom: 6px; text-align: right;">📸 THUMBNAIL</div>
+          <div style="color: white; font-size: 20px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 1px; text-align: right;">{{ thumbnailTimecode }}</div>
         </div>
       </transition>
 
-      <!-- Individual Clip Boxes (drop in under thumbnail) -->
+      <!-- Individual Clip Boxes (drop in under thumbnail) - first clip has margin-top to clear toast if no thumbnail -->
       <transition-group name="clip-drop">
         <div
           v-for="(clip, index) in clips"
           :key="`clip-${index}`"
           class="clip-box"
-          style="background: rgba(255, 152, 0, 0.9); padding: 15px; border-radius: 10px; border-right: 8px solid #F57C00; margin-bottom: 12px; pointer-events: auto; max-width: 350px;"
+          :style="{
+            background: 'rgba(255, 152, 0, 0.9)',
+            padding: '10px 15px',
+            borderRadius: '10px',
+            borderRight: '8px solid #F57C00',
+            marginBottom: '8px',
+            marginTop: (index === 0 && (!thumbnailTimecode || thumbnailTimecode === '00:00:00:00')) ? '70px' : '0',
+            pointerEvents: 'auto',
+            maxWidth: '560px'
+          }"
         >
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <div style="color: white; font-size: 16px; font-weight: bold;">CLIP {{ index + 1 }}</div>
-            <button @click="removeClip(index)" style="background: #f44336; color: white; border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; font-weight: bold; transition: all 0.2s;">✕</button>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <div style="color: white; font-size: 18px; font-weight: bold;">CLIP {{ index + 1 }}</div>
+            <button @click="removeClip(index)" style="background: #f44336; color: white; border: none; border-radius: 4px; padding: 4px 10px; font-size: 13px; cursor: pointer; font-weight: bold; transition: all 0.2s;">✕</button>
           </div>
           <input
             v-model="clip.slug"
             placeholder="clip-slug-here"
-            style="width: 100%; padding: 8px; margin-bottom: 8px; background: rgba(255, 255, 255, 0.2); border: 2px solid rgba(255, 255, 255, 0.4); border-radius: 6px; color: white; font-size: 14px; font-weight: bold; font-family: 'Roboto Mono', monospace;"
+            style="width: 100%; padding: 6px; margin-bottom: 6px; background: rgba(255, 255, 255, 0.2); border: 2px solid rgba(255, 255, 255, 0.4); border-radius: 6px; color: white; font-size: 16px; font-weight: bold; font-family: 'Roboto Mono', monospace;"
             @click.stop
           />
-          <div style="color: white; font-size: 12px; font-family: 'Roboto Mono', monospace; margin-bottom: 4px;">{{ clip.time_start }} → {{ clip.time_end }}</div>
-          <div style="color: rgba(255, 255, 255, 0.7); font-size: 11px; font-family: 'Roboto Mono', monospace;">Duration: {{ Math.round(clip.duration_seconds) }}s</div>
+          <div style="color: white; font-size: 14px; font-family: 'Roboto Mono', monospace; margin-bottom: 2px;">{{ clip.time_start }} → {{ clip.time_end }}</div>
+          <div style="color: rgba(255, 255, 255, 0.7); font-size: 13px; font-family: 'Roboto Mono', monospace;">Duration: {{ Math.round(clip.duration_seconds) }}s</div>
         </div>
       </transition-group>
 
-      <!-- Single Trim Clip Card (shows when in single-trim mode with IN/OUT set) -->
+      <!-- Single Trim Clip Card (shows when in single-trim mode with IN/OUT set) - has margin-top to clear toast if no thumbnail -->
       <transition name="clip-drop">
         <div
           v-if="clippingMethod === 'single-trim' && trimStart && trimEnd && clipDuration"
           key="single-trim-card"
           class="clip-box"
-          style="background: rgba(33, 150, 243, 0.9); padding: 15px; border-radius: 10px; border-right: 8px solid #1976D2; margin-bottom: 12px; pointer-events: auto; max-width: 350px;"
+          :style="{
+            background: 'rgba(33, 150, 243, 0.9)',
+            padding: '18px',
+            borderRadius: '10px',
+            borderRight: '8px solid #1976D2',
+            marginTop: (!thumbnailTimecode || thumbnailTimecode === '00:00:00:00') ? '70px' : '0',
+            marginBottom: '12px',
+            pointerEvents: 'auto',
+            maxWidth: '400px'
+          }"
         >
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <div style="color: white; font-size: 16px; font-weight: bold;">SINGLE TRIM</div>
+            <div style="color: white; font-size: 18px; font-weight: bold;">SINGLE TRIM</div>
           </div>
-          <div style="color: white; font-size: 14px; font-weight: bold; font-family: 'Roboto Mono', monospace; margin-bottom: 8px;">{{ clipSlug || slug || 'untitled' }}</div>
-          <div style="color: white; font-size: 12px; font-family: 'Roboto Mono', monospace; margin-bottom: 4px;">{{ trimStart }} → {{ trimEnd }}</div>
-          <div style="color: rgba(255, 255, 255, 0.7); font-size: 11px; font-family: 'Roboto Mono', monospace;">Duration: {{ clipDuration }}</div>
+          <div style="color: white; font-size: 16px; font-weight: bold; font-family: 'Roboto Mono', monospace; margin-bottom: 8px;">{{ clipSlug || slug || 'untitled' }}</div>
+          <div style="color: white; font-size: 14px; font-family: 'Roboto Mono', monospace; margin-bottom: 4px;">{{ trimStart }} → {{ trimEnd }}</div>
+          <div style="color: rgba(255, 255, 255, 0.7); font-size: 13px; font-family: 'Roboto Mono', monospace;">Duration: {{ clipDuration }}</div>
         </div>
       </transition>
     </div>
@@ -140,7 +169,7 @@
     style="z-index: 9999;"
   >
     <!-- Full Modal Container with 70% transparent overlay -->
-    <v-card class="sot-modal-card" style="max-height: 80vh; overflow: hidden;">
+    <v-card ref="modalCardRef" class="sot-modal-card" style="max-height: 80vh; overflow: hidden;">
       <!-- Collapsible Error at Top -->
       <div
         ref="topErrorEl"
@@ -157,6 +186,7 @@
             size="x-small"
             color="#ff4444"
             variant="flat"
+            tabindex="-1"
             style="color: white; min-width: 30px; height: 36px; font-size: 16px; font-weight: bold;"
             title="Close modal"
           >✕</v-btn>
@@ -165,6 +195,7 @@
             size="x-small"
             color="#666"
             variant="flat"
+            tabindex="-1"
             style="color: white; height: 36px; font-size: 10px; font-weight: bold; padding: 6px 11px;"
             title="Press ESC to close"
           >ESC</v-btn>
@@ -177,58 +208,447 @@
         style="background-color: #f0f0f0; max-height: calc(80vh - 60px); overflow-y: auto; padding: 20px !important;"
       >
         <v-form ref="sotFormRef">
-          <!-- Slug (Required) -->
-          <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">
-            Slug: <span style="color: red;">*</span>
-          </label>
-          <input
-            ref="slugField"
-            v-model="slug"
-            class="cue-modal-input mb-3"
-            type="text"
-            placeholder="short-descriptive-name"
-            style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
-          />
+          <!-- Type of Cut Selection (moved to top for workflow clarity) -->
+          <div class="mb-4">
+            <label class="cue-modal-label mb-2 d-block" style="font-size: 14px; font-weight: 600; color: #333;">Type of Cut:</label>
 
-          <!-- Select Video and Duration Row -->
-          <div class="d-flex mb-3" style="gap: 20px;">
-            <!-- Select Video Buttons (Left, flex: 2) -->
-            <div style="flex: 2;">
-              <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">
-                Select Video: <span style="color: red;">*</span>
-              </label>
-              <div class="d-flex" style="gap: 3px;">
-                <button
-                  @click="triggerFileInput"
-                  class="cue-modal-button-small"
-                  type="button"
-                  style="padding: 15px 30px; font-size: 14px; min-width: 120px; background: #87CEEB; color: white; border: 1px solid #87CEEB; border-radius: 3px; cursor: pointer; transition: background-color 0.2s ease;"
-                  title="Browse for video file"
-                >Local File</button>
-                <button
-                  @click="clearVideo"
-                  class="cue-modal-button-small"
-                  type="button"
-                  style="padding: 15px 30px; font-size: 14px; min-width: 120px; background: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer; transition: background-color 0.2s ease;"
-                  title="Clear selected video"
-                >Clear</button>
-              </div>
-              <input
-                ref="fileInputRef"
-                type="file"
-                accept="video/*"
-                style="display: none;"
-                @change="handleFileUpload"
-              />
-            </div>
-
-            <!-- Duration Display (Right, flex: 1) -->
-            <div style="flex: 1;">
-              <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Duration:</label>
+            <!-- Helper text (shown when Tab-navigating through buttons) -->
+            <transition name="fade">
               <div
-                class="duration-display"
-                style="font-family: monospace; font-size: 14px; color: #666; padding: 8px 12px; background: #f8f8f8; border-radius: 4px; border: 1px solid #ddd;"
-              >{{ duration || 'Pending...' }}</div>
+                v-if="showCutModeHelp && focusedCutMode"
+                style="color: #1976D2; font-size: 12px; margin-bottom: 6px; font-style: italic; min-height: 18px;"
+              >{{ cutModeDescriptions[focusedCutMode] }}</div>
+            </transition>
+
+            <div class="clipping-grid-container" style="width: 100%;">
+              <div class="clipping-row d-flex mb-0" style="gap: 1px;">
+                <!-- None Button -->
+                <div
+                  ref="firstCutModeButtonRef"
+                  tabindex="0"
+                  @click="selectCutMode('none')"
+                  @focus="handleCutModeFocus('none')"
+                  @blur="handleCutModeBlur"
+                  @keydown="handleCutModeKeydown($event, 'none')"
+                  @mouseenter="e => hoverButton(e, '#2196F3')"
+                  @mouseleave="e => unhoverButton(e, '#2196F3')"
+                  class="grid-btn clipping-btn"
+                  :style="{
+                    width: '20%',
+                    height: '50px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: focusedCutMode === 'none' ? selectionColor : (clippingMethod === 'none' ? '#1565C0' : '#2196F3'),
+                    border: focusedCutMode === 'none' ? '2px solid white' : 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    fontFamily: 'Helvetica, Arial, sans-serif',
+                    overflow: 'hidden',
+                    boxShadow: clippingMethod === 'none' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
+                    transform: clippingMethod === 'none' ? 'translateY(2px)' : 'none',
+                    color: focusedCutMode === 'none' ? 'black' : 'white',
+                    fontSize: '13px',
+                    fontWeight: 'bold',
+                    textShadow: focusedCutMode === 'none' ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                    outline: 'none'
+                  }"
+                  title="No clipping - use full video [N]"
+                ><span style="text-decoration: underline;">N</span>ONE</div>
+                <!-- Single Trim Button -->
+                <div
+                  tabindex="0"
+                  @click="selectCutMode('single-trim')"
+                  @focus="handleCutModeFocus('single-trim')"
+                  @blur="handleCutModeBlur"
+                  @keydown="handleCutModeKeydown($event, 'single-trim')"
+                  @mouseenter="e => hoverButton(e, '#2196F3')"
+                  @mouseleave="e => unhoverButton(e, '#2196F3')"
+                  class="grid-btn clipping-btn"
+                  :style="{
+                    width: '20%',
+                    height: '50px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: focusedCutMode === 'single-trim' ? selectionColor : (clippingMethod === 'single-trim' ? '#1565C0' : '#2196F3'),
+                    border: focusedCutMode === 'single-trim' ? '2px solid white' : 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    fontFamily: 'Helvetica, Arial, sans-serif',
+                    overflow: 'hidden',
+                    boxShadow: clippingMethod === 'single-trim' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
+                    transform: clippingMethod === 'single-trim' ? 'translateY(2px)' : 'none',
+                    color: focusedCutMode === 'single-trim' ? 'black' : 'white',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    textShadow: focusedCutMode === 'single-trim' ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                    outline: 'none'
+                  }"
+                  title="Single trim - extract one clip from video [S]"
+                ><span style="text-decoration: underline;">S</span>INGLE TRIM</div>
+                <!-- Multiple Clips Button -->
+                <div
+                  tabindex="0"
+                  @click="selectCutMode('individual-clips')"
+                  @focus="handleCutModeFocus('individual-clips')"
+                  @blur="handleCutModeBlur"
+                  @keydown="handleCutModeKeydown($event, 'individual-clips')"
+                  @mouseenter="e => hoverButton(e, '#2196F3')"
+                  @mouseleave="e => unhoverButton(e, '#2196F3')"
+                  class="grid-btn clipping-btn"
+                  :style="{
+                    width: '20%',
+                    height: '50px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: focusedCutMode === 'individual-clips' ? selectionColor : (clippingMethod === 'individual-clips' ? '#1565C0' : '#2196F3'),
+                    border: focusedCutMode === 'individual-clips' ? '2px solid white' : 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    fontFamily: 'Helvetica, Arial, sans-serif',
+                    overflow: 'hidden',
+                    boxShadow: clippingMethod === 'individual-clips' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
+                    transform: clippingMethod === 'individual-clips' ? 'translateY(2px)' : 'none',
+                    color: focusedCutMode === 'individual-clips' ? 'black' : 'white',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    textShadow: focusedCutMode === 'individual-clips' ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                    outline: 'none'
+                  }"
+                  title="Multiple clips - extract multiple separate clips [M]"
+                ><span style="text-decoration: underline;">M</span>ULTIPLE CLIPS</div>
+                <!-- Removal Button (Disabled - Coming Soon) -->
+                <div
+                  tabindex="0"
+                  @click="selectCutMode('removal')"
+                  @focus="handleCutModeFocus('removal')"
+                  @blur="handleCutModeBlur"
+                  @keydown="handleCutModeKeydown($event, 'removal')"
+                  class="grid-btn clipping-btn"
+                  :style="{
+                    width: '20%',
+                    height: '50px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: focusedCutMode === 'removal' ? selectionColor : '#9E9E9E',
+                    border: focusedCutMode === 'removal' ? '2px solid white' : 'none',
+                    cursor: 'not-allowed',
+                    transition: 'all 0.2s ease',
+                    fontFamily: 'Helvetica, Arial, sans-serif',
+                    overflow: 'hidden',
+                    opacity: focusedCutMode === 'removal' ? 1 : 0.6,
+                    color: focusedCutMode === 'removal' ? 'black' : 'white',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    textShadow: focusedCutMode === 'removal' ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                    outline: 'none'
+                  }"
+                  title="Removal - remove sections from video (Coming Soon) [R]"
+                ><span style="text-decoration: underline;">R</span>EMOVAL</div>
+                <!-- Montage Button (Disabled - Coming Soon) -->
+                <div
+                  tabindex="0"
+                  @click="selectCutMode('montage')"
+                  @focus="handleCutModeFocus('montage')"
+                  @blur="handleCutModeBlur"
+                  @keydown="handleCutModeKeydown($event, 'montage')"
+                  class="grid-btn clipping-btn"
+                  :style="{
+                    width: '20%',
+                    height: '50px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: focusedCutMode === 'montage' ? selectionColor : '#9E9E9E',
+                    border: focusedCutMode === 'montage' ? '2px solid white' : 'none',
+                    cursor: 'not-allowed',
+                    transition: 'all 0.2s ease',
+                    fontFamily: 'Helvetica, Arial, sans-serif',
+                    overflow: 'hidden',
+                    opacity: focusedCutMode === 'montage' ? 1 : 0.6,
+                    color: focusedCutMode === 'montage' ? 'black' : 'white',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    textShadow: focusedCutMode === 'montage' ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                    outline: 'none'
+                  }"
+                  title="Montage - combine multiple clips into single video (Coming Soon) [G]"
+                >MONTA<span style="text-decoration: underline;">G</span>E</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Select Video Row (moved up, same styling as Type of Cut) -->
+          <div class="mb-4">
+            <label class="cue-modal-label mb-2 d-block" style="font-size: 14px; font-weight: 600; color: #333;">
+              Select Video: <span style="color: red;">*</span>
+            </label>
+            <div class="d-flex" style="gap: 1px;">
+              <!-- Browse Button -->
+              <div
+                ref="localFileButtonRef"
+                tabindex="0"
+                @click="triggerFileInput"
+                @keydown.enter="triggerFileInput"
+                @keydown.space.prevent="triggerFileInput"
+                @focus="handleVideoButtonFocus('browse')"
+                @blur="handleVideoButtonBlur"
+                class="grid-btn"
+                :style="{
+                  flex: '1',
+                  height: '50px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: focusedVideoButton === 'browse' ? selectionColor : '#2196F3',
+                  border: focusedVideoButton === 'browse' ? '2px solid white' : 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  fontFamily: 'Helvetica, Arial, sans-serif',
+                  overflow: 'hidden',
+                  color: focusedVideoButton === 'browse' ? 'black' : 'white',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  textShadow: focusedVideoButton === 'browse' ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                  outline: 'none'
+                }"
+                title="Browse for video file [B]"
+              ><span style="text-decoration: underline;">B</span>ROWSE</div>
+              <!-- YouTube Button (Disabled) -->
+              <div
+                tabindex="0"
+                @focus="handleVideoButtonFocus('youtube')"
+                @blur="handleVideoButtonBlur"
+                class="grid-btn"
+                :style="{
+                  flex: '1',
+                  height: '50px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: focusedVideoButton === 'youtube' ? selectionColor : '#9E9E9E',
+                  border: focusedVideoButton === 'youtube' ? '2px solid white' : 'none',
+                  cursor: 'not-allowed',
+                  transition: 'all 0.2s ease',
+                  fontFamily: 'Helvetica, Arial, sans-serif',
+                  overflow: 'hidden',
+                  opacity: focusedVideoButton === 'youtube' ? 1 : 0.6,
+                  color: focusedVideoButton === 'youtube' ? 'black' : 'white',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  textShadow: focusedVideoButton === 'youtube' ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                  outline: 'none'
+                }"
+                title="Import from YouTube (Coming Soon) [Y]"
+              ><span style="text-decoration: underline;">Y</span>OUTUBE</div>
+              <!-- X Button (Disabled) -->
+              <div
+                tabindex="0"
+                @focus="handleVideoButtonFocus('x')"
+                @blur="handleVideoButtonBlur"
+                class="grid-btn"
+                :style="{
+                  flex: '0.6',
+                  height: '50px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: focusedVideoButton === 'x' ? selectionColor : '#9E9E9E',
+                  border: focusedVideoButton === 'x' ? '2px solid white' : 'none',
+                  cursor: 'not-allowed',
+                  transition: 'all 0.2s ease',
+                  fontFamily: 'Helvetica, Arial, sans-serif',
+                  overflow: 'hidden',
+                  opacity: focusedVideoButton === 'x' ? 1 : 0.6,
+                  color: focusedVideoButton === 'x' ? 'black' : 'white',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  textShadow: focusedVideoButton === 'x' ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                  outline: 'none'
+                }"
+                title="Import from X/Twitter (Coming Soon) [X]"
+              ><span style="text-decoration: underline;">X</span></div>
+              <!-- TikTok Button (Disabled) -->
+              <div
+                tabindex="0"
+                @focus="handleVideoButtonFocus('tiktok')"
+                @blur="handleVideoButtonBlur"
+                class="grid-btn"
+                :style="{
+                  flex: '1',
+                  height: '50px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: focusedVideoButton === 'tiktok' ? selectionColor : '#9E9E9E',
+                  border: focusedVideoButton === 'tiktok' ? '2px solid white' : 'none',
+                  cursor: 'not-allowed',
+                  transition: 'all 0.2s ease',
+                  fontFamily: 'Helvetica, Arial, sans-serif',
+                  overflow: 'hidden',
+                  opacity: focusedVideoButton === 'tiktok' ? 1 : 0.6,
+                  color: focusedVideoButton === 'tiktok' ? 'black' : 'white',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  textShadow: focusedVideoButton === 'tiktok' ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                  outline: 'none'
+                }"
+                title="Import from TikTok (Coming Soon) [T]"
+              ><span style="text-decoration: underline;">T</span>IKTOK</div>
+              <!-- Clear Button -->
+              <div
+                tabindex="0"
+                @click="clearVideo"
+                @keydown.enter="clearVideo"
+                @keydown.space.prevent="clearVideo"
+                @focus="handleVideoButtonFocus('clear')"
+                @blur="handleVideoButtonBlur"
+                class="grid-btn"
+                :style="{
+                  flex: '0.8',
+                  height: '50px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: focusedVideoButton === 'clear' ? selectionColor : '#757575',
+                  border: focusedVideoButton === 'clear' ? '2px solid white' : 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  fontFamily: 'Helvetica, Arial, sans-serif',
+                  overflow: 'hidden',
+                  color: focusedVideoButton === 'clear' ? 'black' : 'white',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  textShadow: focusedVideoButton === 'clear' ? 'none' : '0 1px 2px rgba(0,0,0,0.3)',
+                  outline: 'none'
+                }"
+                title="Clear selected video"
+              >CLEAR</div>
+            </div>
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept="video/*"
+              style="display: none;"
+              @change="handleFileUpload"
+            />
+            <!-- Duration Display (inline, right-aligned) -->
+            <div v-if="duration" class="mt-2" style="text-align: right;">
+              <span style="font-size: 12px; color: #666;">Duration: </span>
+              <span style="font-family: monospace; font-size: 14px; color: #333; font-weight: 500;">{{ duration }}</span>
+            </div>
+          </div>
+
+          <!-- Slug (Required - shown only when NOT in multiple clips mode) -->
+          <div v-if="clippingMethod !== 'individual-clips'" class="mb-3">
+            <label class="cue-modal-label mb-1 d-block" style="font-size: 12px; font-weight: 500; color: #555;">
+              Slug: <span style="color: red;">*</span>
+            </label>
+            <input
+              ref="slugField"
+              v-model="slug"
+              class="cue-modal-input"
+              type="text"
+              placeholder="short-descriptive-name"
+              style="width: 100%; padding: 10px; border: 1px solid #ddd; borderRadius: 4px; fontSize: 16px; boxSizing: border-box;"
+            />
+          </div>
+
+          <!-- Multiple Clips Mode: Clip tools shown here instead of slug -->
+          <div v-if="clippingMethod === 'individual-clips'" class="mb-3">
+            <div class="d-flex mb-2" style="gap: 10px; align-items: flex-end;">
+              <!-- Clip Slug -->
+              <div style="flex: 2;">
+                <label
+                  ref="clipSlugLabelRef"
+                  class="cue-modal-label mb-1 d-block"
+                  :style="{
+                    fontSize: '12px',
+                    fontWeight: '500',
+                    color: clipSlugNeedsAttention ? needsAttentionColor : '#555',
+                    transition: 'color 0.2s ease'
+                  }"
+                >Clip Slug:</label>
+                <input
+                  ref="clipSlugInputRef"
+                  v-model="clipSlug"
+                  class="cue-modal-input"
+                  :class="{ 'clip-slug-attention': clipSlugNeedsAttention }"
+                  type="text"
+                  placeholder="clip-name (auto-generated if empty)"
+                  :style="{
+                    width: '100%',
+                    padding: '8px',
+                    border: clipSlugNeedsAttention ? `2px solid ${needsAttentionColor}` : '1px solid #ddd',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    boxSizing: 'border-box',
+                    transition: 'border-color 0.2s ease, box-shadow 0.2s ease'
+                  }"
+                  @input="handleClipSlugInput"
+                  @keydown.enter="handleClipSlugEnter"
+                />
+              </div>
+              <!-- Time Start -->
+              <div style="flex: 1;">
+                <label class="cue-modal-label mb-1 d-block" style="font-size: 12px; font-weight: 500; color: #555;">Time Start:</label>
+                <input
+                  ref="trimStartInputRef"
+                  v-model="trimStart"
+                  class="cue-modal-input"
+                  type="text"
+                  placeholder="HH:MM:SS"
+                  style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+                />
+              </div>
+              <!-- Time End -->
+              <div style="flex: 1;">
+                <label class="cue-modal-label mb-1 d-block" style="font-size: 12px; font-weight: 500; color: #555;">Time End:</label>
+                <input
+                  ref="trimEndInputRef"
+                  v-model="trimEnd"
+                  class="cue-modal-input"
+                  type="text"
+                  placeholder="HH:MM:SS"
+                  style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+                />
+              </div>
+              <!-- Take Button -->
+              <div style="flex: 0 0 80px;">
+                <button
+                  @click="handleTakeClip"
+                  class="cue-modal-button-small"
+                  type="button"
+                  style="width: 100%; height: 36px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;"
+                  title="Take clip (Ctrl+Enter)"
+                >TAKE</button>
+              </div>
+            </div>
+            <!-- Clips Collection Display (Badges) -->
+            <div v-if="clips.length > 0">
+              <label class="cue-modal-label mb-1 d-block" style="font-size: 12px; font-weight: 500; color: #555;">
+                Clips ({{ clips.length }}):
+              </label>
+              <div class="clips-badges" style="display: flex; flex-wrap: wrap; gap: 6px;">
+                <div
+                  v-for="(clip, index) in clips"
+                  :key="`clip-top-${index}`"
+                  class="clip-badge"
+                  style="display: inline-flex; align-items: center; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 16px; padding: 4px 10px; font-size: 12px; gap: 6px;"
+                >
+                  <span style="font-weight: 500; color: #1976d2;">{{ clip.slug }}</span>
+                  <span style="color: #666; font-family: monospace; font-size: 10px;">{{ clip.time_start }} → {{ clip.time_end }}</span>
+                  <button
+                    @click="removeClip(index)"
+                    type="button"
+                    style="background: none; border: none; color: #f44336; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; margin-left: 2px;"
+                    title="Remove clip"
+                  >×</button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -285,12 +705,15 @@
                 class="video-player"
                 controls
                 controlsList="nodownload"
+                tabindex="-1"
                 style="width: 100% !important; height: 300px !important; max-width: 100% !important; position: relative; z-index: 11; display: block; border: none; border-radius: 0; object-fit: contain;"
                 preload="metadata"
                 @loadedmetadata="handleVideoMetadataLoaded"
                 @timeupdate="updateTimecode"
                 @play="updatePlayPauseState"
                 @pause="updatePlayPauseState"
+                @keydown="handleVideoKeydown"
+                @focus="$event.target.blur()"
               ></video>
 
               <!-- Video Info Overlay (Bottom-left corner) -->
@@ -305,7 +728,7 @@
               </div>
             </div>
 
-            <!-- Audio Waveform (Slide-up animation) -->
+            <!-- Audio Waveform (Slide-up animation) - Interactive scrubber -->
             <transition name="waveform-slide">
               <div v-if="showWaveform && waveformData.length > 0" class="waveform-wrapper" style="width: 100%; margin-bottom: 15px;">
                 <AudioWaveform
@@ -317,6 +740,7 @@
                   wave-color="#4CAF50"
                   progress-color="#81C784"
                   playhead-color="#FF5722"
+                  @seek="handleWaveformSeek"
                 />
               </div>
             </transition>
@@ -526,228 +950,72 @@
           </div>
 
           <!-- ============================================================ -->
-          <!-- CLIPPING TOOLS SECTION -->
+          <!-- CLIPPING TOOLS SECTION (hidden in multiple clips mode - tools shown at top) -->
           <!-- ============================================================ -->
-          <div style="border-top: 2px solid #999; margin: 25px 0 20px 0;"></div>
+          <div v-if="clippingMethod !== 'individual-clips'">
+            <div style="border-top: 2px solid #999; margin: 25px 0 20px 0;"></div>
 
-          <div class="clipping-tools-section mb-4">
-            <h3 class="text-uppercase font-weight-bold mb-3" style="font-size: 1.1em; color: #333;">CLIPPING TOOLS</h3>
+            <div class="clipping-tools-section mb-4">
+              <h3 class="text-uppercase font-weight-bold mb-3" style="font-size: 1.1em; color: #333;">CLIPPING TOOLS</h3>
 
-            <!-- Clipping Method Button Grid (1x10) -->
-            <div class="mb-3">
-              <label class="cue-modal-label mb-2 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Clipping Method:</label>
-
-              <!-- 1x10 Grid Container -->
-              <div class="clipping-grid-container" style="width: 100%; margin-bottom: 15px;">
-                <div class="clipping-row d-flex mb-0" style="gap: 1px;">
-
-                  <!-- None Button -->
-                  <div
-                    @click="clippingMethod = 'none'"
-                    @mouseenter="e => hoverButton(e, '#2196F3')"
-                    @mouseleave="e => unhoverButton(e, '#2196F3')"
-                    class="grid-btn clipping-btn"
-                    :style="{
-                      width: '25%',
-                      height: '55px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: clippingMethod === 'none' ? '#1565C0' : '#2196F3',
-                      border: 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      fontFamily: 'Helvetica, Arial, sans-serif',
-                      overflow: 'hidden',
-                      boxShadow: clippingMethod === 'none' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
-                      transform: clippingMethod === 'none' ? 'translateY(2px)' : 'none',
-                      color: 'white',
-                      fontSize: '14px',
-                      fontWeight: 'bold',
-                      textShadow: '0 1px 2px rgba(0,0,0,0.3)'
-                    }"
-                    title="No clipping - use full video"
-                  >
-                    NONE
-                  </div>
-
-                  <!-- Single Trim Button -->
-                  <div
-                    @click="clippingMethod = 'single-trim'"
-                    @mouseenter="e => hoverButton(e, '#2196F3')"
-                    @mouseleave="e => unhoverButton(e, '#2196F3')"
-                    class="grid-btn clipping-btn"
-                    :style="{
-                      width: '25%',
-                      height: '55px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: clippingMethod === 'single-trim' ? '#1565C0' : '#2196F3',
-                      border: 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      fontFamily: 'Helvetica, Arial, sans-serif',
-                      overflow: 'hidden',
-                      boxShadow: clippingMethod === 'single-trim' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
-                      transform: clippingMethod === 'single-trim' ? 'translateY(2px)' : 'none',
-                      color: 'white',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      textShadow: '0 1px 2px rgba(0,0,0,0.3)'
-                    }"
-                    title="Single trim - extract one clip from video"
-                  >
-                    SINGLE TRIM
-                  </div>
-
-                  <!-- Individual Clips Button -->
-                  <div
-                    @click="clippingMethod = 'individual-clips'"
-                    @mouseenter="e => hoverButton(e, '#2196F3')"
-                    @mouseleave="e => unhoverButton(e, '#2196F3')"
-                    class="grid-btn clipping-btn"
-                    :style="{
-                      width: '25%',
-                      height: '55px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: clippingMethod === 'individual-clips' ? '#1565C0' : '#2196F3',
-                      border: 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      fontFamily: 'Helvetica, Arial, sans-serif',
-                      overflow: 'hidden',
-                      boxShadow: clippingMethod === 'individual-clips' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
-                      transform: clippingMethod === 'individual-clips' ? 'translateY(2px)' : 'none',
-                      color: 'white',
-                      fontSize: '11px',
-                      fontWeight: 'bold',
-                      textShadow: '0 1px 2px rgba(0,0,0,0.3)'
-                    }"
-                    title="Individual clips - extract multiple separate clips"
-                  >
-                    INDIVIDUAL CLIPS
-                  </div>
-
-                  <!-- Montage Button -->
-                  <div
-                    @click="clippingMethod = 'montage'"
-                    @mouseenter="e => hoverButton(e, '#2196F3')"
-                    @mouseleave="e => unhoverButton(e, '#2196F3')"
-                    class="grid-btn clipping-btn"
-                    :style="{
-                      width: '25%',
-                      height: '55px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: clippingMethod === 'montage' ? '#1565C0' : '#2196F3',
-                      border: 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      fontFamily: 'Helvetica, Arial, sans-serif',
-                      overflow: 'hidden',
-                      boxShadow: clippingMethod === 'montage' ? 'inset 0 3px 8px rgba(0,0,0,0.4)' : 'none',
-                      transform: clippingMethod === 'montage' ? 'translateY(2px)' : 'none',
-                      color: 'white',
-                      fontSize: '14px',
-                      fontWeight: 'bold',
-                      textShadow: '0 1px 2px rgba(0,0,0,0.3)'
-                    }"
-                    title="Montage - combine multiple clips into single video"
-                  >
-                    MONTAGE
-                  </div>
-
+              <!-- Clip Slug, Time Start, Time End, and Take Button (Inline) -->
+              <div class="d-flex mb-3" style="gap: 10px; align-items: flex-end;">
+                <!-- Clip Slug -->
+                <div style="flex: 2;">
+                  <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Clip Slug:</label>
+                  <input
+                    v-model="clipSlug"
+                    class="cue-modal-input"
+                    type="text"
+                    placeholder="clip-name (auto-generated if empty)"
+                    :disabled="clippingMethod === 'none'"
+                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+                  />
                 </div>
-              </div>
-            </div>
 
-            <!-- Clip Slug, Time Start, Time End, and Take Button (Inline) -->
-            <div class="d-flex mb-3" style="gap: 10px; align-items: flex-end;">
-              <!-- Clip Slug -->
-              <div style="flex: 2;">
-                <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Clip Slug:</label>
-                <input
-                  v-model="clipSlug"
-                  class="cue-modal-input"
-                  type="text"
-                  placeholder="clip-name (auto-generated if empty)"
-                  :disabled="clippingMethod === 'none'"
-                  style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
-                />
-              </div>
+                <!-- Time Start -->
+                <div style="flex: 1;">
+                  <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Time Start:</label>
+                  <input
+                    v-model="trimStart"
+                    class="cue-modal-input"
+                    type="text"
+                    placeholder="HH:MM:SS"
+                    :disabled="clippingMethod === 'none'"
+                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+                  />
+                </div>
 
-              <!-- Time Start -->
-              <div style="flex: 1;">
-                <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Time Start:</label>
-                <input
-                  ref="trimStartInputRef"
-                  v-model="trimStart"
-                  class="cue-modal-input"
-                  type="text"
-                  placeholder="HH:MM:SS"
-                  :disabled="clippingMethod === 'none'"
-                  style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
-                />
-              </div>
+                <!-- Time End -->
+                <div style="flex: 1;">
+                  <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Time End:</label>
+                  <input
+                    v-model="trimEnd"
+                    class="cue-modal-input"
+                    type="text"
+                    placeholder="HH:MM:SS"
+                    :disabled="clippingMethod === 'none'"
+                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
+                  />
+                </div>
 
-              <!-- Time End -->
-              <div style="flex: 1;">
-                <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Time End:</label>
-                <input
-                  ref="trimEndInputRef"
-                  v-model="trimEnd"
-                  class="cue-modal-input"
-                  type="text"
-                  placeholder="HH:MM:SS"
-                  :disabled="clippingMethod === 'none'"
-                  style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;"
-                />
-              </div>
-
-              <!-- Take Button -->
-              <div style="flex: 0 0 80px;">
-                <button
-                  @click="handleTakeClip"
-                  :disabled="clippingMethod === 'none' || clippingMethod === 'single-trim'"
-                  class="cue-modal-button-small"
-                  type="button"
-                  style="width: 100%; height: 38px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: background-color 0.2s;"
-                  :style="{ opacity: (clippingMethod === 'none' || clippingMethod === 'single-trim') ? 0.5 : 1, cursor: (clippingMethod === 'none' || clippingMethod === 'single-trim') ? 'not-allowed' : 'pointer' }"
-                  title="Take clip (Ctrl+Enter)"
-                >TAKE</button>
-              </div>
-            </div>
-
-            <!-- Clips Collection Display (Badges) -->
-            <div v-if="clips.length > 0" class="mb-3">
-              <label class="cue-modal-label mb-2 d-block" style="font-size: 14px; font-weight: 500; color: #555;">
-                Clips ({{ clips.length }}):
-              </label>
-              <div class="clips-badges" style="display: flex; flex-wrap: wrap; gap: 8px;">
-                <div
-                  v-for="(clip, index) in clips"
-                  :key="`clip-${index}`"
-                  class="clip-badge"
-                  style="display: inline-flex; align-items: center; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 16px; padding: 6px 12px; font-size: 13px; gap: 8px;"
-                >
-                  <span style="font-weight: 500; color: #1976d2;">{{ clip.slug }}</span>
-                  <span style="color: #666; font-family: monospace; font-size: 11px;">{{ clip.time_start }} → {{ clip.time_end }}</span>
+                <!-- Take Button (disabled for none and single-trim) -->
+                <div style="flex: 0 0 80px;">
                   <button
-                    @click="removeClip(index)"
+                    @click="handleTakeClip"
+                    :disabled="clippingMethod === 'none' || clippingMethod === 'single-trim'"
+                    class="cue-modal-button-small"
                     type="button"
-                    style="background: none; border: none; color: #f44336; cursor: pointer; font-size: 16px; line-height: 1; padding: 0; margin-left: 4px;"
-                    title="Remove clip"
-                  >×</button>
+                    style="width: 100%; height: 38px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: background-color 0.2s;"
+                    :style="{ opacity: (clippingMethod === 'none' || clippingMethod === 'single-trim') ? 0.5 : 1, cursor: (clippingMethod === 'none' || clippingMethod === 'single-trim') ? 'not-allowed' : 'pointer' }"
+                    title="Take clip (Ctrl+Enter)"
+                  >TAKE</button>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div style="border-bottom: 2px solid #999; margin: 20px 0 25px 0;"></div>
+            <div style="border-bottom: 2px solid #999; margin: 20px 0 25px 0;"></div>
+          </div>
           <!-- ============================================================ -->
           <!-- END CLIPPING TOOLS SECTION -->
           <!-- ============================================================ -->
@@ -796,13 +1064,13 @@
 
           <!-- Description -->
           <div class="mb-3">
-            <label class="cue-modal-label mb-1 d-block" style="font-size: 14px; font-weight: 500; color: #555;">Description:</label>
+            <label class="cue-modal-label mb-1 d-block" style="font-size: 12px; font-weight: 500; color: #555;">Description:</label>
             <textarea
               v-model="description"
               class="cue-modal-textarea"
-              rows="2"
+              rows="4"
               placeholder="Brief description of the SOT content and context..."
-              style="width: 100%; height: 75px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box; resize: none;"
+              style="width: 100%; height: 100px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; box-sizing: border-box; resize: none;"
             ></textarea>
           </div>
 
@@ -845,6 +1113,7 @@ import { useToast } from 'vue-toastification'
 import axios from 'axios'
 import AudioWaveform from '../AudioWaveform.vue'
 import { useWaveform } from '../../composables/useWaveform'
+import { getColorValue, resolveVuetifyColor } from '../../utils/themeColorMap'
 
 // SOT Processing Job Types
 // These define what type of processing the backend should perform
@@ -873,7 +1142,7 @@ export default {
       default: null
     }
   },
-  emits: ['update:show', 'submit'],
+  emits: ['update:show', 'submit', 'submit-multiple'],
   setup(props, { emit }) {
     const toast = useToast()
 
@@ -882,6 +1151,7 @@ export default {
 
     // Form refs
     const sotFormRef = ref(null)
+    const modalCardRef = ref(null)
     const fileInputRef = ref(null)
     const videoPlayerRef = ref(null)
     const trimStartInputRef = ref(null)
@@ -891,6 +1161,7 @@ export default {
     const videoInfoOverlay = ref(null)
     const creditsListRef = ref(null)
     const slugField = ref(null)
+    const firstCutModeButtonRef = ref(null)
 
     // Button refs for keyboard shortcuts
     const markInBtn = ref(null)
@@ -916,6 +1187,8 @@ export default {
     const trimStart = ref('00:00:00')
     const trimEnd = ref('00:00:00')
     const description = ref('')
+    const airTime = ref('')
+    const airDate = ref('')
     const transcription = ref('')
     const credits = ref([])
 
@@ -943,6 +1216,29 @@ export default {
     const clips = ref([])
     const clipCounter = ref(1)
 
+    // Type of Cut keyboard navigation
+    const focusedCutMode = ref(null) // Tracks which button is focused during Tab navigation
+    const focusedVideoButton = ref(null) // Tracks which video source button is focused
+    const showCutModeHelp = ref(false) // Show helper text when Tab-navigating
+
+    // Cut mode descriptions (shown when Tab-navigating)
+    const cutModeDescriptions = {
+      'none': 'Insert SOT cue without video processing',
+      'single-trim': 'Extract one clip from video with IN/OUT points',
+      'individual-clips': 'Extract multiple separate clips, each as its own SOT',
+      'removal': 'Remove sections from video (Coming Soon)',
+      'montage': 'Combine multiple clips into single video (Coming Soon)'
+    }
+
+    // Double-Enter TAKE functionality
+    const clipSlugInputRef = ref(null)
+    const clipSlugLabelRef = ref(null)
+    const localFileButtonRef = ref(null)
+    const lastEnterTime = ref(0)
+    const pendingTakeOnSlug = ref(false) // Auto-retry TAKE when slug is entered
+    const clipSlugNeedsAttention = ref(false) // For styling the input when validation fails
+    const DOUBLE_ENTER_THRESHOLD = 400 // milliseconds
+
     // Keyboard handler
     const keyboardHandler = ref(null)
 
@@ -966,6 +1262,9 @@ export default {
     // Waveform state
     const showWaveform = ref(false)
 
+    // Hotkeys visibility state (starts collapsed)
+    const showHotkeys = ref(false)
+
     // Computed: Clip duration display
     const clipDuration = computed(() => {
       if (!trimStart.value || !trimEnd.value) return null
@@ -981,6 +1280,23 @@ export default {
       if (playbackSpeed.value < 1.0) return 'Slow Motion'
       if (playbackSpeed.value > 1.0) return 'Fast Forward'
       return 'Normal Speed'
+    })
+
+    // Computed: Color values for validation feedback
+    const locatorFlashColor = computed(() => {
+      const colorName = getColorValue('locatorflash') || getColorValue('locatorflash-interface') || 'deep-orange-accent-2'
+      return resolveVuetifyColor(colorName)
+    })
+
+    const needsAttentionColor = computed(() => {
+      const colorName = getColorValue('needs-attention') || 'orange-lighten-3'
+      return resolveVuetifyColor(colorName)
+    })
+
+    // Selection color for focused UI elements (Tab navigation highlight)
+    const selectionColor = computed(() => {
+      const colorName = getColorValue('selection') || 'warning'
+      return resolveVuetifyColor(colorName)
     })
 
     // Utility functions
@@ -1056,6 +1372,64 @@ export default {
       }, 100)
     }
 
+    // Type of Cut keyboard navigation handlers
+    const handleCutModeFocus = (mode) => {
+      focusedCutMode.value = mode
+      showCutModeHelp.value = true
+    }
+
+    const handleCutModeBlur = () => {
+      focusedCutMode.value = null
+      // Delay hiding help text to allow for Tab to next button
+      setTimeout(() => {
+        if (!focusedCutMode.value) {
+          showCutModeHelp.value = false
+        }
+      }, 100)
+    }
+
+    // Video source button focus/blur handlers
+    const handleVideoButtonFocus = (button) => {
+      focusedVideoButton.value = button
+    }
+
+    const handleVideoButtonBlur = () => {
+      focusedVideoButton.value = null
+    }
+
+    const selectCutMode = (mode, fromKeyboard = false) => {
+      // Check if mode is disabled
+      if (mode === 'removal' || mode === 'montage') {
+        toast.warning(`${mode.charAt(0).toUpperCase() + mode.slice(1)} mode coming soon!`)
+        return false
+      }
+
+      clippingMethod.value = mode
+      showCutModeHelp.value = false
+      focusedCutMode.value = null
+
+      if (fromKeyboard) {
+        // After selecting cut mode, transport user to video source selection
+        // Focus on the Local File button
+        nextTick(() => {
+          if (localFileButtonRef.value) {
+            localFileButtonRef.value.focus()
+            console.log(`✂️ Cut mode ${mode.toUpperCase()} selected, focused on video source`)
+          }
+        })
+      }
+
+      return true
+    }
+
+    const handleCutModeKeydown = (event, mode) => {
+      if (event.key === ' ' || event.key === 'Enter') {
+        event.preventDefault()
+        event.stopPropagation()
+        selectCutMode(mode, true)
+      }
+    }
+
     // Video control actions
     const performMarkInAction = () => {
       if (!videoPlayerRef.value) return
@@ -1123,6 +1497,13 @@ export default {
       const seconds = timecodeToSeconds(trimEnd.value)
       videoPlayerRef.value.currentTime = seconds
       animateButtonPress(goToOutBtn.value)
+    }
+
+    // Handle waveform scrubber seek
+    const handleWaveformSeek = (time) => {
+      if (!videoPlayerRef.value) return
+      videoPlayerRef.value.currentTime = time
+      updateTimecode()
     }
 
     const performPlayPauseAction = () => {
@@ -1346,6 +1727,40 @@ export default {
       }
     }
 
+    // Handle keydown on video element to prevent HTML5 player default shortcuts
+    // HTML5 video has built-in shortcuts: Space (play/pause), arrows (seek), M (mute), F (fullscreen)
+    // We intercept these to use our own handlers instead
+    const handleVideoKeydown = (event) => {
+      // Keys that HTML5 video handles by default that we want to override
+      const interceptedKeys = [
+        ' ',           // Space - play/pause (we handle this)
+        'ArrowLeft',   // Seek backward (we use for frame stepping)
+        'ArrowRight',  // Seek forward (we use for frame stepping)
+        'ArrowUp',     // Volume up (we don't use, but prevent for consistency)
+        'ArrowDown',   // Volume down (we don't use, but prevent for consistency)
+        'Home',        // Go to start (we handle this)
+        'End',         // Go to end (we handle this)
+        'm',           // Mute toggle
+        'M',
+        'f',           // Fullscreen toggle
+        'F',
+        'k',           // Play/pause (YouTube-style)
+        'K',
+        'j',           // Seek backward 10s (YouTube-style)
+        'J',
+        'l',           // Seek forward 10s (YouTube-style)
+        'L'
+      ]
+
+      if (interceptedKeys.includes(event.key)) {
+        // Prevent the video player's default handling
+        event.preventDefault()
+        event.stopPropagation()
+        // Let the event bubble up to our document-level handler
+        // which will handle the action properly
+      }
+    }
+
     // Keyboard shortcuts setup
     const setupKeyboardShortcuts = () => {
       keyboardHandler.value = (event) => {
@@ -1364,10 +1779,31 @@ export default {
           return
         }
 
-        // Don't interfere with typing in input fields (except trim inputs with arrow keys)
+        // Don't interfere with typing in input fields, EXCEPT for these shortcuts:
+        // - Ctrl+Enter (TAKE)
+        // - Shift+Space (Preview in-to-out)
+        // - Alt+Enter (Submit for processing)
+        // - Arrow keys in trim inputs
         if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
-          if (!(event.target === trimStartInputRef.value || event.target === trimEndInputRef.value) ||
-              !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+          // Allow Ctrl+Enter (TAKE) from any input
+          if (event.key === 'Enter' && event.ctrlKey) {
+            // Let it through to the switch statement
+          }
+          // Allow Alt+Enter (Submit) from any input
+          else if (event.key === 'Enter' && event.altKey) {
+            // Let it through to the switch statement
+          }
+          // Allow Shift+Space (Preview) from any input
+          else if (event.key === ' ' && event.shiftKey) {
+            // Let it through to the switch statement
+          }
+          // Allow arrow keys in trim inputs
+          else if ((event.target === trimStartInputRef.value || event.target === trimEndInputRef.value) &&
+              ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+            // Let it through to the switch statement
+          }
+          // Block all other keys when in input fields
+          else {
             return
           }
         }
@@ -1381,6 +1817,16 @@ export default {
           event.preventDefault()
           event.stopPropagation()
           event.stopImmediatePropagation()
+        }
+
+        // CRITICAL: Handle Ctrl+1 BEFORE videoPlayerRef check to toggle hotkeys menu
+        // This must work even when no video is loaded
+        if (event.key === '1' && event.ctrlKey) {
+          event.preventDefault()
+          event.stopPropagation()
+          event.stopImmediatePropagation()
+          showHotkeys.value = !showHotkeys.value
+          return // Fully handled, don't continue
         }
 
         if (!videoPlayerRef.value) return
@@ -1478,13 +1924,30 @@ export default {
             performGoToOutAction()
             break
 
-          case 'Enter': // Ctrl+Enter - Take, Alt+Enter - Submit/Inject
+          case 'Enter': // Ctrl+Enter - Take, Alt+Enter - Submit/Inject, Double-Enter - Take (multiple clips mode)
             if (event.ctrlKey) {
               event.preventDefault()
               performTakeAction()
             } else if (event.altKey) {
               event.preventDefault()
               handleAddCue() // Submit and close modal
+            } else if (!event.shiftKey && clippingMethod.value === 'individual-clips') {
+              // Double-Enter detection for multiple clips mode
+              const now = Date.now()
+              const timeSinceLastEnter = now - lastEnterTime.value
+
+              if (timeSinceLastEnter < DOUBLE_ENTER_THRESHOLD) {
+                // Double-Enter detected!
+                event.preventDefault()
+                event.stopPropagation()
+                console.log('🎬 Double-Enter detected - triggering TAKE')
+                handleDoubleEnterTake()
+                lastEnterTime.value = 0 // Reset to prevent triple-enter issues
+              } else {
+                // First Enter - record time
+                lastEnterTime.value = now
+                // Don't prevent default for single Enter (allow normal typing in fields)
+              }
             }
             break
 
@@ -1525,6 +1988,43 @@ export default {
           case 'PageDown': // Page Down - Scroll to bottom of modal
             event.preventDefault()
             scrollToBottomOfModal()
+            break
+
+          // Type of Cut hotkeys (N, S, M, R, G)
+          case 'n':
+          case 'N': // N - None mode
+            event.preventDefault()
+            selectCutMode('none', true)
+            break
+
+          case 's':
+          case 'S': // S - Single Trim mode
+            event.preventDefault()
+            selectCutMode('single-trim', true)
+            break
+
+          case 'm':
+          case 'M': // M - Multiple Clips mode
+            event.preventDefault()
+            selectCutMode('individual-clips', true)
+            break
+
+          case 'r':
+          case 'R': // R - Removal mode (disabled)
+            event.preventDefault()
+            selectCutMode('removal', true)
+            break
+
+          case 'g':
+          case 'G': // G - Montage mode (disabled)
+            event.preventDefault()
+            selectCutMode('montage', true)
+            break
+
+          case 'b':
+          case 'B': // B - Browse for local file
+            event.preventDefault()
+            triggerFileInput()
             break
 
           default:
@@ -1820,6 +2320,105 @@ export default {
       toast.info(`Removed clip "${removedClip.slug}"`)
     }
 
+    // Triple-blink the clip slug input field with locator flash color
+    const blinkClipSlugInput = async () => {
+      const input = clipSlugInputRef.value
+      if (!input) return
+
+      const flashColor = locatorFlashColor.value
+      const originalBorder = input.style.border
+      const originalBoxShadow = input.style.boxShadow
+
+      for (let i = 0; i < 3; i++) {
+        // Flash on
+        input.style.border = `3px solid ${flashColor}`
+        input.style.boxShadow = `0 0 15px ${flashColor}, 0 0 30px ${flashColor}80`
+        await new Promise(resolve => setTimeout(resolve, 120))
+
+        // Flash off
+        input.style.border = originalBorder || '1px solid #ddd'
+        input.style.boxShadow = originalBoxShadow || 'none'
+        await new Promise(resolve => setTimeout(resolve, 80))
+      }
+    }
+
+    // Handle double-Enter TAKE with validation
+    const handleDoubleEnterTake = async () => {
+      // Check if we're in multiple clips mode
+      if (clippingMethod.value !== 'individual-clips') {
+        return false
+      }
+
+      // Check if we have IN and OUT points
+      if (!trimStart.value || !trimEnd.value ||
+          trimStart.value === '00:00:00' || trimEnd.value === '00:00:00') {
+        toast.warning('Please set IN and OUT points first (I and O keys)')
+        return false
+      }
+
+      // Check if we have a slug
+      const hasSlug = clipSlug.value.trim().length > 0
+
+      if (!hasSlug) {
+        // Validation failed - no slug
+        console.log('⚠️ Double-Enter TAKE failed: No clip slug provided')
+
+        // Set needs attention state
+        clipSlugNeedsAttention.value = true
+        pendingTakeOnSlug.value = true
+
+        // Triple blink with locator color
+        await blinkClipSlugInput()
+
+        // Focus on the clip slug input
+        nextTick(() => {
+          if (clipSlugInputRef.value) {
+            clipSlugInputRef.value.focus()
+            clipSlugInputRef.value.select()
+          }
+        })
+
+        toast.warning('Please enter a clip slug to TAKE')
+        return false
+      }
+
+      // All validation passed - execute TAKE
+      handleTakeClip()
+      return true
+    }
+
+    // Handle input changes in clip slug field - auto-retry if pending
+    const handleClipSlugInput = () => {
+      // Clear the needs attention state when user starts typing
+      if (clipSlugNeedsAttention.value && clipSlug.value.trim().length > 0) {
+        clipSlugNeedsAttention.value = false
+      }
+    }
+
+    // Handle Enter keypress in clip slug field - auto-retry TAKE if pending
+    const handleClipSlugEnter = (event) => {
+      if (pendingTakeOnSlug.value && clipSlug.value.trim().length > 0) {
+        event.preventDefault()
+        event.stopPropagation()
+
+        console.log('🎬 Auto-retrying TAKE after slug entered')
+
+        // Clear pending state
+        pendingTakeOnSlug.value = false
+        clipSlugNeedsAttention.value = false
+
+        // Execute the TAKE
+        handleTakeClip()
+
+        // Defocus the input and return focus to modal for keyboard shortcuts
+        nextTick(() => {
+          if (clipSlugInputRef.value) {
+            clipSlugInputRef.value.blur()
+          }
+        })
+      }
+    }
+
     // Credits management
     const addCredit = () => {
       credits.value.push({ key: `credit${credits.value.length + 1}`, value: '' })
@@ -1917,7 +2516,22 @@ export default {
       hideTopError()
 
       // Validate required fields
-      if (!slug.value.trim()) {
+      // For individual-clips mode, main slug is not required - each clip has its own slug
+      if (clippingMethod.value === 'individual-clips') {
+        // Validate that we have clips
+        if (clips.value.length === 0) {
+          console.log('❌ Validation failed: No clips defined for individual-clips mode')
+          showTopError('ERROR: Please add at least one clip using the TAKE button')
+          return
+        }
+        // Validate each clip has a slug
+        const clipsWithoutSlugs = clips.value.filter(c => !c.slug || !c.slug.trim())
+        if (clipsWithoutSlugs.length > 0) {
+          console.log('❌ Validation failed: Some clips are missing slugs')
+          showTopError(`ERROR: ${clipsWithoutSlugs.length} clip(s) are missing slugs. Each clip needs a unique slug.`)
+          return
+        }
+      } else if (!slug.value.trim()) {
         console.log('❌ Validation failed: Slug is required')
         showTopError('ERROR: Slug is required')
         return
@@ -1941,38 +2555,92 @@ export default {
       // Set submitting flag
       isSubmitting.value = true
 
-      // Determine job type based on clipping method
-      let jobType = SOT_JOB_TYPES.FULL_PROCESS // Default to full processing
-      if (clippingMethod.value === 'none' || clippingMethod.value === 'single-trim') {
-        jobType = SOT_JOB_TYPES.SINGLE_TRIM
-      } else if (clippingMethod.value === 'individual-clips') {
-        jobType = SOT_JOB_TYPES.INDIVIDUAL_CLIPS
-      } else if (clippingMethod.value === 'montage') {
-        jobType = SOT_JOB_TYPES.MONTAGE
-      }
-
-      // Show loading toast while generating AssetID
-      const loadingToast = toast.info('⏳ Assigning AssetID...', {
-        timeout: false,  // Don't auto-dismiss
-        closeButton: false
-      })
-
-      // Generate AssetID early (needed for both cue creation and processing)
-      const generatedAssetId = await generateAssetId()
-
-      // Dismiss loading toast
-      toast.dismiss(loadingToast)
-
-      // NOTE: Processing will be triggered AFTER cue insertion by ContentEditor
-      // Don't start processing here - user hasn't inserted cue into script yet!
-
-      // Format credits as JSON
+      // Format credits as JSON (used for all modes)
       const creditsFormatted = credits.value
         .filter(c => c.key.trim() && c.value.trim())
         .reduce((acc, c) => {
           acc[c.key] = c.value
           return acc
         }, {})
+
+      // INDIVIDUAL CLIPS MODE: Generate separate SOT for each clip
+      if (clippingMethod.value === 'individual-clips') {
+        console.log(`🎬 INDIVIDUAL CLIPS MODE: Processing ${clips.value.length} clips as independent SOTs`)
+
+        // Show loading toast while generating AssetIDs
+        const loadingToast = toast.info(`⏳ Assigning ${clips.value.length} AssetIDs...`, {
+          timeout: false,
+          closeButton: false
+        })
+
+        try {
+          // Generate an AssetID for EACH clip
+          const multipleSots = []
+          for (const clip of clips.value) {
+            const clipAssetId = await generateAssetId()
+            console.log(`🆔 Generated AssetID for clip "${clip.slug}": ${clipAssetId}`)
+
+            // Build complete SOT data for this clip
+            const clipSotData = {
+              assetId: clipAssetId,
+              slug: clip.slug,
+              description: description.value,
+              mediaUrl: mediaUrl.value,
+              duration: '', // Will be calculated during processing
+              trimStart: clip.time_start || '00:00:00',
+              trimEnd: clip.time_end || '00:00:00',
+              transcription: '', // Will be filled during processing
+              thumbnailUrl: '', // Will be generated during processing
+              credits: JSON.stringify(creditsFormatted),
+              tempJobId: tempJobId.value,
+              sourceJobId: tempJobId.value, // Reference to original upload for re-trimming
+              originalTrimStart: clip.time_start || '00:00:00',
+              originalTrimEnd: clip.time_end || '00:00:00',
+              jobType: SOT_JOB_TYPES.SINGLE_TRIM, // Each clip processes independently
+              clippingMethod: 'single-trim' // Process as simple single trim
+            }
+
+            multipleSots.push(clipSotData)
+          }
+
+          toast.dismiss(loadingToast)
+
+          console.log(`📦 Emitting ${multipleSots.length} independent SOT cues:`, multipleSots)
+          emit('submit-multiple', multipleSots)
+          emit('update:show', false)
+
+          toast.success(`🎬 ${multipleSots.length} clips queued for processing`)
+
+        } catch (error) {
+          toast.dismiss(loadingToast)
+          console.error('❌ Failed to generate AssetIDs for clips:', error)
+          showTopError(`ERROR: Failed to generate AssetIDs: ${error.message}`)
+          isSubmitting.value = false
+          return
+        }
+
+        resetForm()
+        return
+      }
+
+      // STANDARD MODE (none, single-trim, montage): Single SOT emit
+      let jobType = SOT_JOB_TYPES.FULL_PROCESS
+      if (clippingMethod.value === 'none' || clippingMethod.value === 'single-trim') {
+        jobType = SOT_JOB_TYPES.SINGLE_TRIM
+      } else if (clippingMethod.value === 'montage') {
+        jobType = SOT_JOB_TYPES.MONTAGE
+      }
+
+      // Show loading toast while generating AssetID
+      const loadingToast = toast.info('⏳ Assigning AssetID...', {
+        timeout: false,
+        closeButton: false
+      })
+
+      // Generate AssetID
+      const generatedAssetId = await generateAssetId()
+
+      toast.dismiss(loadingToast)
 
       // Build SOT cue data
       const sotData = {
@@ -1986,10 +2654,10 @@ export default {
         transcription: transcription.value,
         thumbnailUrl: thumbnailUrl.value,
         credits: JSON.stringify(creditsFormatted),
-        tempJobId: tempJobId.value,  // Include job ID for tracking
+        tempJobId: tempJobId.value,
         clippingMethod: clippingMethod.value,
         clips: clips.value.length > 0 ? JSON.stringify(clips.value) : null,
-        jobType: jobType  // Backend will use this to route processing
+        jobType: jobType
       }
 
       console.log('SOT cue data:', sotData)
@@ -2052,6 +2720,8 @@ export default {
       trimStart.value = '00:00:00'
       trimEnd.value = '00:00:00'
       description.value = ''
+      airTime.value = ''
+      airDate.value = ''
       transcription.value = ''
       credits.value = []
       originalFile.value = null
@@ -2085,11 +2755,89 @@ export default {
       }
     }
 
+    // Focus trap handler reference
+    const focusTrapHandler = ref(null)
+
+    // Setup focus trap to keep Tab within the modal
+    const setupFocusTrap = () => {
+      if (focusTrapHandler.value) return // Already set up
+
+      focusTrapHandler.value = (e) => {
+        if (e.key !== 'Tab') return
+
+        // Get the modal card element
+        const modalEl = modalCardRef.value?.$el || modalCardRef.value
+        if (!modalEl) return
+
+        // Get all focusable elements within the modal
+        const focusableSelectors = [
+          'button:not([disabled])',
+          'input:not([disabled])',
+          'select:not([disabled])',
+          'textarea:not([disabled])',
+          '[tabindex]:not([tabindex="-1"]):not([disabled])',
+          'a[href]'
+        ].join(', ')
+
+        const focusableElements = modalEl.querySelectorAll(focusableSelectors)
+        const focusableArray = Array.from(focusableElements).filter(el => {
+          // Filter out hidden elements
+          return el.offsetParent !== null && !el.closest('[style*="display: none"]')
+        })
+
+        if (focusableArray.length === 0) return
+
+        const firstElement = focusableArray[0]
+        const lastElement = focusableArray[focusableArray.length - 1]
+
+        // Check if current focus is outside the modal
+        const currentFocus = document.activeElement
+        const isInModal = modalEl.contains(currentFocus)
+
+        if (!isInModal) {
+          // Focus is outside modal, bring it back
+          e.preventDefault()
+          firstElement.focus()
+          return
+        }
+
+        if (e.shiftKey) {
+          // Shift+Tab: if on first element, go to last
+          if (currentFocus === firstElement) {
+            e.preventDefault()
+            lastElement.focus()
+          }
+        } else {
+          // Tab: if on last element, go to first
+          if (currentFocus === lastElement) {
+            e.preventDefault()
+            firstElement.focus()
+          }
+        }
+      }
+
+      // Use capture phase to intercept before other handlers
+      document.addEventListener('keydown', focusTrapHandler.value, true)
+      console.log('🔒 Focus trap enabled for SOT modal')
+    }
+
+    // Remove focus trap
+    const removeFocusTrap = () => {
+      if (focusTrapHandler.value) {
+        document.removeEventListener('keydown', focusTrapHandler.value, true)
+        focusTrapHandler.value = null
+        console.log('🔓 Focus trap disabled for SOT modal')
+      }
+    }
+
     // Lifecycle - DON'T setup keyboard shortcuts here, only when modal is shown
     onMounted(() => {
       // Only setup if modal is already showing (edge case)
       if (props.show) {
         setupKeyboardShortcuts()
+        nextTick(() => {
+          setupFocusTrap()
+        })
       }
     })
 
@@ -2099,19 +2847,30 @@ export default {
       (newValue, oldValue) => {
         console.log(`🔔 SOT Modal visibility changed: ${oldValue} → ${newValue}`)
         if (newValue && !oldValue) {
-          // Modal opening - setup keyboard shortcuts
+          // Modal opening - setup keyboard shortcuts and focus trap
           setupKeyboardShortcuts()
-          // Auto-focus slug field when modal opens
           nextTick(() => {
-            if (slugField.value) {
-              slugField.value.focus()
-              console.log('🎯 Auto-focused slug field')
-            }
+            setupFocusTrap()
+            // Auto-focus first cut mode button when modal opens (follows tab order)
+            // Use setTimeout to ensure DOM is fully rendered and focus trap is ready
+            setTimeout(() => {
+              if (firstCutModeButtonRef.value) {
+                firstCutModeButtonRef.value.focus()
+                // Also trigger the visual focus state
+                handleCutModeFocus('none')
+                console.log('🎯 Auto-focused first cut mode button (NONE)')
+              } else if (slugField.value) {
+                // Fallback to slug field if button ref not available
+                slugField.value.focus()
+                console.log('🎯 Fallback: Auto-focused slug field')
+              }
+            }, 100)
           })
         } else if (!newValue && oldValue) {
-          // Modal closing - remove keyboard shortcuts
-          console.log('🚪 Modal closed - removing keyboard shortcuts')
+          // Modal closing - remove keyboard shortcuts and focus trap
+          console.log('🚪 Modal closed - removing keyboard shortcuts and focus trap')
           removeKeyboardShortcuts()
+          removeFocusTrap()
         }
       }
     )
@@ -2168,6 +2927,11 @@ export default {
         document.removeEventListener('keydown', keyboardHandler.value, true)
       }
 
+      // Clean up focus trap
+      if (focusTrapHandler.value) {
+        document.removeEventListener('keydown', focusTrapHandler.value, true)
+      }
+
       if (previewInterval.value) {
         clearInterval(previewInterval.value)
       }
@@ -2189,6 +2953,7 @@ export default {
     return {
       // Refs
       sotFormRef,
+      modalCardRef,
       fileInputRef,
       videoPlayerRef,
       trimStartInputRef,
@@ -2221,6 +2986,8 @@ export default {
       trimStart,
       trimEnd,
       description,
+      airTime,
+      airDate,
       transcription,
       credits,
 
@@ -2241,6 +3008,27 @@ export default {
       clippingMethod,
       clipSlug,
       clips,
+      clipSlugInputRef,
+      clipSlugLabelRef,
+      clipSlugNeedsAttention,
+      needsAttentionColor,
+      selectionColor,
+      firstCutModeButtonRef,
+      handleClipSlugInput,
+      handleClipSlugEnter,
+      localFileButtonRef,
+
+      // Type of Cut keyboard navigation
+      focusedCutMode,
+      showCutModeHelp,
+      cutModeDescriptions,
+      handleCutModeFocus,
+      handleCutModeBlur,
+      selectCutMode,
+      handleCutModeKeydown,
+      focusedVideoButton,
+      handleVideoButtonFocus,
+      handleVideoButtonBlur,
 
       // Overlay display state
       currentActionDisplay,
@@ -2262,6 +3050,9 @@ export default {
       waveformData,
       isAnalyzing,
 
+      // Hotkeys visibility
+      showHotkeys,
+
       // Actions
       triggerFileInput,
       handleFileUpload,
@@ -2282,6 +3073,7 @@ export default {
       performPlayPauseAction,
       performPreviewAction,
       performTakeAction,
+      handleWaveformSeek,
       performStepBackFrame,
       performStepForwardFrame,
       performStepBackSecond,
@@ -2295,7 +3087,8 @@ export default {
       scrollToBottomOfModal,
       updateTimecode,
       updatePlayPauseState,
-      handleVideoMetadataLoaded
+      handleVideoMetadataLoaded,
+      handleVideoKeydown
     }
   }
 }
@@ -2303,6 +3096,33 @@ export default {
 
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');
+
+/* Disable video player scrubber/timeline - use waveform instead */
+:deep(video::-webkit-media-controls-timeline) {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+:deep(video::-webkit-media-controls-current-time-display),
+:deep(video::-webkit-media-controls-time-remaining-display) {
+  display: none !important;
+}
+
+/* Firefox - hide timeline */
+:deep(video::-moz-progress-bar) {
+  display: none !important;
+}
+
+/* Fade animation for cut mode helper text */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
 
 /* Slide-down animation for clip duration */
 .slide-down-enter-active {
@@ -2442,6 +3262,11 @@ export default {
   color: white !important;
   font-weight: bold !important;
   font-family: 'Helvetica', Arial, sans-serif !important;
+}
+
+/* Push toast container down to appear below IN/OUT point displays */
+:global(.Vue-Toastification__container) {
+  top: 140px !important;
 }
 
 /* Clip item hover effect */

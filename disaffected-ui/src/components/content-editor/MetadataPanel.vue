@@ -520,11 +520,11 @@
           </v-card>
         </v-dialog>
 
-        <!-- Generated Scripts Section (episode-level, always shown) -->
+        <!-- Generated Documents Section (episode-level, always shown) -->
         <div v-if="episodeNumber" class="metadata-section mt-4 generated-documents-section">
           <h4 class="section-title">
-            <v-icon size="small" class="mr-1">mdi-script-text-outline</v-icon>
-            Generated Scripts
+            <v-icon size="small" class="mr-1">mdi-file-document-multiple-outline</v-icon>
+            Generated Documents
           </h4>
 
           <!-- Loading State -->
@@ -532,9 +532,9 @@
             <v-progress-circular indeterminate size="20" width="2" color="primary" />
           </div>
 
-          <!-- No Scripts -->
+          <!-- No Documents -->
           <div v-else-if="generatedDocuments.length === 0" class="text-center py-2">
-            <p class="text-caption text-grey">No generated scripts yet</p>
+            <p class="text-caption text-grey">No generated documents yet</p>
             <v-btn
               size="x-small"
               variant="text"
@@ -565,9 +565,18 @@
               </template>
               <v-list-item-title class="text-body-2">
                 {{ formatDocumentName(doc) }}
+                <span v-if="doc.revision" class="revision-badge">R{{ doc.revision }}</span>
               </v-list-item-title>
-              <v-list-item-subtitle class="text-caption">
-                {{ doc.size_formatted }} • {{ doc.modified_formatted }}
+              <v-list-item-subtitle class="text-caption d-flex align-center">
+                <span>{{ doc.size_formatted }} • {{ doc.modified_formatted }}</span>
+                <a
+                  v-if="doc.pastRevisions && doc.pastRevisions.length > 0"
+                  href="#"
+                  class="past-revisions-link ml-2"
+                  @click.prevent.stop="openRevisionsModal(doc)"
+                >
+                  past revisions ({{ doc.pastRevisions.length }})
+                </a>
               </v-list-item-subtitle>
               <template v-slot:append>
                 <v-btn
@@ -636,6 +645,71 @@
         </div>
       </v-card-text>
     </v-card>
+
+    <!-- Past Revisions Modal -->
+    <v-dialog v-model="showRevisionsModal" max-width="500">
+      <v-card>
+        <v-card-title class="text-subtitle-1 d-flex align-center">
+          <v-icon size="small" class="mr-2">mdi-history</v-icon>
+          Past Revisions: {{ selectedDocument?.type || formatDocumentName(selectedDocument) }}
+          <v-spacer />
+          <v-btn icon size="small" @click="showRevisionsModal = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-card-text class="pa-0">
+          <v-list density="compact" v-if="selectedDocument?.pastRevisions?.length > 0">
+            <v-list-item
+              v-for="rev in selectedDocument.pastRevisions"
+              :key="rev.revision"
+              :href="rev.url"
+              target="_blank"
+              class="revision-list-item"
+            >
+              <template v-slot:prepend>
+                <v-icon size="small" :color="getDocumentIconColor(rev.format)">
+                  {{ getDocumentIcon(rev.format) }}
+                </v-icon>
+              </template>
+              <v-list-item-title class="text-body-2">
+                {{ rev.filename }}
+                <span class="revision-badge">R{{ rev.revision }}</span>
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption">
+                {{ rev.size_formatted }} • {{ rev.modified_formatted }}
+              </v-list-item-subtitle>
+              <template v-slot:append>
+                <v-btn
+                  icon
+                  size="x-small"
+                  variant="text"
+                  :href="rev.url"
+                  target="_blank"
+                  @click.stop
+                >
+                  <v-icon size="small">mdi-open-in-new</v-icon>
+                </v-btn>
+              </template>
+            </v-list-item>
+          </v-list>
+          <div v-else class="pa-4 text-center text-grey">
+            No past revisions available
+          </div>
+        </v-card-text>
+        <v-divider></v-divider>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn
+            size="small"
+            variant="text"
+            @click="showRevisionsModal = false"
+          >
+            Close
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -730,7 +804,9 @@ export default {
       gatherStatus: '',
       gatherResults: null,
       showGatherResultsModal: false,
-      assetIdCopied: false
+      assetIdCopied: false,
+      showRevisionsModal: false,
+      selectedDocument: null
     }
   },
   watch: {
@@ -920,8 +996,8 @@ export default {
         )
 
         if (response.data.success) {
-          const { updated, renamed, total } = response.data
-          this.enumerationStatus = `Enumerated: ${updated}/${total} cues, ${renamed} files renamed`
+          const { enumerated, files_renamed, total } = response.data
+          this.enumerationStatus = `Enumerated: ${enumerated}/${total} cues, ${files_renamed} files renamed`
           // Emit event to refresh the rundown data
           this.$emit('refresh-rundown')
         } else {
@@ -1046,19 +1122,32 @@ export default {
     },
 
     formatDocumentName(doc) {
+      if (!doc) return ''
       // Extract readable name from filename
       // e.g., "0249-HOST-SCRIPT.html" -> "Host Script"
+      // e.g., "0249-HOST-SCRIPT-2025-01-18.html" -> "Host Script 2025-01-18"
       let name = doc.filename
         .replace(/^\d+-/, '') // Remove episode number prefix
         .replace(/\.(html|pdf|txt)$/i, '') // Remove extension
         .replace(/-/g, ' ') // Replace dashes with spaces
 
-      // Title case
+      // Title case (but preserve date format)
       name = name.split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .map(word => {
+          // Check if it looks like a date part (YYYY, MM, DD)
+          if (/^\d{4}$/.test(word) || /^\d{2}$/.test(word)) {
+            return word
+          }
+          return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        })
         .join(' ')
 
       return name
+    },
+
+    openRevisionsModal(doc) {
+      this.selectedDocument = doc
+      this.showRevisionsModal = true
     },
 
     formatVersionDate(dateString) {
@@ -1516,6 +1605,37 @@ export default {
 .document-item .v-list-item-subtitle {
   font-size: 0.65rem !important;
   opacity: 0.7;
+}
+
+/* Revision badge */
+.revision-badge {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 1px 4px;
+  margin-left: 6px;
+  background: rgba(var(--v-theme-primary), 0.15);
+  color: rgb(var(--v-theme-primary));
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+/* Past revisions link */
+.past-revisions-link {
+  font-size: 0.6rem;
+  color: #888;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.past-revisions-link:hover {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: underline;
+}
+
+/* Revision modal list item */
+.revision-list-item {
+  min-height: 48px !important;
 }
 
 /* Document action buttons */

@@ -332,8 +332,8 @@
           ></video>
         </div>
 
-        <!-- Thumbnail + Info Layout (when completed or has thumbnail) -->
-        <div v-if="sotThumbnailUrl || (jobStatus && jobStatus.status === 'completed')" class="sot-completed-layout">
+        <!-- Thumbnail + Info Layout (when completed, has thumbnail, or has any display data) -->
+        <div v-if="sotThumbnailUrl || isJobCompleted || displayDuration || displayVideoPath" class="sot-completed-layout">
           <!-- Left: Thumbnail with navigation -->
           <div class="sot-thumbnail-wrapper">
             <div class="sot-thumbnail-section">
@@ -388,25 +388,25 @@
 
           <!-- Right: Info -->
           <div class="sot-info-section">
-            <!-- Duration -->
-            <div v-if="cueData.duration || (jobStatus && jobStatus.post_analysis)" class="sot-info-row">
+            <!-- Duration (uses computed displayDuration to handle stale placeholders) -->
+            <div v-if="displayDuration" class="sot-info-row">
               <v-icon size="small" color="primary">mdi-timer-outline</v-icon>
               <span class="sot-info-label">Duration:</span>
-              <span class="sot-info-value">{{ cueData.duration || jobStatus?.post_analysis?.duration || '—' }}</span>
+              <span class="sot-info-value">{{ displayDuration }}</span>
             </div>
 
-            <!-- Media URL -->
-            <div v-if="cueData.mediaUrl || (jobStatus && jobStatus.final_video_path)" class="sot-info-row">
+            <!-- Media URL (uses computed displayVideoPath to handle stale placeholders) -->
+            <div v-if="displayVideoPath" class="sot-info-row">
               <v-icon size="small" color="primary">mdi-video</v-icon>
               <span class="sot-info-label">Video:</span>
-              <span class="sot-info-value sot-media-path">{{ formatMediaPath(cueData.mediaUrl || jobStatus?.final_video_path) }}</span>
+              <span class="sot-info-value sot-media-path">{{ formatMediaPath(displayVideoPath) }}</span>
             </div>
 
-            <!-- Processing Status -->
-            <div v-if="cueData.processingStatus" class="sot-info-row">
-              <v-icon size="small" color="success">mdi-check-circle</v-icon>
+            <!-- Processing Status (uses computed displayProcessingStatus for live status) -->
+            <div v-if="displayProcessingStatus" class="sot-info-row">
+              <v-icon size="small" :color="isJobCompleted ? 'success' : 'info'">{{ isJobCompleted ? 'mdi-check-circle' : 'mdi-progress-clock' }}</v-icon>
               <span class="sot-info-label">Status:</span>
-              <span class="sot-info-value">{{ cueData.processingStatus }}</span>
+              <span class="sot-info-value">{{ displayProcessingStatus }}</span>
             </div>
 
             <!-- Transcription Preview -->
@@ -417,13 +417,56 @@
                 <span style="white-space: pre-wrap;">{{ sotTranscription }}</span>
               </v-tooltip>
             </div>
-          </div>
-        </div>
 
-        <!-- Outcue Display - Full Width at Bottom -->
-        <div v-if="sotOutcue" class="sot-outcue-banner">
-          <span class="sot-outcue-label">OUTCUE:</span>
-          <span class="sot-outcue-text">{{ sotOutcue }}</span>
+            <!-- Enhanced Video Specs (from job status) -->
+            <div v-if="jobStatus?.video_specs" class="sot-info-row">
+              <v-icon size="small" color="secondary">mdi-cog</v-icon>
+              <span class="sot-info-label">Specs:</span>
+              <span class="sot-info-value sot-tech-specs">
+                {{ jobStatus.video_specs.resolution }}
+                <span v-if="jobStatus.video_specs.codec !== 'unknown' && jobStatus.video_specs.codec !== 'processing'"> &bull; {{ jobStatus.video_specs.codec }}</span>
+                <span v-if="jobStatus.video_specs.file_size_mb"> &bull; {{ jobStatus.video_specs.file_size_mb }}MB</span>
+              </span>
+            </div>
+
+            <!-- Audio Info (from job status) -->
+            <div v-if="jobStatus?.audio_analysis" class="sot-info-row">
+              <v-icon size="small" color="secondary">mdi-volume-high</v-icon>
+              <span class="sot-info-label">Audio:</span>
+              <span class="sot-info-value">{{ jobStatus.audio_analysis.channels }}</span>
+            </div>
+
+            <!-- Warnings Badge (blur, audio issues) -->
+            <div v-if="jobStatus?.warnings?.length" class="sot-warnings-row">
+              <v-chip
+                v-for="(warning, idx) in jobStatus.warnings.slice(0, 2)"
+                :key="idx"
+                size="x-small"
+                :color="warning.includes('low_sharpness') ? 'error' : 'warning'"
+                variant="tonal"
+                class="mr-1"
+              >
+                <v-icon size="x-small" start>{{ warning.includes('sharpness') ? 'mdi-blur' : 'mdi-alert' }}</v-icon>
+                {{ formatWarningLabel(warning) }}
+              </v-chip>
+            </div>
+
+            <!-- Thumbnail Sharpness Indicator -->
+            <div v-if="currentThumbnailSharpness" class="sot-info-row sot-sharpness-row">
+              <v-icon size="small" :color="sharpnessColor">mdi-image-filter-hdr</v-icon>
+              <span class="sot-info-label">Sharpness:</span>
+              <span class="sot-info-value" :style="{ color: sharpnessColor }">{{ currentThumbnailSharpness.toFixed(0) }}</span>
+              <v-tooltip activator="parent" location="top">
+                Thumbnail sharpness score (higher = sharper). Below 100 may indicate blur.
+              </v-tooltip>
+            </div>
+          </div>
+
+          <!-- Outcue Display - Full Width at Bottom (MOVED INSIDE completed layout) -->
+          <div v-if="sotOutcue" class="sot-outcue-banner">
+            <span class="sot-outcue-label">OUTCUE:</span>
+            <span class="sot-outcue-text">{{ sotOutcue }}</span>
+          </div>
         </div>
 
         <!-- Processing In Progress (no thumbnail yet) -->
@@ -467,8 +510,8 @@
           ></video>
         </div>
 
-        <!-- Thumbnail + Info Layout (when completed or has thumbnail) -->
-        <div v-if="sotThumbnailUrl || (jobStatus && jobStatus.status === 'completed')" class="sot-completed-layout">
+        <!-- Thumbnail + Info Layout (when completed, has thumbnail, or has any display data) -->
+        <div v-if="sotThumbnailUrl || isJobCompleted || displayDuration || displayVideoPath" class="sot-completed-layout">
           <!-- Left: Thumbnail with navigation -->
           <div class="sot-thumbnail-wrapper">
             <div class="sot-thumbnail-section">
@@ -528,25 +571,25 @@
 
           <!-- Right: Info (no transcription for VO) -->
           <div class="sot-info-section">
-            <!-- Duration -->
-            <div v-if="cueData.duration || (jobStatus && jobStatus.post_analysis)" class="sot-info-row">
+            <!-- Duration (uses computed displayDuration to handle stale placeholders) -->
+            <div v-if="displayDuration" class="sot-info-row">
               <v-icon size="small" color="primary">mdi-timer-outline</v-icon>
               <span class="sot-info-label">Duration:</span>
-              <span class="sot-info-value">{{ cueData.duration || jobStatus?.post_analysis?.duration || '—' }}</span>
+              <span class="sot-info-value">{{ displayDuration }}</span>
             </div>
 
-            <!-- Media URL -->
-            <div v-if="cueData.mediaUrl || (jobStatus && jobStatus.final_video_path)" class="sot-info-row">
+            <!-- Media URL (uses computed displayVideoPath to handle stale placeholders) -->
+            <div v-if="displayVideoPath" class="sot-info-row">
               <v-icon size="small" color="primary">mdi-video</v-icon>
               <span class="sot-info-label">Video:</span>
-              <span class="sot-info-value sot-media-path">{{ formatMediaPath(cueData.mediaUrl || jobStatus?.final_video_path) }}</span>
+              <span class="sot-info-value sot-media-path">{{ formatMediaPath(displayVideoPath) }}</span>
             </div>
 
-            <!-- Processing Status -->
-            <div v-if="cueData.processingStatus" class="sot-info-row">
-              <v-icon size="small" color="success">mdi-check-circle</v-icon>
+            <!-- Processing Status (uses computed displayProcessingStatus for live status) -->
+            <div v-if="displayProcessingStatus" class="sot-info-row">
+              <v-icon size="small" :color="isJobCompleted ? 'success' : 'info'">{{ isJobCompleted ? 'mdi-check-circle' : 'mdi-progress-clock' }}</v-icon>
               <span class="sot-info-label">Status:</span>
-              <span class="sot-info-value">{{ cueData.processingStatus }}</span>
+              <span class="sot-info-value">{{ displayProcessingStatus }}</span>
             </div>
 
             <!-- VO indicator (no audio) -->
@@ -574,7 +617,71 @@
         </div>
       </div>
 
-      <!-- Generic Placeholder Display for non-SOT, non-FSQ, non-VO -->
+      <!-- GFX-specific Display -->
+      <div v-else-if="cueData.type === 'GFX'" class="gfx-container">
+        <div class="gfx-preview-section">
+          <!-- Show generated image if available -->
+          <div v-if="cueData.assetUrl || cueData.mediaUrl" class="gfx-image-preview">
+            <img
+              :src="gfxImageUrl"
+              alt="GFX Preview"
+              class="gfx-preview-img"
+              @error="handleGfxImageError"
+            />
+            <div class="gfx-generated-badge">
+              <v-icon size="12" color="success">mdi-check-circle</v-icon>
+              <span>Generated</span>
+            </div>
+          </div>
+          <!-- Show text preview if not generated -->
+          <div v-else class="gfx-text-preview">
+            <div v-if="cueData.title" class="gfx-title">{{ cueData.title }}</div>
+            <div v-if="cueData.body" class="gfx-body">{{ formatGfxBody(cueData.body) }}</div>
+            <div v-if="!cueData.body && !cueData.title" class="gfx-no-content">No content</div>
+          </div>
+        </div>
+
+        <div class="gfx-controls">
+          <!-- Generate/Regenerate Button -->
+          <v-btn
+            block
+            size="small"
+            :variant="(cueData.assetUrl || cueData.mediaUrl) ? 'outlined' : 'elevated'"
+            :color="(cueData.assetUrl || cueData.mediaUrl) ? 'primary' : 'success'"
+            @click.stop="handleGenerateGfx"
+            :loading="generatingGfx"
+            class="mb-2"
+          >
+            <v-icon size="small" start>{{ (cueData.assetUrl || cueData.mediaUrl) ? 'mdi-sync' : 'mdi-creation' }}</v-icon>
+            {{ (cueData.assetUrl || cueData.mediaUrl) ? 'Regenerate' : 'Generate GFX' }}
+          </v-btn>
+
+          <!-- Style info -->
+          <div v-if="cueData.fontSize || cueData.fontFamily" class="gfx-style-info">
+            <span v-if="cueData.fontSize">{{ cueData.fontSize }}</span>
+            <span v-if="cueData.fontFamily"> · {{ cueData.fontFamily }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- DIR (Directors Note) Display -->
+      <div v-else-if="cueData.type === 'DIR'" class="dir-container">
+        <div class="dir-content">
+          <div class="dir-icon-section">
+            <v-icon size="32" :color="cueTypeColor">mdi-note-text</v-icon>
+          </div>
+          <div class="dir-note-section">
+            <div v-if="cueData.noteText" class="dir-note-text">
+              {{ cueData.noteText }}
+            </div>
+            <div v-else class="dir-no-content">
+              <span style="color: grey;">No note text provided</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Generic Placeholder Display for other cue types -->
       <div v-else class="placeholder-container">
         <div class="placeholder-icon-section">
           <v-icon size="small" :color="cueTypeColor" class="placeholder-icon">
@@ -887,6 +994,8 @@ export default {
   data() {
     return {
       generatingPNG: false,
+      generatingGfx: false,       // GFX generation in progress
+      gfxImageError: false,       // GFX image failed to load
       fsqGenerationStatus: null, // FSQ generation status: null, 'queued', 'generating', 'completed', 'failed'
       fsqTaskId: null,        // Current FSQ Celery task ID
       fsqCacheBuster: null,   // Timestamp to bust browser cache after regeneration
@@ -1127,6 +1236,125 @@ export default {
     },
 
     /**
+     * Get sharpness score for current thumbnail from thumbnail_data
+     */
+    currentThumbnailSharpness() {
+      if (!this.jobStatus?.thumbnail_data || !Array.isArray(this.jobStatus.thumbnail_data)) {
+        return null;
+      }
+
+      // Find thumbnail data for current index (1-based in data)
+      const thumbData = this.jobStatus.thumbnail_data.find(
+        t => t.index === this.currentThumbnailIndex + 1
+      );
+
+      return thumbData?.sharpness || null;
+    },
+
+    /**
+     * Check if job is completed (status from API)
+     */
+    isJobCompleted() {
+      return this.jobStatus?.status === 'completed';
+    },
+
+    /**
+     * Display duration - prioritizes jobStatus data over stale cueData placeholders
+     * Treats "calculating", "processing", "queued", "pending" as null values
+     */
+    displayDuration() {
+      const stalePlaceholders = ['calculating', 'processing', 'queued', 'pending', ''];
+
+      // If job is completed, prefer jobStatus data
+      if (this.isJobCompleted) {
+        // Try post_analysis duration first
+        if (this.jobStatus?.post_analysis?.duration) {
+          return this.jobStatus.post_analysis.duration;
+        }
+        // Try video_specs duration
+        if (this.jobStatus?.video_specs?.duration) {
+          return this.jobStatus.video_specs.duration;
+        }
+      }
+
+      // Check cueData, but filter out placeholder values
+      const cueDuration = this.cueData?.duration?.toLowerCase?.() || this.cueData?.duration;
+      if (cueDuration && !stalePlaceholders.includes(cueDuration?.toLowerCase?.())) {
+        return this.cueData.duration;
+      }
+
+      // Fallback to jobStatus even if not completed
+      if (this.jobStatus?.post_analysis?.duration) {
+        return this.jobStatus.post_analysis.duration;
+      }
+      if (this.jobStatus?.video_specs?.duration) {
+        return this.jobStatus.video_specs.duration;
+      }
+
+      return null;
+    },
+
+    /**
+     * Display video path - prioritizes jobStatus data over stale cueData placeholders
+     */
+    displayVideoPath() {
+      const stalePlaceholders = ['processing', 'queued', 'pending', ''];
+
+      // If job is completed, prefer jobStatus data
+      if (this.isJobCompleted && this.jobStatus?.final_video_path) {
+        return this.jobStatus.final_video_path;
+      }
+
+      // Check cueData, but filter out placeholder values
+      const cueMediaUrl = this.cueData?.mediaUrl?.toLowerCase?.() || this.cueData?.mediaUrl;
+      if (cueMediaUrl && !stalePlaceholders.includes(cueMediaUrl?.toLowerCase?.())) {
+        return this.cueData.mediaUrl;
+      }
+
+      // Fallback to jobStatus
+      if (this.jobStatus?.final_video_path) {
+        return this.jobStatus.final_video_path;
+      }
+
+      return null;
+    },
+
+    /**
+     * Display processing status - prioritizes actual job status over stale cueData
+     */
+    displayProcessingStatus() {
+      // If we have live job status, use that
+      if (this.jobStatus?.status) {
+        const status = this.jobStatus.status;
+        if (status === 'completed') return 'Completed';
+        if (status === 'failed') return 'Failed';
+        if (status === 'processing') return this.jobStatus.current_phase || 'Processing...';
+        if (status === 'queued') return 'Queued';
+        return status;
+      }
+
+      // Fallback to cueData
+      if (this.cueData?.processingStatus) {
+        return this.cueData.processingStatus;
+      }
+
+      return null;
+    },
+
+    /**
+     * Get color for sharpness indicator based on value
+     */
+    sharpnessColor() {
+      const sharpness = this.currentThumbnailSharpness;
+      if (!sharpness) return 'grey';
+
+      if (sharpness < 100) return '#D32F2F';  // Red - blurry
+      if (sharpness < 150) return '#FF9800';  // Orange - below average
+      if (sharpness < 200) return '#FFC107';  // Yellow - average
+      return '#4CAF50';  // Green - sharp
+    },
+
+    /**
      * Get SOT thumbnail URL from cue data or job status (base/primary thumbnail)
      */
     sotThumbnailUrl() {
@@ -1212,6 +1440,21 @@ export default {
         url += `?t=${this.fsqCacheBuster}`;
       }
       return url;
+    },
+
+    /**
+     * Get GFX image URL from cue data
+     */
+    gfxImageUrl() {
+      const url = this.cueData?.assetUrl || this.cueData?.mediaUrl;
+      if (!url) return '';
+      // If it's already a full URL, use it
+      if (url.startsWith('http') || url.startsWith('/')) {
+        return url;
+      }
+      // Build episode-relative URL
+      const episode = this.currentEpisode || this.$route?.params?.episode || '';
+      return `/episodes/${episode}/assets/graphics/${url}`;
     },
 
     /**
@@ -1655,12 +1898,57 @@ export default {
     },
 
     /**
+     * Format warning label for display (extract short description)
+     */
+    formatWarningLabel(warning) {
+      if (!warning) return '';
+
+      // Extract the type before the colon for display
+      if (warning.includes(':')) {
+        const type = warning.split(':')[0];
+        const typeLabels = {
+          'low_sharpness': 'Blurry',
+          'moderate_blur': 'Low Quality',
+          'unbalanced_audio': 'Audio Issue',
+          'large_file': 'Large File'
+        };
+        return typeLabels[type] || type;
+      }
+
+      return warning.length > 20 ? warning.substring(0, 20) + '...' : warning;
+    },
+
+    /**
      * Truncate transcription for preview
      */
     truncateTranscription(text) {
       if (!text) return '';
       if (text.length <= 100) return text;
       return text.substring(0, 100) + '...';
+    },
+
+    /**
+     * Preload all thumbnail images for faster navigation
+     * Creates Image objects in memory to cache them in the browser
+     */
+    preloadThumbnails() {
+      const options = this.sotThumbnailOptions;
+      if (!options || options.length <= 1) return;
+
+      console.log(`🖼️ Preloading ${options.length} thumbnails for ${this.cueData.slug || 'cue'}`);
+
+      options.forEach((url, index) => {
+        const img = new Image();
+        img.onload = () => {
+          if (index === 0) {
+            console.log(`✅ First thumbnail preloaded: ${url}`);
+          }
+        };
+        img.onerror = () => {
+          console.warn(`⚠️ Failed to preload thumbnail ${index + 1}: ${url}`);
+        };
+        img.src = url;
+      });
     },
 
     /**
@@ -2050,6 +2338,98 @@ export default {
     },
 
     /**
+     * Generate GFX image from cue data
+     */
+    async handleGenerateGfx() {
+      if (!this.cueData.assetId) {
+        console.error('Cannot generate GFX: no assetId found');
+        return;
+      }
+
+      if (!this.cueData.body) {
+        console.error('Cannot generate GFX: no body text found');
+        return;
+      }
+
+      try {
+        this.generatingGfx = true;
+        console.log(`🎨 Generating GFX for: ${this.cueData.assetId}`);
+
+        const token = localStorage.getItem('auth-token');
+        const episode = this.currentEpisode || this.$route?.params?.episode || '';
+
+        const requestData = {
+          episode_id: episode,
+          gfx_type: this.cueData.gfxType || 'fullscreen-text',
+          body: this.cueData.body?.replace(/\\n/g, '\n') || '',
+          slug: this.cueData.slug || 'gfx',
+          asset_id: this.cueData.assetId,
+          title: this.cueData.title || null,
+          alignment: this.cueData.textAlign || 'center',
+          font_family: this.cueData.fontFamily || 'sans-serif',
+          font_size: parseInt(this.cueData.fontSize) || 25,
+          render_mode: this.cueData.renderMode || 'png',
+          priority: 'high'
+        };
+
+        console.log('📤 Sending GFX generation request:', requestData);
+
+        const response = await fetch('/api/gfx/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify(requestData)
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to generate GFX');
+        }
+
+        const result = await response.json();
+        console.log('✅ GFX generated:', result);
+
+        // Update cue with generated asset URL
+        if (result.asset_url) {
+          this.$emit('update-cue-field', {
+            assetId: this.cueData.assetId,
+            field: 'assetUrl',
+            value: result.asset_url
+          });
+          // Force image reload
+          this.gfxImageError = false;
+        }
+
+      } catch (error) {
+        console.error('❌ Error generating GFX:', error);
+        alert('Failed to generate GFX: ' + error.message);
+      } finally {
+        this.generatingGfx = false;
+      }
+    },
+
+    /**
+     * Format GFX body text for display (unescape newlines)
+     */
+    formatGfxBody(body) {
+      if (!body) return '';
+      // Unescape \n to actual newlines, then truncate for preview
+      const unescaped = body.replace(/\\n/g, '\n');
+      // Truncate to 200 chars for preview
+      return unescaped.length > 200 ? unescaped.substring(0, 200) + '...' : unescaped;
+    },
+
+    /**
+     * Handle GFX image load error
+     */
+    handleGfxImageError() {
+      console.warn('GFX image failed to load:', this.gfxImageUrl);
+      this.gfxImageError = true;
+    },
+
+    /**
      * Poll Celery task status until completion
      */
     async pollTaskStatus(taskId, maxAttempts = 30) {
@@ -2232,6 +2612,17 @@ export default {
         }
       },
       deep: true
+    },
+    // Watch sotThumbnailOptions to preload thumbnails when they become available
+    sotThumbnailOptions: {
+      handler(newOptions, oldOptions) {
+        // Preload when we get new options (e.g., after job status updates)
+        if (newOptions && newOptions.length > 1 && (!oldOptions || oldOptions.length <= 1)) {
+          console.log('📷 Thumbnail options now available, preloading...');
+          this.preloadThumbnails();
+        }
+      },
+      immediate: false
     }
   },
 
@@ -2247,6 +2638,11 @@ export default {
     // Start polling if this is a SOT cue with AssetID
     if (this.showJobStatus) {
       this.startPolling();
+    }
+
+    // Preload thumbnails if already available on mount
+    if (this.sotThumbnailOptions && this.sotThumbnailOptions.length > 1) {
+      this.preloadThumbnails();
     }
   },
 
@@ -2488,6 +2884,132 @@ export default {
   font-style: italic;
 }
 
+/* GFX Container Styles */
+.gfx-container {
+  display: flex;
+  gap: 16px;
+  padding: 12px;
+}
+
+.gfx-preview-section {
+  flex: 1;
+  min-width: 0;
+}
+
+.gfx-image-preview {
+  position: relative;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.gfx-preview-img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  background: #1a1a1a;
+  border-radius: 4px;
+}
+
+.gfx-generated-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #4CAF50;
+}
+
+.gfx-text-preview {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  padding: 16px;
+  border-radius: 4px;
+  color: white;
+  min-height: 80px;
+}
+
+.gfx-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #fff;
+}
+
+.gfx-body {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.gfx-no-content {
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.gfx-controls {
+  width: 140px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.gfx-style-info {
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+  text-align: center;
+}
+
+/* DIR (Directors Note) Styling */
+.dir-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background-color: rgba(var(--v-theme-surface-variant), 0.05);
+  border-radius: 4px;
+  margin-bottom: 12px;
+}
+
+.dir-content {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.dir-icon-section {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dir-note-section {
+  flex: 1;
+}
+
+.dir-note-text {
+  font-size: 1rem;
+  line-height: 1.5;
+  color: rgba(var(--v-theme-on-surface), 0.87);
+  white-space: pre-wrap;
+  font-style: italic;
+  padding: 8px;
+  background-color: rgba(var(--v-theme-warning), 0.05);
+  border-left: 4px solid rgb(var(--v-theme-warning));
+  border-radius: 4px;
+}
+
+.dir-no-content {
+  font-size: 0.9rem;
+  font-style: italic;
+  padding: 8px;
+}
+
 /* SOT Container Styling */
 .sot-container {
   display: flex;
@@ -2664,6 +3186,25 @@ export default {
   font-family: 'Roboto Mono', monospace;
   font-size: 0.8rem;
   color: rgba(var(--v-theme-on-surface), 0.7);
+}
+
+/* Technical specs display */
+.sot-tech-specs {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.8rem;
+}
+
+/* Warnings row */
+.sot-warnings-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+/* Sharpness indicator row */
+.sot-sharpness-row {
+  margin-top: 4px;
 }
 
 .sot-transcription-preview {

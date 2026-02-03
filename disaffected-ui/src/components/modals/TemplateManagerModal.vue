@@ -50,6 +50,19 @@ export default {
       this.$emit('template-selected', template);
       this.closeModal();
     },
+    handleKeydown(event) {
+      if (event.key === 'Escape' && this.dialog) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closeModal();
+      }
+    },
+  },
+  mounted() {
+    document.addEventListener('keydown', this.handleKeydown);
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleKeydown);
   },
 };
 </script>

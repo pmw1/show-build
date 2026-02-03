@@ -149,6 +149,7 @@ This document defines the **ONLY** acceptable directory structure and naming con
 │   │   └── 030-intro-music.mp3
 │   │
 │   └── graphics/
+│       ├── quotes/                               # Full-screen quote graphics
 │       └── 040-lower-third.png
 │
 ├── rundown/                                        # Rundown organization
@@ -181,6 +182,9 @@ This document defines the **ONLY** acceptable directory structure and naming con
 │       ├── media-list.txt → ../versions/{latest}/media-list.txt
 │       ├── flat-text.txt → ../versions/{latest}/flat-text.txt
 │       └── source.md → ../versions/{latest}/source.md
+│
+├── preshow/                                        # Preshow preparation materials
+│   └── (notes, research, planning documents)
 │
 └── exports/                                        # Distribution-ready content
     ├── {EPISODE}-A.mp4                            # Block A video
@@ -473,6 +477,9 @@ assets/graphics/040-lower-third.png
 - Overlays
 - Animated graphics (exported frames)
 - Title cards
+
+**Subdirectories**:
+- `quotes/` - Full-screen quote graphics (FSQ cue type)
 
 **Formats**: `.png` (with transparency)
 
@@ -849,7 +856,30 @@ scripts/
 - Regenerate → new timestamped version
 - Old versions preserved for history
 
-### Preshow Folder (Deprecated)
+---
+
+## Preshow Folder
+
+**Purpose**: Preshow preparation materials and planning documents
+**Location**: `{EPISODE}/preshow/`
+
+### Contents
+
+This directory holds preshow preparation materials:
+- Research notes and links
+- Guest briefings and background information
+- Topic outlines and talking points
+- Planning documents
+- Reference materials collected during episode preparation
+
+### Usage Notes
+
+- **Optional directory** - Not required for every episode
+- **Human-managed content** - Unlike scripts/, this folder contains manually created materials
+- **Pre-production focus** - Used during episode planning before production begins
+- Files here are for reference during production, not for automated processing
+
+### Preshow Folder (Legacy Note)
 
 **Status**: ⚠️ Being phased out
 
@@ -1261,6 +1291,7 @@ Show (Disaffected)
 ⚪ Script versions - Generated on demand
 ⚪ `exports/{EPISODE}.mp4` - Full episode (created after editing)
 ⚪ `exports/{EPISODE}.srt` - Subtitles (if created)
+⚪ `preshow/` - Preshow preparation materials (notes, research, planning)
 
 ### FORBIDDEN (Must Never Exist)
 
@@ -1270,7 +1301,6 @@ Show (Disaffected)
 ❌ `growing-temporary-files/` - Temp files
 ❌ `sync-*/` - Sync folders
 ❌ `New folder/` - Unnamed directories
-❌ `preshow/` - Deprecated (use Show-Build Scratch instead)
 ❌ Files with trailing/leading spaces
 ❌ Files with non-ASCII characters (unless intentional)
 
@@ -1301,6 +1331,7 @@ mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/assets/video
 mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/assets/images
 mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/assets/audio
 mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/assets/graphics
+mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/assets/graphics/quotes
 
 # Rundown
 mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/rundown
@@ -1309,6 +1340,9 @@ mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/rundown/media-list
 # Scripts
 mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/scripts/versions
 mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/scripts/current
+
+# Preshow
+mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/preshow
 
 # Exports
 mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/exports

@@ -84,9 +84,26 @@ export default {
         this.reset();
       } catch (error) { this.$toast.error('Failed to add NAT cue'); }
     },
-    reset() { this.slug = ''; this.description = ''; this.duration = ''; this.timestamp = ''; this.file = null; this.$emit('update:show', false); }
+    reset() { this.slug = ''; this.description = ''; this.duration = ''; this.timestamp = ''; this.file = null; this.$emit('update:show', false); },
+    handleAbort() {
+      this.$emit('update:show', false);
+      this.reset();
+    },
+    handleKeydown(event) {
+      if (event.key === 'Escape' && this.show) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.handleAbort();
+      }
+    }
   },
-  watch: { show(val) { if (!val) this.reset(); } }
+  watch: { show(val) { if (!val) this.reset(); } },
+  mounted() {
+    document.addEventListener('keydown', this.handleKeydown);
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleKeydown);
+  }
 }
 </script>
 <style scoped>.v-card { padding: 16px; }</style>

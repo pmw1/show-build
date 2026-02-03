@@ -80,6 +80,19 @@ export default {
       };
       return icons[type] || icons.other;
     },
+    handleKeydown(event) {
+      if (event.key === 'Escape' && this.show) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.$emit('update:show', false);
+      }
+    },
+  },
+  mounted() {
+    document.addEventListener('keydown', this.handleKeydown);
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleKeydown);
   },
 };
 </script>

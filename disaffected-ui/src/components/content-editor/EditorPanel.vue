@@ -67,6 +67,27 @@
           </v-btn>
         </v-btn-toggle>
 
+        <!-- iPad Mode Button -->
+        <v-btn
+          size="small"
+          class="mode-btn ml-2"
+          rounded="0"
+          @click="openIpadMode"
+          :disabled="!currentEpisodeNumber"
+        >
+          <v-icon left size="small">mdi-tablet</v-icon>
+          iPad Mode
+        </v-btn>
+
+        <!-- Collapse Mode Indicator (centered, prominent) -->
+        <div v-if="collapseMode && editorMode === 'script'" class="collapse-mode-indicator">
+          <v-icon size="small" class="mr-1">mdi-arrow-collapse-vertical</v-icon>
+          COLLAPSE MODE
+          <v-tooltip activator="parent" location="bottom">
+            Press Ctrl+Shift+C to exit collapse mode
+          </v-tooltip>
+        </div>
+
         <v-spacer></v-spacer>
 
         <!-- Save All Button - mirrors main Save All behavior -->
@@ -343,6 +364,28 @@
                     } : {}"
                     @click="handleParagraphClick(index, $event)"
                   >
+                    <!-- COLLAPSE MODE: Compact single-line paragraph display -->
+                    <div v-if="collapseMode" class="collapsed-paragraph" :class="`speaker-bg-${segment.speaker}`">
+                      <div class="drag-handle-column drag-handle">
+                        <v-icon size="small">mdi-drag</v-icon>
+                      </div>
+                      <div class="collapsed-paragraph-content">
+                        <span class="collapsed-line-range">[{{ getCollapsedLineRange(index) }}]</span>
+                        <span class="collapsed-text-left">{{ getCollapsedFirstWords(segment.content) }} ...</span>
+                        <span class="collapsed-text-right">... {{ getCollapsedLastWords(segment.content) }}</span>
+                      </div>
+                      <v-btn
+                        icon
+                        size="x-small"
+                        class="collapsed-delete-btn"
+                        @click.stop="deleteSegment(index)"
+                      >
+                        <v-icon size="16">mdi-close</v-icon>
+                      </v-btn>
+                    </div>
+
+                    <!-- NORMAL MODE: Full paragraph display -->
+                    <template v-else>
                     <!-- Speaker Header -->
                     <div v-if="shouldShowSpeakerHeader(index, segment.speaker)" class="speaker-header" :style="getSpeakerHeaderStyle(segment.speaker)">
                       <div class="speaker-info">
@@ -377,6 +420,7 @@
 
                     <!-- Paragraph Content -->
                     <div
+                      :ref="el => setParagraphRef(index, el)"
                       class="paragraph-content"
                       :class="[
                         `seg-${index}`,
@@ -389,6 +433,7 @@
                       ]"
                       @mouseenter="hoveredParagraphIndex = index"
                       @mouseleave="hoveredParagraphIndex = null"
+                      @click="handleParagraphClick(index, $event)"
                     >
                       <!-- Drag Handle Column (before line numbers) -->
                       <div class="drag-handle-column drag-handle">
@@ -430,18 +475,19 @@
                         :class="{ 'flag-active': segment.needsAttention }"
                         @click.stop="handleFlagClick(index, 'paragraph', segment)"
                         :title="segment.needsAttention ? (isFlagNoteMinimized('paragraph', index) ? 'Expand note' : 'Minimize note') : 'Flag for attention'"
+                        tabindex="-1"
                       >
                         <v-icon size="18" :color="segment.needsAttention ? 'orange' : 'grey'">
                           {{ segment.needsAttention ? 'mdi-flag' : 'mdi-flag-outline' }}
                         </v-icon>
                       </v-btn>
 
-                      <!-- Flag Note Panel (teleported to body to escape stacking context) -->
+                      <!-- Flag Note Panel (teleported to body, positioned dynamically) -->
                       <Teleport to="body">
                         <div
                           v-if="segment.needsAttention && !isFlagNoteMinimized('paragraph', index)"
-                          class="flag-note-panel"
-                          :style="editorPanelCssVars"
+                          class="flag-note-panel flag-note-teleported"
+                          :style="{ ...editorPanelCssVars, ...getFlagNotePanelStyle(index, 'paragraph') }"
                           @click.stop
                         >
                           <div class="flag-note-header">
@@ -491,6 +537,7 @@
                         size="x-small"
                         class="paragraph-delete-btn"
                         @click.stop="deleteSegment(index)"
+                        tabindex="-1"
                       >
                         <v-icon size="18">mdi-close</v-icon>
                       </v-btn>
@@ -502,10 +549,12 @@
                         size="small"
                         class="paragraph-add-btn"
                         @click.stop="createNewParagraphAfter(index)"
+                        tabindex="-1"
                       >
                         <v-icon size="medium">mdi-plus</v-icon>
                       </v-btn>
                     </div>
+                    </template>
                   </div>
                   <!-- Fallback for non-paragraph content -->
                   <v-textarea
@@ -529,7 +578,8 @@
                   :class="[
                     `cue-align-${cueCardAlignment}`,
                     { 'cue-focused': focusedCueIndex === index },
-                    { 'cue-needs-attention': segment.data?.needsAttention }
+                    { 'cue-needs-attention': segment.data?.needsAttention },
+                    { 'cue-collapsed': collapseMode }
                   ]"
                   :style="focusedCueIndex === index ? { backgroundColor: highlightBackgroundColor } : {}"
                   :data-pending="segment.isPending || null"
@@ -541,6 +591,35 @@
                   @mouseenter="hoveredCueIndex = index"
                   @mouseleave="hoveredCueIndex = null"
                 >
+                  <!-- COLLAPSE MODE: Compact cue display -->
+                  <div v-if="collapseMode" class="collapsed-cue" :style="getCollapsedCueStyle(segment.data?.type)">
+                    <div class="drag-handle-column drag-handle">
+                      <v-icon size="small">mdi-drag</v-icon>
+                    </div>
+                    <div class="collapsed-cue-content">
+                      <span v-if="segment.data?.enumerator" class="collapsed-cue-index">#{{ segment.data.enumerator }}</span>
+                      <span class="collapsed-cue-type">{{ segment.data?.type || 'CUE' }}</span>
+                      <span class="collapsed-cue-divider">|</span>
+                      <span class="collapsed-cue-slug">{{ segment.data?.slug || segment.data?.title || '(no slug)' }}</span>
+                      <span class="collapsed-cue-divider">|</span>
+                      <span class="collapsed-cue-duration">{{ segment.data?.duration || '00:00:00:00' }}</span>
+                      <template v-if="segment.data?.outcue || getCollapsedOutcue(segment.data)">
+                        <span class="collapsed-cue-divider">|</span>
+                        <span class="collapsed-cue-outcue">{{ segment.data?.outcue || getCollapsedOutcue(segment.data) }}</span>
+                      </template>
+                    </div>
+                    <v-btn
+                      icon
+                      size="x-small"
+                      class="collapsed-delete-btn"
+                      @click.stop="deleteCue(index)"
+                    >
+                      <v-icon size="16">mdi-close</v-icon>
+                    </v-btn>
+                  </div>
+
+                  <!-- NORMAL MODE: Full cue card display -->
+                  <template v-else>
                   <ImageCueCard
                     v-if="segment.data.isImageType"
                     :cue-data="segment.data"
@@ -575,18 +654,19 @@
                     :class="{ 'flag-active': segment.data?.needsAttention }"
                     @click.stop="handleFlagClick(index, 'cue', segment)"
                     :title="segment.data?.needsAttention ? (isFlagNoteMinimized('cue', index) ? 'Expand note' : 'Minimize note') : 'Flag for attention'"
+                    tabindex="-1"
                   >
                     <v-icon size="18" :color="segment.data?.needsAttention ? 'orange' : 'grey'">
                       {{ segment.data?.needsAttention ? 'mdi-flag' : 'mdi-flag-outline' }}
                     </v-icon>
                   </v-btn>
 
-                  <!-- Flag Note Panel for Cue (teleported to body to escape stacking context) -->
+                  <!-- Flag Note Panel for Cue (teleported to body, positioned dynamically) -->
                   <Teleport to="body">
                     <div
                       v-if="segment.data?.needsAttention && !isFlagNoteMinimized('cue', index)"
-                      class="flag-note-panel"
-                      :style="editorPanelCssVars"
+                      class="flag-note-panel flag-note-teleported"
+                      :style="{ ...editorPanelCssVars, ...getFlagNotePanelStyle(index, 'cue') }"
                       @click.stop
                     >
                       <div class="flag-note-header">
@@ -628,6 +708,7 @@
                       </div>
                     </div>
                   </Teleport>
+                  </template>
                 </div>
                     </div>
                   </div>
@@ -1324,14 +1405,8 @@
     </v-card>
   </div>
 
-  <!-- IMG Cue Modal -->
-  <ImgCueModal
-    v-model:show="showImgModal"
-    :current-episode="currentEpisode"
-    :edit-data="editingCueData"
-    @submit="handleImgCueSubmit"
-    @update:show="handleImgModalClose"
-  />
+  <!-- IMG Cue Modal - REMOVED: Now handled by ContentEditor.vue -->
+  <!-- All IMG cue operations emit to parent via 'show-img-modal' and 'edit-img-cue' events -->
 
   <!-- Delete IMG Cue Confirmation Modal -->
   <DeleteImgCueModal
@@ -1379,7 +1454,7 @@
 <script>
 import { getColorValue, resolveVuetifyColor, loadColorsFromDatabase } from '../../utils/themeColorMap.js';
 import draggable from 'vuedraggable';
-import ImgCueModal from './modals/ImgCueModal.vue';
+// ImgCueModal - REMOVED: Now handled by ContentEditor.vue
 import DeleteImgCueModal from './modals/DeleteImgCueModal.vue';
 import ImageCueCard from './cards/ImageCueCard.vue';
 import PlaceholderCueCard from './cards/PlaceholderCueCard.vue';
@@ -1394,7 +1469,7 @@ export default {
   name: 'EditorPanel',
   components: {
     draggable,
-    ImgCueModal,
+    // ImgCueModal - REMOVED: Now handled by ContentEditor.vue
     DeleteImgCueModal,
     ImageCueCard,
     PlaceholderCueCard,
@@ -1435,7 +1510,10 @@ export default {
       activeFlagNoteType: null, // 'paragraph' or 'cue' - type of segment with open note
       flagNoteContent: '', // Content of the flag note being edited
       minimizedFlagNotes: {}, // Track which flag notes are minimized (by "type-index" key as object for Vue reactivity)
+      paragraphRefs: {}, // Store refs to paragraph elements for flag note positioning
+      flagNotePosUpdateTrigger: 0, // Trigger to force position recalculation on scroll
       focusedParagraphIndex: null, // Track which paragraph has focus
+      lastKnownParagraphIndex: null, // Persist last focused paragraph for cue insertion (survives blur)
       focusedCueIndex: null, // Track which cue row has focus (for tab navigation)
       savedParagraphIndex: null, // Track paragraph that just saved (for green flash)
       errorParagraphIndex: null, // Track paragraph with save error (for red flash)
@@ -1497,7 +1575,8 @@ export default {
       savedContainerScroll: undefined,
       scrollContainerRef: null,
       scriptContainerRef: null,
-      colorLoadTrigger: 0 // Reactive trigger to force re-computation of color-dependent properties
+      colorLoadTrigger: 0, // Reactive trigger to force re-computation of color-dependent properties
+      collapseMode: false // Collapse mode for easier drag-and-drop reordering
     }
   },
   mounted() {
@@ -1584,6 +1663,9 @@ export default {
     document.addEventListener('keydown', this.handleGlobalKeydown);
     document.addEventListener('keyup', this.handleGlobalKeyup);
 
+    // Reset ALT key state when window loses focus (prevents stuck ALT key)
+    window.addEventListener('blur', this.handleWindowBlur);
+
     // Add keyboard listener for cursor character cleanup
     document.addEventListener('keydown', this.handleCursorCharacterKeydown);
 
@@ -1591,12 +1673,18 @@ export default {
     this.$nextTick(() => {
       this.loadCueCardAlignment();
     });
+
+    // Add scroll listener for flag note positioning
+    window.addEventListener('scroll', this.handleScrollForFlagNotes, true);
   },
   unmounted() {
+    // Clean up scroll listener for flag notes
+    window.removeEventListener('scroll', this.handleScrollForFlagNotes, true);
     // Clean up event listeners
     document.removeEventListener('keydown', this.handleGlobalKeydown);
     document.removeEventListener('keyup', this.handleGlobalKeyup);
     document.removeEventListener('keydown', this.handleCursorCharacterKeydown);
+    window.removeEventListener('blur', this.handleWindowBlur);
     if (this.autoformatTimer) {
       clearInterval(this.autoformatTimer);
     }
@@ -1614,6 +1702,9 @@ export default {
   },
 
   beforeUnmount() {
+    // CRITICAL: Flush any pending changes before unmount to prevent data loss
+    this.flushPendingChanges();
+
     // Clean up timers
     this.stopAutoformatTimer();
     this.clearAutoformatDebounce();
@@ -1675,8 +1766,12 @@ export default {
         const contentDifferent = newVal !== oldVal && oldVal !== undefined;
 
         if (contentDifferent && (significantChange || !oldVal)) {
-          console.log('🧹 Clearing segmentEditBuffer - item appears to have changed');
+          console.log('🧹 Clearing segmentEditBuffer and cache - item appears to have changed');
           this.segmentEditBuffer = {};
+          // CRITICAL: Also clear cached segments to force re-parsing
+          // This prevents stale cue blocks from appearing across different items
+          this.cachedScriptSegments = null;
+          this.lastParsedContent = null;
         }
 
         if (this.editorMode === 'script' && this.useVisualScriptMode) {
@@ -1929,6 +2024,7 @@ export default {
     'reupload-sot-cue',
     'edit-fsq-cue',
     'edit-gfx-cue',
+    'edit-img-cue',
     'sot-job-complete',
     'showDirModal',
     'showBumpModal',
@@ -2062,6 +2158,11 @@ export default {
       set(value) {
         this.$emit('update:scriptContent', value);
       }
+    },
+
+    // Episode number for iPad mode
+    currentEpisodeNumber() {
+      return this.currentEpisode
     },
 
     // Parse content into segments ONLY for Script mode display (no reactive loops)
@@ -2508,6 +2609,71 @@ export default {
 
   },
   methods: {
+    /**
+     * Open iPad Mode - launches iPad scroll view in new window
+     */
+    openIpadMode() {
+      if (!this.currentEpisodeNumber) {
+        console.warn('No episode number available for iPad mode')
+        return
+      }
+
+      // Open iPad scroll view in new window/tab
+      const url = `/ipad-scroll/${this.currentEpisodeNumber}`
+      window.open(url, '_blank')
+    },
+
+    /**
+     * Store reference to paragraph element for flag note positioning.
+     */
+    setParagraphRef(index, el) {
+      if (el) {
+        this.paragraphRefs[index] = el;
+      } else {
+        delete this.paragraphRefs[index];
+      }
+    },
+
+    /**
+     * Get style object for flag note panel positioning.
+     * Uses the paragraph's bounding rect to position the panel next to it.
+     */
+    // eslint-disable-next-line no-unused-vars
+    getFlagNotePanelStyle(index, type) {
+      // Force reactivity on scroll
+      // eslint-disable-next-line no-unused-vars
+      const _trigger = this.flagNotePosUpdateTrigger;
+
+      const el = this.paragraphRefs[index];
+      if (!el) {
+        // Fallback to default position if ref not available
+        return {
+          position: 'fixed',
+          top: '100px',
+          right: '20px'
+        };
+      }
+
+      const rect = el.getBoundingClientRect();
+      // Position to the right of the flag button (which is at right: -28px from paragraph)
+      // The flag button is ~24px wide, so panel starts after the button with a small gap
+      const leftPos = rect.right + 36; // 28px (button offset) + 8px gap
+
+      return {
+        position: 'fixed',
+        top: `${Math.max(rect.top, 60)}px`, // Don't go above 60px (below toolbar)
+        left: `${leftPos}px` // Position to the right of the flag button
+        // No maxHeight - panel grows to fit content
+      };
+    },
+
+    /**
+     * Handle scroll event to update flag note positions.
+     */
+    handleScrollForFlagNotes() {
+      this.flagNotePosUpdateTrigger++;
+    },
+
     /**
      * Format relative time from ISO date string for locked segment display.
      */
@@ -3058,10 +3224,11 @@ export default {
 
     // Flush all pending changes from the edit buffer immediately
     // Called before switching items to ensure no edits are lost
-    flushPendingChanges() {
+    // Returns a Promise that resolves after the flush is complete
+    async flushPendingChanges() {
       if (!this.segmentEditBuffer || Object.keys(this.segmentEditBuffer).length === 0) {
         console.log('💾 No pending changes to flush');
-        return;
+        return Promise.resolve();
       }
 
       console.log('💾 Flushing pending changes for', Object.keys(this.segmentEditBuffer).length, 'segments');
@@ -3092,7 +3259,17 @@ export default {
         const newRawContent = this.reconstructRawContent(segments);
         this.$emit('update:scriptContent', newRawContent);
         console.log('💾 Flushed changes emitted to parent');
+
+        // Clear the buffer AFTER emitting
+        this.segmentEditBuffer = {};
+
+        // Wait for Vue to process the emit and parent to update
+        await this.$nextTick();
+        await this.$nextTick();
+        console.log('💾 Flush complete - Vue reactivity settled');
       }
+
+      return Promise.resolve();
     },
 
     // Handle paste for contenteditable divs - detect paragraph breaks and split into multiple paragraphs
@@ -3136,11 +3313,25 @@ export default {
           el.removeAttribute('style');
         });
 
+        // Also strip ALL span tags from the entire pasted content (catches unclosed spans)
+        // Google Docs often creates unclosed <span> tags that corrupt content
+        tempDiv.innerHTML = tempDiv.innerHTML
+          .replace(/<span[^>]*>/gi, '')   // Remove ALL opening <span> tags
+          .replace(/<\/span>/gi, '');     // Remove ALL closing </span> tags
+
         // Extract paragraphs from <p>, <div>, or split plain text by line breaks
+        // Note: We query for <p> and <div> to find paragraph boundaries, but will strip
+        // nested <div> tags from within paragraph content below
         const pElements = tempDiv.querySelectorAll('p, div');
         if (pElements.length > 0) {
           pElements.forEach(p => {
-            const content = p.innerHTML.trim();
+            // Strip any remaining span and div tags from individual paragraph content
+            let content = p.innerHTML.trim()
+              .replace(/<span[^>]*>/gi, '')
+              .replace(/<\/span>/gi, '')
+              .replace(/<div[^>]*>/gi, '')      // Remove nested <div> opening tags
+              .replace(/<\/div>/gi, '')          // Remove nested </div> closing tags
+              .replace(/&nbsp;/gi, ' ');
             if (content && content !== '<br>' && content !== '<br/>') {
               paragraphs.push(content);
             }
@@ -3455,6 +3646,15 @@ export default {
           .replace(/<\/b>/gi, '</strong>')
           .replace(/<i>/gi, '<em>')
           .replace(/<\/i>/gi, '</em>');
+
+        // Clean up browser-inserted <div> tags from contenteditable
+        // Browsers insert <div> when pressing Enter - convert to spaces or remove
+        html = html
+          .replace(/<div><br\s*\/?><\/div>/gi, '')           // Remove <div><br></div> (empty line)
+          .replace(/<\/div>\s*<div[^>]*>/gi, ' ')            // Convert </div><div> to space (line break)
+          .replace(/<div[^>]*>/gi, '')                        // Remove remaining opening <div> tags
+          .replace(/<\/div>/gi, '');                          // Remove remaining closing </div> tags
+
         this.updateTextSegment(index, html);
         this.hasLocalUnsavedChanges = true;
       });
@@ -3594,6 +3794,151 @@ export default {
       // Add the current relative line number
       return absoluteLine + relativeLineNum;
     },
+
+    // ===== COLLAPSE MODE HELPER METHODS =====
+
+    /**
+     * Get the line range for a collapsed paragraph display
+     * Returns a string like "33-43" representing the absolute line numbers
+     */
+    getCollapsedLineRange(segmentIndex) {
+      const startLine = this.getAbsoluteLineNumber(segmentIndex, 1);
+      const lineCount = this.getLineCount(segmentIndex);
+      const endLine = startLine + lineCount - 1;
+
+      if (lineCount === 1) {
+        return `${startLine}`;
+      }
+      return `${startLine}-${endLine}`;
+    },
+
+    /**
+     * Get the first 6 words of paragraph content for collapsed mode (left-aligned)
+     */
+    getCollapsedFirstWords(content) {
+      if (!content) return '(empty)';
+
+      // Strip HTML tags for word counting
+      const textOnly = content.replace(/<[^>]*>/g, '').trim();
+      if (!textOnly) return '(empty)';
+
+      const words = textOnly.split(/\s+/).filter(w => w.length > 0);
+
+      if (words.length <= 6) {
+        return words.join(' ');
+      }
+
+      return words.slice(0, 6).join(' ');
+    },
+
+    /**
+     * Get the last 6 words of paragraph content for collapsed mode (right-aligned)
+     */
+    getCollapsedLastWords(content) {
+      if (!content) return '';
+
+      // Strip HTML tags for word counting
+      const textOnly = content.replace(/<[^>]*>/g, '').trim();
+      if (!textOnly) return '';
+
+      const words = textOnly.split(/\s+/).filter(w => w.length > 0);
+
+      if (words.length <= 6) {
+        return ''; // Don't show last words if content is short
+      }
+
+      return words.slice(-6).join(' ');
+    },
+
+    /**
+     * Convert hex color to HSL
+     */
+    hexToHsl(hex) {
+      // Remove # if present
+      hex = hex.replace(/^#/, '');
+
+      // Parse RGB values
+      const r = parseInt(hex.substring(0, 2), 16) / 255;
+      const g = parseInt(hex.substring(2, 4), 16) / 255;
+      const b = parseInt(hex.substring(4, 6), 16) / 255;
+
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      let h, s, l = (max + min) / 2;
+
+      if (max === min) {
+        h = s = 0; // achromatic
+      } else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+          case g: h = ((b - r) / d + 2) / 6; break;
+          case b: h = ((r - g) / d + 4) / 6; break;
+        }
+      }
+
+      return { h: h * 360, s: s * 100, l: l * 100 };
+    },
+
+    /**
+     * Get the style for a collapsed cue based on its type
+     * Uses the cue type colors for the border, darkened 30% for background
+     */
+    getCollapsedCueStyle(cueType) {
+      const typeColors = {
+        'IMG': '#4CAF50',
+        'GFX': '#9C27B0',
+        'FSQ': '#FF9800',
+        'SOT': '#2196F3',
+        'VO': '#00BCD4',
+        'NAT': '#795548',
+        'RIF': '#E91E63',
+        'PKG': '#607D8B',
+        'DIR': '#FF5722',
+        'BUMP': '#3F51B5',
+        'STING': '#8BC34A',
+        'VOX': '#009688',
+        'MUS': '#673AB7',
+        'LIVE': '#F44336'
+      };
+
+      const color = typeColors[cueType] || '#757575';
+
+      // Convert to HSL and darken by 30% (reduce lightness)
+      const hsl = this.hexToHsl(color);
+      // Darken: reduce lightness by 30% of its current value, then use with alpha for background
+      const darkenedL = Math.max(0, hsl.l * 0.7); // 30% darker
+      const bgColor = `hsla(${hsl.h}, ${hsl.s}%, ${darkenedL}%, 0.25)`;
+
+      return {
+        borderLeft: `4px solid ${color}`,
+        backgroundColor: bgColor
+      };
+    },
+
+    /**
+     * Get the outcue from cue data (for SOT - last 5 words of transcription)
+     */
+    getCollapsedOutcue(cueData) {
+      if (!cueData) return '';
+
+      // If outcue is already set, use it
+      if (cueData.outcue) return cueData.outcue;
+
+      // For SOT, extract from transcription
+      if (cueData.type === 'SOT' && cueData.transcription) {
+        const words = cueData.transcription.trim().split(/\s+/);
+        if (words.length > 5) {
+          return '...' + words.slice(-5).join(' ');
+        }
+        return cueData.transcription;
+      }
+
+      return '';
+    },
+
+    // ===== END COLLAPSE MODE HELPER METHODS =====
 
     // Strip YAML frontmatter from content for visual display
     stripYamlFrontmatter(content) {
@@ -4194,9 +4539,9 @@ export default {
 
         this.pendingCueType = cueType;
 
-        // Show modal immediately for code mode
+        // Show modal immediately for code mode - emit to parent for all cue types
         if (cueType === 'IMG') {
-          this.showImgModal = true;
+          this.$emit('show-img-modal');
           return;
         }
 
@@ -4278,7 +4623,7 @@ export default {
         }
 
         if (cueType === 'IMG') {
-          this.showImgModal = true;
+          this.$emit('show-img-modal');
           console.log('🎬 IMG modal opened - placement overlay will activate when modal closes');
           return;
         }
@@ -4722,7 +5067,7 @@ export default {
 
         // Persist to database and show visual feedback
         await this.persistCurrentItemToDatabase(segmentIndex);
-      }, 5000); // 5 second debounce - persist after user stops typing (longer to avoid cursor disruption)
+      }, 1500); // 1.5 second debounce - reduced from 5s to minimize data loss window
     },
 
     /**
@@ -5266,10 +5611,10 @@ export default {
 
     editCue(index, cueData) {
       console.log('Edit cue at index:', index, cueData);
-      // Open appropriate modal based on cue type
+      // Open appropriate modal based on cue type - emit to parent for all
       if (cueData.type === 'IMG') {
-        this.editingCueData = cueData;
-        this.showImgModal = true;
+        // Emit event to parent (ContentEditor) to open IMG modal with cue data
+        this.$emit('edit-img-cue', cueData);
       } else if (cueData.type === 'SOT') {
         // Emit event to parent (ContentEditor) to open SOT modal with cue data
         this.$emit('edit-sot-cue', cueData);
@@ -5279,6 +5624,9 @@ export default {
       } else if (cueData.type === 'GFX') {
         // Emit event to parent (ContentEditor) to open GFX modal with cue data
         this.$emit('edit-gfx-cue', cueData);
+      } else if (cueData.type === 'DIR') {
+        // Emit event to parent (ContentEditor) to open DIR modal with cue data
+        this.$emit('edit-dir-cue', cueData);
       }
       // Add other cue type modals as needed
     },
@@ -5766,7 +6114,7 @@ export default {
           console.warn(`⚠️ No pendingCueData found - opening ${placement.cueType} modal`);
           // No cue data yet, show modal first
           if (placement.cueType === 'IMG') {
-            this.showImgModal = true;
+            this.$emit('show-img-modal');
           } else if (placement.cueType === 'FSQ') {
             this.$emit('show-fsq-modal');
           } else if (placement.cueType === 'SOT') {
@@ -5884,9 +6232,36 @@ export default {
         return;
       }
 
-      console.log('📄 Script mode: Activating placement overlay for VO insertion');
-      this.showCuePlacement = true;
-      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+      // SCRIPT MODE: Auto-insert based on selection (same behavior as SOT)
+      console.log('📄 Script mode: Auto-inserting VO based on selection');
+
+      // Determine insertion point based on selection
+      let insertionIndex;
+      if (this.selectedSegmentIndex !== null && this.selectedSegmentIndex >= 0) {
+        // Insert AFTER the selected segment (between zones)
+        insertionIndex = this.selectedSegmentIndex + 1;
+        console.log(`📍 Selected segment found at index ${this.selectedSegmentIndex}, inserting AFTER at between-zone ${insertionIndex}`);
+      } else {
+        // No selection - insert at bottom (after last paragraph)
+        const paragraphCount = this.scriptSegments.filter(seg => seg.type === 'text').length;
+        insertionIndex = paragraphCount;
+        console.log(`📍 No segment selected, inserting at bottom (between-zone ${insertionIndex})`);
+      }
+
+      // Create placement object for between-paragraph insertion
+      const placement = {
+        type: 'between',  // CRITICAL: Always use 'between' for VO, never 'paragraph'
+        index: insertionIndex,
+        cueType: 'VO'
+      };
+
+      // Insert VO at determined location
+      this.insertCueBetweenParagraphsInRawScript(placement, voCueText);
+
+      // Clear pending data
+      this.pendingCueData = null;
+      this.pendingCueType = null;
+      console.log('✅ VO cue auto-inserted in script mode');
     },
 
     async handleNatCueSubmit(natCueText) {
@@ -5921,22 +6296,63 @@ export default {
     },
 
     async handleRifCueSubmit(rifCueText) {
-      console.log('🎬 RIF cue submitted to EditorPanel for cursor insertion');
+      console.log('🎬 RIF cue submitted to EditorPanel for placement-based insertion');
 
-      // CRITICAL FIX: Get FRESH cursor position at submission time
-      const codeTextarea = document.querySelector('.code-textarea textarea');
-      if (codeTextarea && document.activeElement === codeTextarea) {
-        this.pendingCursorPosition = codeTextarea.selectionStart;
-        console.log('📝 Using current cursor position:', this.pendingCursorPosition);
-      } else {
-        this.pendingCursorPosition = null;
-        console.log('📝 Textarea not focused - inserting at end');
+      // Store the cue data for later insertion
+      this.pendingCueData = rifCueText;
+      this.pendingCueType = 'RIF';
+
+      // CODE MODE: Insert directly at cursor position
+      if (this.editorMode === 'code') {
+        console.log('📝 Code mode: Inserting RIF at cursor position');
+
+        // CRITICAL FIX: Get FRESH cursor position at submission time
+        const codeTextarea = document.querySelector('.code-textarea textarea');
+        if (codeTextarea && document.activeElement === codeTextarea) {
+          this.pendingCursorPosition = codeTextarea.selectionStart;
+          console.log('📝 Using current cursor position:', this.pendingCursorPosition);
+        } else {
+          this.pendingCursorPosition = null;
+          console.log('📝 Textarea not focused - inserting at end');
+        }
+
+        this.insertCueAtCursor(rifCueText);
+        this.pendingCueData = null;
+        this.pendingCueType = null;
+        console.log('✅ RIF cue inserted in code mode');
+        return;
       }
 
-      // Always insert at cursor position for immediate rendering
-      console.log('📝 Inserting RIF at cursor position');
-      this.insertCueAtCursor(rifCueText);
-      console.log('✅ RIF cue inserted at cursor - will render immediately in script mode');
+      // SCRIPT MODE: Auto-insert based on selection (same as SOT)
+      console.log('📄 Script mode: Auto-inserting RIF based on selection');
+
+      // Determine insertion point based on selection
+      let insertionIndex;
+      if (this.selectedSegmentIndex !== null && this.selectedSegmentIndex >= 0) {
+        // Insert AFTER the selected segment (between zones)
+        insertionIndex = this.selectedSegmentIndex + 1;
+        console.log(`📍 Selected segment found at index ${this.selectedSegmentIndex}, inserting AFTER at between-zone ${insertionIndex}`);
+      } else {
+        // No selection - insert at bottom (after last paragraph)
+        const paragraphCount = this.scriptSegments.filter(seg => seg.type === 'text').length;
+        insertionIndex = paragraphCount;
+        console.log(`📍 No segment selected, inserting at bottom (between-zone ${insertionIndex})`);
+      }
+
+      // Create placement object for between-paragraph insertion
+      const placement = {
+        type: 'between',
+        index: insertionIndex,
+        cueType: 'RIF'
+      };
+
+      // Insert RIF at determined location
+      this.insertCueBetweenParagraphsInRawScript(placement, rifCueText);
+
+      // Clear pending data
+      this.pendingCueData = null;
+      this.pendingCueType = null;
+      console.log('✅ RIF cue auto-inserted in script mode');
     },
 
     async handlePkgCueSubmit(pkgCueText) {
@@ -6511,6 +6927,15 @@ export default {
         return;
       }
 
+      // Handle Ctrl+Shift+C for collapse mode toggle
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c') {
+        console.log('✅ CTRL+SHIFT+C triggered - toggling collapse mode');
+        event.preventDefault();
+        this.collapseMode = !this.collapseMode;
+        console.log('📦 Collapse mode:', this.collapseMode ? 'ACTIVE' : 'INACTIVE');
+        return;
+      }
+
       // Track ALT key state manually
       if (event.key === 'Alt') {
         this.altKeyPressed = true;
@@ -6539,11 +6964,13 @@ export default {
         return;
       }
 
-      // Skip hotkeys for input fields (re-check for other hotkeys below)
+      // Skip hotkeys for input fields and contenteditable elements
       // Allow hotkeys in speaker textareas by checking if textarea is inside a speaker-paragraph
+      // CRITICAL: Must exclude contentEditable to prevent hotkeys triggering while typing
 
       if (target.tagName === 'INPUT' ||
-          (target.tagName === 'TEXTAREA' && !isInSpeakerParagraph)) {
+          (target.tagName === 'TEXTAREA' && !isInSpeakerParagraph) ||
+          target.isContentEditable) {
         return;
       }
 
@@ -6653,6 +7080,15 @@ export default {
       }
     },
 
+    handleWindowBlur() {
+      // Reset ALT key state when window loses focus
+      // This prevents the ALT key from getting "stuck" if user switches windows while holding ALT
+      if (this.altKeyPressed) {
+        this.altKeyPressed = false;
+        console.log('🔑 Window blur - resetting altKeyPressed to prevent stuck modifier');
+      }
+    },
+
     createParagraphFromCurrentLine() {
       if (this.typingBuffer.trim()) {
         // Create a new paragraph from the current buffer
@@ -6687,9 +7123,13 @@ export default {
       this.$emit('update:scriptContent', fullContent);
     },
 
-    // Handle paragraph click for selection
+    // Handle paragraph click for selection and cursor position tracking
     handleParagraphClick(index, event) {
-      if (event.ctrlKey || event.metaKey) {
+      // Always update lastKnownParagraphIndex for cue insertion positioning
+      this.lastKnownParagraphIndex = index;
+      console.log('🖱️ Paragraph clicked:', index, '- lastKnownParagraphIndex updated');
+
+      if (event && (event.ctrlKey || event.metaKey)) {
         // Ctrl+click for multi-selection
         this.toggleMultiSelection(index);
       } else {
@@ -6772,9 +7212,12 @@ export default {
 
       // Always highlight the currently focused paragraph
       this.focusedParagraphIndex = index;
+      // Also persist to lastKnownParagraphIndex for cue insertion (survives blur)
+      this.lastKnownParagraphIndex = index;
       // Clear any cue focus when paragraph is focused
       this.focusedCueIndex = null;
       console.log('🟡 focusedParagraphIndex set to:', this.focusedParagraphIndex);
+      console.log('🟡 lastKnownParagraphIndex set to:', this.lastKnownParagraphIndex);
     },
 
     // Handle cue row focus (for tab navigation)
@@ -6874,15 +7317,15 @@ export default {
         // This will trigger the saveCurrentItem method which persists to DB
         this.$emit('save-current');
 
-        // Triple blue flash on success (CSS animation, no re-render)
-        await this.flashParagraph(segmentIndex, 'success', 3);
+        // Single fade flash on success (CSS animation, no re-render)
+        await this.flashParagraph(segmentIndex, 'success');
 
         console.log('✅ Autosave successful');
       } catch (error) {
         console.error('❌ Autosave failed:', error);
 
-        // Triple red flash on failure
-        await this.flashParagraph(segmentIndex, 'error', 3);
+        // Single fade flash on failure
+        await this.flashParagraph(segmentIndex, 'error');
 
         // Show urgent flash notification
         if (window.flashUrgent) {
@@ -7005,7 +7448,7 @@ export default {
 
       if (index !== null && index !== undefined) {
         console.log('💚 Flashing paragraph', index, 'green for successful save');
-        this.flashParagraph(index, 'success', 3);
+        this.flashParagraph(index, 'success');
       } else {
         console.log('⚠️ No focused paragraph to flash - both focusedParagraphIndex and activelyEditingSegment are null');
       }
@@ -7015,7 +7458,7 @@ export default {
     // Uses JavaScript-based animations to support dynamic colors from settings
     // This prevents cursor loss during autosave by not triggering Vue re-renders
     // eslint-disable-next-line no-unused-vars
-    async flashParagraph(index, type, count = 3) {
+    async flashParagraph(index, type, count = 1) {
       const refName = `textareaRef-${index}`;
       let element = this.$refs[refName];
 
@@ -7079,33 +7522,29 @@ export default {
         console.log(`🎨 Temporarily removed paragraph-focused class`);
       }
 
-      // Set fast transition for snappy flashing on both elements
-      paragraphDiv.style.transition = 'background-color 0.05s ease-in-out';
+      // Set smooth transition for fade effect
+      paragraphDiv.style.transition = 'background-color 0.25s ease-out';
       if (innerTextArea) {
-        innerTextArea.style.transition = 'background-color 0.05s ease-in-out';
+        innerTextArea.style.transition = 'background-color 0.25s ease-out';
       }
 
-      // Perform 3 fast flashes using JavaScript (80ms on, 80ms off)
-      for (let i = 0; i < 3; i++) {
-        // Flash on - use !important to override speaker backgrounds on both elements
-        paragraphDiv.style.setProperty('background-color', flashColor, 'important');
-        if (innerTextArea) {
-          innerTextArea.style.setProperty('background-color', flashColor, 'important');
-        }
-        await new Promise(resolve => setTimeout(resolve, 80));
-        // Flash off - brief transparent moment
-        paragraphDiv.style.setProperty('background-color', 'transparent', 'important');
-        if (innerTextArea) {
-          innerTextArea.style.setProperty('background-color', 'transparent', 'important');
-        }
-        await new Promise(resolve => setTimeout(resolve, 80));
+      // Single flash with fade-out
+      // Flash on - use !important to override speaker backgrounds on both elements
+      paragraphDiv.style.setProperty('background-color', flashColor, 'important');
+      if (innerTextArea) {
+        innerTextArea.style.setProperty('background-color', flashColor, 'important');
+      }
+      await new Promise(resolve => setTimeout(resolve, 250)); // 250ms fade duration
+
+      // Flash off - remove background (will fade out smoothly due to transition)
+      paragraphDiv.style.removeProperty('background-color');
+      if (innerTextArea) {
+        innerTextArea.style.removeProperty('background-color');
       }
 
       // Restore original styles
-      paragraphDiv.style.removeProperty('background-color');
       paragraphDiv.style.transition = originalTransition;
       if (innerTextArea) {
-        innerTextArea.style.removeProperty('background-color');
         innerTextArea.style.transition = innerOriginalTransition;
       }
 
@@ -7154,9 +7593,84 @@ export default {
         return false;
       }
 
+      // Read autoformat settings from localStorage
+      const interfaceSettings = JSON.parse(localStorage.getItem('showbuild_interface_settings') || '{}');
+      const stripSpans = interfaceSettings.autoformatStripSpans !== false; // Default true
+      // SUSPENDED: removeEmptyParagraphs - all empty paragraph manipulation disabled
+      // const removeEmptyParagraphs = interfaceSettings.autoformatRemoveEmptyParagraphs !== false;
+      const removeLeadingDashes = interfaceSettings.autoformatRemoveLeadingDashes !== false;
+      const cleanWhitespace = interfaceSettings.autoformatCleanWhitespace !== false;
+
       let hasChanges = false;
       let formattedContent = this.scriptContent;
 
+      // === STEP 1: Strip ALL span tags and inline styles FIRST ===
+      if (stripSpans) {
+      // Google Docs pastes often have unclosed <span> tags that corrupt content
+      // We aggressively strip ALL span tags (open and close) regardless of matching
+      const originalLength = formattedContent.length;
+
+      // Remove Google Docs span IDs
+      formattedContent = formattedContent.replace(/<span id="docs-internal-guid-[^"]*">/gi, '');
+
+      // Remove nested <p dir="ltr"...> tags from Google Docs (keep content)
+      formattedContent = formattedContent.replace(/<p dir="ltr"[^>]*>/gi, '');
+
+      // Convert font-weight: 700 spans to <b> tags BEFORE stripping (preserve bold)
+      // Must match the full tag pair first to preserve formatting
+      formattedContent = formattedContent.replace(/<span[^>]*font-weight:\s*700[^>]*>([\s\S]*?)<\/span>/gi, '<b>$1</b>');
+      formattedContent = formattedContent.replace(/<span[^>]*font-weight:\s*bold[^>]*>([\s\S]*?)<\/span>/gi, '<b>$1</b>');
+
+      // Convert font-style: italic spans to <i> tags (preserve italic formatting)
+      formattedContent = formattedContent.replace(/<span[^>]*font-style:\s*italic[^>]*>([\s\S]*?)<\/span>/gi, '<i>$1</i>');
+
+      // CRITICAL: Strip ALL remaining span tags - both opening AND closing
+      // This catches unclosed spans from Google Docs pastes
+      formattedContent = formattedContent.replace(/<span[^>]*>/gi, '');  // Remove ALL opening <span> tags
+      formattedContent = formattedContent.replace(/<\/span>/gi, '');     // Remove ALL closing </span> tags
+
+      // Also strip any HTML-escaped span tags that might appear in content
+      formattedContent = formattedContent.replace(/&lt;span[^&]*&gt;/gi, '');
+      formattedContent = formattedContent.replace(/&lt;\/span&gt;/gi, '');
+
+      // Strip <div> tags that browsers insert in contenteditable and from Google pastes
+      // Empty <div></div> tags cause extra blank lines at the bottom of paragraphs
+      formattedContent = formattedContent.replace(/<div><\/div>/gi, '');           // Remove empty <div></div>
+      formattedContent = formattedContent.replace(/<div><br\s*\/?><\/div>/gi, ''); // Remove <div><br></div>
+      formattedContent = formattedContent.replace(/<div[^>]*>/gi, '');             // Remove ALL opening <div> tags
+      formattedContent = formattedContent.replace(/<\/div>/gi, '');                // Remove ALL closing </div> tags
+
+      // Clean up whitespace inside paragraph tags that may be left after stripping spans
+      // This catches: <p class="josh">  text  </p> -> <p class="josh">text</p>
+      formattedContent = formattedContent.replace(/<p([^>]*)>\s+/gi, '<p$1>');
+      formattedContent = formattedContent.replace(/\s+<\/p>/gi, '</p>');
+
+      // Remove paragraphs that are now empty or contain only whitespace/br
+      formattedContent = formattedContent.replace(/<p[^>]*>(\s|<br\s*\/?>)*<\/p>\s*/gi, '');
+
+        if (formattedContent.length !== originalLength) {
+          hasChanges = true;
+          console.log('Autoformat: Stripped span tags and inline styles');
+        }
+      } // End if (stripSpans)
+
+      // === STEP 1b: Clean whitespace (separate from span stripping) ===
+      if (cleanWhitespace) {
+        const beforeWhitespace = formattedContent.length;
+
+        // Clean &nbsp; to regular spaces
+        formattedContent = formattedContent.replace(/&nbsp;/gi, ' ');
+
+        // Clean multiple consecutive spaces (but preserve single spaces)
+        formattedContent = formattedContent.replace(/  +/g, ' ');
+
+        if (formattedContent.length !== beforeWhitespace) {
+          hasChanges = true;
+          console.log('Autoformat: Cleaned whitespace');
+        }
+      } // End if (cleanWhitespace)
+
+      // === STEP 2: Split multiple paragraphs in single <p> tags ===
       // Find all <p> tags with content
       const paragraphMatches = [...formattedContent.matchAll(/<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/g)];
 
@@ -7180,74 +7694,59 @@ export default {
         }
       }
 
-      // Remove leading dashes from paragraphs (unless part of a list)
-      // Re-match paragraphs after potential changes above
-      const dashCheckMatches = [...formattedContent.matchAll(/<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/g)];
+      // === STEP 3: Remove leading dashes from paragraphs (unless part of a list) ===
+      if (removeLeadingDashes) {
+        // Re-match paragraphs after potential changes above
+        const dashCheckMatches = [...formattedContent.matchAll(/<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/g)];
 
-      for (const match of dashCheckMatches) {
-        const fullMatch = match[0];
-        const speaker = match[1] || 'josh';
-        const content = match[2];
+        for (const match of dashCheckMatches) {
+          const fullMatch = match[0];
+          const speaker = match[1] || 'josh';
+          const content = match[2];
 
-        // Check if content starts with a dash (possibly with whitespace)
-        if (/^\s*[-–—]/.test(content)) {
-          // Check if this is a list (multiple lines starting with dashes)
-          const lines = content.split('\n').filter(l => l.trim());
-          const dashLines = lines.filter(l => /^\s*[-–—]/.test(l));
+          // Check if content starts with a dash (possibly with whitespace)
+          if (/^\s*[-–—]/.test(content)) {
+            // Check if this is a list (multiple lines starting with dashes)
+            const lines = content.split('\n').filter(l => l.trim());
+            const dashLines = lines.filter(l => /^\s*[-–—]/.test(l));
 
-          // It's a list if 2+ consecutive lines start with dashes
-          const isListContent = dashLines.length >= 2 && dashLines.length === lines.length;
+            // It's a list if 2+ consecutive lines start with dashes
+            const isListContent = dashLines.length >= 2 && dashLines.length === lines.length;
 
-          if (!isListContent) {
-            // Not a list - remove the leading dash
-            const cleanedContent = content.replace(/^\s*[-–—]\s*/, '');
-            const newTag = `<p class="${speaker}">${cleanedContent}</p>`;
+            if (!isListContent) {
+              // Not a list - remove the leading dash
+              const cleanedContent = content.replace(/^\s*[-–—]\s*/, '');
+              const newTag = `<p class="${speaker}">${cleanedContent}</p>`;
 
-            if (newTag !== fullMatch) {
-              formattedContent = formattedContent.replace(fullMatch, newTag);
-              hasChanges = true;
-              console.log('Autoformat: Removed leading dash from paragraph');
+              if (newTag !== fullMatch) {
+                formattedContent = formattedContent.replace(fullMatch, newTag);
+                hasChanges = true;
+                console.log('Autoformat: Removed leading dash from paragraph');
+              }
             }
           }
         }
-      }
+      } // End if (removeLeadingDashes)
 
-      // Strip inline styles from pasted content (Google Docs, Word, etc.)
-      // This normalizes colors, fonts, and other styles to match manually typed content
-      const originalLength = formattedContent.length;
-
-      // Remove Google Docs span IDs
-      formattedContent = formattedContent.replace(/<span id="docs-internal-guid-[^"]*">/gi, '');
-
-      // Remove nested <p dir="ltr"...> tags from Google Docs (keep content)
-      formattedContent = formattedContent.replace(/<p dir="ltr"[^>]*>/gi, '');
-
-      // Convert font-weight: 700 spans to <b> tags (preserve bold formatting)
-      formattedContent = formattedContent.replace(/<span[^>]*font-weight:\s*700[^>]*>([^<]*)<\/span>/gi, '<b>$1</b>');
-      formattedContent = formattedContent.replace(/<span[^>]*font-weight:\s*bold[^>]*>([^<]*)<\/span>/gi, '<b>$1</b>');
-
-      // Convert font-style: italic spans to <i> tags (preserve italic formatting)
-      formattedContent = formattedContent.replace(/<span[^>]*font-style:\s*italic[^>]*>([^<]*)<\/span>/gi, '<i>$1</i>');
-
-      // Remove all other spans with style attributes (colors, fonts, etc.) but keep content
-      formattedContent = formattedContent.replace(/<span[^>]*style="[^"]*"[^>]*>([^<]*)<\/span>/gi, '$1');
-
-      // Remove orphaned </span> tags
-      formattedContent = formattedContent.replace(/<\/span>/gi, '');
-
-      // Remove remaining span tags without content
-      formattedContent = formattedContent.replace(/<span[^>]*><\/span>/gi, '');
-
-      // Clean &nbsp; to regular spaces
-      formattedContent = formattedContent.replace(/&nbsp;/gi, ' ');
-
-      // Clean multiple consecutive spaces
-      formattedContent = formattedContent.replace(/  +/g, ' ');
-
-      if (formattedContent.length !== originalLength) {
-        hasChanges = true;
-        console.log('Autoformat: Stripped inline styles from pasted content');
-      }
+      // === STEP 4: Clean up empty paragraphs and cue spacing ===
+      // FULLY SUSPENDED: All empty paragraph manipulation disabled
+      // This was causing issues where users couldn't add paragraphs around cues
+      // The autoformat was removing blank paragraphs that users need for spacing
+      //
+      // if (removeEmptyParagraphs) {
+      //   // Remove empty paragraphs after cue blocks
+      //   const cueEndPattern = /(<!-- End Cue -->)\s*(<p(?:\s+class="[^"]*")?[^>]*>\s*<\/p>)\s*(?=<p(?:\s+class="[^"]*")?[^>]*>[^<]+<\/p>|<!-- Begin Cue -->)/gi;
+      //   formattedContent = formattedContent.replace(cueEndPattern, '$1\n\n');
+      //
+      //   // Collapse multiple consecutive empty paragraphs into one
+      //   const emptyParagraphPattern = /(<p(?:\s+class="[^"]*")?[^>]*>\s*<\/p>\s*){2,}/gi;
+      //   formattedContent = formattedContent.replace(emptyParagraphPattern, (match) => {
+      //     const classMatch = match.match(/<p(?:\s+class="([^"]*)")?/);
+      //     const className = classMatch && classMatch[1] ? classMatch[1] : 'josh';
+      //     return `<p class="${className}"></p>\n`;
+      //   });
+      // }
+      // END SUSPENDED BLOCK
 
       // Apply changes if any were made
       if (hasChanges) {
@@ -7348,9 +7847,21 @@ export default {
     // Timer management for autoformat
     startAutoformatTimer() {
       this.stopAutoformatTimer(); // Clear any existing timer
+
+      // Read autoformat settings from localStorage
+      const interfaceSettings = JSON.parse(localStorage.getItem('showbuild_interface_settings') || '{}');
+      const autoformatEnabled = interfaceSettings.autoformatEnabled !== false; // Default to true
+      const intervalSeconds = interfaceSettings.autoformatInterval || 30;
+
+      if (!autoformatEnabled) {
+        console.log('Autoformat disabled in settings');
+        return;
+      }
+
       this.autoformatTimer = setInterval(() => {
         this.runAutoformat();
-      }, 30000); // Run every 30 seconds
+      }, intervalSeconds * 1000);
+      console.log(`Autoformat timer started (every ${intervalSeconds}s)`);
     },
 
     stopAutoformatTimer() {
@@ -9662,7 +10173,7 @@ export default {
 
 /* Speaker Paragraph Styling */
 .speaker-paragraph {
-  margin: 2px 0;
+  margin: 0 0 8px 0;
   background-color: white;
   cursor: pointer;
   position: relative;
@@ -9780,7 +10291,7 @@ export default {
 
 /* Paragraph content with proper padding and background */
 .paragraph-content {
-  padding: 5px 0;
+  padding: 0;
   border-radius: 0;
   position: relative;
   transition: background-color 0.2s ease;
@@ -9806,7 +10317,7 @@ export default {
   width: 50px;
   display: flex;
   flex-direction: column;
-  padding-top: 5px;
+  padding-top: 2px;
   user-select: none;
   margin-left: 4px;
 }
@@ -9817,8 +10328,8 @@ export default {
   font-size: 14px;
   font-weight: 600;
   color: rgba(0, 0, 0, 0.4);
-  line-height: 24px; /* Must match .speaker-contenteditable line-height */
-  height: 24px;
+  line-height: 27px; /* Must match .speaker-contenteditable line-height */
+  height: 27px;
   padding-right: 8px;
   white-space: nowrap;
   box-sizing: border-box;
@@ -10050,7 +10561,7 @@ export default {
 /* Clean textarea styling */
 .speaker-textarea {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  font-size: 14pt;
+  font-size: 17pt;
   line-height: 1.5;
   padding: 0;
   background-color: #fafafa !important; /* Even lighter gray background */
@@ -10059,15 +10570,15 @@ export default {
 /* Contenteditable div styling - renders HTML formatting */
 .speaker-contenteditable {
   min-height: 1.5em;
-  padding: 5px !important;
+  padding: 2px 5px !important;
   outline: none;
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow-wrap: break-word;
   cursor: text;
   /* Match line-height with line numbers for proper alignment */
-  font-size: 16px;
-  line-height: 24px; /* Must match .line-number height */
+  font-size: 19px;
+  line-height: 27px; /* Must match .line-number height */
   /* Force LTR text direction to prevent RTL character input issues */
   direction: ltr !important;
   unicode-bidi: plaintext !important;
@@ -10152,7 +10663,7 @@ export default {
   background-color: #fafafa !important;
   color: #000000 !important;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
-  font-size: 14pt !important;
+  font-size: 17pt !important;
   padding: 0 !important;
   line-height: 1.5 !important;
   margin: 0 !important;
@@ -10215,6 +10726,7 @@ export default {
 .content-segment {
   margin: 0;
   padding: 0;
+  position: relative; /* For absolute positioning of flag note panels */
 }
 
 .text-segment {
@@ -10226,7 +10738,7 @@ export default {
 
 .segment-textarea {
   font-family: 'Roboto', sans-serif !important;
-  font-size: 14pt !important;
+  font-size: 17pt !important;
   line-height: 1.6 !important;
   padding: 16px !important;
   min-height: 80px !important;
@@ -10247,7 +10759,7 @@ export default {
 
 .segment-textarea :deep(textarea) {
   font-family: 'Roboto', sans-serif !important;
-  font-size: 14pt !important;
+  font-size: 17pt !important;
   line-height: 1.6 !important;
   padding: 16px !important;
   min-height: 80px !important;
@@ -10327,20 +10839,21 @@ export default {
   background-color: var(--needs-attention-btn-active, rgba(255, 152, 0, 0.5)) !important;
 }
 
-/* Flag Note Panel - floating panel for attention notes */
+/* Flag Note Panel - base styles */
 .flag-note-panel {
-  position: fixed; /* Use fixed to escape stacking context and float above sidebar */
-  right: 20px; /* Position from right edge of viewport */
-  top: 50%;
-  transform: translateY(-50%);
-  width: 300px;
+  width: 280px;
   background-color: #fff;
   border: 2px solid var(--needs-attention-border, #FF9800);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-  z-index: 9999; /* High z-index to float above everything */
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  z-index: 100;
   padding: 0;
-  overflow: hidden;
+  overflow: visible; /* Allow content to determine height */
+}
+
+/* Teleported flag note panel - positioned via JavaScript */
+.flag-note-panel.flag-note-teleported {
+  z-index: 9999; /* High enough to appear above everything except modals */
 }
 
 .flag-note-header {
@@ -10386,6 +10899,8 @@ export default {
 .flag-note-textarea :deep(textarea) {
   font-size: 13px;
   line-height: 1.4;
+  max-height: none !important; /* Allow unlimited growth */
+  overflow-y: visible !important; /* No scrollbar */
 }
 
 .flag-note-actions {
@@ -10697,9 +11212,10 @@ textarea.yellow-cursor-highlight {
 .ghost-segment {
   height: 60px !important;
   min-height: 60px !important;
-  background: linear-gradient(90deg, rgba(33, 150, 243, 0.1) 0%, rgba(33, 150, 243, 0.05) 100%) !important;
-  border: 3px dashed rgb(33, 150, 243) !important;
+  background: var(--draglight-color, rgba(33, 150, 243, 0.15)) !important;
+  border: 3px dashed var(--dropline-color, rgb(33, 150, 243)) !important;
   border-radius: 4px !important;
+  position: relative !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -10707,11 +11223,19 @@ textarea.yellow-cursor-highlight {
 }
 
 .ghost-segment::before {
-  content: "Drop here";
-  color: rgb(33, 150, 243);
-  font-weight: 600;
-  font-size: 14px;
-  opacity: 0.7;
+  content: "DROP HERE";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--dropline-color, rgb(33, 150, 243));
+  font-family: Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  opacity: 0.25;
+  z-index: 10;
 }
 
 /* Hide the actual content inside the ghost placeholder */
@@ -10720,12 +11244,15 @@ textarea.yellow-cursor-highlight {
 }
 
 .chosen-segment {
-  opacity: 0.8;
+  opacity: 0.9;
   cursor: grabbing !important;
+  outline: 2px solid var(--dropline-color, rgb(33, 150, 243)) !important;
+  outline-offset: 2px;
 }
 
 .drag-segment {
-  opacity: 0.7;
+  opacity: 0.8;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 /* Collapse cue cards to title bar only when actively being dragged (not on mousedown) */
@@ -10742,12 +11269,6 @@ textarea.yellow-cursor-highlight {
 /* Keep paragraph content visible but slightly transparent when dragging */
 .drag-segment .paragraph-content {
   opacity: 0.6 !important;
-}
-
-/* Keep chosen-segment visible but slightly dimmed */
-.chosen-segment {
-  opacity: 0.9;
-  cursor: grabbing !important;
 }
 
 /* Pending cue styling - highlight and pulse */
@@ -10792,4 +11313,190 @@ textarea.yellow-cursor-highlight {
   max-width: 800px;
   width: 100%;
 }
+
+/* ===== COLLAPSE MODE STYLES ===== */
+
+/* Collapse mode indicator in toolbar */
+.collapse-mode-indicator {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  margin: 0 16px;
+  background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+  color: white;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 1px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.4);
+  animation: collapse-pulse 2s ease-in-out infinite;
+}
+
+@keyframes collapse-pulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(255, 152, 0, 0.4); }
+  50% { box-shadow: 0 2px 16px rgba(255, 152, 0, 0.7); }
+}
+
+/* Collapsed paragraph styling - 25% shorter than original 36px */
+.collapsed-paragraph {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  margin: 2px 0;
+  border-radius: 4px;
+  min-height: 27px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.collapsed-paragraph:hover {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.collapsed-paragraph-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 12px;
+}
+
+.collapsed-line-range {
+  font-weight: 700;
+  color: #1976D2;
+  background: rgba(25, 118, 210, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  min-width: 55px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.collapsed-text-left {
+  color: #424242;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.collapsed-text-right {
+  color: #616161;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+  margin-left: auto;
+}
+
+/* Collapsed cue styling */
+.collapsed-cue {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  margin: 2px 0;
+  border-radius: 4px;
+  min-height: 40px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.collapsed-cue:hover {
+  filter: brightness(0.95);
+}
+
+.collapsed-cue-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 12px;
+}
+
+.collapsed-cue-index {
+  font-weight: 700;
+  color: #9C27B0;
+  background: rgba(156, 39, 176, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.collapsed-cue-type {
+  font-weight: 700;
+  text-transform: uppercase;
+  min-width: 50px;
+}
+
+.collapsed-cue-divider {
+  color: #9E9E9E;
+  font-weight: 300;
+}
+
+.collapsed-cue-slug {
+  color: #424242;
+  font-weight: 500;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collapsed-cue-duration {
+  color: #757575;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+}
+
+.collapsed-cue-outcue {
+  color: #1976D2;
+  font-style: italic;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Shared delete button for collapsed elements */
+.collapsed-delete-btn {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  color: #F44336 !important;
+}
+
+.collapsed-paragraph:hover .collapsed-delete-btn,
+.collapsed-cue:hover .collapsed-delete-btn {
+  opacity: 1;
+}
+
+/* Cue segment in collapsed mode - full width, override alignment */
+.cue-segment.cue-collapsed {
+  padding: 0;
+  margin: 0;
+  display: block !important;
+  justify-content: flex-start !important;
+}
+
+.cue-segment.cue-collapsed .collapsed-cue {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Drag handle adjustments for collapsed mode */
+.collapsed-paragraph .drag-handle-column,
+.collapsed-cue .drag-handle-column {
+  width: 24px;
+  opacity: 0.6;
+}
+
+.collapsed-paragraph:hover .drag-handle-column,
+.collapsed-cue:hover .drag-handle-column {
+  opacity: 1;
+}
+
+/* ===== END COLLAPSE MODE STYLES ===== */
 </style>

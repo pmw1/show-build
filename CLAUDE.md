@@ -42,6 +42,29 @@ cd disaffected-ui && npm run lint -- --fix
 
 ---
 
+## ⚠️ **MANDATORY: REBUILD AND REDEPLOY AFTER EVERY ITERATION** ⚠️
+
+**CRITICAL RULE**: After making code changes, you MUST rebuild Docker and redeploy before the user can test.
+
+```bash
+cd /mnt/process/show-build && docker compose restart server
+```
+
+**When to rebuild:**
+- After ANY backend Python code changes (routers, services, models, tasks)
+- After modifying `requirements.txt` or Docker configuration
+- After database migrations
+- After ANY iteration of code changes - no exceptions
+
+**Why this matters:**
+- Backend changes are NOT hot-reloaded - the container must restart
+- User cannot test changes until the server is restarted
+- Forgetting to restart wastes user time debugging "unchanged" behavior
+
+**This is not optional - always restart after backend changes.**
+
+---
+
 ## ⚠️ **MANDATORY: INTER-CLAUDE RELAY COORDINATION** ⚠️
 
 **CRITICAL RULE**: Check the relay server on EVERY user message for coordination with other Claude instances.

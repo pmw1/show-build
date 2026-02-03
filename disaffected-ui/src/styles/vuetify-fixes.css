@@ -252,29 +252,32 @@ input[type="number"]::-webkit-inner-spin-button {
   box-sizing: border-box !important;
 }
 
-/* Toast notification z-index override - place above modal overlays */
+/* Toast notification z-index override - place above ALL overlays and indicators */
 .toast-container-high-z {
-  z-index: 10000 !important;  /* Above modal overlay (9999) */
+  z-index: 99999 !important;  /* Above everything including modal overlays */
 }
 
 /* Ensure individual toast notifications inherit high z-index */
 .toast-container-high-z .Vue-Toastification__toast {
-  z-index: 10001 !important;
+  z-index: 100000 !important;
 }
 
-/* Custom toast styling - 50% smaller, blue color, positioned higher */
+/* Custom toast styling - positioned higher */
 .toast-custom-style {
   top: 15% !important;  /* 15% higher on screen (default is usually 30%) */
 }
 
 .toast-blue-small {
-  font-size: 0.7rem !important;  /* 50% smaller text */
-  padding: 8px 12px !important;  /* 50% smaller padding */
-  min-height: 32px !important;  /* 50% smaller min-height */
-  max-width: 250px !important;  /* 50% smaller width */
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+  font-size: 0.85rem !important;  /* Slightly larger text */
+  padding: 12px 18px !important;  /* More padding */
+  min-height: 44px !important;  /* Taller min-height */
+  max-width: 320px !important;  /* Wider */
   background-color: #2196F3 !important;  /* Blue color */
   color: white !important;
-  border-radius: 4px !important;
+  border-radius: 6px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3) !important;  /* Drop shadow */
+  font-weight: 500 !important;
 }
 
 /* Override success/error/warning/info colors to be blue */

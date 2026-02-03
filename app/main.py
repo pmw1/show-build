@@ -76,6 +76,7 @@ try:
     from convert_assetid_router import router as convert_assetid_router
     from duration_estimation_router import router as duration_estimation_router
     from fsq_asset_router import router as fsq_asset_router
+    from gfx_asset_router import router as gfx_asset_router
     from speakers_router import router as speakers_router
     from voice_sample_router import router as voice_sample_router
     from wpm_audio_router import router as wpm_audio_router
@@ -101,6 +102,8 @@ try:
     from content_library_router import router as content_library_router
     from customer_router import router as customer_router
     from segment_locks_router import router as segment_locks_router
+    from tools_router import router as tools_router
+    from segment_llm_router import router as segment_llm_router
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Current directory: {os.getcwd()}")
@@ -201,6 +204,9 @@ app.include_router(duration_estimation_router, prefix="/api")
 # Include the FSQ asset generation router
 app.include_router(fsq_asset_router, prefix="/api/fsq", tags=["fsq"])
 
+# Include the GFX asset generation router
+app.include_router(gfx_asset_router, prefix="/api/gfx", tags=["gfx"])
+
 # Include the Speakers router
 app.include_router(speakers_router)
 
@@ -279,6 +285,12 @@ app.include_router(customer_router)
 
 # Include the segment locks router (concurrent editing protection)
 app.include_router(segment_locks_router)
+
+# Include the production tools router (validation, diagnostics, reports)
+app.include_router(tools_router)
+
+# Include the segment LLM preprocessing router (entity extraction, prechewed data)
+app.include_router(segment_llm_router)
 
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
@@ -1111,6 +1123,81 @@ async def health():
 
     return health_status
 
+
+@app.get("/version")
+async def get_version():
+    """
+    Get server version information for worker update polling.
+
+    Workers can poll this endpoint to check if they need to update their code.
+    Returns git commit hash and key file hashes that workers can compare.
+    """
+    import subprocess
+    import hashlib
+    from pathlib import Path
+    from datetime import datetime
+
+    version_info = {
+        "git_commit": None,
+        "git_branch": None,
+        "git_date": None,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "key_files": {}
+    }
+
+    # Get git info
+    try:
+        # Determine if we're in Docker or local
+        app_dir = Path("/app") if Path("/app").exists() else Path(".")
+
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, cwd=app_dir, timeout=5
+        )
+        if result.returncode == 0:
+            version_info["git_commit"] = result.stdout.strip()
+
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, cwd=app_dir, timeout=5
+        )
+        if result.returncode == 0:
+            version_info["git_branch"] = result.stdout.strip()
+
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%ci"],
+            capture_output=True, text=True, cwd=app_dir, timeout=5
+        )
+        if result.returncode == 0:
+            version_info["git_date"] = result.stdout.strip()
+    except Exception:
+        pass
+
+    # Generate hashes for key files (workers compare these to detect changes)
+    key_files = [
+        "services/ffmpeg_tasks.py",
+        "platform_utils.py",
+        "celery_app.py",
+        "models_v2.py"
+    ]
+
+    for file_path in key_files:
+        try:
+            # Check Docker path first, then local
+            full_path = Path("/app") / file_path
+            if not full_path.exists():
+                full_path = Path("app") / file_path
+
+            if full_path.exists():
+                with open(full_path, "rb") as f:
+                    file_hash = hashlib.md5(f.read()).hexdigest()[:8]
+                version_info["key_files"][file_path] = file_hash
+        except Exception:
+            version_info["key_files"][file_path] = "error"
+
+    return version_info
+
+
 @app.get("/api/llm/ollama/models")
 async def get_ollama_models(current_user: dict = Depends(get_current_user_or_key)):
     """Get list of available Ollama models"""
@@ -1477,12 +1564,16 @@ async def upload_img_cue_image(
         md5_hash = hashlib.md5(file_content).hexdigest()
         
         logging.info(f"IMG cue image saved: {filepath}, MD5: {md5_hash}")
-        
+
+        # Return web-accessible URL (not filesystem path)
+        # Static files are mounted at /episodes from /home/episodes
+        web_url = f"/episodes/{padded_episode}/assets/images/{filename}"
+
         return {
             "status": "success",
             "message": "Image uploaded successfully",
             "filename": filename,
-            "filepath": filepath,
+            "filepath": web_url,  # Return web URL, not filesystem path
             "md5": md5_hash,
             "size": len(file_content)
         }

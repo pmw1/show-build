@@ -68,7 +68,7 @@ app.use(Toast, {
   transition: "Vue-Toastification__bounce",
   maxToasts: 20,
   newestOnTop: true,
-  timeout: 4000,  // Increased from default 3000ms to 4000ms (1 second longer)
+  timeout: 5000,  // 5 seconds display time
   containerClassName: "toast-container-high-z toast-custom-style",  // Custom classes for z-index and styling
   toastClassName: "toast-blue-small"  // Custom class for individual toasts
 });

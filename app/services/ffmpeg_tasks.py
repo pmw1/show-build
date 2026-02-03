@@ -319,19 +319,36 @@ def calculate_sharpness_simple(image_path: str) -> float:
 
     Returns:
         float: Sharpness score (higher = sharper)
+
+    Raises:
+        FileNotFoundError: If the image file doesn't exist
+        ValueError: If the image file is empty or corrupted
     """
-    try:
-        file_size = os.path.getsize(image_path)
-        # Normalize: typical thumbnail 10KB-50KB
-        # Very blurry: < 10KB, Sharp: > 30KB
-        sharpness = file_size / 100  # Scale to roughly 0-500
-        return sharpness
-    except Exception as e:
-        logger.warning(f"Failed to get file size for {image_path}: {str(e)}")
-        return 0.0
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Thumbnail file not found: {image_path}")
+
+    file_size = os.path.getsize(image_path)
+
+    # Validate minimum file size (PNG thumbnails should be at least 5KB)
+    MIN_THUMBNAIL_SIZE = 5 * 1024  # 5KB
+    if file_size < MIN_THUMBNAIL_SIZE:
+        raise ValueError(f"Thumbnail file too small ({file_size} bytes), likely corrupted: {image_path}")
+
+    # Validate PNG magic bytes
+    with open(image_path, 'rb') as f:
+        magic = f.read(8)
+        # PNG magic: 89 50 4E 47 0D 0A 1A 0A
+        if magic[:4] != b'\x89PNG':
+            raise ValueError(f"Invalid PNG file (bad magic bytes): {image_path}")
+
+    # PNG files are typically larger than JPEG, adjust threshold
+    # Typical PNG thumbnail: 30KB-150KB
+    # Very blurry: < 30KB, Sharp: > 80KB
+    sharpness = file_size / 300  # Scale to roughly 0-500 for PNG
+    return sharpness
 
 
-# Sharpness thresholds
+# Sharpness thresholds (adjusted for PNG which is larger than JPEG)
 SHARPNESS_THRESHOLD_BLURRY = 100  # Below this = blurry
 SHARPNESS_THRESHOLD_WARNING = 150  # Below this = warn user
 
@@ -414,18 +431,24 @@ def process_sot_video(
             task_id=task_id
         )
 
-        # 2. Generate thumbnail at 1 second mark
+        # 2. Generate thumbnail at 1 second mark (PNG for lossless quality)
         self.update_state(state='PROGRESS', meta={'stage': 'Generating thumbnail', 'progress': 30})
-        thumbnail_path = episode_dir / f"{base_name}-thumb.jpg"
+        thumbnail_path = episode_dir / f"{base_name}-thumb.png"
         thumbnail_cmd = [
             ffmpeg, "-y",
             "-ss", "1",
             "-i", str(input_video),
             "-vframes", "1",
-            "-q:v", "2",
             str(thumbnail_path)
         ]
         subprocess.run(thumbnail_cmd, check=True, capture_output=True)
+
+        # Validate thumbnail was created properly
+        if not thumbnail_path.exists():
+            raise RuntimeError(f"Thumbnail generation failed - file not created: {thumbnail_path}")
+        if thumbnail_path.stat().st_size < 5000:
+            raise RuntimeError(f"Thumbnail appears corrupted - file too small: {thumbnail_path.stat().st_size} bytes")
+
         logger.info(f"Thumbnail created: {thumbnail_path}")
 
         send_notification(
@@ -972,20 +995,55 @@ def _update_sot_cue_block(episode: str, slug: str, asset_id: str, updates: dict)
 
 
 def _generate_asset_id() -> str:
-    """Generate a unique AssetID for SOT clips."""
-    from services.asset_id import AssetIDService
-    return AssetIDService.generate('AST')
+    """
+    Generate a unique AssetID for SOT clips.
+
+    Uses local AssetIDService when available (main server),
+    falls back to API call for remote workers (Windows/external).
+    """
+    try:
+        # Try local service first (main server/Docker)
+        from services.asset_id import AssetIDService
+        return AssetIDService.generate('CUE')
+    except ImportError:
+        # Remote worker - use API call
+        import requests
+        try:
+            response = requests.post(
+                "http://192.168.51.210:8888/assetid/generate",
+                json={"entity_type": "CUE", "reason": "sot_clip_generation"},
+                timeout=10
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("asset_id", data.get("id"))
+            else:
+                raise RuntimeError(f"AssetID API returned {response.status_code}")
+        except Exception as e:
+            logger.error(f"Failed to generate AssetID via API: {e}")
+            raise
 
 
 def _process_individual_clips(temp_job_id, episode, slug, clips, parent_asset_id, working_dir, normalized_slug):
     """
-    Process individual clips workflow:
-    1. Split video into individual clips
-    2. Generate unique AssetID for each clip
-    3. Run full processing pipeline on each clip
-    4. Insert multiple cue blocks into script_content
+    DEPRECATED: This function is no longer used.
 
-    Args:
+    As of 2026-01-21, individual clips are processed as independent SOT cues
+    via the frontend's submit-multiple event. Each clip gets its own AssetID
+    and is processed via the standard single_trim workflow.
+
+    This parent-child approach is deprecated because:
+    - Complex parent cue lookup that can fail
+    - Single point of failure for multi-clip jobs
+    - Unable to process clips in parallel
+
+    The new approach:
+    - Frontend generates AssetIDs for each clip
+    - Frontend inserts N independent cue blocks
+    - Frontend triggers N independent processing jobs
+    - Each uses standard single_trim workflow
+
+    Legacy Args (kept for reference):
         temp_job_id: Job ID
         episode: Episode number
         slug: Base slug for naming
@@ -993,11 +1051,41 @@ def _process_individual_clips(temp_job_id, episode, slug, clips, parent_asset_id
         parent_asset_id: AssetID of parent cue block
         working_dir: Working directory path
         normalized_slug: Normalized slug for filenames
-
-    Returns:
-        dict: Processing results with multiple clip outputs
     """
+    # DEPRECATION WARNING
+    logger.warning("⚠️ DEPRECATED: _process_individual_clips() called - this workflow is deprecated")
+    logger.warning("⚠️ Individual clips should now be processed as independent SOTs via single_trim workflow")
+    logger.warning("⚠️ The frontend should emit 'submit-multiple' event with separate AssetIDs per clip")
+
+    # Mark job as failed with deprecation notice
+    _update_job_status(
+        temp_job_id,
+        'deprecated_workflow',
+        'failed',
+        'individual_clips workflow is deprecated. Please use the updated frontend that creates independent SOT cues.'
+    )
+
+    raise DeprecationWarning(
+        "individual_clips workflow is deprecated. "
+        "Use the updated frontend that emits independent SOT cues via 'submit-multiple' event. "
+        "Each clip should be processed as a separate single_trim job."
+    )
+
+    # === LEGACY CODE BELOW (unreachable, kept for reference) ===
     logger.info(f"🎬 INDIVIDUAL CLIPS: Processing {len(clips)} clips for {temp_job_id}")
+
+    # Validate inputs early
+    if not clips:
+        error_msg = "No clips provided for individual clips processing"
+        logger.error(f"❌ {error_msg}")
+        _update_job_status(temp_job_id, 'failed', 'failed', error_msg)
+        raise ValueError(error_msg)
+
+    if not parent_asset_id:
+        error_msg = "No parent_asset_id provided for individual clips processing"
+        logger.error(f"❌ {error_msg}")
+        _update_job_status(temp_job_id, 'failed', 'failed', error_msg)
+        raise ValueError(error_msg)
 
     # Get platform-appropriate binaries
     ffmpeg = get_ffmpeg_binary()
@@ -1005,79 +1093,110 @@ def _process_individual_clips(temp_job_id, episode, slug, clips, parent_asset_id
 
     input_file = working_dir / f"{temp_job_id}_upload.mp4"
     if not input_file.exists():
-        raise FileNotFoundError(f"Upload file not found: {input_file}")
+        error_msg = f"Upload file not found: {input_file}"
+        logger.error(f"❌ {error_msg}")
+        _update_job_status(temp_job_id, 'failed', 'failed', error_msg)
+        raise FileNotFoundError(error_msg)
 
     clip_results = []
 
-    # Process each clip individually
-    for i, clip in enumerate(clips, 1):
-        clip_slug = clip.get('slug', f"{slug}_CLIP_{i}")
-        clip_start = clip.get('time_start', '00:00:00:00')
-        clip_end = clip.get('time_end', '00:00:00:00')
+    try:
+        # Process each clip individually
+        for i, clip in enumerate(clips, 1):
+            clip_slug = clip.get('slug', f"{slug}_CLIP_{i}")
+            clip_start = clip.get('time_start', '00:00:00:00')
+            clip_end = clip.get('time_end', '00:00:00:00')
 
-        logger.info(f"📹 Processing clip {i}/{len(clips)}: {clip_slug} ({clip_start} → {clip_end})")
+            logger.info(f"📹 Processing clip {i}/{len(clips)}: {clip_slug} ({clip_start} → {clip_end})")
 
-        # Generate unique AssetID for this clip
-        clip_asset_id = _generate_asset_id()
-        logger.info(f"🆔 Generated AssetID for clip {i}: {clip_asset_id}")
+            # Generate unique AssetID for this clip
+            clip_asset_id = _generate_asset_id()
+            logger.info(f"🆔 Generated AssetID for clip {i}: {clip_asset_id}")
 
-        # Update job status
-        _update_job_status(temp_job_id, f'clip{i}_phase-1', 'processing')
+            # Update job status
+            _update_job_status(temp_job_id, f'clip{i}_phase-1', 'processing')
 
-        # Phase -1: Extract this clip from source video
-        clip_extracted = working_dir / f"{temp_job_id}_clip{i}_extracted.mp4"
+            # Phase -1: Extract this clip from source video
+            clip_extracted = working_dir / f"{temp_job_id}_clip{i}_extracted.mp4"
 
-        # Convert timecode to seconds
-        def timecode_to_seconds(tc):
-            """Convert HH:MM:SS:FF to seconds (ignoring frames)"""
-            parts = tc.split(':')
-            if len(parts) == 4:
-                h, m, s, f = parts
-                return int(h) * 3600 + int(m) * 60 + int(s)
-            return 0
+            # Convert timecode to seconds
+            def timecode_to_seconds(tc):
+                """Convert HH:MM:SS:FF to seconds (ignoring frames)"""
+                parts = tc.split(':')
+                if len(parts) == 4:
+                    h, m, s, f = parts
+                    return int(h) * 3600 + int(m) * 60 + int(s)
+                return 0
 
-        start_sec = timecode_to_seconds(clip_start)
-        end_sec = timecode_to_seconds(clip_end)
-        duration_sec = end_sec - start_sec
+            start_sec = timecode_to_seconds(clip_start)
+            end_sec = timecode_to_seconds(clip_end)
+            duration_sec = end_sec - start_sec
 
-        # Extract clip with FFmpeg
-        extract_cmd = [
-            ffmpeg, "-y",
-            "-ss", str(start_sec),
-            "-i", str(input_file),
-            "-t", str(duration_sec),
-            "-c", "copy",  # Fast extraction, no re-encoding
-            str(clip_extracted)
-        ]
-        result = subprocess.run(extract_cmd, capture_output=True)
-        if result.returncode != 0:
-            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else 'Unknown'
-            logger.error(f"FFmpeg clip extraction failed for clip {i}: {stderr[:500]}")
-            raise RuntimeError(f"Failed to extract clip {i}: {stderr[:200]}")
-        logger.info(f"✅ Clip {i} extracted: {clip_extracted}")
+            # Validate clip times
+            if duration_sec <= 0:
+                error_msg = f"Invalid clip {i} times: start={clip_start}, end={clip_end} (duration={duration_sec}s)"
+                logger.error(f"❌ {error_msg}")
+                _update_job_status(temp_job_id, f'clip{i}_failed', 'failed', error_msg)
+                raise ValueError(error_msg)
 
-        # Now run full processing pipeline on this clip
-        # (Phases 0, 0.5, 1, 1.1, 2, 3-skip, 4, 5)
-        clip_result = _process_single_clip(
-            clip_extracted, clip_slug, clip_asset_id, episode,
-            working_dir, i, temp_job_id
-        )
+            # Extract clip with FFmpeg
+            extract_cmd = [
+                ffmpeg, "-y",
+                "-ss", str(start_sec),
+                "-i", str(input_file),
+                "-t", str(duration_sec),
+                "-c", "copy",  # Fast extraction, no re-encoding
+                str(clip_extracted)
+            ]
+            result = subprocess.run(extract_cmd, capture_output=True)
+            if result.returncode != 0:
+                stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else 'Unknown'
+                error_msg = f"FFmpeg clip extraction failed for clip {i}: {stderr[:200]}"
+                logger.error(f"❌ {error_msg}")
+                _update_job_status(temp_job_id, f'clip{i}_extraction_failed', 'failed', error_msg)
+                raise RuntimeError(error_msg)
+            logger.info(f"✅ Clip {i} extracted: {clip_extracted}")
 
-        clip_results.append(clip_result)
+            # Now run full processing pipeline on this clip
+            # (Phases 0, 0.5, 1, 1.1, 2, 3-skip, 4, 5)
+            clip_result = _process_single_clip(
+                clip_extracted, clip_slug, clip_asset_id, episode,
+                working_dir, i, temp_job_id
+            )
 
-    # Phase 6: Insert multiple cue blocks into parent segment
-    _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id)
+            clip_results.append(clip_result)
 
-    # Mark job as complete
-    _update_job_status(temp_job_id, 'complete', 'completed')
+        # Phase 6: Insert multiple cue blocks into parent segment
+        logger.info(f"📝 Inserting {len(clip_results)} cue blocks for parent {parent_asset_id}")
+        _update_job_status(temp_job_id, 'inserting_cues', 'processing')
 
-    logger.info(f"✅ INDIVIDUAL CLIPS: Completed processing {len(clips)} clips")
+        inserted_count = _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id)
+        logger.info(f"✅ Successfully inserted {inserted_count} cue blocks")
 
-    return {
-        "status": "completed",
-        "clips": clip_results,
-        "message": f"Processed {len(clips)} individual clips successfully"
-    }
+        # Mark job as complete
+        _update_job_status(temp_job_id, 'complete', 'completed')
+
+        logger.info(f"✅ INDIVIDUAL CLIPS: Completed processing {len(clips)} clips")
+
+        return {
+            "status": "completed",
+            "clips": clip_results,
+            "message": f"Processed {len(clips)} individual clips successfully"
+        }
+
+    except CueInsertionError as e:
+        # Specific handling for cue insertion failures
+        error_msg = f"Failed to insert cue blocks: {str(e)}"
+        logger.error(f"❌ INDIVIDUAL CLIPS FAILED: {error_msg}")
+        _update_job_status(temp_job_id, 'cue_insertion_failed', 'failed', error_msg)
+        raise
+
+    except Exception as e:
+        # Catch-all for any other errors
+        error_msg = f"Individual clips processing failed: {str(e)}"
+        logger.error(f"❌ INDIVIDUAL CLIPS FAILED: {error_msg}")
+        _update_job_status(temp_job_id, 'failed', 'failed', error_msg)
+        raise
 
 
 def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_dir, clip_index, temp_job_id):
@@ -1191,16 +1310,15 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
     # PHASE 3: Skip (no trimming needed for already-extracted clips)
     phase3_output = phase2_output
 
-    # PHASE 4: Generate thumbnails and MP3
+    # PHASE 4: Generate thumbnails (PNG) and MP3
     # Generate 1 thumbnail (middle of clip)
     thumb_time = clip_duration / 2
-    thumb_file = working_dir / f"clip{clip_index}_thumb.jpg"
+    thumb_file = working_dir / f"clip{clip_index}_thumb.png"
     thumb_cmd = [
         ffmpeg, "-y",
         "-ss", str(thumb_time),
         "-i", str(phase3_output),
         "-vframes", "1",
-        "-q:v", "2",
         str(thumb_file)
     ]
     result = subprocess.run(thumb_cmd, capture_output=True)
@@ -1208,6 +1326,12 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
         stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else 'Unknown'
         logger.error(f"Phase 4 thumbnail generation failed for clip {clip_index}: {stderr[:500]}")
         raise RuntimeError(f"Phase 4 thumbnail failed: {stderr[:200]}")
+
+    # Validate thumbnail
+    if not thumb_file.exists():
+        raise RuntimeError(f"Phase 4 thumbnail not created for clip {clip_index}")
+    if thumb_file.stat().st_size < 5000:
+        raise RuntimeError(f"Phase 4 thumbnail corrupted for clip {clip_index} - only {thumb_file.stat().st_size} bytes")
 
     # Extract MP3
     mp3_file = working_dir / f"clip{clip_index}_audio.mp3"
@@ -1233,7 +1357,7 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
     final_thumb_dir.mkdir(parents=True, exist_ok=True)
 
     final_video = final_video_dir / f"{normalized_clip_slug}.mp4"
-    final_thumb = final_thumb_dir / f"{normalized_clip_slug}-thumb.jpg"
+    final_thumb = final_thumb_dir / f"{normalized_clip_slug}-thumb.png"
     final_audio = final_video_dir / f"{normalized_clip_slug}.mp3"
 
     import shutil
@@ -1247,7 +1371,7 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
         "asset_id": clip_asset_id,
         "slug": clip_slug,
         "media_url": f"/episodes/{episode}/assets/video/{normalized_clip_slug}.mp4",
-        "thumbnail_url": f"/episodes/{episode}/assets/thumbnails/{normalized_clip_slug}-thumb.jpg",
+        "thumbnail_url": f"/episodes/{episode}/assets/thumbnails/{normalized_clip_slug}-thumb.png",
         "audio_url": f"/episodes/{episode}/assets/video/{normalized_clip_slug}.mp3",
         "duration": duration_formatted,
         "transcription": transcription_text,
@@ -1263,53 +1387,94 @@ def _format_duration(seconds):
     return f"{hours:02d}:{minutes:02d}:{secs:02d}:00"
 
 
+class CueInsertionError(Exception):
+    """Raised when cue block insertion fails."""
+    pass
+
+
 def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
     """
-    Insert multiple SOT cue blocks into the parent segment's script_content.
-    Finds the parent cue by asset_id and inserts new cues after it.
+    DEPRECATED: This function is no longer used.
 
-    Args:
+    As of 2026-01-21, individual clips are inserted by the frontend as
+    independent SOT cue blocks. This backend insertion function that
+    searches for a parent cue is no longer needed.
+
+    The new approach:
+    - Frontend inserts all cue blocks before triggering processing
+    - Each cue block is independent with its own AssetID
+    - Processing updates each cue block individually by AssetID (no parent lookup)
+
+    This function is deprecated because:
+    - Complex parent cue lookup that can fail
+    - Database race conditions during insertion
+    - Tight coupling between clips and parent cue
+
+    Legacy Args (kept for reference):
         episode: Episode number
         clip_results: List of dicts with asset_id, slug, media_url, etc.
         parent_asset_id: AssetID of the original SOT cue block
     """
-    try:
-        from models_v2 import Rundown, RundownItem, Episode
-        import re
+    # DEPRECATION WARNING
+    logger.warning("⚠️ DEPRECATED: _insert_multiple_cue_blocks() called - this function is deprecated")
+    logger.warning("⚠️ Cue blocks should now be inserted by the frontend before processing starts")
 
-        with db_session() as db:
-            # Find the rundown for this episode by joining with Episode
-            rundown = db.query(Rundown).join(Episode).filter(Episode.episode_number == episode).first()
-            if not rundown:
-                logger.warning(f"No rundown found for episode {episode}")
-                return
+    raise DeprecationWarning(
+        "_insert_multiple_cue_blocks is deprecated. "
+        "The frontend now inserts all cue blocks before triggering processing. "
+        "Each clip has its own independent AssetID and cue block."
+    )
 
-            # Search all rundown items for parent SOT cue with matching AssetID
-            items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
+    # === LEGACY CODE BELOW (unreachable, kept for reference) ===
+    from models_v2 import Rundown, RundownItem, Episode
+    import re
 
-            for item in items:
-                if not item.script_content:
-                    continue
+    with db_session() as db:
+        # Find the rundown for this episode by joining with Episode
+        rundown = db.query(Rundown).join(Episode).filter(Episode.episode_number == episode).first()
+        if not rundown:
+            raise CueInsertionError(f"No rundown found for episode {episode}")
 
-                # Look for parent SOT cue block
-                cue_pattern = re.compile(
-                    r'(<!-- Begin Cue -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
+        # Search all rundown items for parent SOT cue with matching AssetID
+        items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
+        logger.info(f"🔍 Searching {len(items)} rundown items for parent cue {parent_asset_id}")
+
+        for item in items:
+            if not item.script_content:
+                continue
+
+            # Look for parent SOT cue block - more flexible pattern
+            # Try exact match first
+            cue_pattern = re.compile(
+                r'(<!-- Begin Cue -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
+                re.DOTALL
+            )
+
+            match = cue_pattern.search(item.script_content)
+
+            # Fallback: try searching just for AssetID in any cue block
+            if not match:
+                fallback_pattern = re.compile(
+                    r'(<!-- Begin Cue -->.*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
                     re.DOTALL
                 )
-
-                match = cue_pattern.search(item.script_content)
+                match = fallback_pattern.search(item.script_content)
                 if match:
-                    parent_cue = match.group(1)
-                    insertion_point = match.end()
+                    logger.info(f"📎 Found parent cue via fallback pattern (non-SOT type)")
 
-                    # Build cue blocks for each clip
-                    new_cues = []
-                    for clip in clip_results:
-                        # Get transcription and outcue with fallbacks
-                        transcription = clip.get('transcription', '')
-                        outcue = clip.get('outcue', '')
+            if match:
+                parent_cue = match.group(1)
+                insertion_point = match.end()
+                logger.info(f"✅ Found parent cue in item '{item.title}' (id={item.id})")
 
-                        cue_block = f"""
+                # Build cue blocks for each clip
+                new_cues = []
+                for clip in clip_results:
+                    # Get transcription and outcue with fallbacks
+                    transcription = clip.get('transcription', '')
+                    outcue = clip.get('outcue', '')
+
+                    cue_block = f"""
 <!-- Begin Cue -->
 [Type: SOT]
 [AssetID: {clip['asset_id']}]
@@ -1324,24 +1489,34 @@ def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
 [Credits: {{}}]
 <!-- End Cue -->
 """
-                        new_cues.append(cue_block)
+                    new_cues.append(cue_block)
 
-                    # Insert all new cues after parent cue
-                    all_cues = '\n\n'.join(new_cues)
-                    item.script_content = (
-                        item.script_content[:insertion_point] +
-                        '\n\n' + all_cues +
-                        item.script_content[insertion_point:]
-                    )
+                # Insert all new cues after parent cue
+                all_cues = '\n\n'.join(new_cues)
+                item.script_content = (
+                    item.script_content[:insertion_point] +
+                    '\n\n' + all_cues +
+                    item.script_content[insertion_point:]
+                )
 
-                    db.commit()
-                    logger.info(f"✅ Inserted {len(clip_results)} cue blocks after parent {parent_asset_id}")
-                    return
+                db.commit()
+                logger.info(f"✅ Inserted {len(clip_results)} cue blocks after parent {parent_asset_id}")
+                return len(clip_results)
 
-            logger.warning(f"Parent SOT cue {parent_asset_id} not found in episode {episode}")
+        # If we get here, parent cue was not found in any item
+        # Log detailed debug info
+        logger.error(f"❌ Parent SOT cue {parent_asset_id} not found in episode {episode}")
+        logger.error(f"   Searched {len(items)} rundown items")
+        for item in items:
+            if item.script_content and 'AssetID' in item.script_content:
+                # Extract all AssetIDs in this item for debugging
+                asset_ids = re.findall(r'\[AssetID: ([^\]]+)\]', item.script_content)
+                logger.error(f"   Item '{item.title}' has AssetIDs: {asset_ids}")
 
-    except Exception as e:
-        logger.error(f"Failed to insert multiple cue blocks: {e}")
+        raise CueInsertionError(
+            f"Parent SOT cue with AssetID {parent_asset_id} not found in episode {episode}. "
+            f"Searched {len(items)} rundown items."
+        )
 
 
 def _process_montage(temp_job_id, episode, slug, clips, asset_id, working_dir, normalized_slug):
@@ -2329,24 +2504,24 @@ def process_sot_video_multi_phase(
         phase4_thumbs = []
         thumbnail_data = []  # Store (filename, sharpness, time_point) tuples
         for i, time_point in enumerate(thumbnail_times, 1):
-            thumb_file = working_dir / f"{temp_job_id}_4_thumb_{i:02d}.jpg"
+            thumb_file = working_dir / f"{temp_job_id}_4_thumb_{i:02d}.png"
             # Use accurate seeking (-ss after -i) for better frame quality
             # This decodes from nearest keyframe ensuring sharp frames
+            # PNG format for lossless quality
             thumb_cmd = [
                 ffmpeg, "-y",
                 "-i", str(phase3_output),
                 "-ss", str(time_point),
                 "-vframes", "1",
-                "-q:v", "2",
                 str(thumb_file)
             ]
             subprocess.run(thumb_cmd, check=True, capture_output=True)
             phase4_thumbs.append(thumb_file)
 
-            # Calculate sharpness score for this thumbnail
+            # Calculate sharpness score - also validates file exists and is valid PNG
             sharpness = calculate_sharpness_simple(str(thumb_file))
             thumbnail_data.append({
-                'filename': f"{temp_job_id}_4_thumb_{i:02d}.jpg",
+                'filename': f"{temp_job_id}_4_thumb_{i:02d}.png",
                 'sharpness': sharpness,
                 'time': time_point,
                 'index': i
@@ -2380,6 +2555,24 @@ def process_sot_video_multi_phase(
                 db.commit()
 
         logger.info(f"Phase 4: Stored {len(thumbnail_filenames)} thumbnail candidates (best sharpness: {max_sharpness:.1f} at index {best_thumbnail_idx + 1})")
+
+        # Store thumbnail data with sharpness scores in processing_report for API access
+        processing_report["phases"]["phase4"] = {
+            "status": "success",
+            "data": {
+                "thumbnail_count": len(thumbnail_data),
+                "thumbnail_data": thumbnail_data,  # Full array with sharpness scores
+                "best_thumbnail": thumbnail_data_sorted[0] if thumbnail_data_sorted else None,
+                "max_sharpness": max_sharpness,
+                "avg_sharpness": avg_sharpness
+            }
+        }
+
+        # Add blur warning to processing_report if detected
+        if max_sharpness < SHARPNESS_THRESHOLD_BLURRY:
+            processing_report["warnings"].append(f"low_sharpness: All thumbnails appear blurry (max: {max_sharpness:.1f})")
+        elif avg_sharpness < SHARPNESS_THRESHOLD_WARNING:
+            processing_report["warnings"].append(f"moderate_blur: Thumbnails below average sharpness (avg: {avg_sharpness:.1f})")
 
         # Audio extract (full segment)
         phase4_audio = working_dir / f"{temp_job_id}_4_audio.mp3"
@@ -2425,10 +2618,10 @@ def process_sot_video_multi_phase(
         shutil.move(str(phase3_output), str(final_video))
         shutil.move(str(phase4_audio), str(final_audio))
 
-        # Move all 15 thumbnails to thumbnails directory
+        # Move all 15 thumbnails to thumbnails directory (PNG format)
         final_thumbs = []
         for i, thumb_file in enumerate(phase4_thumbs, 1):
-            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.jpg"
+            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.png"
             shutil.move(str(thumb_file), str(final_thumb))
             final_thumbs.append(final_thumb)
 
@@ -2502,9 +2695,9 @@ def process_sot_video_multi_phase(
         seconds = int(duration % 60)
         duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-        # Build thumbnail URLs for all 15 options (now in thumbnails directory)
+        # Build thumbnail URLs for all 15 options (PNG format in thumbnails directory)
         thumbnail_urls = [
-            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.jpg"
+            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.png"
             for i in range(1, 16)
         ]
 
@@ -3033,24 +3226,24 @@ def process_vo_video(
         phase3_thumbs = []
         thumbnail_data = []  # Store (filename, sharpness, time_point) tuples
         for i, time_point in enumerate(thumbnail_times, 1):
-            thumb_file = working_dir / f"{temp_job_id}_thumb_{i:02d}.jpg"
+            thumb_file = working_dir / f"{temp_job_id}_thumb_{i:02d}.png"
             # Use accurate seeking (-ss after -i) for better frame quality
             # This decodes from nearest keyframe ensuring sharp frames
+            # PNG format for lossless quality
             thumb_cmd = [
                 ffmpeg, "-y",
                 "-i", str(current_input),
                 "-ss", str(time_point),
                 "-vframes", "1",
-                "-q:v", "2",
                 str(thumb_file)
             ]
             subprocess.run(thumb_cmd, check=True, capture_output=True)
             phase3_thumbs.append(thumb_file)
 
-            # Calculate sharpness score for this thumbnail
+            # Calculate sharpness score - also validates file exists and is valid PNG
             sharpness = calculate_sharpness_simple(str(thumb_file))
             thumbnail_data.append({
-                'filename': f"{temp_job_id}_thumb_{i:02d}.jpg",
+                'filename': f"{temp_job_id}_thumb_{i:02d}.png",
                 'sharpness': sharpness,
                 'time': time_point,
                 'index': i
@@ -3085,6 +3278,24 @@ def process_vo_video(
 
         logger.info(f"Phase 3 complete: {len(thumbnail_filenames)} thumbnails (best sharpness: {max_sharpness:.1f} at index {best_thumbnail_idx + 1})")
 
+        # Store thumbnail data with sharpness scores in processing_report for API access
+        processing_report["phases"]["phase3"] = {
+            "status": "success",
+            "data": {
+                "thumbnail_count": len(thumbnail_data),
+                "thumbnail_data": thumbnail_data,  # Full array with sharpness scores
+                "best_thumbnail": thumbnail_data_sorted[0] if thumbnail_data_sorted else None,
+                "max_sharpness": max_sharpness,
+                "avg_sharpness": avg_sharpness
+            }
+        }
+
+        # Add blur warning to processing_report if detected
+        if max_sharpness < SHARPNESS_THRESHOLD_BLURRY:
+            processing_report["warnings"].append(f"low_sharpness: All thumbnails appear blurry (max: {max_sharpness:.1f})")
+        elif avg_sharpness < SHARPNESS_THRESHOLD_WARNING:
+            processing_report["warnings"].append(f"moderate_blur: Thumbnails below average sharpness (avg: {avg_sharpness:.1f})")
+
         if asset_id:
             _update_vo_cue_block(episode, slug, asset_id, {
                 'ProcessingStatus': 'Phase 3 Complete: Thumbnails Generated'
@@ -3106,10 +3317,10 @@ def process_vo_video(
         final_video = final_video_dir / f"{normalized_slug}.mp4"
         shutil.move(str(current_input), str(final_video))
 
-        # Move thumbnails
+        # Move thumbnails (PNG format)
         final_thumbs = []
         for i, thumb_file in enumerate(phase3_thumbs, 1):
-            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.jpg"
+            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.png"
             shutil.move(str(thumb_file), str(final_thumb))
             final_thumbs.append(final_thumb)
 
@@ -3166,9 +3377,9 @@ def process_vo_video(
                 job.processing_report = processing_report
                 db.commit()
 
-        # Build thumbnail URLs
+        # Build thumbnail URLs (PNG format)
         thumbnail_urls = [
-            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.jpg"
+            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.png"
             for i in range(1, 16)
         ]
 

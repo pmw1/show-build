@@ -10,136 +10,36 @@
     <v-row>
       <v-col>
         <v-tabs v-model="activeTab" color="primary" class="mb-4">
-          <v-tab value="ai-llm">AI & LLM</v-tab>
+          <v-tab value="ai">AI</v-tab>
+          <v-tab value="third-party-api">Third Party & API</v-tab>
           <v-tab value="interface">Interface</v-tab>
           <v-tab value="content">Content</v-tab>
           <v-tab value="system">System</v-tab>
         </v-tabs>
 
         <v-tabs-window v-model="activeTab">
-          <!-- AI & LLM Tab (consolidates API Access, Generation, Prompts) -->
-          <v-tabs-window-item value="ai-llm">
+          <!-- AI Tab -->
+          <v-tabs-window-item value="ai">
             <v-card flat>
               <v-card-text class="pa-0">
                 <v-tabs v-model="aiSubTab" direction="vertical" color="primary">
-                  <v-tab value="api-access" prepend-icon="mdi-key">API Access</v-tab>
-                  <v-tab value="content-generator" prepend-icon="mdi-text-box-plus" class="font-weight-bold">
-                    Content Generator
-                    <v-chip size="x-small" color="primary" class="ml-2">Ctrl+Alt+Shift+#</v-chip>
-                  </v-tab>
                   <v-tab value="generation" prepend-icon="mdi-creation">Generation</v-tab>
-                  <v-tab value="prompts" prepend-icon="mdi-brain">LLM Prompts</v-tab>
+                  <v-tab value="meta-extraction" prepend-icon="mdi-brain">Meta Extraction</v-tab>
+                  <v-tab value="prompts" prepend-icon="mdi-text-box-outline">LLM Prompts</v-tab>
                 </v-tabs>
 
                 <v-tabs-window v-model="aiSubTab">
-                  <!-- API Access Sub-tab -->
-                  <v-tabs-window-item value="api-access">
-                    <ApiAccessSettings
-                      v-model="apiConfigs"
-                      @save="handleApiSave"
-                    />
-                  </v-tabs-window-item>
-
-                  <!-- Content Generator Sub-tab (Surfaced for easy access) -->
-                  <v-tabs-window-item value="content-generator">
-                    <v-card class="pa-6">
-                      <h3 class="text-h5 mb-2">
-                        <v-icon class="mr-2">mdi-text-box-plus</v-icon>
-                        Test Content Generator
-                      </h3>
-                      <p class="text-body-2 text-grey mb-6">
-                        Generate placeholder script content using local LLM. Triggered by <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>[1-9]</kbd> where the number is paragraph count.
-                      </p>
-
-                      <v-alert type="info" variant="tonal" class="mb-6">
-                        <strong>How it works:</strong> Select a rundown item, press the hotkey, and the LLM will generate broadcast-style script content based on the segment type and duration.
-                      </v-alert>
-
-                      <v-card variant="outlined" class="mb-6">
-                        <v-card-title class="text-subtitle-1">
-                          <v-icon class="mr-2">mdi-robot</v-icon>
-                          LLM Model Selection
-                        </v-card-title>
-                        <v-card-text>
-                          <v-row>
-                            <v-col cols="6">
-                              <v-select
-                                v-model="contentGeneratorService"
-                                :items="contentGeneratorServiceOptions"
-                                label="Service"
-                                variant="outlined"
-                                density="comfortable"
-                                hint="Which LLM service to use"
-                                persistent-hint
-                              />
-                            </v-col>
-                            <v-col cols="6">
-                              <v-select
-                                v-model="contentGeneratorModel"
-                                :items="contentGeneratorModelOptions"
-                                label="Model"
-                                variant="outlined"
-                                density="comfortable"
-                                :disabled="!contentGeneratorService || contentGeneratorService === 'auto'"
-                                hint="Specific model for content generation"
-                                persistent-hint
-                              />
-                            </v-col>
-                          </v-row>
-                          <v-row class="mt-4">
-                            <v-col cols="12">
-                              <v-btn
-                                color="primary"
-                                variant="elevated"
-                                @click="saveContentGeneratorSettings"
-                                :loading="savingContentGenerator"
-                              >
-                                <v-icon left>mdi-content-save</v-icon>
-                                Save Model Selection
-                              </v-btn>
-                              <v-btn
-                                variant="text"
-                                class="ml-2"
-                                @click="resetContentGeneratorToDefaults"
-                              >
-                                Reset to Defaults
-                              </v-btn>
-                            </v-col>
-                          </v-row>
-                        </v-card-text>
-                      </v-card>
-
-                      <v-card variant="outlined">
-                        <v-card-title class="text-subtitle-1">
-                          <v-icon class="mr-2">mdi-server</v-icon>
-                          Available Ollama Models
-                        </v-card-title>
-                        <v-card-text>
-                          <v-chip-group>
-                            <v-chip
-                              v-for="model in availableOllamaModels"
-                              :key="model"
-                              size="small"
-                              :color="contentGeneratorModel === model ? 'primary' : 'default'"
-                              @click="selectOllamaModel(model)"
-                            >
-                              {{ model }}
-                            </v-chip>
-                          </v-chip-group>
-                          <p v-if="!availableOllamaModels.length" class="text-grey mt-2">
-                            Loading models from Ollama server...
-                          </p>
-                        </v-card-text>
-                      </v-card>
-                    </v-card>
-                  </v-tabs-window-item>
-
                   <!-- Generation Sub-tab -->
                   <v-tabs-window-item value="generation">
                     <GenerationSettings
                       v-model="generationSettings"
                       @save="handleGenerationSave"
                     />
+                  </v-tabs-window-item>
+
+                  <!-- Meta Extraction Sub-tab -->
+                  <v-tabs-window-item value="meta-extraction">
+                    <MetaExtractionSettings />
                   </v-tabs-window-item>
 
                   <!-- LLM Prompts Sub-tab -->
@@ -149,6 +49,14 @@
                 </v-tabs-window>
               </v-card-text>
             </v-card>
+          </v-tabs-window-item>
+
+          <!-- Third Party & API Tab -->
+          <v-tabs-window-item value="third-party-api">
+            <ApiAccessSettings
+              v-model="apiConfigs"
+              @save="handleApiSave"
+            />
           </v-tabs-window-item>
 
           <!-- Interface Tab -->
@@ -198,6 +106,7 @@
 import InterfaceSettings from '@/components/settings/InterfaceSettings.vue'
 import ApiAccessSettings from '@/components/settings/ApiAccessSettings.vue'
 import GenerationSettings from '@/components/settings/GenerationSettings.vue'
+import MetaExtractionSettings from '@/components/settings/MetaExtractionSettings.vue'
 import SystemSettings from '@/components/settings/SystemSettings.vue'
 import PromptManager from '@/components/PromptManager.vue'
 import RundownTemplateManager from '@/components/settings/RundownTemplateManager.vue'
@@ -209,6 +118,7 @@ export default {
     InterfaceSettings,
     ApiAccessSettings,
     GenerationSettings,
+    MetaExtractionSettings,
     SystemSettings,
     PromptManager,
     RundownTemplateManager,
@@ -216,8 +126,8 @@ export default {
   },
   data() {
     return {
-      activeTab: localStorage.getItem('settingsActiveTab') || 'ai-llm', // Restore last used tab or default to AI & LLM
-      aiSubTab: localStorage.getItem('settingsAiSubTab') || 'api-access', // Sub-tab for AI & LLM section
+      activeTab: localStorage.getItem('settingsActiveTab') || 'ai', // Restore last used tab or default to AI
+      aiSubTab: localStorage.getItem('settingsAiSubTab') || 'generation', // Sub-tab for AI section
       contentSubTab: localStorage.getItem('settingsContentSubTab') || 'rundown-templates', // Sub-tab for Content section
       apiConfigs: {
         ollama: {
@@ -341,6 +251,14 @@ export default {
         editorWordWrap: true,
         editorAutoSave: true,
         pastePlainTextOnly: true,  // Strip formatting when pasting (enabled by default)
+        // Autoformat settings
+        autoformatEnabled: true,           // Enable periodic autoformat
+        autoformatInterval: 30,            // Interval in seconds (default 30)
+        autoformatStripSpans: true,        // Strip <span> tags from Google Docs
+        autoformatRemoveEmptyParagraphs: true,  // Remove empty <p> tags
+        autoformatRemoveLeadingDashes: true,    // Remove leading dashes from paragraphs
+        autoformatCleanWhitespace: true,   // Clean up extra spaces and &nbsp;
+        // Layout settings
         sidebarWidth: 300,
         compactMode: false,
         showToolbarLabels: true,

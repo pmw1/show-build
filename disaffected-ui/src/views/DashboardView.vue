@@ -19,7 +19,7 @@
                 <span>Active Tools</span>
               </v-card-title>
               <v-card-text class="pa-2">
-                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/tools')">
+                <v-card variant="outlined" class="hover-card mb-2" @click="openEpisodeModal">
                   <v-card-text class="d-flex align-center pa-3">
                     <v-icon color="primary" size="32" class="me-3">mdi-plus-circle-outline</v-icon>
                     <div>
@@ -60,12 +60,12 @@
             <TodoPanel />
           </v-col>
 
-          <!-- Preshow Panel -->
+          <!-- Preproduction Panel -->
           <v-col cols="12" sm="6" lg="3" class="pa-1">
             <v-card class="elevation-4">
               <v-card-title class="d-flex align-center bg-purple text-white">
                 <v-icon class="me-2">mdi-lightbulb-on</v-icon>
-                <span>Preshow</span>
+                <span>Preproduction</span>
               </v-card-title>
               <v-card-text class="pa-2">
                 <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/whiteboard')">
@@ -74,6 +74,15 @@
                     <div>
                       <div class="text-subtitle-1 font-weight-bold">Whiteboard</div>
                       <div class="text-caption text-grey">Brainstorm ideas and links</div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/generator')">
+                  <v-card-text class="d-flex align-center pa-3">
+                    <v-icon color="purple" size="32" class="me-3">mdi-creation</v-icon>
+                    <div>
+                      <div class="text-subtitle-1 font-weight-bold">Generator</div>
+                      <div class="text-caption text-grey">AI content generation</div>
                     </div>
                   </v-card-text>
                 </v-card>
@@ -414,6 +423,9 @@
         </v-row>
       </v-col>
     </v-row>
+
+    <!-- Episode Creation Modal (hidden activator, triggered programmatically) -->
+    <EpisodeScaffoldModal ref="episodeModalRef" @episode-created="onEpisodeCreated" />
   </v-container>
 </template>
 
@@ -425,8 +437,12 @@ import { useSystemHealth } from '@/composables/useSystemHealth'
 import AnnouncementsPanel from '@/components/AnnouncementsPanel.vue'
 import TodoPanel from '@/components/TodoPanel.vue'
 import NextShowPanel from '@/components/NextShowPanel.vue'
+import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'
 
 const router = useRouter()
+
+// Episode creation modal ref
+const episodeModalRef = ref(null)
 const { health } = useSystemHealth()
 
 // Reactive data
@@ -493,9 +509,18 @@ const getStatusColor = (status) => {
 
 
 // Quick action handlers
+const openEpisodeModal = () => {
+  episodeModalRef.value?.open()
+}
+
 const createNewEpisode = () => {
-  router.push('/episodes')
-  // TODO: Open new episode modal
+  openEpisodeModal()
+}
+
+const onEpisodeCreated = (episode) => {
+  console.log('Episode created:', episode)
+  // Optionally refresh dashboard data
+  fetchUpcomingEpisodes()
 }
 
 const openVoiceTest = () => {

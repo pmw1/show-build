@@ -241,6 +241,88 @@
               </v-list>
             </v-expansion-panel-text>
           </v-expansion-panel>
+
+          <!-- Production Tools (Disabled - Pending Testing) -->
+          <v-expansion-panel>
+            <v-expansion-panel-title>
+              <div class="d-flex align-center">
+                <v-icon class="me-2" color="grey">mdi-wrench-cog</v-icon>
+                <span class="text-h6">Production Tools</span>
+                <v-chip size="x-small" color="warning" class="ms-2">Testing</v-chip>
+              </div>
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <v-list lines="two">
+                <!-- Health Check -->
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-heart-pulse</v-icon>
+                  </template>
+                  <v-list-item-title>System Health Check</v-list-item-title>
+                  <v-list-item-subtitle>Extended diagnostics for database, Redis, Celery, storage, and APIs</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Pending Test</v-chip>
+                  </template>
+                </v-list-item>
+
+                <v-divider class="my-2" />
+
+                <!-- Asset Validator -->
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-check-decagram</v-icon>
+                  </template>
+                  <v-list-item-title>Asset Metadata Validator</v-list-item-title>
+                  <v-list-item-subtitle>Scan cue blocks for missing fields and invalid values</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Pending Test</v-chip>
+                  </template>
+                </v-list-item>
+
+                <v-divider class="my-2" />
+
+                <!-- Duration Reconciliation -->
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-timer-sync</v-icon>
+                  </template>
+                  <v-list-item-title>Duration Reconciliation</v-list-item-title>
+                  <v-list-item-subtitle>Compare database durations with actual media file durations</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Pending Test</v-chip>
+                  </template>
+                </v-list-item>
+
+                <v-divider class="my-2" />
+
+                <!-- Rundown Overview -->
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-compare</v-icon>
+                  </template>
+                  <v-list-item-title>Rundown Overview</v-list-item-title>
+                  <v-list-item-subtitle>View rundown structure, item counts, and summary statistics</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Pending Test</v-chip>
+                  </template>
+                </v-list-item>
+
+                <v-divider class="my-2" />
+
+                <!-- Production Report -->
+                <v-list-item disabled>
+                  <template v-slot:prepend>
+                    <v-icon>mdi-file-document-outline</v-icon>
+                  </template>
+                  <v-list-item-title>Production Report</v-list-item-title>
+                  <v-list-item-subtitle>Generate comprehensive HTML report for an episode</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip size="small" variant="outlined">Pending Test</v-chip>
+                  </template>
+                </v-list-item>
+              </v-list>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
         </v-expansion-panels>
       </v-col>
     </v-row>
@@ -307,6 +389,12 @@
 import { ref, inject } from 'vue'
 import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'
 import EpisodeNameNormalizerModal from '@/components/EpisodeNameNormalizerModal.vue'
+// Production Tools - Disabled pending testing
+// import HealthCheckModal from '@/components/tools/HealthCheckModal.vue'
+// import AssetValidatorModal from '@/components/tools/AssetValidatorModal.vue'
+// import DurationReconcileModal from '@/components/tools/DurationReconcileModal.vue'
+// import RundownDiffModal from '@/components/tools/RundownDiffModal.vue'
+// import ProductionReportModal from '@/components/tools/ProductionReportModal.vue'
 
 // Inject axios
 const axios = inject('axios')

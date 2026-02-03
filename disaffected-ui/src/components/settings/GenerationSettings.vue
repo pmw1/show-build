@@ -9,6 +9,14 @@
           color="primary"
           class="generation-vertical-tabs"
         >
+          <v-tab value="real-content" prepend-icon="mdi-creation">
+            Real Content
+            <v-chip size="x-small" color="success" class="ml-2">Production</v-chip>
+          </v-tab>
+          <v-tab value="test-content" prepend-icon="mdi-test-tube">
+            Test Content
+            <v-chip size="x-small" color="warning" class="ml-2">Dev</v-chip>
+          </v-tab>
           <v-tab value="fsq-generator" prepend-icon="mdi-format-quote-close">
             FSQ Quote Generator
           </v-tab>
@@ -27,6 +35,1219 @@
       <!-- Tab Content on Right -->
       <v-col cols="9">
         <v-tabs-window v-model="generationSubTab" class="pa-6">
+
+          <!-- Real Content Generator -->
+          <v-tabs-window-item value="real-content">
+            <h3 class="text-h6 mb-4">
+              <v-icon left>mdi-creation</v-icon>
+              Real Content Generator
+            </h3>
+            <p class="text-body-2 mb-4">Configure AI-assisted content generation for production scripts.</p>
+
+            <!-- Show Identity Section -->
+            <v-card variant="outlined" class="mb-4">
+              <v-expansion-panels v-model="showIdentityPanel">
+                <v-expansion-panel
+                  value="identity"
+                  :class="[
+                    'show-identity-panel',
+                    `show-identity-${showIdentityStatus}`
+                  ]"
+                >
+                  <v-expansion-panel-title>
+                    <div class="d-flex align-center flex-grow-1">
+                      <v-icon class="mr-2">mdi-bullseye-arrow</v-icon>
+                      <span class="text-subtitle-1 font-weight-medium">Show Identity</span>
+                      <v-spacer />
+                      <v-chip
+                        v-if="showIdentityStatus === 'complete'"
+                        size="x-small"
+                        color="success"
+                        class="mr-2"
+                      >
+                        Configured
+                      </v-chip>
+                      <v-chip
+                        v-else-if="showIdentityStatus === 'partial'"
+                        size="x-small"
+                        color="warning"
+                        class="mr-2"
+                      >
+                        Incomplete
+                      </v-chip>
+                      <v-chip
+                        v-else
+                        size="x-small"
+                        color="error"
+                        class="mr-2"
+                      >
+                        Not Set
+                      </v-chip>
+                    </div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text>
+                    <p class="text-caption text-grey mb-3">
+                      This context is automatically included in all LLM prompts to ensure consistent, on-brand content generation.
+                    </p>
+                    <v-textarea
+                      v-model="realContentSettings.showIdentity.thesis"
+                      label="Show Thesis / Mission"
+                      hint="The core purpose, perspective, or objective of the show. What is it about? What does it stand for?"
+                      persistent-hint
+                      variant="outlined"
+                      density="compact"
+                      rows="3"
+                      class="mb-3"
+                    />
+                    <v-textarea
+                      v-model="realContentSettings.showIdentity.tone"
+                      label="Tone & Voice"
+                      hint="How should content sound? (e.g., skeptical, irreverent, fact-based, conversational)"
+                      persistent-hint
+                      variant="outlined"
+                      density="compact"
+                      rows="2"
+                      class="mb-3"
+                    />
+                    <v-textarea
+                      v-model="realContentSettings.showIdentity.audience"
+                      label="Target Audience"
+                      hint="Who is this show for? What do they care about?"
+                      persistent-hint
+                      variant="outlined"
+                      density="compact"
+                      rows="2"
+                    />
+                    <div class="d-flex justify-end mt-3">
+                      <v-btn
+                        color="primary"
+                        variant="tonal"
+                        size="small"
+                        @click="saveShowIdentity"
+                        :loading="savingShowIdentity"
+                      >
+                        <v-icon left size="small">mdi-content-save</v-icon>
+                        Save Show Identity
+                      </v-btn>
+                    </div>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+              </v-expansion-panels>
+            </v-card>
+
+            <!-- Descriptions Section -->
+            <v-card variant="outlined" class="pa-4 mb-4">
+              <h4 class="text-subtitle-1 mb-3 d-flex align-center">
+                <v-icon class="mr-2">mdi-text-box-outline</v-icon>
+                Descriptions
+              </h4>
+              <v-expansion-panels variant="accordion" multiple v-model="descriptionPanels">
+                <!-- Episode Description -->
+                <v-expansion-panel value="episode" class="desc-panel-episode">
+                  <v-expansion-panel-title>
+                    <div class="d-flex align-center flex-grow-1">
+                      <v-icon class="mr-2" size="small">mdi-movie-open</v-icon>
+                      <span>Episode Description</span>
+                      <v-spacer />
+                      <v-chip
+                        v-if="realContentSettings.episodeDescription.enabled"
+                        size="x-small"
+                        color="success"
+                        class="mr-2"
+                      >
+                        Enabled
+                      </v-chip>
+                    </div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text>
+                    <v-switch
+                      v-model="realContentSettings.episodeDescription.enabled"
+                      label="Enable Episode Description Generation"
+                      color="primary"
+                      density="compact"
+                      class="mb-2"
+                    />
+
+                    <!-- Collapsed state when disabled -->
+                    <v-alert
+                      v-if="!realContentSettings.episodeDescription.enabled"
+                      type="info"
+                      variant="tonal"
+                      density="compact"
+                    >
+                      Enable to configure episode description generation settings
+                    </v-alert>
+
+                    <!-- Expanded settings when enabled -->
+                    <div v-if="realContentSettings.episodeDescription.enabled">
+                      <v-divider class="my-3" />
+
+                      <!-- Show Identity Injection -->
+                      <v-checkbox
+                        v-model="realContentSettings.episodeDescription.injectShowIdentity"
+                        label="Inject Show Identity"
+                        hint="Include show thesis, tone, and audience context in the prompt"
+                        persistent-hint
+                        density="compact"
+                        hide-details="auto"
+                        class="mb-3"
+                        :disabled="!realContentSettings.showIdentity.thesis"
+                      />
+                      <v-alert
+                        v-if="!realContentSettings.showIdentity.thesis"
+                        type="warning"
+                        variant="tonal"
+                        density="compact"
+                        class="mb-3"
+                      >
+                        <small>Configure Show Identity above to enable injection</small>
+                      </v-alert>
+
+                      <!-- Include (if exists) -->
+                      <h6 class="text-subtitle-2 mb-2">Include (if exists)</h6>
+                      <p class="text-caption text-grey mb-2">Select which available information to include in the generated description</p>
+
+                      <v-row dense class="mb-3">
+                        <v-col cols="4">
+                          <v-checkbox
+                            v-model="realContentSettings.episodeDescription.includeTitle"
+                            label="Show Title"
+                            density="compact"
+                            hide-details
+                          />
+                        </v-col>
+                        <v-col cols="4">
+                          <v-checkbox
+                            v-model="realContentSettings.episodeDescription.includeGuestInfo"
+                            label="Guest Name/Info"
+                            density="compact"
+                            hide-details
+                          />
+                        </v-col>
+                        <v-col cols="4">
+                          <v-checkbox
+                            v-model="realContentSettings.episodeDescription.mentionSpeaker"
+                            label="Speaker Mention"
+                            density="compact"
+                            hide-details
+                          />
+                        </v-col>
+                      </v-row>
+
+                      <!-- Item Types - Dynamically loaded from itemTypes.js config -->
+                      <div class="mb-3">
+                        <span class="text-body-2 font-weight-medium">Include content from Item types:</span>
+                        <v-row class="mt-2" dense>
+                          <v-col
+                            v-for="itemType in availableItemTypes"
+                            :key="itemType.value"
+                            cols="4"
+                          >
+                            <v-checkbox
+                              v-model="realContentSettings.episodeDescription.itemTypes[itemType.value]"
+                              :label="itemType.title"
+                              density="compact"
+                              hide-details
+                            >
+                              <template v-slot:label>
+                                <div class="d-flex align-center">
+                                  <v-icon size="x-small" :color="itemType.color" class="mr-1">{{ itemType.icon }}</v-icon>
+                                  <span>{{ itemType.title }}</span>
+                                </div>
+                              </template>
+                            </v-checkbox>
+                          </v-col>
+                        </v-row>
+                      </div>
+
+                      <v-divider class="my-3" />
+
+                      <!-- Generation Options -->
+                      <h6 class="text-subtitle-2 mb-2">Generation Options</h6>
+
+                      <v-switch
+                        v-model="realContentSettings.episodeDescription.weightSegmentDescriptions"
+                        label="Weight Segment Descriptions more heavily"
+                        color="primary"
+                        density="compact"
+                        hint="Prioritize segment descriptions when generating episode summary"
+                        persistent-hint
+                        class="mb-2"
+                      />
+
+                      <v-switch
+                        v-model="realContentSettings.episodeDescription.exposeSpecialInstructions"
+                        label="Expose special instructions text field"
+                        color="primary"
+                        density="compact"
+                        hint="Show a text field for custom generation instructions when generating"
+                        persistent-hint
+                        class="mb-2"
+                      />
+
+                      <v-switch
+                        v-model="realContentSettings.episodeDescription.allowInteractiveIteration"
+                        label="Allow interactive iteration"
+                        color="primary"
+                        density="compact"
+                        hint="Enable regeneration with feedback after initial generation"
+                        persistent-hint
+                        class="mb-3"
+                      />
+
+                      <v-divider class="my-3" />
+
+                      <!-- LLM Preference Order -->
+                      <h6 class="text-subtitle-2 mb-2">LLM Preference Order</h6>
+                      <p class="text-caption text-grey mb-3">
+                        Set the order of LLMs to try for episode description generation. The system will attempt each in order until one succeeds.
+                      </p>
+
+                      <div class="llm-preference-list mb-3">
+                        <v-row
+                          v-for="(pref, index) in realContentSettings.episodeDescription.llmPreferenceOrder"
+                          :key="index"
+                          align="center"
+                          dense
+                          class="mb-2"
+                        >
+                          <v-col cols="1" class="text-center">
+                            <v-chip size="small" color="primary" variant="tonal">{{ index + 1 }}</v-chip>
+                          </v-col>
+                          <v-col cols="8">
+                            <v-select
+                              v-model="realContentSettings.episodeDescription.llmPreferenceOrder[index]"
+                              :items="allAvailableLLMs"
+                              item-title="title"
+                              item-value="value"
+                              label="Select LLM"
+                              variant="outlined"
+                              density="compact"
+                              hide-details
+                            >
+                              <template v-slot:item="{ item, props }">
+                                <v-list-item v-bind="props">
+                                  <template v-slot:prepend>
+                                    <v-icon size="small">{{ item.raw.icon }}</v-icon>
+                                  </template>
+                                </v-list-item>
+                              </template>
+                            </v-select>
+                          </v-col>
+                          <v-col cols="3" class="d-flex justify-end">
+                            <v-btn
+                              icon
+                              size="x-small"
+                              variant="text"
+                              :disabled="index === 0"
+                              @click="moveLLMPreferenceUp(index)"
+                            >
+                              <v-icon size="small">mdi-arrow-up</v-icon>
+                            </v-btn>
+                            <v-btn
+                              icon
+                              size="x-small"
+                              variant="text"
+                              :disabled="index === realContentSettings.episodeDescription.llmPreferenceOrder.length - 1"
+                              @click="moveLLMPreferenceDown(index)"
+                            >
+                              <v-icon size="small">mdi-arrow-down</v-icon>
+                            </v-btn>
+                            <v-btn
+                              icon
+                              size="x-small"
+                              variant="text"
+                              color="error"
+                              @click="removeLLMPreference(index)"
+                            >
+                              <v-icon size="small">mdi-close</v-icon>
+                            </v-btn>
+                          </v-col>
+                        </v-row>
+
+                        <v-btn
+                          variant="tonal"
+                          color="primary"
+                          size="small"
+                          prepend-icon="mdi-plus"
+                          @click="addLLMPreference"
+                          class="mt-2"
+                        >
+                          Add LLM
+                        </v-btn>
+
+                        <v-alert
+                          v-if="realContentSettings.episodeDescription.llmPreferenceOrder.length === 0"
+                          type="info"
+                          variant="tonal"
+                          density="compact"
+                          class="mt-2"
+                        >
+                          No LLM preferences set. Click "Add LLM" to configure the preference order.
+                        </v-alert>
+                      </div>
+
+                      <v-divider class="my-3" />
+
+                      <!-- Generation Prompt -->
+                      <h6 class="text-subtitle-2 mb-2">Generation Prompt</h6>
+
+                      <!-- Available Template Variables -->
+                      <v-card variant="tonal" color="grey-darken-3" class="pa-3 mb-3">
+                        <div class="d-flex align-center mb-2">
+                          <v-icon size="small" class="mr-2">mdi-code-braces</v-icon>
+                          <span class="text-caption font-weight-medium">Available Template Variables</span>
+                          <v-spacer />
+                          <v-btn
+                            size="x-small"
+                            variant="text"
+                            @click="generateDefaultEpisodePrompt"
+                          >
+                            Generate Default
+                          </v-btn>
+                        </div>
+                        <div class="template-vars-grid">
+                          <!-- Episode Info -->
+                          <div class="var-group">
+                            <span class="var-label">Episode Info</span>
+                            <div class="d-flex flex-wrap ga-1">
+                              <v-chip size="x-small" variant="outlined" @click="insertVariable('{{episode_number}}')" class="cursor-pointer">
+                                {{episode_number}}
+                              </v-chip>
+                              <v-chip size="x-small" variant="outlined" @click="insertVariable('{{show_name}}')" class="cursor-pointer">
+                                {{show_name}}
+                              </v-chip>
+                              <v-chip size="x-small" variant="outlined" @click="insertVariable('{{air_date}}')" class="cursor-pointer">
+                                {{air_date}}
+                              </v-chip>
+                              <v-chip size="x-small" variant="outlined" @click="insertVariable('{{duration}}')" class="cursor-pointer">
+                                {{duration}}
+                              </v-chip>
+                            </div>
+                          </div>
+
+                          <!-- Title (conditional) -->
+                          <div v-if="realContentSettings.episodeDescription.includeTitle" class="var-group">
+                            <span class="var-label text-blue">Title</span>
+                            <div class="d-flex flex-wrap ga-1">
+                              <v-chip size="x-small" variant="flat" color="blue" @click="insertVariable('{{title}}')" class="cursor-pointer">
+                                {{title}}
+                              </v-chip>
+                            </div>
+                          </div>
+
+                          <!-- Guest Info (conditional) -->
+                          <div v-if="realContentSettings.episodeDescription.includeGuestInfo" class="var-group">
+                            <span class="var-label text-teal">Guest Info</span>
+                            <div class="d-flex flex-wrap ga-1">
+                              <v-chip size="x-small" variant="flat" color="teal" @click="insertVariable('{{guest_names}}')" class="cursor-pointer">
+                                {{guest_names}}
+                              </v-chip>
+                              <v-chip size="x-small" variant="flat" color="teal" @click="insertVariable('{{guest_bios}}')" class="cursor-pointer">
+                                {{guest_bios}}
+                              </v-chip>
+                            </div>
+                          </div>
+
+                          <!-- Speaker (conditional) -->
+                          <div v-if="realContentSettings.episodeDescription.mentionSpeaker" class="var-group">
+                            <span class="var-label text-orange">Speaker</span>
+                            <div class="d-flex flex-wrap ga-1">
+                              <v-chip size="x-small" variant="flat" color="orange" @click="insertVariable('{{speaker_name}}')" class="cursor-pointer">
+                                {{speaker_name}}
+                              </v-chip>
+                              <v-chip size="x-small" variant="flat" color="orange" @click="insertVariable('{{host_name}}')" class="cursor-pointer">
+                                {{host_name}}
+                              </v-chip>
+                            </div>
+                          </div>
+
+                          <!-- Content -->
+                          <div class="var-group">
+                            <span class="var-label text-green">Content</span>
+                            <div class="d-flex flex-wrap ga-1">
+                              <v-chip size="x-small" variant="flat" color="green" @click="insertVariable('{{segment_summaries}}')" class="cursor-pointer">
+                                {{segment_summaries}}
+                              </v-chip>
+                              <v-chip size="x-small" variant="flat" color="green" @click="insertVariable('{{segment_titles}}')" class="cursor-pointer">
+                                {{segment_titles}}
+                              </v-chip>
+                              <v-chip v-if="realContentSettings.episodeDescription.weightSegmentDescriptions" size="x-small" variant="flat" color="purple" @click="insertVariable('{{weighted_content}}')" class="cursor-pointer">
+                                {{weighted_content}}
+                              </v-chip>
+                            </div>
+                          </div>
+
+                          <!-- Topics & Quotes -->
+                          <div class="var-group">
+                            <span class="var-label">Topics & Quotes</span>
+                            <div class="d-flex flex-wrap ga-1">
+                              <v-chip size="x-small" variant="outlined" @click="insertVariable('{{topics}}')" class="cursor-pointer">
+                                {{topics}}
+                              </v-chip>
+                              <v-chip size="x-small" variant="outlined" @click="insertVariable('{{key_quotes}}')" class="cursor-pointer">
+                                {{key_quotes}}
+                              </v-chip>
+                            </div>
+                          </div>
+                        </div>
+                        <p class="text-caption text-grey mt-2 mb-0">
+                          <v-icon size="x-small">mdi-information-outline</v-icon>
+                          Click a variable to insert it. Colored chips are enabled by your selections above.
+                        </p>
+                      </v-card>
+
+                      <!-- Conditional Logic Blocks -->
+                      <v-card variant="tonal" color="grey-darken-4" class="pa-3 mb-3">
+                        <div class="d-flex align-center mb-2">
+                          <v-icon size="small" class="mr-2">mdi-code-brackets</v-icon>
+                          <span class="text-caption font-weight-medium">Conditional Logic Blocks</span>
+                          <v-spacer />
+                          <v-btn
+                            size="x-small"
+                            variant="text"
+                            color="grey"
+                            @click="showConditionalHelp = !showConditionalHelp"
+                          >
+                            <v-icon size="small" class="mr-1">mdi-help-circle-outline</v-icon>
+                            {{ showConditionalHelp ? 'Hide' : 'Show' }} Reference
+                          </v-btn>
+                        </div>
+
+                        <!-- Expandable Help Reference -->
+                        <v-expand-transition>
+                          <v-card v-if="showConditionalHelp" variant="outlined" color="grey-darken-3" class="mb-3 pa-3">
+                            <div class="text-caption mb-2">
+                              <strong>Syntax:</strong> <code>{% if condition %}your content here{% endif %}</code>
+                            </div>
+                            <v-divider class="my-2" />
+                            <v-table density="compact" class="conditional-help-table">
+                              <thead>
+                                <tr>
+                                  <th class="text-left">Condition</th>
+                                  <th class="text-left">True When</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr class="text-cyan">
+                                  <td><code>include_title</code></td>
+                                  <td>Show Title checkbox is enabled AND episode has a title</td>
+                                </tr>
+                                <tr class="text-cyan">
+                                  <td><code>include_guest_info</code></td>
+                                  <td>Guest Name/Info checkbox is enabled AND episode has guest data</td>
+                                </tr>
+                                <tr class="text-cyan">
+                                  <td><code>mention_speaker</code></td>
+                                  <td>Speaker Mention checkbox is enabled AND host/speaker is defined</td>
+                                </tr>
+                                <tr class="text-amber">
+                                  <td><code>has_segments</code></td>
+                                  <td>Episode contains segment-type rundown items</td>
+                                </tr>
+                                <tr class="text-amber">
+                                  <td><code>has_interviews</code></td>
+                                  <td>Episode contains interview-type rundown items</td>
+                                </tr>
+                                <tr class="text-amber">
+                                  <td><code>weight_segments</code></td>
+                                  <td>Weight Segment Descriptions option is enabled</td>
+                                </tr>
+                                <tr class="text-pink">
+                                  <td><code>has_quotes</code></td>
+                                  <td>Episode has key quotes extracted from content</td>
+                                </tr>
+                                <tr class="text-pink">
+                                  <td><code>has_topics</code></td>
+                                  <td>Episode has topics/tags assigned</td>
+                                </tr>
+                                <tr class="text-pink">
+                                  <td><code>has_duration</code></td>
+                                  <td>Episode has a calculated or assigned duration</td>
+                                </tr>
+                              </tbody>
+                            </v-table>
+                            <div class="text-caption text-grey mt-2">
+                              <v-icon size="x-small">mdi-lightbulb-outline</v-icon>
+                              Tip: Combine conditionals with variables, e.g., <code>{% if has_quotes %}Notable quotes: {{key_quotes}}{% endif %}</code>
+                            </div>
+                          </v-card>
+                        </v-expand-transition>
+                        <div class="template-vars-grid">
+                          <!-- Include Options -->
+                          <div class="var-group">
+                            <span class="var-label text-cyan">Include Options</span>
+                            <div class="d-flex flex-wrap ga-1">
+                              <v-chip
+                                size="x-small"
+                                variant="flat"
+                                color="cyan"
+                                @click="insertConditional('include_title', 'Include the episode title {{title}} in the description.')"
+                                class="cursor-pointer"
+                              >
+                                if include_title
+                              </v-chip>
+                              <v-chip
+                                size="x-small"
+                                variant="flat"
+                                color="cyan"
+                                @click="insertConditional('include_guest_info', 'Feature the guest(s): {{guest_names}}.')"
+                                class="cursor-pointer"
+                              >
+                                if include_guest_info
+                              </v-chip>
+                              <v-chip
+                                size="x-small"
+                                variant="flat"
+                                color="cyan"
+                                @click="insertConditional('mention_speaker', 'Hosted by {{host_name}}.')"
+                                class="cursor-pointer"
+                              >
+                                if mention_speaker
+                              </v-chip>
+                            </div>
+                          </div>
+
+                          <!-- Content Types -->
+                          <div class="var-group">
+                            <span class="var-label text-amber">Content Types</span>
+                            <div class="d-flex flex-wrap ga-1">
+                              <v-chip
+                                size="x-small"
+                                variant="flat"
+                                color="amber"
+                                @click="insertConditional('has_segments', 'Cover these segments: {{segment_titles}}.')"
+                                class="cursor-pointer"
+                              >
+                                if has_segments
+                              </v-chip>
+                              <v-chip
+                                size="x-small"
+                                variant="flat"
+                                color="amber"
+                                @click="insertConditional('has_interviews', 'Highlight the interview content.')"
+                                class="cursor-pointer"
+                              >
+                                if has_interviews
+                              </v-chip>
+                              <v-chip
+                                size="x-small"
+                                variant="flat"
+                                color="amber"
+                                @click="insertConditional('weight_segments', 'Emphasize segment descriptions: {{weighted_content}}.')"
+                                class="cursor-pointer"
+                              >
+                                if weight_segments
+                              </v-chip>
+                            </div>
+                          </div>
+
+                          <!-- Data Availability -->
+                          <div class="var-group">
+                            <span class="var-label text-pink">Data Checks</span>
+                            <div class="d-flex flex-wrap ga-1">
+                              <v-chip
+                                size="x-small"
+                                variant="flat"
+                                color="pink"
+                                @click="insertConditional('has_quotes', 'Include notable quotes: {{key_quotes}}.')"
+                                class="cursor-pointer"
+                              >
+                                if has_quotes
+                              </v-chip>
+                              <v-chip
+                                size="x-small"
+                                variant="flat"
+                                color="pink"
+                                @click="insertConditional('has_topics', 'Topics covered: {{topics}}.')"
+                                class="cursor-pointer"
+                              >
+                                if has_topics
+                              </v-chip>
+                              <v-chip
+                                size="x-small"
+                                variant="flat"
+                                color="pink"
+                                @click="insertConditional('has_duration', 'Runtime: {{duration}}.')"
+                                class="cursor-pointer"
+                              >
+                                if has_duration
+                              </v-chip>
+                            </div>
+                          </div>
+                        </div>
+                        <p class="text-caption text-grey mt-2 mb-0">
+                          <v-icon size="x-small">mdi-information-outline</v-icon>
+                          Click to insert conditional block. Edit the content inside {% if %}...{% endif %} as needed.
+                        </p>
+                      </v-card>
+
+                      <v-textarea
+                        ref="episodePromptTextarea"
+                        v-model="realContentSettings.episodeDescription.prompt"
+                        label="Default Prompt Template"
+                        variant="outlined"
+                        density="compact"
+                        rows="9"
+                        hint="Custom prompt for generating episode descriptions. Use {{variables}} and {% if condition %}...{% endif %} blocks."
+                        persistent-hint
+                        class="mb-3"
+                      />
+
+                      <!-- Length Settings -->
+                      <v-row>
+                        <v-col cols="6">
+                          <v-text-field
+                            v-model.number="realContentSettings.episodeDescription.minLength"
+                            label="Min Length"
+                            type="number"
+                            variant="outlined"
+                            density="compact"
+                            suffix="chars"
+                          />
+                        </v-col>
+                        <v-col cols="6">
+                          <v-text-field
+                            v-model.number="realContentSettings.episodeDescription.maxLength"
+                            label="Max Length"
+                            type="number"
+                            variant="outlined"
+                            density="compact"
+                            suffix="chars"
+                          />
+                        </v-col>
+                      </v-row>
+
+                      <v-divider class="my-4" />
+
+                      <!-- Save Button -->
+                      <div class="d-flex justify-end">
+                        <v-btn
+                          color="primary"
+                          variant="elevated"
+                          @click="saveEpisodeDescriptionSettings"
+                          :loading="savingEpisodeDescription"
+                          prepend-icon="mdi-content-save"
+                        >
+                          Save Episode Description Settings
+                        </v-btn>
+                      </div>
+                    </div>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+
+                <!-- Segment Description -->
+                <v-expansion-panel value="segment" class="desc-panel-segment">
+                  <v-expansion-panel-title>
+                    <div class="d-flex align-center flex-grow-1">
+                      <v-icon class="mr-2" size="small">mdi-script-text-outline</v-icon>
+                      <span>Segment Description</span>
+                      <v-spacer />
+                      <v-chip
+                        v-if="realContentSettings.segmentDescription.enabled"
+                        size="x-small"
+                        color="success"
+                        class="mr-2"
+                      >
+                        Enabled
+                      </v-chip>
+                    </div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text>
+                    <v-switch
+                      v-model="realContentSettings.segmentDescription.enabled"
+                      label="Enable Segment Description Generation"
+                      color="primary"
+                      density="compact"
+                      class="mb-2"
+                    />
+
+                    <!-- Collapsed state when disabled -->
+                    <v-alert
+                      v-if="!realContentSettings.segmentDescription.enabled"
+                      type="info"
+                      variant="tonal"
+                      density="compact"
+                    >
+                      Enable to configure segment description generation settings
+                    </v-alert>
+
+                    <!-- Expanded settings when enabled -->
+                    <div v-if="realContentSettings.segmentDescription.enabled">
+                      <v-divider class="my-3" />
+
+                      <!-- Show Identity Injection -->
+                      <v-checkbox
+                        v-model="realContentSettings.segmentDescription.injectShowIdentity"
+                        label="Inject Show Identity"
+                        hint="Include show thesis, tone, and audience context in the prompt"
+                        persistent-hint
+                        density="compact"
+                        hide-details="auto"
+                        class="mb-3"
+                        :disabled="!realContentSettings.showIdentity.thesis"
+                      />
+                      <v-alert
+                        v-if="!realContentSettings.showIdentity.thesis"
+                        type="warning"
+                        variant="tonal"
+                        density="compact"
+                        class="mb-3"
+                      >
+                        <small>Configure Show Identity above to enable injection</small>
+                      </v-alert>
+
+                      <!-- Core Options -->
+                      <h6 class="text-subtitle-2 mb-2">Content Options</h6>
+                      <v-checkbox
+                        v-model="realContentSettings.segmentDescription.includeFullText"
+                        label="Include full text of segment"
+                        hint="Send the complete segment script content to the LLM"
+                        persistent-hint
+                        density="compact"
+                        hide-details="auto"
+                        class="mb-2"
+                      />
+                      <v-checkbox
+                        v-model="realContentSettings.segmentDescription.includeAdjacentContext"
+                        label="Include adjacent segment context"
+                        hint="Provide titles/summaries of surrounding segments for better context"
+                        persistent-hint
+                        density="compact"
+                        hide-details="auto"
+                        class="mb-2"
+                      />
+
+                      <v-divider class="my-3" />
+
+                      <!-- Interaction Options -->
+                      <h6 class="text-subtitle-2 mb-2">Interaction Options</h6>
+                      <v-checkbox
+                        v-model="realContentSettings.segmentDescription.exposeSpecialInstructions"
+                        label="Expose special instructions"
+                        hint="Show a text field to provide custom instructions per generation"
+                        persistent-hint
+                        density="compact"
+                        hide-details="auto"
+                        class="mb-2"
+                      />
+                      <v-checkbox
+                        v-model="realContentSettings.segmentDescription.allowInteractiveIteration"
+                        label="Allow interactive iteration"
+                        hint="Enable back-and-forth refinement of generated descriptions"
+                        persistent-hint
+                        density="compact"
+                        hide-details="auto"
+                        class="mb-2"
+                      />
+                    </div>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+
+                <!-- Image Description -->
+                <v-expansion-panel value="image" class="desc-panel-image">
+                  <v-expansion-panel-title>
+                    <div class="d-flex align-center">
+                      <v-icon class="mr-2" size="small">mdi-image-text</v-icon>
+                      <span>Image Description</span>
+                    </div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text>
+                    <v-switch
+                      v-model="realContentSettings.imageDescription.enabled"
+                      label="Enable Image Description Generation"
+                      color="primary"
+                      density="compact"
+                      class="mb-2"
+                    />
+                    <v-textarea
+                      v-model="realContentSettings.imageDescription.prompt"
+                      label="Generation Prompt"
+                      variant="outlined"
+                      density="compact"
+                      rows="3"
+                      hint="Custom prompt for generating image alt text and descriptions"
+                      persistent-hint
+                      :disabled="!realContentSettings.imageDescription.enabled"
+                    />
+                    <v-switch
+                      v-model="realContentSettings.imageDescription.includeAltText"
+                      label="Generate ALT text for accessibility"
+                      color="primary"
+                      density="compact"
+                      :disabled="!realContentSettings.imageDescription.enabled"
+                    />
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+              </v-expansion-panels>
+            </v-card>
+
+            <!-- Social Media Section -->
+            <v-card variant="outlined" class="pa-4 mb-4">
+              <h4 class="text-subtitle-1 mb-3 d-flex align-center">
+                <v-icon class="mr-2">mdi-share-variant</v-icon>
+                Social Media
+              </h4>
+              <p class="text-body-2 text-grey mb-4">
+                Configure AI-generated content for social media platforms. Enable platforms to reveal their settings.
+              </p>
+
+              <v-expansion-panels variant="accordion" multiple v-model="socialMediaPanels">
+                <!-- X (Twitter) -->
+                <v-expansion-panel value="x">
+                  <v-expansion-panel-title>
+                    <div class="d-flex align-center flex-grow-1">
+                      <v-icon class="mr-2" size="small">mdi-twitter</v-icon>
+                      <span>X (Twitter)</span>
+                      <v-spacer />
+                      <v-switch
+                        v-model="realContentSettings.socialMedia.x.enabled"
+                        color="primary"
+                        density="compact"
+                        hide-details
+                        @click.stop
+                        class="mr-2"
+                      />
+                    </div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text>
+                    <v-alert v-if="!realContentSettings.socialMedia.x.enabled" type="warning" variant="tonal" density="compact" class="mb-3">
+                      Enable X integration above to configure settings
+                    </v-alert>
+                    <div :class="{ 'disabled-section': !realContentSettings.socialMedia.x.enabled }">
+                      <v-textarea
+                        v-model="realContentSettings.socialMedia.x.defaultPrompt"
+                        label="Default Post Prompt"
+                        variant="outlined"
+                        density="compact"
+                        rows="2"
+                        hint="Template prompt for generating X posts"
+                        persistent-hint
+                        :disabled="!realContentSettings.socialMedia.x.enabled"
+                        class="mb-3"
+                      />
+                      <v-row>
+                        <v-col cols="6">
+                          <v-text-field
+                            v-model.number="realContentSettings.socialMedia.x.maxLength"
+                            label="Max Post Length"
+                            type="number"
+                            variant="outlined"
+                            density="compact"
+                            suffix="chars"
+                            :disabled="!realContentSettings.socialMedia.x.enabled"
+                          />
+                        </v-col>
+                        <v-col cols="6">
+                          <v-switch
+                            v-model="realContentSettings.socialMedia.x.includeHashtags"
+                            label="Auto-generate hashtags"
+                            color="primary"
+                            density="compact"
+                            :disabled="!realContentSettings.socialMedia.x.enabled"
+                          />
+                        </v-col>
+                      </v-row>
+                      <v-switch
+                        v-model="realContentSettings.socialMedia.x.includeThreads"
+                        label="Enable thread generation for long content"
+                        color="primary"
+                        density="compact"
+                        :disabled="!realContentSettings.socialMedia.x.enabled"
+                      />
+                    </div>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+
+                <!-- Meta/Facebook -->
+                <v-expansion-panel value="meta">
+                  <v-expansion-panel-title>
+                    <div class="d-flex align-center flex-grow-1">
+                      <v-icon class="mr-2" size="small">mdi-facebook</v-icon>
+                      <span>Meta / Facebook</span>
+                      <v-spacer />
+                      <v-switch
+                        v-model="realContentSettings.socialMedia.meta.enabled"
+                        color="primary"
+                        density="compact"
+                        hide-details
+                        @click.stop
+                        class="mr-2"
+                      />
+                    </div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text>
+                    <v-alert v-if="!realContentSettings.socialMedia.meta.enabled" type="warning" variant="tonal" density="compact" class="mb-3">
+                      Enable Meta integration above to configure settings
+                    </v-alert>
+                    <div :class="{ 'disabled-section': !realContentSettings.socialMedia.meta.enabled }">
+                      <v-textarea
+                        v-model="realContentSettings.socialMedia.meta.defaultPrompt"
+                        label="Default Post Prompt"
+                        variant="outlined"
+                        density="compact"
+                        rows="2"
+                        hint="Template prompt for generating Facebook posts"
+                        persistent-hint
+                        :disabled="!realContentSettings.socialMedia.meta.enabled"
+                        class="mb-3"
+                      />
+                      <v-row>
+                        <v-col cols="6">
+                          <v-select
+                            v-model="realContentSettings.socialMedia.meta.postType"
+                            :items="['Standard Post', 'Story', 'Reel Caption', 'Event Description']"
+                            label="Default Post Type"
+                            variant="outlined"
+                            density="compact"
+                            :disabled="!realContentSettings.socialMedia.meta.enabled"
+                          />
+                        </v-col>
+                        <v-col cols="6">
+                          <v-switch
+                            v-model="realContentSettings.socialMedia.meta.includeEmoji"
+                            label="Include emojis"
+                            color="primary"
+                            density="compact"
+                            :disabled="!realContentSettings.socialMedia.meta.enabled"
+                          />
+                        </v-col>
+                      </v-row>
+                      <v-switch
+                        v-model="realContentSettings.socialMedia.meta.crossPostInstagram"
+                        label="Generate Instagram-compatible version"
+                        color="primary"
+                        density="compact"
+                        :disabled="!realContentSettings.socialMedia.meta.enabled"
+                      />
+                    </div>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+
+                <!-- Substack -->
+                <v-expansion-panel value="substack">
+                  <v-expansion-panel-title>
+                    <div class="d-flex align-center flex-grow-1">
+                      <v-icon class="mr-2" size="small">mdi-newspaper-variant</v-icon>
+                      <span>Substack</span>
+                      <v-spacer />
+                      <v-switch
+                        v-model="realContentSettings.socialMedia.substack.enabled"
+                        color="primary"
+                        density="compact"
+                        hide-details
+                        @click.stop
+                        class="mr-2"
+                      />
+                    </div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text>
+                    <v-alert v-if="!realContentSettings.socialMedia.substack.enabled" type="warning" variant="tonal" density="compact" class="mb-3">
+                      Enable Substack integration above to configure settings
+                    </v-alert>
+                    <div :class="{ 'disabled-section': !realContentSettings.socialMedia.substack.enabled }">
+                      <v-textarea
+                        v-model="realContentSettings.socialMedia.substack.defaultPrompt"
+                        label="Default Article Prompt"
+                        variant="outlined"
+                        density="compact"
+                        rows="2"
+                        hint="Template prompt for generating Substack content"
+                        persistent-hint
+                        :disabled="!realContentSettings.socialMedia.substack.enabled"
+                        class="mb-3"
+                      />
+                      <v-row>
+                        <v-col cols="6">
+                          <v-select
+                            v-model="realContentSettings.socialMedia.substack.contentType"
+                            :items="['Full Article', 'Newsletter Teaser', 'Show Notes', 'Episode Recap']"
+                            label="Default Content Type"
+                            variant="outlined"
+                            density="compact"
+                            :disabled="!realContentSettings.socialMedia.substack.enabled"
+                          />
+                        </v-col>
+                        <v-col cols="6">
+                          <v-text-field
+                            v-model.number="realContentSettings.socialMedia.substack.targetWordCount"
+                            label="Target Word Count"
+                            type="number"
+                            variant="outlined"
+                            density="compact"
+                            suffix="words"
+                            :disabled="!realContentSettings.socialMedia.substack.enabled"
+                          />
+                        </v-col>
+                      </v-row>
+                      <v-switch
+                        v-model="realContentSettings.socialMedia.substack.includeTimestamps"
+                        label="Include episode timestamps"
+                        color="primary"
+                        density="compact"
+                        :disabled="!realContentSettings.socialMedia.substack.enabled"
+                      />
+                    </div>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+
+                <!-- More Coming Soon -->
+                <v-expansion-panel disabled>
+                  <v-expansion-panel-title>
+                    <div class="d-flex align-center text-grey">
+                      <v-icon class="mr-2" size="small" color="grey">mdi-plus-circle-outline</v-icon>
+                      <span>More platforms coming soon...</span>
+                    </div>
+                  </v-expansion-panel-title>
+                </v-expansion-panel>
+              </v-expansion-panels>
+            </v-card>
+
+            <!-- Production Content Features (existing) -->
+            <v-card variant="outlined" class="pa-4 mb-4">
+              <h4 class="text-subtitle-1 mb-3 d-flex align-center">
+                <v-icon class="mr-2">mdi-text-box-check</v-icon>
+                Production Content Features
+              </h4>
+              <v-list density="compact">
+                <v-list-item prepend-icon="mdi-script-text-outline">
+                  <v-list-item-title>Segment Intros & Outros</v-list-item-title>
+                  <v-list-item-subtitle>Generate professional transitions between segments</v-list-item-subtitle>
+                </v-list-item>
+                <v-list-item prepend-icon="mdi-bullhorn">
+                  <v-list-item-title>Promotional Copy</v-list-item-title>
+                  <v-list-item-subtitle>Create on-brand promotional content and CTAs</v-list-item-subtitle>
+                </v-list-item>
+                <v-list-item prepend-icon="mdi-format-quote-close">
+                  <v-list-item-title>Quote Formatting</v-list-item-title>
+                  <v-list-item-subtitle>Intelligently format and split quotes for display</v-list-item-subtitle>
+                </v-list-item>
+                <v-list-item prepend-icon="mdi-clipboard-check">
+                  <v-list-item-title>Approval Workflows</v-list-item-title>
+                  <v-list-item-subtitle>Review and approve AI-generated content before use</v-list-item-subtitle>
+                </v-list-item>
+              </v-list>
+            </v-card>
+
+            <!-- Save Button -->
+            <v-btn
+              color="primary"
+              variant="elevated"
+              @click="saveRealContentSettings"
+              :loading="savingRealContent"
+            >
+              <v-icon left>mdi-content-save</v-icon>
+              Save Real Content Settings
+            </v-btn>
+          </v-tabs-window-item>
+
+          <!-- Test Content Generator -->
+          <v-tabs-window-item value="test-content">
+            <h3 class="text-h6 mb-4">
+              <v-icon left>mdi-test-tube</v-icon>
+              Test Content Generator
+            </h3>
+            <p class="text-body-2 mb-4">
+              Generate placeholder script content using local LLM for development and testing purposes.
+            </p>
+
+            <v-alert type="warning" variant="tonal" class="mb-6">
+              <strong>Development Tool:</strong> This generates placeholder content for testing layouts and workflows.
+              Not intended for production use.
+            </v-alert>
+
+            <v-card variant="outlined" class="pa-4 mb-4">
+              <v-card-title class="text-subtitle-1 pa-0 mb-3">
+                <v-icon class="mr-2">mdi-keyboard</v-icon>
+                Keyboard Shortcut
+              </v-card-title>
+              <v-card-text class="pa-0">
+                <p class="text-body-2 mb-2">
+                  Triggered by <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>[1-9]</kbd> where the number is paragraph count.
+                </p>
+                <v-alert type="info" variant="tonal" density="compact">
+                  <strong>How it works:</strong> Select a rundown item, press the hotkey, and the LLM will generate broadcast-style script content based on the segment type and duration.
+                </v-alert>
+              </v-card-text>
+            </v-card>
+
+            <v-card variant="outlined" class="pa-4 mb-4">
+              <v-card-title class="text-subtitle-1 pa-0 mb-3">
+                <v-icon class="mr-2">mdi-robot</v-icon>
+                LLM Model Selection
+              </v-card-title>
+              <v-card-text class="pa-0">
+                <v-row>
+                  <v-col cols="6">
+                    <v-select
+                      v-model="testContentService"
+                      :items="testContentServiceOptions"
+                      label="Service"
+                      variant="outlined"
+                      density="comfortable"
+                      hint="Which LLM service to use"
+                      persistent-hint
+                    />
+                  </v-col>
+                  <v-col cols="6">
+                    <v-select
+                      v-model="testContentModel"
+                      :items="testContentModelOptions"
+                      label="Model"
+                      variant="outlined"
+                      density="comfortable"
+                      :disabled="!testContentService || testContentService === 'auto'"
+                      hint="Specific model for content generation"
+                      persistent-hint
+                    />
+                  </v-col>
+                </v-row>
+                <v-row class="mt-4">
+                  <v-col cols="12">
+                    <v-btn
+                      color="primary"
+                      variant="elevated"
+                      @click="saveTestContentSettings"
+                      :loading="savingTestContent"
+                    >
+                      <v-icon left>mdi-content-save</v-icon>
+                      Save Model Selection
+                    </v-btn>
+                    <v-btn
+                      variant="text"
+                      class="ml-2"
+                      @click="resetTestContentToDefaults"
+                    >
+                      Reset to Defaults
+                    </v-btn>
+                  </v-col>
+                </v-row>
+              </v-card-text>
+            </v-card>
+
+            <v-card variant="outlined" class="pa-4">
+              <v-card-title class="text-subtitle-1 pa-0 mb-3">
+                <v-icon class="mr-2">mdi-server</v-icon>
+                Available Ollama Models
+              </v-card-title>
+              <v-card-text class="pa-0">
+                <v-chip-group>
+                  <v-chip
+                    v-for="model in availableOllamaModels"
+                    :key="model"
+                    size="small"
+                    :color="testContentModel === model ? 'primary' : 'default'"
+                    @click="selectOllamaModel(model)"
+                  >
+                    {{ model }}
+                  </v-chip>
+                </v-chip-group>
+                <p v-if="!availableOllamaModels.length" class="text-grey mt-2">
+                  Loading models from Ollama server...
+                </p>
+              </v-card-text>
+            </v-card>
+          </v-tabs-window-item>
 
           <!-- FSQ Quote Generator -->
           <v-tabs-window-item value="fsq-generator">
@@ -703,18 +1924,135 @@
                     </v-col>
                   </v-row>
 
-                  <v-row>
-                    <v-col cols="6">
+                  <v-divider class="my-4" />
+
+                  <!-- Typography Settings -->
+                  <h5 class="text-subtitle-2 mb-3">Typography Settings</h5>
+
+                  <!-- Script Text -->
+                  <v-row align="center" class="mb-2">
+                    <v-col cols="4">
+                      <span class="text-body-2">Script Text</span>
+                    </v-col>
+                    <v-col cols="4">
                       <v-select
-                        v-model="localSettings.script_host_font_size"
-                        :items="fontSizeOptions"
-                        label="Default Font Size"
+                        v-model="localSettings.script_host_text_size"
+                        :items="scriptFontSizeOptions"
+                        label="Size"
                         variant="outlined"
-                        density="comfortable"
-                        hint="Font size for exported host scripts"
-                        persistent-hint
+                        density="compact"
+                        hide-details
                       />
                     </v-col>
+                    <v-col cols="4">
+                      <div class="d-flex align-center">
+                        <v-menu :close-on-content-click="false">
+                          <template v-slot:activator="{ props }">
+                            <v-btn
+                              v-bind="props"
+                              :color="localSettings.script_host_text_color || '#000000'"
+                              size="small"
+                              variant="flat"
+                              class="color-picker-btn"
+                            >
+                              <v-icon size="small">mdi-palette</v-icon>
+                            </v-btn>
+                          </template>
+                          <v-color-picker
+                            v-model="localSettings.script_host_text_color"
+                            mode="hex"
+                            hide-inputs
+                          />
+                        </v-menu>
+                        <span class="text-caption ml-2">{{ localSettings.script_host_text_color || '#000000' }}</span>
+                      </div>
+                    </v-col>
+                  </v-row>
+
+                  <!-- Segment Header -->
+                  <v-row align="center" class="mb-2">
+                    <v-col cols="4">
+                      <span class="text-body-2">Segment Header</span>
+                    </v-col>
+                    <v-col cols="4">
+                      <v-select
+                        v-model="localSettings.script_host_segment_header_size"
+                        :items="scriptFontSizeOptions"
+                        label="Size"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                      />
+                    </v-col>
+                    <v-col cols="4">
+                      <div class="d-flex align-center">
+                        <v-menu :close-on-content-click="false">
+                          <template v-slot:activator="{ props }">
+                            <v-btn
+                              v-bind="props"
+                              :color="localSettings.script_host_segment_header_color || '#1976D2'"
+                              size="small"
+                              variant="flat"
+                              class="color-picker-btn"
+                            >
+                              <v-icon size="small">mdi-palette</v-icon>
+                            </v-btn>
+                          </template>
+                          <v-color-picker
+                            v-model="localSettings.script_host_segment_header_color"
+                            mode="hex"
+                            hide-inputs
+                          />
+                        </v-menu>
+                        <span class="text-caption ml-2">{{ localSettings.script_host_segment_header_color || '#1976D2' }}</span>
+                      </div>
+                    </v-col>
+                  </v-row>
+
+                  <!-- Block Header -->
+                  <v-row align="center" class="mb-2">
+                    <v-col cols="4">
+                      <span class="text-body-2">Block Header</span>
+                    </v-col>
+                    <v-col cols="4">
+                      <v-select
+                        v-model="localSettings.script_host_block_header_size"
+                        :items="scriptFontSizeOptions"
+                        label="Size"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                      />
+                    </v-col>
+                    <v-col cols="4">
+                      <div class="d-flex align-center">
+                        <v-menu :close-on-content-click="false">
+                          <template v-slot:activator="{ props }">
+                            <v-btn
+                              v-bind="props"
+                              :color="localSettings.script_host_block_header_color || '#FF5722'"
+                              size="small"
+                              variant="flat"
+                              class="color-picker-btn"
+                            >
+                              <v-icon size="small">mdi-palette</v-icon>
+                            </v-btn>
+                          </template>
+                          <v-color-picker
+                            v-model="localSettings.script_host_block_header_color"
+                            mode="hex"
+                            hide-inputs
+                          />
+                        </v-menu>
+                        <span class="text-caption ml-2">{{ localSettings.script_host_block_header_color || '#FF5722' }}</span>
+                      </div>
+                    </v-col>
+                  </v-row>
+
+                  <v-divider class="my-4" />
+
+                  <!-- Line Height -->
+                  <v-row>
                     <v-col cols="6">
                       <v-select
                         v-model="localSettings.script_host_line_height"
@@ -1027,6 +2365,7 @@
 
 <script>
 import LLMRoutingSettings from './LLMRoutingSettings.vue'
+import { CORE_ITEM_TYPES, getAllItemTypes } from '@/config/itemTypes'
 
 export default {
   name: 'GenerationSettings',
@@ -1052,7 +2391,124 @@ export default {
   emits: ['update:modelValue', 'save'],
   data() {
     return {
-      generationSubTab: 'fsq-generator',
+      generationSubTab: 'real-content',
+      // Real Content Generator settings
+      showIdentityPanel: null,
+      descriptionPanels: [],
+      socialMediaPanels: [],
+      savingRealContent: false,
+      savingEpisodeDescription: false,
+      savingShowIdentity: false,
+      showConditionalHelp: false,
+      realContentSettings: {
+        showIdentity: {
+          thesis: '',
+          tone: '',
+          audience: ''
+        },
+        episodeDescription: {
+          enabled: false,
+          injectShowIdentity: true,
+          prompt: 'Generate a compelling episode description that captures the key topics, guests, and takeaways.',
+          minLength: 100,
+          maxLength: 500,
+          // Content Sources
+          includeTitle: true,
+          includeGuestInfo: true,
+          // itemTypes will be initialized dynamically in created() hook
+          itemTypes: {},
+          // Generation Options
+          weightSegmentDescriptions: true,
+          mentionSpeaker: true,
+          exposeSpecialInstructions: false,
+          allowInteractiveIteration: false,
+          // LLM Preference Order
+          llmPreferenceOrder: []
+        },
+        segmentDescription: {
+          enabled: false,
+          injectShowIdentity: true,
+          // Content Options
+          includeFullText: true,
+          includeAdjacentContext: false,
+          // Interaction Options
+          exposeSpecialInstructions: false,
+          allowInteractiveIteration: false
+        },
+        imageDescription: {
+          enabled: false,
+          prompt: 'Generate descriptive alt text for this image suitable for accessibility and SEO.',
+          includeAltText: true
+        },
+        socialMedia: {
+          x: {
+            enabled: false,
+            defaultPrompt: 'Create an engaging tweet about this content with relevant hashtags.',
+            maxLength: 280,
+            includeHashtags: true,
+            includeThreads: false
+          },
+          meta: {
+            enabled: false,
+            defaultPrompt: 'Create an engaging Facebook post about this content.',
+            postType: 'Standard Post',
+            includeEmoji: true,
+            crossPostInstagram: false
+          },
+          substack: {
+            enabled: false,
+            defaultPrompt: 'Create newsletter content summarizing this episode.',
+            contentType: 'Show Notes',
+            targetWordCount: 500,
+            includeTimestamps: true
+          }
+        }
+      },
+      // Available LLM services and models for preference order
+      availableLLMServices: [
+        { title: 'Ollama (Local)', value: 'ollama', icon: 'mdi-server' },
+        { title: 'OpenAI', value: 'openai', icon: 'mdi-robot' },
+        { title: 'Anthropic', value: 'anthropic', icon: 'mdi-head-cog' },
+        { title: 'Gemini', value: 'gemini', icon: 'mdi-google' },
+        { title: 'Grok', value: 'grok', icon: 'mdi-twitter' }
+      ],
+      llmServiceModels: {
+        ollama: [],
+        openai: [
+          { title: 'GPT-4o', value: 'gpt-4o' },
+          { title: 'GPT-4 Turbo', value: 'gpt-4-turbo' },
+          { title: 'GPT-4', value: 'gpt-4' },
+          { title: 'GPT-3.5 Turbo', value: 'gpt-3.5-turbo' }
+        ],
+        anthropic: [
+          { title: 'Claude 3.5 Sonnet', value: 'claude-3-5-sonnet-20241022' },
+          { title: 'Claude 3 Opus', value: 'claude-3-opus-20240229' },
+          { title: 'Claude 3 Haiku', value: 'claude-3-haiku-20240307' }
+        ],
+        gemini: [
+          { title: 'Gemini 2.0 Flash', value: 'gemini-2.0-flash' },
+          { title: 'Gemini 1.5 Pro', value: 'gemini-1.5-pro' },
+          { title: 'Gemini 1.5 Flash', value: 'gemini-1.5-flash' }
+        ],
+        grok: [
+          { title: 'Grok 4', value: 'grok-4-latest' },
+          { title: 'Grok 3', value: 'grok-3' }
+        ]
+      },
+      // Test Content Generator settings
+      testContentService: 'ollama',
+      testContentModel: 'llama3:latest',
+      savingTestContent: false,
+      availableOllamaModels: [],
+      testContentServiceOptions: [
+        { title: 'Auto (Smart Routing)', value: 'auto' },
+        { title: 'Ollama (Local)', value: 'ollama' },
+        { title: 'OpenAI', value: 'openai' },
+        { title: 'Anthropic', value: 'anthropic' },
+        { title: 'Gemini', value: 'gemini' },
+        { title: 'Grok', value: 'grok' }
+      ],
+      testContentModelOptions: [],
       localSettings: {
         ...this.modelValue,
         // Initialize new FSQ split settings with defaults if not present (using snake_case to match backend)
@@ -1072,6 +2528,13 @@ export default {
         script_host_include_timestamps: this.modelValue.script_host_include_timestamps !== undefined ? this.modelValue.script_host_include_timestamps : false,
         script_host_font_size: this.modelValue.script_host_font_size || '14pt',
         script_host_line_height: this.modelValue.script_host_line_height || '1.5',
+        // Typography settings for Host Script
+        script_host_text_size: this.modelValue.script_host_text_size || '12pt',
+        script_host_text_color: this.modelValue.script_host_text_color || '#000000',
+        script_host_segment_header_size: this.modelValue.script_host_segment_header_size || '18pt',
+        script_host_segment_header_color: this.modelValue.script_host_segment_header_color || '#1976D2',
+        script_host_block_header_size: this.modelValue.script_host_block_header_size || '24pt',
+        script_host_block_header_color: this.modelValue.script_host_block_header_color || '#FF5722',
         script_director_include_technical_notes: this.modelValue.script_director_include_technical_notes !== undefined ? this.modelValue.script_director_include_technical_notes : true,
         script_director_include_timecodes: this.modelValue.script_director_include_timecodes !== undefined ? this.modelValue.script_director_include_timecodes : true,
         script_director_include_media_list: this.modelValue.script_director_include_media_list !== undefined ? this.modelValue.script_director_include_media_list : true,
@@ -1130,6 +2593,20 @@ export default {
         { title: '18pt (Extra Large)', value: '18pt' },
         { title: '20pt (Huge)', value: '20pt' }
       ],
+      scriptFontSizeOptions: [
+        { title: '10pt', value: '10pt' },
+        { title: '11pt', value: '11pt' },
+        { title: '12pt', value: '12pt' },
+        { title: '14pt', value: '14pt' },
+        { title: '16pt', value: '16pt' },
+        { title: '18pt', value: '18pt' },
+        { title: '20pt', value: '20pt' },
+        { title: '22pt', value: '22pt' },
+        { title: '24pt', value: '24pt' },
+        { title: '28pt', value: '28pt' },
+        { title: '32pt', value: '32pt' },
+        { title: '36pt', value: '36pt' }
+      ],
       lineHeightOptions: [
         { title: 'Single (1.0)', value: '1.0' },
         { title: 'Compact (1.2)', value: '1.2' },
@@ -1155,6 +2632,17 @@ export default {
     }
   },
   computed: {
+    isShowIdentityComplete() {
+      const identity = this.realContentSettings?.showIdentity || {}
+      return !!(identity.thesis && identity.tone && identity.audience)
+    },
+    showIdentityStatus() {
+      const identity = this.realContentSettings?.showIdentity || {}
+      const filled = [identity.thesis, identity.tone, identity.audience].filter(v => v && v.trim()).length
+      if (filled === 3) return 'complete'
+      if (filled > 0) return 'partial'
+      return 'empty'
+    },
     maxCharsScreen1() {
       return (this.localSettings.fsq_max_lines || 5) * (this.localSettings.fsq_chars_per_line || 50)
     },
@@ -1163,6 +2651,43 @@ export default {
       const minSecond = this.localSettings.fsq_min_second_screen || 80
       const percent = (this.localSettings.fsq_balance_threshold_percent || 30) / 100
       return Math.round(maxChars + (minSecond * percent))
+    },
+    // Get available rundown item types from config
+    availableItemTypes() {
+      // Use getAllItemTypes to include both core and custom types
+      return getAllItemTypes()
+    },
+    // Core item types only (for reference)
+    coreItemTypes() {
+      return CORE_ITEM_TYPES
+    },
+    // Build flat list of all available LLMs for preference dropdown
+    allAvailableLLMs() {
+      const llms = []
+      this.availableLLMServices.forEach(service => {
+        const models = this.llmServiceModels[service.value] || []
+        if (models.length > 0) {
+          models.forEach(model => {
+            llms.push({
+              title: `${service.title} - ${model.title}`,
+              value: `${service.value}:${model.value}`,
+              service: service.value,
+              model: model.value,
+              icon: service.icon
+            })
+          })
+        } else {
+          // Service without specific models (or models not loaded yet)
+          llms.push({
+            title: `${service.title} (Auto)`,
+            value: `${service.value}:auto`,
+            service: service.value,
+            model: 'auto',
+            icon: service.icon
+          })
+        }
+      })
+      return llms
     }
   },
   watch: {
@@ -1171,10 +2696,25 @@ export default {
         this.localSettings = { ...newVal }
       },
       deep: true
+    },
+    testContentService() {
+      this.updateTestContentModelOptions()
     }
+  },
+  created() {
+    // Initialize itemTypes from CORE_ITEM_TYPES config
+    // Default: segment, interview, coldopen enabled; others disabled
+    const defaultEnabledTypes = ['segment', 'interview', 'coldopen']
+    CORE_ITEM_TYPES.forEach(type => {
+      this.realContentSettings.episodeDescription.itemTypes[type.value] = defaultEnabledTypes.includes(type.value)
+    })
   },
   mounted() {
     this.loadLLMSettings()
+    this.loadTestContentSettings()
+    this.loadOllamaModels()
+    this.loadRealContentSettings()
+    this.loadShowIdentity()
   },
   methods: {
     showSnackbar(message, color = 'error') {
@@ -1185,6 +2725,35 @@ export default {
     save() {
       this.$emit('update:modelValue', this.localSettings)
       this.$emit('save', this.localSettings)
+    },
+    async saveShowIdentity() {
+      this.savingShowIdentity = true
+      try {
+        await this.$axios.post('/settings/show_identity', {
+          key: 'show_identity',
+          value: this.realContentSettings.showIdentity
+        })
+        this.showSnackbar('Show identity saved successfully', 'success')
+      } catch (error) {
+        console.error('Failed to save show identity:', error)
+        this.showSnackbar('Failed to save show identity', 'error')
+      } finally {
+        this.savingShowIdentity = false
+      }
+    },
+    async loadShowIdentity() {
+      try {
+        const response = await this.$axios.get('/settings/show_identity')
+        if (response.data && response.data.value) {
+          this.realContentSettings.showIdentity = {
+            ...this.realContentSettings.showIdentity,
+            ...response.data.value
+          }
+          console.log('✅ Loaded show identity from database')
+        }
+      } catch (error) {
+        console.warn('No show identity found in database, using defaults')
+      }
     },
     async loadLLMSettings() {
       // Load LLM settings from database
@@ -1315,6 +2884,304 @@ export default {
       }
 
       return target
+    },
+
+    // Test Content Generator methods
+    async loadTestContentSettings() {
+      const saved = localStorage.getItem('llm-routing-settings')
+      if (saved) {
+        try {
+          const settings = JSON.parse(saved)
+          const contentExpansion = settings.routing?.contentExpansion || 'auto'
+          if (contentExpansion === 'auto') {
+            this.testContentService = 'auto'
+            this.testContentModel = null
+          } else if (contentExpansion.includes(':')) {
+            const parts = contentExpansion.split(':')
+            this.testContentService = parts[0]
+            this.testContentModel = parts.slice(1).join(':')
+          } else {
+            this.testContentService = contentExpansion
+            this.testContentModel = null
+          }
+          if (settings.ollamaModels?.contentExpansion) {
+            this.testContentModel = settings.ollamaModels.contentExpansion
+          }
+        } catch (e) {
+          console.error('Failed to parse llm-routing-settings:', e)
+        }
+      }
+    },
+
+    async loadOllamaModels() {
+      try {
+        const response = await fetch('/api/llm/ollama/models', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
+        if (response.ok) {
+          const data = await response.json()
+          this.availableOllamaModels = data.models?.map(m => m.name) || []
+          // Also populate llmServiceModels.ollama for preference dropdowns
+          this.llmServiceModels.ollama = this.availableOllamaModels.map(m => ({
+            title: m,
+            value: m
+          }))
+          console.log('📋 Loaded Ollama models:', this.availableOllamaModels)
+          this.updateTestContentModelOptions()
+        } else {
+          this.loadFallbackModels()
+        }
+      } catch (e) {
+        console.error('Failed to load Ollama models:', e)
+        this.loadFallbackModels()
+      }
+    },
+
+    loadFallbackModels() {
+      this.availableOllamaModels = [
+        'llama3:latest',
+        'mistral:7b',
+        'deepseek-r1:8b',
+        'Qwen2.5-Coder:7b',
+        'codellama:34b',
+        'samantha-mistral:latest'
+      ]
+      // Also populate llmServiceModels.ollama for preference dropdowns
+      this.llmServiceModels.ollama = this.availableOllamaModels.map(m => ({
+        title: m,
+        value: m
+      }))
+      this.updateTestContentModelOptions()
+    },
+
+    updateTestContentModelOptions() {
+      if (this.testContentService === 'ollama') {
+        this.testContentModelOptions = this.availableOllamaModels.map(m => ({
+          title: m,
+          value: m
+        }))
+      } else if (this.testContentService === 'openai') {
+        this.testContentModelOptions = [
+          { title: 'GPT-4', value: 'gpt-4' },
+          { title: 'GPT-4 Turbo', value: 'gpt-4-turbo' },
+          { title: 'GPT-3.5 Turbo', value: 'gpt-3.5-turbo' }
+        ]
+      } else if (this.testContentService === 'anthropic') {
+        this.testContentModelOptions = [
+          { title: 'Claude 3.5 Sonnet', value: 'claude-3-5-sonnet-20241022' },
+          { title: 'Claude 3 Opus', value: 'claude-3-opus-20240229' },
+          { title: 'Claude 3 Haiku', value: 'claude-3-haiku-20240307' }
+        ]
+      } else if (this.testContentService === 'gemini') {
+        this.testContentModelOptions = [
+          { title: 'Gemini 2.0 Flash', value: 'gemini-2.0-flash' },
+          { title: 'Gemini 1.5 Pro', value: 'gemini-1.5-pro' }
+        ]
+      } else if (this.testContentService === 'grok') {
+        this.testContentModelOptions = [
+          { title: 'Grok 4', value: 'grok-4-latest' },
+          { title: 'Grok 3', value: 'grok-3' }
+        ]
+      } else {
+        this.testContentModelOptions = []
+      }
+    },
+
+    selectOllamaModel(model) {
+      this.testContentService = 'ollama'
+      this.testContentModel = model
+      this.updateTestContentModelOptions()
+    },
+
+    saveTestContentSettings() {
+      this.savingTestContent = true
+
+      let settings = {}
+      const saved = localStorage.getItem('llm-routing-settings')
+      if (saved) {
+        try {
+          settings = JSON.parse(saved)
+        } catch (e) {
+          settings = {}
+        }
+      }
+
+      if (!settings.routing) settings.routing = {}
+      if (!settings.ollamaModels) settings.ollamaModels = {}
+
+      if (this.testContentService === 'auto') {
+        settings.routing.contentExpansion = 'auto'
+      } else if (this.testContentModel) {
+        settings.routing.contentExpansion = `${this.testContentService}:${this.testContentModel}`
+        if (this.testContentService === 'ollama') {
+          settings.ollamaModels.contentExpansion = this.testContentModel
+        }
+      } else {
+        settings.routing.contentExpansion = this.testContentService
+      }
+
+      localStorage.setItem('llm-routing-settings', JSON.stringify(settings))
+
+      console.log('✅ Test Content Generator settings saved:', {
+        service: this.testContentService,
+        model: this.testContentModel,
+        routing: settings.routing.contentExpansion
+      })
+
+      this.showSnackbar('Test content settings saved', 'success')
+
+      setTimeout(() => {
+        this.savingTestContent = false
+      }, 500)
+    },
+
+    resetTestContentToDefaults() {
+      this.testContentService = 'ollama'
+      this.testContentModel = 'llama3:latest'
+      this.updateTestContentModelOptions()
+      this.saveTestContentSettings()
+    },
+
+    // LLM Preference Order methods
+    addLLMPreference() {
+      // Add a new empty preference slot
+      this.realContentSettings.episodeDescription.llmPreferenceOrder.push('')
+    },
+
+    removeLLMPreference(index) {
+      this.realContentSettings.episodeDescription.llmPreferenceOrder.splice(index, 1)
+    },
+
+    moveLLMPreferenceUp(index) {
+      if (index > 0) {
+        const prefs = this.realContentSettings.episodeDescription.llmPreferenceOrder
+        const temp = prefs[index]
+        prefs[index] = prefs[index - 1]
+        prefs[index - 1] = temp
+      }
+    },
+
+    moveLLMPreferenceDown(index) {
+      const prefs = this.realContentSettings.episodeDescription.llmPreferenceOrder
+      if (index < prefs.length - 1) {
+        const temp = prefs[index]
+        prefs[index] = prefs[index + 1]
+        prefs[index + 1] = temp
+      }
+    },
+
+    getLLMDisplayName(value) {
+      if (!value) return 'Select LLM...'
+      const llm = this.allAvailableLLMs.find(l => l.value === value)
+      return llm ? llm.title : value
+    },
+
+    // Template variable methods
+    insertVariable(variable) {
+      // Insert variable at cursor position or append to end
+      const currentPrompt = this.realContentSettings.episodeDescription.prompt || ''
+      this.realContentSettings.episodeDescription.prompt = currentPrompt + (currentPrompt ? ' ' : '') + variable
+    },
+
+    insertConditional(condition, defaultContent) {
+      // Insert a conditional logic block
+      const block = `{% if ${condition} %}${defaultContent}{% endif %}`
+      const currentPrompt = this.realContentSettings.episodeDescription.prompt || ''
+      this.realContentSettings.episodeDescription.prompt = currentPrompt + (currentPrompt ? '\n' : '') + block
+    },
+
+    generateDefaultEpisodePrompt() {
+      const settings = this.realContentSettings.episodeDescription
+      let prompt = 'Generate a compelling episode description for {{show_name}} Episode {{episode_number}}'
+
+      if (settings.includeTitle) {
+        prompt += ' titled "{{title}}"'
+      }
+
+      prompt += '.\n\n'
+
+      if (settings.includeGuestInfo) {
+        prompt += 'Featured guests: {{guest_names}}\n'
+        prompt += 'Guest background: {{guest_bios}}\n\n'
+      }
+
+      if (settings.mentionSpeaker) {
+        prompt += 'Hosted by {{host_name}}.\n\n'
+      }
+
+      prompt += 'Episode content summary:\n{{segment_summaries}}\n\n'
+
+      if (settings.weightSegmentDescriptions) {
+        prompt += 'Key weighted content:\n{{weighted_content}}\n\n'
+      }
+
+      prompt += 'Main topics covered: {{topics}}\n\n'
+
+      prompt += 'Requirements:\n'
+      prompt += `- Length: ${settings.minLength}-${settings.maxLength} characters\n`
+      prompt += '- Tone: Professional, engaging, informative\n'
+      prompt += '- Include key takeaways and highlights\n'
+      prompt += '- Optimized for search and social sharing'
+
+      this.realContentSettings.episodeDescription.prompt = prompt
+    },
+
+    // Real Content Generator methods
+    loadRealContentSettings() {
+      const saved = localStorage.getItem('real-content-settings')
+      if (saved) {
+        try {
+          const settings = JSON.parse(saved)
+          // Deep merge with defaults to handle new fields
+          this.realContentSettings = this.deepMerge(this.realContentSettings, settings)
+          console.log('✅ Loaded real content settings:', this.realContentSettings)
+        } catch (e) {
+          console.error('Failed to parse real-content-settings:', e)
+        }
+      }
+    },
+
+    deepMerge(target, source) {
+      const result = { ...target }
+      for (const key in source) {
+        if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+          result[key] = this.deepMerge(target[key] || {}, source[key])
+        } else {
+          result[key] = source[key]
+        }
+      }
+      return result
+    },
+
+    saveEpisodeDescriptionSettings() {
+      this.savingEpisodeDescription = true
+
+      // Save just the episode description portion to localStorage
+      localStorage.setItem('real-content-settings', JSON.stringify(this.realContentSettings))
+
+      console.log('✅ Episode Description settings saved:', this.realContentSettings.episodeDescription)
+
+      this.showSnackbar('Episode description settings saved', 'success')
+
+      setTimeout(() => {
+        this.savingEpisodeDescription = false
+      }, 500)
+    },
+
+    saveRealContentSettings() {
+      this.savingRealContent = true
+
+      localStorage.setItem('real-content-settings', JSON.stringify(this.realContentSettings))
+
+      console.log('✅ Real Content settings saved:', this.realContentSettings)
+
+      this.showSnackbar('Real content settings saved', 'success')
+
+      setTimeout(() => {
+        this.savingRealContent = false
+      }, 500)
     }
   }
 }
@@ -1335,5 +3202,112 @@ export default {
 
 .v-card {
   border-radius: 8px;
+}
+
+.disabled-section {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.color-picker-btn {
+  min-width: 36px !important;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.color-picker-btn .v-icon {
+  color: white;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Description panel background colors */
+.desc-panel-episode {
+  background: rgba(33, 150, 243, 0.08) !important;
+}
+
+.desc-panel-segment {
+  background: rgba(76, 175, 80, 0.08) !important;
+}
+
+.desc-panel-image {
+  background: rgba(156, 39, 176, 0.08) !important;
+}
+
+.desc-panel-episode :deep(.v-expansion-panel-title),
+.desc-panel-segment :deep(.v-expansion-panel-title),
+.desc-panel-image :deep(.v-expansion-panel-title) {
+  background: transparent;
+}
+
+/* Show Identity status colors */
+.show-identity-complete {
+  background: rgba(76, 175, 80, 0.15) !important;
+}
+
+.show-identity-partial {
+  background: rgba(255, 193, 7, 0.15) !important;
+}
+
+.show-identity-empty {
+  background: rgba(244, 67, 54, 0.15) !important;
+}
+
+.show-identity-panel :deep(.v-expansion-panel-title) {
+  background: transparent;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+}
+
+.cursor-pointer:hover {
+  opacity: 0.8;
+}
+
+/* Template variables grid */
+.template-vars-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.var-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.var-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.7;
+}
+
+.conditional-help-table {
+  background: transparent !important;
+  font-size: 12px;
+}
+
+.conditional-help-table th {
+  font-size: 11px !important;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 12px !important;
+}
+
+.conditional-help-table td {
+  padding: 6px 12px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.conditional-help-table code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
 }
 </style>

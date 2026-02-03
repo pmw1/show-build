@@ -283,6 +283,13 @@ export default {
       this.saveToLibrary = false;
       this.selectedLibraryItem = null;
       this.selectedTab = 'existing';
+    },
+    handleKeydown(event) {
+      if (event.key === 'Escape' && this.show) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.handleAbort();
+      }
     }
   },
   watch: {
@@ -294,6 +301,12 @@ export default {
         this.reset();
       }
     }
+  },
+  mounted() {
+    document.addEventListener('keydown', this.handleKeydown);
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleKeydown);
   }
 };
 </script>

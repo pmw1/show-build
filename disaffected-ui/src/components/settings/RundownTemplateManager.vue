@@ -547,7 +547,7 @@ const loadEpisodeTemplates = async () => {
 
 const loadOrganizations = async () => {
   try {
-    const response = await axios.get('/api/organizations', { headers: getAuthHeaders() })
+    const response = await axios.get('/api/organizations/', { headers: getAuthHeaders() })
     organizations.value = response.data
   } catch (error) {
     console.error('Error loading organizations:', error)

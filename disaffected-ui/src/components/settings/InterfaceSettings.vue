@@ -116,6 +116,145 @@
               class="mb-3"
             />
 
+            <!-- Autoformat Settings -->
+            <v-divider class="my-4"></v-divider>
+            <h4 class="text-subtitle-1 mb-3">
+              <v-icon class="mr-1" size="small">mdi-auto-fix</v-icon>
+              Autoformat Settings
+            </h4>
+
+            <v-alert
+              type="info"
+              variant="tonal"
+              density="compact"
+              class="mb-4"
+            >
+              <div class="text-body-2">
+                <strong>What is autoformat?</strong> When enabled, the editor periodically scans your script content
+                and fixes common formatting issues that occur when pasting from Google Docs or other sources.
+                This runs in the background while you work.
+              </div>
+            </v-alert>
+
+            <v-row align="center" class="mb-2">
+              <v-col cols="12" md="6">
+                <v-switch
+                  v-model="interfaceSettings.autoformatEnabled"
+                  label="Enable autoformat"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-slider
+                  v-model="interfaceSettings.autoformatInterval"
+                  :disabled="!interfaceSettings.autoformatEnabled"
+                  label="Interval"
+                  min="10"
+                  max="120"
+                  step="5"
+                  thumb-label
+                  hide-details
+                >
+                  <template v-slot:append>
+                    <v-text-field
+                      v-model="interfaceSettings.autoformatInterval"
+                      type="number"
+                      style="width: 70px"
+                      density="compact"
+                      suffix="sec"
+                      hide-details
+                      :disabled="!interfaceSettings.autoformatEnabled"
+                    />
+                  </template>
+                </v-slider>
+              </v-col>
+            </v-row>
+
+            <!-- Autoformat Options with Explainers -->
+            <v-expand-transition>
+              <div v-if="interfaceSettings.autoformatEnabled">
+                <p class="text-caption text-grey mb-3">Select which cleanup operations to perform:</p>
+
+                <v-row>
+                  <v-col cols="12" md="6">
+                    <v-card variant="outlined" class="pa-3">
+                      <v-switch
+                        v-model="interfaceSettings.autoformatStripSpans"
+                        label="Strip span tags"
+                        color="primary"
+                        density="compact"
+                        hide-details
+                        class="mb-2"
+                      />
+                      <p class="text-caption text-grey-darken-1 ml-10">
+                        Google Docs wraps text in &lt;span&gt; tags with inline styles.
+                        These often paste with unclosed tags that corrupt content.
+                        Stripping them preserves bold/italic while removing junk.
+                      </p>
+                    </v-card>
+                  </v-col>
+                  <v-col cols="12" md="6">
+                    <v-card variant="outlined" class="pa-3">
+                      <v-switch
+                        v-model="interfaceSettings.autoformatRemoveEmptyParagraphs"
+                        label="Remove empty paragraphs"
+                        color="primary"
+                        density="compact"
+                        hide-details
+                        class="mb-2"
+                      />
+                      <p class="text-caption text-grey-darken-1 ml-10">
+                        Collapses multiple blank lines into one and removes
+                        empty &lt;p&gt; tags that accumulate after cue insertions
+                        or editing.
+                      </p>
+                    </v-card>
+                  </v-col>
+                </v-row>
+
+                <v-row class="mt-2">
+                  <v-col cols="12" md="6">
+                    <v-card variant="outlined" class="pa-3">
+                      <v-switch
+                        v-model="interfaceSettings.autoformatRemoveLeadingDashes"
+                        label="Remove leading dashes"
+                        color="primary"
+                        density="compact"
+                        hide-details
+                        class="mb-2"
+                      />
+                      <p class="text-caption text-grey-darken-1 ml-10">
+                        Strips dashes from the start of paragraphs (e.g., "- Some text"
+                        becomes "Some text"). Preserves actual bulleted lists where
+                        multiple consecutive lines have dashes.
+                      </p>
+                    </v-card>
+                  </v-col>
+                  <v-col cols="12" md="6">
+                    <v-card variant="outlined" class="pa-3">
+                      <v-switch
+                        v-model="interfaceSettings.autoformatCleanWhitespace"
+                        label="Clean whitespace"
+                        color="primary"
+                        density="compact"
+                        hide-details
+                        class="mb-2"
+                      />
+                      <p class="text-caption text-grey-darken-1 ml-10">
+                        Converts &amp;nbsp; (non-breaking spaces) to regular spaces
+                        and collapses multiple consecutive spaces into one.
+                        Common issue from web copy-paste.
+                      </p>
+                    </v-card>
+                  </v-col>
+                </v-row>
+              </div>
+            </v-expand-transition>
+
+            <v-divider class="my-4"></v-divider>
+
             <v-select
               v-model="interfaceSettings.cueCardAlignment"
               :items="[

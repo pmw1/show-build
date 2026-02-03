@@ -136,8 +136,10 @@ def generate_host_script(
 
         html_filename = f"{ep_num_padded}-{preset_suffix}-{date_str}{revision_suffix}.html"
         pdf_filename = f"{ep_num_padded}-{preset_suffix}-{date_str}{revision_suffix}.pdf"
+        md_filename = f"{ep_num_padded}-{preset_suffix}-{date_str}{revision_suffix}.md"
         html_path = output_path / html_filename
         pdf_path = output_path / pdf_filename
+        md_path = output_path / md_filename
 
         logger.info(f"Generating script revision {revision}: {pdf_filename}")
 
@@ -147,6 +149,13 @@ def generate_host_script(
 
         logger.info(f"Generated {preset} script HTML: {html_path}")
 
+        # Generate Markdown
+        md_content = _generate_markdown(episode_info, blocks, script_preset, url_mapping, transcription_cache)
+        with open(md_path, 'w', encoding='utf-8') as f:
+            f.write(md_content)
+
+        logger.info(f"Generated {preset} script Markdown: {md_path}")
+
         # Convert to PDF
         pdf_generated = _convert_to_pdf(html_path, pdf_path, episode_info)
 
@@ -154,6 +163,7 @@ def generate_host_script(
             "success": True,
             "html_path": str(html_path),
             "pdf_path": str(pdf_path) if pdf_generated else None,
+            "md_path": str(md_path),
             "output_path": str(pdf_path) if pdf_generated else str(html_path),
             "episode_number": episode_number,
             "preset": script_preset.value,
@@ -340,7 +350,9 @@ def _collect_media_resources(
     # Patterns for media URLs - handle both "Media Url" (with space) and "MediaUrl" (no space)
     media_patterns = [
         re.compile(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', re.IGNORECASE),
+        re.compile(r'\[MediaURL:\s*([^\]]+)\]', re.IGNORECASE),
         re.compile(r'\[Thumbnail\s*[Uu]rl:\s*([^\]]+)\]', re.IGNORECASE),
+        re.compile(r'\[ThumbnailURL:\s*([^\]]+)\]', re.IGNORECASE),
         re.compile(r'<img[^>]+src="([^"]+)"', re.IGNORECASE),
     ]
 
@@ -509,18 +521,319 @@ def _generate_html(
     return '\n'.join(html_parts)
 
 
+def _generate_markdown(
+    episode_info: Dict[str, Any],
+    blocks: List[Dict[str, Any]],
+    preset: ScriptPreset,
+    url_mapping: Dict[str, str],
+    transcription_cache: Dict[str, str] = None
+) -> str:
+    """Generate clean markdown document from script data."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    md_parts = []
+
+    # Title/Cover section
+    md_parts.append(f"# {episode_info['show_name']}")
+    md_parts.append(f"## Episode {episode_info['episode_number']}")
+    md_parts.append("")
+
+    if episode_info.get('title'):
+        md_parts.append(f"### {episode_info['title']}")
+        md_parts.append("")
+
+    # Metadata table
+    md_parts.append("| Field | Value |")
+    md_parts.append("|-------|-------|")
+    if episode_info.get('episode_date'):
+        md_parts.append(f"| Date | {episode_info['episode_date']} |")
+    if episode_info.get('guests'):
+        md_parts.append(f"| Guests | {episode_info['guests']} |")
+    if episode_info.get('total_runtime'):
+        md_parts.append(f"| Runtime | {episode_info['total_runtime']} |")
+    md_parts.append(f"| Blocks | {len(blocks)} |")
+    md_parts.append("")
+
+    # Block summary
+    md_parts.append("### Block Summary")
+    md_parts.append("")
+    for block in blocks:
+        item_count = len(block.get('items', []))
+        md_parts.append(f"- **Block {block['letter']}**: {item_count} segment(s)")
+    md_parts.append("")
+    md_parts.append("---")
+    md_parts.append("")
+
+    # Content blocks
+    for block in blocks:
+        md_parts.append(_generate_markdown_block(block, preset, url_mapping, transcription_cache))
+
+    return '\n'.join(md_parts)
+
+
+def _generate_markdown_block(
+    block: Dict[str, Any],
+    preset: ScriptPreset,
+    url_mapping: Dict[str, str],
+    transcription_cache: Dict[str, str] = None
+) -> str:
+    """Generate markdown for a single block."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    parts = []
+    letter = block['letter']
+
+    # Block header
+    parts.append(f"## ★ BLOCK {letter} ★")
+    parts.append("")
+
+    # Process each segment
+    for item in block['items']:
+        segment_md = _process_segment_markdown(item, preset, url_mapping, transcription_cache)
+        if segment_md:
+            parts.append(segment_md)
+
+    # Block end
+    parts.append(f"— END BLOCK {letter} —")
+    parts.append("")
+
+    # Break indicator
+    if block.get('break_after'):
+        break_item = block['break_after']
+        break_title = break_item.title
+        if not break_title or break_title.lower() == 'untitled':
+            break_title = "BREAK"
+        parts.append(f"### ▶ {break_title.upper()} ◀")
+        parts.append("")
+
+    parts.append("---")
+    parts.append("")
+
+    return '\n'.join(parts)
+
+
+def _process_segment_markdown(
+    item,
+    preset: ScriptPreset,
+    url_mapping: Dict[str, str],
+    transcription_cache: Dict[str, str] = None
+) -> str:
+    """Process a single rundown item to markdown."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    # Check if item has content
+    if not item.script_content or not item.script_content.strip():
+        return ''
+
+    # Remove frontmatter and check for actual content
+    content = item.script_content
+    content_check = re.sub(r'^---.*?---\s*', '', content, flags=re.DOTALL)
+    content_check = re.sub(r'<!--.*?-->', '', content_check, flags=re.DOTALL)
+    content_check = re.sub(r'<p[^>]*>\s*</p>', '', content_check)
+
+    if not content_check.strip():
+        return ''
+
+    parts = []
+
+    # Segment header
+    title = item.title
+    if not title or title.lower() == 'untitled':
+        title = item.slug or "Segment"
+    duration = item.duration or ""
+
+    if duration:
+        parts.append(f"### {title} `[{duration}]`")
+    else:
+        parts.append(f"### {title}")
+    parts.append("")
+
+    # Process content
+    content_md = _process_content_markdown(content, preset, url_mapping, transcription_cache)
+    if content_md.strip():
+        parts.append(content_md)
+        parts.append("")
+
+    return '\n'.join(parts)
+
+
+def _process_content_markdown(
+    content: str,
+    preset: ScriptPreset,
+    url_mapping: Dict[str, str],
+    transcription_cache: Dict[str, str] = None
+) -> str:
+    """Process script content to markdown with cue blocks and paragraphs."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    parts = []
+
+    # Pattern for cue blocks
+    cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL | re.IGNORECASE)
+
+    # Split by cue blocks and process
+    last_end = 0
+    for match in cue_pattern.finditer(content):
+        # Text before cue
+        text_before = content[last_end:match.start()]
+        if text_before.strip():
+            text_md = _process_text_markdown(text_before, preset)
+            parts.append(text_md)
+
+        # Cue block
+        cue_md = _process_cue_markdown(match.group(1), preset, url_mapping, transcription_cache)
+        if cue_md:
+            parts.append(cue_md)
+
+        last_end = match.end()
+
+    # Text after last cue
+    text_after = content[last_end:]
+    if text_after.strip():
+        text_md = _process_text_markdown(text_after, preset)
+        parts.append(text_md)
+
+    return '\n'.join(parts)
+
+
+def _process_text_markdown(text: str, preset: ScriptPreset) -> str:
+    """Process text content to markdown paragraphs."""
+    parts = []
+
+    # Remove frontmatter
+    text = re.sub(r'^---.*?---\s*', '', text, flags=re.DOTALL)
+    text = re.sub(r'^-\s*-\s*-.*?-\s*-\s*-\s*', '', text, flags=re.DOTALL)
+
+    # Remove markdown headers (we add our own)
+    text = re.sub(r'^#+\s+.*$', '', text, flags=re.MULTILINE)
+
+    # Parse paragraphs with speaker classes
+    p_pattern = re.compile(r'<p\s+class=["\']([^"\']+)["\'][^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE)
+
+    for match in p_pattern.finditer(text):
+        speaker_class = match.group(1).strip().lower()
+        paragraph_text = match.group(2).strip()
+
+        if not paragraph_text:
+            continue
+
+        # Clean HTML entities and tags
+        paragraph_text = html.unescape(paragraph_text)
+        paragraph_text = re.sub(r'<[^>]+>', '', paragraph_text)
+
+        # Get speaker name
+        speaker_config = SPEAKER_CONFIG.get(speaker_class, {'name': speaker_class.upper()})
+        speaker_name = speaker_config['name']
+
+        # Format based on preset
+        if preset == ScriptPreset.HOST_CLEAN:
+            # Clean mode: just the text with speaker prefix on new paragraphs
+            parts.append(f"**{speaker_name}:** {paragraph_text}")
+            parts.append("")
+        else:
+            # Full/Production mode: speaker labeled paragraphs
+            parts.append(f"**{speaker_name}:**")
+            parts.append(f"> {paragraph_text}")
+            parts.append("")
+
+    return '\n'.join(parts)
+
+
+def _process_cue_markdown(
+    cue_content: str,
+    preset: ScriptPreset,
+    url_mapping: Dict[str, str],
+    transcription_cache: Dict[str, str] = None
+) -> str:
+    """Process a cue block to markdown format."""
+    if transcription_cache is None:
+        transcription_cache = {}
+
+    # Extract cue type
+    type_match = re.search(r'\[Type:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    cue_type = type_match.group(1).strip().upper() if type_match else 'CUE'
+
+    # Extract common fields
+    slug_match = re.search(r'\[Slug:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    duration_match = re.search(r'\[Duration:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    media_url_match = re.search(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    asset_id_match = re.search(r'\[Asset\s*[Ii][Dd]:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    transcription_match = re.search(r'\[Transcription:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    description_match = re.search(r'\[Description:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+
+    slug = slug_match.group(1).strip() if slug_match else ''
+    duration = duration_match.group(1).strip() if duration_match else ''
+    media_url = media_url_match.group(1).strip() if media_url_match else ''
+    asset_id = asset_id_match.group(1).strip() if asset_id_match else ''
+    transcription = transcription_match.group(1).strip() if transcription_match else ''
+    description = description_match.group(1).strip() if description_match else ''
+
+    # Check transcription cache
+    if not transcription and asset_id and asset_id in transcription_cache:
+        transcription = transcription_cache[asset_id]
+
+    # Skip certain cue types in clean mode
+    if preset == ScriptPreset.HOST_CLEAN:
+        # Only show media cues with transcription
+        if cue_type in ['SOT', 'VO', 'NAT', 'PKG'] and transcription:
+            parts = [f"**[{cue_type}]** _{slug}_"]
+            if duration:
+                parts[0] += f" `{duration}`"
+            parts.append("")
+            parts.append(f"> {transcription}")
+            parts.append("")
+            return '\n'.join(parts)
+        elif cue_type in ['FSQ']:
+            return f"**[{cue_type}]** _{slug}_ `{duration}`\n"
+        else:
+            return ''
+
+    # Full/Production mode - show all cue details
+    parts = []
+
+    # Cue header
+    header = f"**[{cue_type}]**"
+    if slug:
+        header += f" _{slug}_"
+    if duration:
+        header += f" `{duration}`"
+    parts.append(header)
+
+    # Details as a list
+    if preset == ScriptPreset.PRODUCTION:
+        if asset_id:
+            parts.append(f"  - AssetID: `{asset_id}`")
+        if media_url:
+            parts.append(f"  - Media: `{media_url}`")
+
+    # Transcription/Description
+    if transcription:
+        parts.append("")
+        parts.append(f"> *\"{transcription}\"*")
+    elif description:
+        parts.append("")
+        parts.append(f"> {description}")
+
+    parts.append("")
+    return '\n'.join(parts)
+
+
 def _get_css(preset: ScriptPreset, episode_number: str) -> str:
     """Get CSS styles based on preset."""
 
-    # Base font size varies by preset
+    # Base font size varies by preset (+3pt from original)
     if preset == ScriptPreset.HOST_CLEAN:
-        body_font = "20pt"  # Larger for teleprompter/easy reading
+        body_font = "23pt"  # Larger for teleprompter/easy reading
         line_height = "1.8"
     elif preset == ScriptPreset.PRODUCTION:
-        body_font = "11pt"  # Smaller for more info density
+        body_font = "14pt"  # More readable
         line_height = "1.4"
     else:  # HOST_FULL
-        body_font = "16pt"
+        body_font = "19pt"  # Main body text
         line_height = "1.6"
 
     return f"""
@@ -710,7 +1023,7 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
         }}
 
         .cue-label {{
-            font-size: 11pt;
+            font-size: 19pt;
             font-weight: bold;
             margin-bottom: 0.1in;
         }}
@@ -725,7 +1038,7 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
         .cue-fsq .cue-label {{ color: #666; }}
 
         .cue-fsq blockquote {{
-            font-size: 18pt;
+            font-size: 19pt;
             font-style: italic;
             color: #333;
             margin: 0.1in 0;
@@ -734,7 +1047,7 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
 
         .cue-fsq .attribution {{
             text-align: right;
-            font-size: 13pt;
+            font-size: 17pt;
             color: #555;
             margin-top: 0.1in;
         }}
@@ -768,10 +1081,10 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
         }}
 
         .sot-info {{ flex: 1; order: 1; }}
-        .sot-slug {{ font-weight: bold; font-size: 13pt; }}
-        .sot-duration {{ font-size: 11pt; color: #666; }}
-        .sot-outcue {{ font-size: 12pt; color: #d84315; font-weight: bold; margin-top: 0.05in; }}
-        .sot-transcription {{ font-size: 11pt; color: #444; font-style: italic; margin-top: 0.1in; }}
+        .sot-slug {{ font-weight: bold; font-size: 19pt; }}
+        .sot-duration {{ font-size: 17pt; color: #666; }}
+        .sot-outcue {{ font-size: 19pt; color: #d84315; font-weight: bold; margin-top: 0.05in; }}
+        .sot-transcription {{ font-size: 17pt; color: #444; font-style: italic; margin-top: 0.1in; }}
 
         /* IMG/GFX */
         .cue-img, .cue-gfx {{
@@ -783,26 +1096,27 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
         .cue-img .cue-label, .cue-gfx .cue-label {{ color: #666; }}
 
         .cue-img img, .cue-gfx img {{
-            max-width: 675px;
+            max-width: 1180px;
+            width: 100%;
             border: 1px solid #ccc;
             border-radius: 4px;
         }}
 
         .img-caption {{
-            font-size: 11pt;
+            font-size: 17pt;
             color: #666;
             margin-top: 0.1in;
             font-style: italic;
         }}
 
-        /* Clean preset - minimal cue markers */
+        /* Cue markers for RIF, VOX, etc. */
         .cue-marker {{
             display: inline-block;
             background: #eee;
             color: #666;
-            padding: 4px 12px;
+            padding: 6px 14px;
             border-radius: 4px;
-            font-size: 12pt;
+            font-size: 19pt;
             font-weight: bold;
             margin: 0.15in 0;
         }}
@@ -1048,11 +1362,17 @@ def _process_text(
             continue
 
         # Clean content - remove unwanted HTML tags
-        content = re.sub(r'<div>\s*</div>', '', content)
-        content = re.sub(r'<div[^>]*>\s*</div>', '', content)
+        # Strip ALL div tags (both empty and with content)
+        content = re.sub(r'<div[^>]*>', '', content)  # Remove opening div tags
+        content = re.sub(r'</div>', '', content)  # Remove closing div tags
         content = re.sub(r'<span[^>]*>', '', content)  # Remove opening span tags
         content = re.sub(r'</span>', '', content)  # Remove closing span tags
         content = re.sub(r'<br\s*/?>', ' ', content)
+        # Also remove HTML-escaped versions of div/span tags
+        content = re.sub(r'&lt;div[^&]*?&gt;', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'&lt;/div&gt;', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'&lt;span[^&]*?&gt;', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'&lt;/span&gt;', '', content, flags=re.IGNORECASE)
         content = re.sub(r'\s+', ' ', content)
 
         # Check if speaker changed
@@ -1156,11 +1476,16 @@ def _format_sot(cue_content: str, slug: str, url_mapping: Dict[str, str], transc
     duration_match = re.search(r'\[Duration:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
     duration = duration_match.group(1).strip() if duration_match else ''
 
-    thumb_match = re.search(r'\[Thumbnail\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    thumb_match = re.search(r'\[Thumbnail\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE) or \
+                  re.search(r'\[ThumbnailURL:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
     thumbnail_url = ''
     if thumb_match:
         original_url = thumb_match.group(1).strip()
-        thumbnail_url = url_mapping.get(original_url, '')
+        # Use local copy if available, otherwise use original URL (wkhtmltopdf can fetch HTTP)
+        thumbnail_url = url_mapping.get(original_url, original_url)
+        # Skip blob URLs as they won't work
+        if thumbnail_url.startswith('blob:'):
+            thumbnail_url = ''
 
     # Get transcription - first check cue block, then transcription cache by Asset ID
     trans_match = re.search(r'\[Transcription:\s*([^\]]+)\]', cue_content, re.IGNORECASE)

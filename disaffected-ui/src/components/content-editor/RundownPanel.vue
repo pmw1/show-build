@@ -51,13 +51,12 @@
           <!-- New Item Button -->
           <v-btn
             size="x-small"
-            color="primary"
-            variant="elevated"
+            variant="outlined"
             @click="$emit('new-item')"
-            class="toolbar-btn-tile"
+            class="toolbar-btn-tile toolbar-btn-success"
           >
-            <v-icon size="small" class="mr-1">mdi-plus</v-icon>
-            <span class="btn-text-tiny">New</span>
+            <v-icon size="small">mdi-plus-circle</v-icon>
+            <span class="btn-text-tiny">New Item</span>
             <v-tooltip activator="parent" location="bottom">
               Add New Rundown Item (Ctrl+Shift+N)
             </v-tooltip>
@@ -66,14 +65,13 @@
           <!-- Delete Selected Button -->
           <v-btn
             size="x-small"
-            color="error"
-            variant="elevated"
+            variant="outlined"
             @click="handleDeleteSelected"
             :disabled="!hasSelections"
-            class="toolbar-btn-tile"
+            class="toolbar-btn-tile toolbar-btn-error"
           >
-            <v-icon size="small" class="mr-1">mdi-delete</v-icon>
-            <span class="btn-text-tiny">Del ({{ totalSelectionsCount }})</span>
+            <v-icon size="small">mdi-trash-can-outline</v-icon>
+            <span class="btn-text-tiny">Delete ({{ totalSelectionsCount }})</span>
             <v-tooltip activator="parent" location="bottom">
               <div v-if="hasMultipleSelections">
                 Delete Selected: {{ selectionSummary }}
@@ -90,12 +88,11 @@
           <!-- View Regions Toggle Button -->
           <v-btn
             size="x-small"
-            :color="showRegions ? 'primary' : 'grey'"
-            variant="elevated"
+            variant="outlined"
             @click="toggleRegionsVisibility"
-            class="toolbar-btn-tile"
+            :class="['toolbar-btn-tile', showRegions ? 'toolbar-btn-info' : 'toolbar-btn-grey']"
           >
-            <v-icon size="small" class="mr-1">{{ showRegions ? 'mdi-view-grid' : 'mdi-view-list' }}</v-icon>
+            <v-icon size="small">{{ showRegions ? 'mdi-view-grid' : 'mdi-view-list' }}</v-icon>
             <span class="btn-text-tiny">Regions</span>
             <v-tooltip activator="parent" location="bottom">
               {{ showRegions ? 'Hide Regions (Alt+Shift+R)' : 'Show Regions (Alt+Shift+R)' }}
@@ -107,17 +104,31 @@
             <template v-slot:activator="{ props }">
               <v-btn
                 size="x-small"
-                color="orange-darken-2"
-                variant="elevated"
+                variant="outlined"
                 v-bind="props"
-                class="toolbar-btn-tile"
+                class="toolbar-btn-tile toolbar-btn-warning"
               >
-                <v-icon size="small" class="mr-1">mdi-dots-vertical</v-icon>
+                <v-icon size="small">mdi-cog-outline</v-icon>
                 <span class="btn-text-tiny">Options</span>
                 <v-tooltip activator="parent" location="bottom">Rundown Options</v-tooltip>
               </v-btn>
             </template>
             <v-list density="compact">
+              <v-list-item @click="$emit('refresh-rundown')">
+                <template v-slot:prepend>
+                  <v-icon size="small">mdi-refresh</v-icon>
+                </template>
+                <v-list-item-title>Refresh Rundown</v-list-item-title>
+                <v-list-item-subtitle>Reload from database</v-list-item-subtitle>
+              </v-list-item>
+              <v-list-item @click="$emit('restore-revision')" :disabled="selectedItemIndex === -1">
+                <template v-slot:prepend>
+                  <v-icon size="small">mdi-history</v-icon>
+                </template>
+                <v-list-item-title>Restore Previous Revision</v-list-item-title>
+                <v-list-item-subtitle>{{ selectedItemIndex === -1 ? 'Select an item first' : 'View version history' }}</v-list-item-subtitle>
+              </v-list-item>
+              <v-divider></v-divider>
               <v-list-item @click="createNewRegion">
                 <template v-slot:prepend>
                   <v-icon size="small">mdi-plus</v-icon>
@@ -304,7 +315,7 @@
                         :style="Object.assign({},
                           {
                             backgroundColor: itemHasNeedsAttention(item) ? needsAttentionColor : (getItemGlobalIndex(item) === selectedItemIndex ? getSelectionColor() : getBackgroundColorForItem(item?.type || 'unknown')),
-                            color: getItemGlobalIndex(item) === selectedItemIndex ? getSelectionTextColor() : getTextColorForItem(item?.type || 'unknown')
+                            color: itemHasNeedsAttention(item) ? '#FFFFFF' : (getItemGlobalIndex(item) === selectedItemIndex ? getSelectionTextColor() : getTextColorForItem(item?.type || 'unknown'))
                           },
                           llmState ? llmState.getVisualStyle('item', item.id) : {}
                         )"
@@ -337,7 +348,7 @@
 
                             <!-- Slug -->
                             <div class="slug-column">
-                              <div class="slug-text">{{ truncateSlug(item?.slug || '', panelWidth) }}</div>
+                              <div :class="['slug-text', { 'blink-attention': itemHasNeedsAttention(item) }]">{{ itemHasNeedsAttention(item) ? `**${truncateSlug(item?.slug || '', panelWidth)}**` : truncateSlug(item?.slug || '', panelWidth) }}</div>
                               <div v-if="panelWidth === 'narrow' && getItemGlobalIndex(item) === selectedItemIndex" class="word-count-display">
                                 WC: {{ getWordCount(item) }}
                               </div>
@@ -667,6 +678,8 @@ export default {
     'sync-order',
     'export',
     'refresh',
+    'refresh-rundown',
+    'restore-revision',
     'toggle-options',
     'select-item',
     'edit-item',
@@ -1017,14 +1030,17 @@ export default {
   methods: {
     // Check if an item's script content contains any needs-attention flagged segments
     itemHasNeedsAttention(item) {
-      if (!item || !item.script_content) {
+      // API returns script_content as 'script' field in rundown list response
+      const scriptContent = item?.script || item?.script_content;
+      if (!item || !scriptContent) {
         return false;
       }
       // Check for paragraph flags (data-needs-attention="true")
-      const hasParagraphFlag = item.script_content.includes('data-needs-attention="true"');
+      const hasParagraphFlag = scriptContent.includes('data-needs-attention="true"');
       // Check for cue flags (NeedsAttention: true or NeedsAttention:true)
-      const hasCueFlag = /NeedsAttention:\s*true/i.test(item.script_content);
-      return hasParagraphFlag || hasCueFlag;
+      const hasCueFlag = /NeedsAttention:\s*true/i.test(scriptContent);
+      const result = hasParagraphFlag || hasCueFlag;
+      return result;
     },
 
     // Region visibility toggle
@@ -2784,11 +2800,7 @@ export default {
   z-index: 100;
 }
 
-/* Needs-attention items get 400% wider status bar (4x = 20px) */
-.needs-attention-item .status-indicator {
-  width: 20px !important;
-  background-color: var(--needs-attention-border, #FFCC80) !important;
-}
+/* (status-indicator hidden for needs-attention items - see main needs-attention styles below) */
 
 .rundown-panel.narrow .index-number-cell {
   min-width: 40px; /* Slightly smaller for narrow mode */
@@ -3144,9 +3156,9 @@ export default {
 
 .toolbar-main-grid {
   display: grid;
-  gap: 3px;
+  gap: 6px;
   flex: 1;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   align-items: stretch;
 }
 
@@ -3156,33 +3168,94 @@ export default {
 }
 
 .toolbar-btn-tile {
-  border-radius: 0 !important;
-  height: 48px !important;
-  min-height: 48px !important;
+  border-radius: 6px !important;
+  height: 44px !important;
+  min-height: 44px !important;
   font-size: 10px !important;
   flex: 1;
   width: 100% !important;
   justify-self: stretch;
   display: flex !important;
+  flex-direction: column !important;
   align-items: center;
   justify-content: center;
-  padding: 2px 4px !important;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+  padding: 4px 8px !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  border-width: 2px !important;
   transition: all 0.2s ease !important;
 }
 
 .toolbar-btn-tile:hover {
   transform: translateY(-1px) !important;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3) !important;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15) !important;
+}
+
+.toolbar-btn-tile .v-icon {
+  margin-bottom: 2px !important;
+  margin-right: 0 !important;
 }
 
 .toolbar-btn-tile .btn-text-tiny {
-  font-size: 9px !important;
+  font-size: 11px !important;
   line-height: 1.1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+/* Button color variants - white background with colored text/borders */
+.toolbar-btn-success {
+  border-color: #4caf50 !important;
+  color: #2e7d32 !important;
+}
+.toolbar-btn-success:hover {
+  background-color: #f1f8e9 !important;
+  border-color: #2e7d32 !important;
+}
+
+.toolbar-btn-error {
+  border-color: #f44336 !important;
+  color: #c62828 !important;
+}
+.toolbar-btn-error:hover {
+  background-color: #ffebee !important;
+  border-color: #c62828 !important;
+}
+.toolbar-btn-error:disabled {
+  border-color: #bdbdbd !important;
+  color: #9e9e9e !important;
+  background-color: #fafafa !important;
+}
+
+.toolbar-btn-info {
+  border-color: #2196f3 !important;
+  color: #1565c0 !important;
+}
+.toolbar-btn-info:hover {
+  background-color: #e3f2fd !important;
+  border-color: #1565c0 !important;
+}
+
+.toolbar-btn-grey {
+  border-color: #9e9e9e !important;
+  color: #616161 !important;
+}
+.toolbar-btn-grey:hover {
+  background-color: #f5f5f5 !important;
+  border-color: #616161 !important;
+}
+
+.toolbar-btn-warning {
+  border-color: #ff9800 !important;
+  color: #e65100 !important;
+}
+.toolbar-btn-warning:hover {
+  background-color: #fff3e0 !important;
+  border-color: #e65100 !important;
 }
 
 .options-btn-fixed {
@@ -3207,17 +3280,20 @@ export default {
 /* Narrow panel adjustments */
 .rundown-panel.narrow .toolbar-main-grid {
   grid-template-columns: repeat(2, 1fr);
-  gap: 2px;
+  gap: 4px;
 }
 
 .rundown-panel.narrow .toolbar-btn-tile {
-  min-height: 24px !important;
-  font-size: 8px !important;
-  padding: 0 2px !important;
+  min-height: 40px !important;
+  height: 40px !important;
+  font-size: 10px !important;
+  padding: 4px 6px !important;
+  border-radius: 4px !important;
 }
 
 .rundown-panel.narrow .toolbar-btn-tile .btn-text-tiny {
-  font-size: 7px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.2px;
 }
 
 .rundown-panel.narrow .options-btn-fixed {
@@ -3891,16 +3967,19 @@ export default {
   color: v-bind('getSelectionTextColor()') !important;
 }
 
-/* Needs-attention item styling - uses CSS variables from settings */
-/* 10x larger left bar (40px) to make flagged items very visible */
+/* Needs-attention item styling - uses color from settings */
 .needs-attention-item {
   border-left: none !important;
-  background-color: var(--needs-attention-bg-light, rgba(255, 204, 128, 0.15)) !important;
   position: relative;
   margin-left: 0 !important;
 }
 
-/* Large attention bar on left side - 10x normal size */
+/* Hide the regular status-indicator for needs-attention items (only show ::before bar) */
+.needs-attention-item .status-indicator {
+  display: none !important;
+}
+
+/* Large attention bar on left side - 40px using needs-attention color from settings */
 .needs-attention-item::before {
   content: '';
   position: absolute;
@@ -3917,18 +3996,18 @@ export default {
   margin-left: 36px;
 }
 
-/* Flag indicator on needs-attention items */
-.needs-attention-item::after {
-  content: '';
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 12px;
-  height: 12px;
-  background-color: var(--needs-attention-border, #FFCC80);
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M14.4,6L14,4H5V21H7V14H12.6L13,16H20V6H14.4Z'/%3E%3C/svg%3E") no-repeat center;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M14.4,6L14,4H5V21H7V14H12.6L13,16H20V6H14.4Z'/%3E%3C/svg%3E") no-repeat center;
-  z-index: 10;
+/* Blinking animation for needs-attention slug text */
+.blink-attention {
+  animation: blink-text 1s ease-in-out infinite;
+}
+
+@keyframes blink-text {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 /* Override needs-attention when item is selected */

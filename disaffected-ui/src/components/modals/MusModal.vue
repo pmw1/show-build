@@ -31,21 +31,34 @@ export default {
       });
       this.reset();
     },
-    reset() { 
-      this.slug = ''; 
-      this.description = ''; 
-      this.duration = ''; 
+    reset() {
+      this.slug = '';
+      this.description = '';
+      this.duration = '';
       this.$emit('update:show', false);
+    },
+    handleKeydown(event) {
+      if (event.key === 'Escape' && this.show) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.$emit('update:show', false);
+      }
     }
   },
-  watch: { 
-    show(val) { 
+  watch: {
+    show(val) {
       if (!val) {
-        this.slug = ''; 
-        this.description = ''; 
-        this.duration = ''; 
+        this.slug = '';
+        this.description = '';
+        this.duration = '';
       }
-    } 
+    }
+  },
+  mounted() {
+    document.addEventListener('keydown', this.handleKeydown);
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleKeydown);
   }
 }
 </script>

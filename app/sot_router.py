@@ -276,20 +276,58 @@ async def process_sot_multi_phase_endpoint(
         # DEBUG: Log incoming request
         logger.info(f"📥 Multi-phase request received: temp_job_id={request.temp_job_id}, episode={request.episode}, slug={request.slug}, asset_id={request.asset_id}")
 
-        # Verify job exists
-        job = db.query(SOTProcessingJob).filter_by(temp_job_id=request.temp_job_id).first()
-        if not job:
+        # Verify parent job exists (the original upload)
+        parent_job = db.query(SOTProcessingJob).filter_by(temp_job_id=request.temp_job_id).first()
+        if not parent_job:
             logger.error(f"❌ Job not found: {request.temp_job_id}")
             raise HTTPException(status_code=404, detail=f"Job {request.temp_job_id} not found")
 
-        if job.status != 'uploaded':
-            logger.error(f"❌ Job {request.temp_job_id} has wrong status: {job.status}")
+        # Check if this is a child clip request (different asset_id than the parent)
+        # This happens when frontend creates multiple clips from single upload (individual-clips mode)
+        is_child_clip = (
+            parent_job.status != 'uploaded' and
+            parent_job.asset_id != request.asset_id
+        )
+
+        if is_child_clip:
+            # Create a new child job record for this clip
+            # Child shares parent's working directory but has its own tracking
+            import uuid
+            child_job_id = f"{request.temp_job_id}_{str(uuid.uuid4())[:8]}"
+
+            logger.info(f"🔀 Creating child job {child_job_id} from parent {request.temp_job_id} for asset {request.asset_id}")
+
+            job = SOTProcessingJob(
+                temp_job_id=child_job_id,
+                episode=request.episode,
+                slug=request.slug,
+                asset_id=request.asset_id,
+                status='uploaded',  # Start fresh
+                current_phase='uploaded',
+                working_directory=parent_job.working_directory,  # Share working dir with parent
+                job_type=request.job_type or 'single_trim',
+                source_asset_id=parent_job.source_asset_id  # Share source reference
+            )
+            db.add(job)
+            db.flush()  # Get the ID
+
+            logger.info(f"✅ Child job created: {child_job_id}")
+
+            # Update request temp_job_id for downstream processing
+            # The Celery task will use this new job ID
+            request.temp_job_id = child_job_id
+
+        elif parent_job.status != 'uploaded':
+            # Not a child clip, and parent already processing - reject
+            logger.error(f"❌ Job {request.temp_job_id} has wrong status: {parent_job.status}")
             raise HTTPException(
                 status_code=400,
-                detail=f"Job is in status '{job.status}', expected 'uploaded'"
+                detail=f"Job is in status '{parent_job.status}', expected 'uploaded'"
             )
-
-        logger.info(f"✅ Job found with correct status: {job.status}")
+        else:
+            # Normal case: parent job in 'uploaded' status, first processing request
+            job = parent_job
+            logger.info(f"✅ Job found with correct status: {job.status}")
 
         # CRITICAL FIX: Verify upload file exists before submitting to Celery
         # Prevents race condition where file hasn't fully synced to NFS
@@ -731,11 +769,18 @@ async def get_job_status_by_asset_id(
     Returns the most recent job status for the given AssetID.
     Used for real-time status updates on cue cards.
 
+    Enhanced response (as of 2026-01) includes:
+    - video_specs: Resolution, codec, bitrate, fps, duration from post_analysis
+    - thumbnail_data: Array of thumbnails with sharpness scores
+    - audio_analysis: Channel info, layout, sample rate from pre_analysis
+    - warnings: Processing warnings (blur, unbalanced audio, etc.)
+    - phase_timing: Duration of each processing phase (when available)
+
     Args:
         asset_id: AssetID of the SOT cue
 
     Returns:
-        Job status information including status, phase, progress, and errors
+        Job status information including status, phase, progress, errors, and enhanced metadata
     """
     logger.info(f"🔍 Job status requested for AssetID: {asset_id}")
 
@@ -755,8 +800,82 @@ async def get_job_status_by_asset_id(
 
         logger.info(f"✅ Found job for AssetID {asset_id}: {job.temp_job_id}, status={job.status}, phase={job.current_phase}")
 
-        # Return job status with transcription and asset paths
-        return {
+        # Extract video specs from post_analysis (final output) or pre_analysis (raw input)
+        video_specs = None
+        if job.post_analysis:
+            post = job.post_analysis
+            video_specs = {
+                "resolution": post.get("resolution", "unknown"),
+                "codec": post.get("codec", "unknown"),
+                "bitrate": post.get("bitrate", "unknown"),
+                "duration": post.get("duration", "00:00:00"),
+                "duration_seconds": post.get("duration_seconds", 0),
+                "file_size_mb": post.get("file_size_mb", 0)
+            }
+        elif job.pre_analysis:
+            pre = job.pre_analysis
+            video_specs = {
+                "resolution": pre.get("resolution", "unknown"),
+                "codec": "processing",
+                "bitrate": "processing",
+                "fps": pre.get("framerate", 0),
+                "duration": pre.get("duration", "00:00:00"),
+                "duration_seconds": pre.get("duration_seconds", 0),
+                "orientation": pre.get("orientation", "unknown")
+            }
+
+        # Extract audio analysis from pre_analysis
+        audio_analysis = None
+        if job.pre_analysis:
+            pre = job.pre_analysis
+            audio_analysis = {
+                "channels": pre.get("audio_config", "unknown"),
+                "channel_count": pre.get("audio_channels", 0),
+                "layout": pre.get("audio_layout", "unknown"),
+                "sample_rate": pre.get("sample_rate", 0)
+            }
+
+        # Extract thumbnail data with sharpness scores from processing_report
+        thumbnail_data = None
+        if job.processing_report and isinstance(job.processing_report, dict):
+            phases = job.processing_report.get("phases", {})
+            # Check phase4 (SOT) or phase3 (VO) for thumbnail data
+            for phase_key in ["phase4", "phase3"]:
+                if phase_key in phases and phases[phase_key].get("data"):
+                    phase_data = phases[phase_key].get("data", {})
+                    if "thumbnail_data" in phase_data:
+                        thumbnail_data = phase_data["thumbnail_data"]
+                        break
+
+        # If no thumbnail_data in report, build from candidates with estimated sharpness
+        if not thumbnail_data and job.thumbnail_candidates:
+            thumbnail_data = [
+                {"filename": fname, "index": i + 1, "sharpness": None}
+                for i, fname in enumerate(job.thumbnail_candidates)
+            ]
+            # Mark selected thumbnail
+            if job.selected_thumbnail:
+                for td in thumbnail_data:
+                    if td["filename"] == job.selected_thumbnail:
+                        td["selected"] = True
+
+        # Extract warnings from processing_report
+        warnings = []
+        if job.processing_report and isinstance(job.processing_report, dict):
+            warnings = job.processing_report.get("warnings", [])
+
+        # Extract phase timing from processing_report if available
+        phase_timing = None
+        if job.processing_report and isinstance(job.processing_report, dict):
+            phases = job.processing_report.get("phases", {})
+            if phases:
+                phase_timing = {}
+                for phase_name, phase_info in phases.items():
+                    if isinstance(phase_info, dict) and "duration" in phase_info:
+                        phase_timing[phase_name] = phase_info["duration"]
+
+        # Build enhanced response
+        response = {
             "asset_id": asset_id,
             "job_id": job.temp_job_id,
             "status": job.status,
@@ -767,13 +886,32 @@ async def get_job_status_by_asset_id(
             "celery_task_id": job.celery_task_id,
             "slug": job.slug,
             "episode": job.episode,
+            "job_type": job.job_type,
+            "retry_count": job.retry_count,
+
+            # Content data
             "transcription": job.transcription,
             "final_video_path": job.final_video_path,
+            "final_audio_path": job.final_audio_path,
             "final_thumbnail_path": job.final_thumbnail_path,
             "thumbnail_candidates": job.thumbnail_candidates,
+            "selected_thumbnail": job.selected_thumbnail,
             "source_asset_id": job.source_asset_id,
-            "final_asset_id": job.final_asset_id
+            "final_asset_id": job.final_asset_id,
+
+            # Enhanced metadata (new fields)
+            "video_specs": video_specs,
+            "audio_analysis": audio_analysis,
+            "thumbnail_data": thumbnail_data,
+            "warnings": warnings,
+            "phase_timing": phase_timing,
+
+            # Raw analysis data for advanced use cases
+            "pre_analysis": job.pre_analysis,
+            "post_analysis": job.post_analysis
         }
+
+        return response
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
