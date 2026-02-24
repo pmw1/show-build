@@ -400,6 +400,9 @@ export class CueParser {
       analysisState: cueData.analysisState,
       analysisField: cueData.analysisField,
       analysisRecommendations: cueData.analysisRecommendations,
+      // NOTE cue fields
+      noteText: cueData.noteText || '',
+      noteFor: cueData.noteFor || '',
       enumerator: cueData.enumerator,  // Enumeration number for display
       needsAttention: cueData.needsAttention === 'true' || cueData.needsAttention === true, // Parse boolean from string
       flagNote: cueData.flagNote || '', // Attention note for flagged cues

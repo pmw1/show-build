@@ -20,13 +20,20 @@ from models_episode import (
     RundownTemplateExport,
     RundownTemplateImport
 )
-from typing import List, Optional
+from models_v2 import RundownItemType
+from typing import List, Optional, Dict
 import logging
 import json
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["rundown-templates"])
+
+
+@router.get("/item-types", response_model=Dict[str, str])
+async def get_rundown_item_types():
+    """Get all available rundown item types from the RundownItemType enum"""
+    return {item.name: item.value for item in RundownItemType}
 
 
 @router.get("/", response_model=List[RundownTemplateResponse])

@@ -33,6 +33,9 @@
           <v-tab value="voice" prepend-icon="mdi-microphone">
             Voice Services
           </v-tab>
+          <v-tab value="mp3-encoding" prepend-icon="mdi-music">
+            MP3 Encoding
+          </v-tab>
           <v-tab value="deployments" prepend-icon="mdi-cloud-upload">
             Deployments
           </v-tab>
@@ -919,6 +922,11 @@
             />
           </v-tabs-window-item>
 
+          <!-- MP3 Encoding Tab -->
+          <v-tabs-window-item value="mp3-encoding">
+            <Mp3EncodingSettings />
+          </v-tabs-window-item>
+
           <!-- Deployments Tab -->
           <v-tabs-window-item value="deployments">
             <DeploymentSettings />
@@ -933,6 +941,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import VoiceSettings from './VoiceSettings.vue'
+import Mp3EncodingSettings from './Mp3EncodingSettings.vue'
 import DeploymentSettings from './DeploymentSettings.vue'
 
 // Define props
@@ -1024,6 +1033,13 @@ const voiceConfigs = ref({
     language: 'en',
     speed: 1.0,
     speaker: '',
+    enabled: false
+  },
+  fishspeech: {
+    host: 'http://192.168.51.197:8080',
+    endpoint: '/v1/audio/speech',
+    voice: 'kairo_main',
+    format: 'wav',
     enabled: false
   }
 })
@@ -1428,6 +1444,7 @@ const loadVoiceConfigs = async () => {
         const loadedVoice = {}
         if (aiServices.whisper) loadedVoice.whisper = aiServices.whisper
         if (aiServices.xtts) loadedVoice.xtts = aiServices.xtts
+        if (aiServices.fishspeech) loadedVoice.fishspeech = aiServices.fishspeech
 
         voiceConfigs.value = { ...voiceConfigs.value, ...loadedVoice }
       }

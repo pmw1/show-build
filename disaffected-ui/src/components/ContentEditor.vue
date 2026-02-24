@@ -606,6 +606,14 @@ export default {
     rawMarkdownContent: {
       handler(newVal, oldVal) {
         if (newVal !== oldVal && this.selectedItemIndex >= 0) {
+          // CRITICAL FIX: Skip autosave when loading item content from the database.
+          // Without this guard, switching items triggers: loadItemContent -> rawMarkdownContent changes
+          // -> watcher fires -> autosave queued -> saves loaded content back unnecessarily.
+          // Combined with the (now removed) duplicate detection, this caused permanent data loss.
+          if (this.isLoadingItemContent) {
+            console.log('📝 Content changed during item load - skipping autosave');
+            return;
+          }
           console.log('📝 Content changed, triggering autosave...');
           this.hasUnsavedChanges = true;
           // Capture which paragraph is being edited NOW, before debounce delay
@@ -708,6 +716,7 @@ export default {
       paragraphBeingEdited: null, // Track which paragraph was being edited when autosave debounce started
       loadingRundown: true, // Start with loading overlay visible until episode loads
       loadingEpisode: false, // Prevent duplicate episode loading
+      isLoadingItemContent: false, // Guard to prevent autosave during item content load
       rundownError: null,
       checkEpisodeInterval: null, // Interval for checking episode changes from toolbar
       
@@ -1657,9 +1666,6 @@ Try dropping an image or video file here!`
         console.log('🖼️ lastKnownParagraphIndex:', editorPanel?.lastKnownParagraphIndex);
         console.log('🖼️ Captured cursor position (using fallback if needed):', this.imgInsertionIndex);
 
-        // Also insert a placeholder at cursor position for precise insertion
-        this.insertCuePlaceholder();
-
         console.log('🖼️ Opening IMG modal...');
         this.showImgCueModal = true;
       } else {
@@ -1729,7 +1735,7 @@ Try dropping an image or video file here!`
       this.showImgCueModal = true;
     },
     handleEditDirCue(cueData) {
-      console.log('📝 Editing DIR cue:', cueData);
+      console.log('📝 Editing NOTE cue:', cueData);
       // Store cue data for editing
       this.editingDirCueData = cueData;
       this.showDirModal = true;
@@ -1747,11 +1753,7 @@ Try dropping an image or video file here!`
         this.editingSotCueData = cueData;
 
         if (!cueData) {
-          // New SOT - insert placeholder at cursor position
-          console.log('📍 SOT modal opened - inserting placeholder at cursor position');
-          this.insertCuePlaceholder();
-
-          // Also keep the old paragraph index as fallback
+          // Keep paragraph index as metadata (snapshotting now happens in EditorPanel.insertCue)
           this.sotInsertionIndex = this.$refs.editorPanel?.focusedParagraphIndex;
           console.log('📍 Fallback cursor position:', this.sotInsertionIndex);
 
@@ -1885,9 +1887,9 @@ Try dropping an image or video file here!`
       }
     },
     handleShowDirModal() {
-      if (!this.requireRundownItemSelected('DIR cue')) return;
+      if (!this.requireRundownItemSelected('NOTE cue')) return;
       if (!this.showDirModal) {
-        // Clear editing data when creating new DIR
+        // Clear editing data when creating new NOTE
         this.editingDirCueData = null;
         this.showDirModal = true;
       }
@@ -1925,44 +1927,14 @@ Try dropping an image or video file here!`
 
     // SINGLE SOURCE HELPER: Update script content within rawMarkdownContent
     updateScriptContent(newScriptContent) {
-      console.log('🔄🔄🔄 ===============================================');
-      console.log('🔄 updateScriptContent CALLED');
-      console.log('📥 New script content length:', newScriptContent?.length || 0);
-      console.log('📥 New script content preview (first 200 chars):', newScriptContent?.substring(0, 200));
-      console.log('📊 this.parsedContent exists:', !!this.parsedContent);
-
-      const parsed = this.parsedContent;
-      console.log('📊 Frontmatter keys:', Object.keys(parsed?.frontmatter || {}));
-
-      // CRITICAL: Remove any standalone "---" lines from script content to prevent corruption
-      // These would be interpreted as frontmatter delimiters
-      const sanitizedScript = newScriptContent ? newScriptContent.replace(/^---\s*$/gm, '- - -') : '';
-      console.log('🧹 Sanitized script length:', sanitizedScript.length);
-
-      // Rebuild frontmatter YAML
-      const frontmatterLines = Object.entries(parsed.frontmatter)
-        .map(([key, value]) => `${key}: ${value}`)
-        .join('\n');
-      console.log('📋 Frontmatter lines:', frontmatterLines);
-
-      // Rebuild full markdown content
-      if (frontmatterLines) {
-        this.rawMarkdownContent = `---\n${frontmatterLines}\n---\n\n${sanitizedScript}`;
-        console.log('✅ Updated rawMarkdownContent WITH frontmatter');
-      } else {
-        this.rawMarkdownContent = sanitizedScript;
-        console.log('✅ Updated rawMarkdownContent WITHOUT frontmatter');
-      }
-
-      console.log('📊 New rawMarkdownContent length:', this.rawMarkdownContent?.length || 0);
-      console.log('📊 New rawMarkdownContent preview (first 200 chars):', this.rawMarkdownContent?.substring(0, 200));
-      console.log('📊 New computed scriptContent preview (first 200 chars):', this.scriptContent?.substring(0, 200));
+      // Database-first: no frontmatter in script_content, just the body
+      // NOTE: Removed '---' → '- - -' sanitizer that was corrupting content.
+      // Frontmatter is stripped on load, so standalone '---' lines in body content
+      // (e.g., markdown horizontal rules) should be preserved as-is.
+      this.rawMarkdownContent = newScriptContent || '';
 
       // CRITICAL: Mark that we have unsaved changes when content is updated
       this.hasUnsavedChanges = true;
-
-      console.log('✅ updateScriptContent complete (hasUnsavedChanges: true)');
-      console.log('🔄🔄🔄 ===============================================');
     },
 
     // SINGLE SOURCE HELPER: Append to script content
@@ -2392,6 +2364,14 @@ Try dropping an image or video file here!`
         this.scratchContent = '';
         this.rawMarkdownContent = '';
 
+        // Force EditorPanel to re-parse on reload
+        if (this.$refs.editorPanel) {
+          this.$refs.editorPanel.segmentReparseKey++;
+          this.$refs.editorPanel.cachedScriptSegments = null;
+          this.$refs.editorPanel.lastParsedContent = null;
+          this.$refs.editorPanel.segmentEditBuffer = {};
+        }
+
         // Reload episode data and rundown
         if (this.currentEpisodeNumber) {
           await this.loadEpisode(this.currentEpisodeNumber);
@@ -2666,6 +2646,10 @@ Try dropping an image or video file here!`
 
           this.selectedItemIndex = restoredIndex;
           if (this.selectedItemIndex !== -1 && items[this.selectedItemIndex]) {
+            // Force EditorPanel to re-parse segments on episode load
+            if (this.$refs.editorPanel) {
+              this.$refs.editorPanel.segmentReparseKey++;
+            }
             this.loadItemContent(items[this.selectedItemIndex]);
           }
           console.log('Loaded episode', paddedNumber, 'with', items.length, 'items, selected index:', this.selectedItemIndex);
@@ -2738,6 +2722,10 @@ Try dropping an image or video file here!`
       }
 
       this.saving = true;
+      // CRITICAL FIX: Capture the item index NOW, not after async operations.
+      // If selectedItemIndex changes during the await (e.g., user switches items),
+      // the post-save mutation must still target the correct item.
+      const saveTargetIndex = this.selectedItemIndex;
       try {
         const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
         const headers = this.getAuthHeaders();
@@ -2754,9 +2742,11 @@ Try dropping an image or video file here!`
         const contentToSave = this.rawMarkdownContent || this.parsedContent.scriptContent || '';
 
         // CRITICAL: Prevent saving empty/minimal content that would destroy existing content
-        if (contentToSave.length < 50 && this.rundownItems[this.selectedItemIndex]?.script_content?.length > 100) {
+        // NOTE: API returns items with field "script" (not "script_content"), so check .script
+        const existingScript = this.rundownItems[this.selectedItemIndex]?.script || '';
+        if (contentToSave.length < 50 && existingScript.length > 100) {
           console.error('🚨 BLOCKED: Attempted to save minimal content over substantial existing content');
-          console.error(`   New content: ${contentToSave.length} chars, Existing: ${this.rundownItems[this.selectedItemIndex]?.script_content?.length} chars`);
+          console.error(`   New content: ${contentToSave.length} chars, Existing: ${existingScript.length} chars`);
           throw new Error('Blocked save: would destroy existing content');
         }
 
@@ -2772,8 +2762,8 @@ Try dropping an image or video file here!`
         const rawToCheck = this.rawMarkdownContent || '';
 
         // More specific check: Look for multiple frontmatter blocks by detecting the pattern
-        // "---" followed by YAML keys like "id:", "slug:", "type:" which indicate segment metadata
-        const frontmatterBlockPattern = /^---\s*\n\s*(id|slug|type|title):/gm;
+        // "---" or "- - -" followed by YAML keys like "id:", "slug:", "type:" which indicate segment metadata
+        const frontmatterBlockPattern = /^(?:---|(?:-\s){2}-)\s*\n\s*(id|slug|type|title):/gm;
         const frontmatterBlockMatches = rawToCheck.match(frontmatterBlockPattern);
         const frontmatterBlockCount = frontmatterBlockMatches ? frontmatterBlockMatches.length : 0;
 
@@ -2815,6 +2805,21 @@ Try dropping an image or video file here!`
         );
 
         if (response.data) {
+          // Check if backend blocked a destructive save
+          if (response.data.blocked_saves && response.data.blocked_saves.length > 0) {
+            console.error('🚨 Backend BLOCKED a destructive save:', response.data.blocked_saves);
+            const editorPanel = this.$refs.editorPanel;
+            if (editorPanel && editorPanel.flashParagraph && paragraphToFlash !== null) {
+              editorPanel.flashParagraph(paragraphToFlash, 'error', 5);
+            }
+            if (window.flashUrgent) {
+              window.flashUrgent('Save blocked: content too short to overwrite existing', window.FLASH_COLORS?.RED || '#f44336', 5000);
+            }
+            // Keep hasUnsavedChanges true so user knows save didn't fully succeed
+            this.hasUnsavedChanges = true;
+            return;
+          }
+
           this.hasUnsavedChanges = false;
           console.log('✅ Current item autosaved successfully');
 
@@ -2829,14 +2834,15 @@ Try dropping an image or video file here!`
           }
 
           // Update local state with saved content IN-PLACE
-          // CRITICAL: Mutate the existing object instead of creating a new reference
-          // Creating a new reference triggers Vue watchers in EditorPanel,
-          // causing re-renders that lose focus and cursor position
-          const currentItem = this.rundownItems[this.selectedItemIndex];
-          if (currentItem) {
-            currentItem.script = this.parsedContent.scriptContent;
-            currentItem.scratch = this.scratchContent;
-            currentItem.rawMarkdown = null;  // Clear to prevent stale frontmatter-included content
+          // CRITICAL: Use saveTargetIndex (captured at call time) instead of this.selectedItemIndex
+          // which may have changed during the async axios call if the user switched items.
+          // Using the live selectedItemIndex here was Bug #5 - it could write the wrong content
+          // to the wrong item's local state during concurrent saves.
+          const savedItem = this.rundownItems[saveTargetIndex];
+          if (savedItem) {
+            savedItem.script = contentToSave;
+            savedItem.scratch = this.scratchContent;
+            savedItem.rawMarkdown = null;  // Clear to prevent stale frontmatter-included content
           }
         }
 
@@ -3108,22 +3114,27 @@ Try dropping an image or video file here!`
             processedItem.scratch = this.scratchContent;
             processedItem.rawMarkdown = this.rawMarkdownContent;
             console.log(`📝 Including editor content for selected item: ${item.title}`);
-          } else {
-            // 🔥 CRITICAL FIX: Don't send script fields for non-selected items
-            // This prevents overwriting database content with stale array data
-            delete processedItem.script;
-            delete processedItem.scratch;
-            delete processedItem.rawMarkdown;
           }
+          // Note: script preserved on local items for duration calculation
 
           return processedItem;
         });
 
-        // STEP 2: Send to database-first save endpoint
+        // STEP 2: Build payload - strip script from non-selected items to prevent stale overwrites
         const headers = this.getAuthHeaders();
 
+        const payloadItems = processedItems.map((item, index) => {
+          const payloadItem = { ...item };
+          if (index !== this.selectedItemIndex) {
+            delete payloadItem.script;
+            delete payloadItem.scratch;
+            delete payloadItem.rawMarkdown;
+          }
+          return payloadItem;
+        });
+
         const rundownPayload = {
-          items: processedItems,
+          items: payloadItems,
           episode_number: paddedId,
           save_type: 'manual_save'  // Always manual save for saveRundownItems (creates version history)
         };
@@ -3131,10 +3142,15 @@ Try dropping an image or video file here!`
         console.log('🚀 Sending to /save-rundown endpoint...');
         const response = await axios.put(`/api/episodes/${paddedId}/save-rundown`, rundownPayload, { headers });
 
-        // STEP 3: Update local state with synchronized data
+        // STEP 3: Update local state with synchronized data (scripts preserved)
         this.rundownItems = processedItems;
         this.hasUnsavedChanges = false;
         this.hasUnsavedRundownChanges = false;
+
+        // Update master duration from backend calculation
+        if (response.data && response.data.total_duration) {
+          this.duration = response.data.total_duration;
+        }
 
         console.log('✅ Centralized rundown save completed:', response.data);
 
@@ -3253,9 +3269,11 @@ Try dropping an image or video file here!`
     },
     loadItemContent(item) {
       if (!item) {
+        this.isLoadingItemContent = true;
         this.scratchContent = '';
         this.rawMarkdownContent = '';
         this.currentItemMetadata = {};
+        this.isLoadingItemContent = false;
         return;
       }
 
@@ -3263,6 +3281,9 @@ Try dropping an image or video file here!`
       console.log(`🔄 Item details - ID: ${item.id}, AssetID: ${item.asset_id}, Type: ${item.type}, Order: ${item.order}`);
       console.log('🔄 script length:', item.script?.length || 0);
       console.log('🔄 script preview:', item.script?.substring(0, 200) || '(empty)');
+
+      // Set loading guard to prevent autosave watcher from firing during content load
+      this.isLoadingItemContent = true;
 
       // Load scratch content
       this.scratchContent = item.scratch || '';
@@ -3312,6 +3333,13 @@ Try dropping an image or video file here!`
       
       console.log('✅ Loaded metadata - AssetID:', this.currentItemMetadata.AssetID, 'Title:', this.currentItemMetadata.title, 'Order:', this.currentItemMetadata.order);
       console.log('Loaded raw content length:', this.rawMarkdownContent.length);
+
+      // Clear loading guard - content is fully loaded, future changes are user edits
+      this.$nextTick(() => {
+        this.isLoadingItemContent = false;
+        this.hasUnsavedChanges = false;
+        console.log('🔓 Content load complete - autosave re-enabled');
+      });
     },
 
     async reloadCurrentItemContent() {
@@ -3331,6 +3359,11 @@ Try dropping an image or video file here!`
 
           // Update in rundownItems array
           this.rundownItems[this.selectedItemIndex] = updatedItem
+
+          // Force EditorPanel to re-parse segments for updated content
+          if (this.$refs.editorPanel) {
+            this.$refs.editorPanel.segmentReparseKey++
+          }
 
           // Reload into editor
           this.loadItemContent(updatedItem)
@@ -3352,7 +3385,12 @@ Try dropping an image or video file here!`
         const maxIterations = 5; // Safety limit to prevent infinite loops
 
         // Strip any existing frontmatter (legacy/corrupted data cleanup)
-        while (scriptContent.trim().startsWith('---') && strippingIterations < maxIterations) {
+        // Detect both '---' and '- - -' (sanitized) frontmatter delimiters
+        const isFrontmatterDelimiter = (line) => {
+          const t = line.trim();
+          return t === '---' || t === '- - -';
+        };
+        while ((scriptContent.trim().startsWith('---') || scriptContent.trim().startsWith('- - -')) && strippingIterations < maxIterations) {
           strippingIterations++;
           console.warn(`🧹 Stripping legacy frontmatter (iteration ${strippingIterations})`);
 
@@ -3361,7 +3399,7 @@ Try dropping an image or video file here!`
           let dashCount = 0;
 
           for (let i = 0; i < lines.length; i++) {
-            if (lines[i].trim() === '---') {
+            if (isFrontmatterDelimiter(lines[i])) {
               dashCount++;
               if (dashCount === 2) {
                 frontmatterEndIndex = i;
@@ -3381,17 +3419,11 @@ Try dropping an image or video file here!`
           console.log(`✅ Cleaned ${strippingIterations} frontmatter block(s) from content`);
         }
 
-        // Check for duplicate content patterns
-        if (scriptContent.length > 200) {
-          const checkLength = Math.min(100, Math.floor(scriptContent.length / 2));
-          const firstCheck = scriptContent.substring(0, checkLength).trim();
-          const duplicatePattern = scriptContent.indexOf('\n' + firstCheck);
-
-          if (duplicatePattern > checkLength && duplicatePattern < scriptContent.length - checkLength) {
-            console.warn('🚨 DUPLICATE CONTENT PATTERN DETECTED! Truncating to first occurrence.');
-            scriptContent = scriptContent.substring(0, duplicatePattern).trim();
-          }
-        }
+        // REMOVED: Duplicate content detection was causing false positives
+        // and permanently truncating legitimate content (refrains, repeated intros).
+        // The autosave watcher would then save the truncated version back to the DB.
+        // If duplicate content is a problem, it should be handled as a UI warning,
+        // NOT by silently modifying the content on load.
 
         // Set content directly - no frontmatter wrapper
         this.rawMarkdownContent = scriptContent;
@@ -3610,11 +3642,25 @@ Try dropping an image or video file here!`
         }
       }
 
-      // Log all items to see the array
-      console.log('📋 All rundown items:');
-      this.rundownItems.forEach((item, idx) => {
-        console.log(`  [${idx}] ${item.title || item.slug} (order: ${item.order}, index: ${item.index})`);
-      });
+      // CRITICAL FIX: Force-clear EditorPanel's editing flags before switching items.
+      // If isActivelyEditing is still true (e.g., blur didn't fire before click on touch devices),
+      // the scriptContent watcher in EditorPanel would be bypassed, leaving stale cached segments
+      // from the previous item. This caused cross-item content contamination (Bug #4).
+      const editorPanelRef = this.$refs.editorPanel;
+      if (editorPanelRef) {
+        editorPanelRef.isActivelyEditing = false;
+        editorPanelRef.isRestoringCursor = false;
+        editorPanelRef.activelyEditingSegment = null;
+        editorPanelRef.cachedScriptSegments = null;
+        editorPanelRef.lastParsedContent = null;
+        editorPanelRef.segmentEditBuffer = {};
+        // CRITICAL: Increment reparseKey to guarantee scriptSegments re-evaluates.
+        // The manual cache in scriptSegments can get stale due to side-effect-based caching
+        // interacting with Vue's async reactivity batching. This counter creates an explicit
+        // dependency that forces fresh parsing regardless of cache state.
+        editorPanelRef.segmentReparseKey++;
+        console.log('🧹 Cleared EditorPanel editing flags and segment cache for clean item switch (reparseKey:', editorPanelRef.segmentReparseKey, ')');
+      }
 
       this.selectedItemIndex = index;
       console.log('Updated selectedItemIndex to:', this.selectedItemIndex);
@@ -3919,7 +3965,7 @@ Try dropping an image or video file here!`
           this.deleteCueAtCursor(event.target);
         }
       }
-      // Handle Alt+D for DIR (Director Note) cue
+      // Handle Alt+D for NOTE cue
       else if (event.altKey && event.key === 'd' && !event.ctrlKey && !event.metaKey) {
         event.preventDefault();
         this.showDirModal = true;
@@ -4702,7 +4748,13 @@ Try dropping an image or video file here!`
           console.log(`📝 Inserting ${totalParts} FSQ cue(s) at BOTTOM of script (no valid cursor position: ${insertionPosition})`);
         }
 
-        this.appendToScriptContent(`\n${allCues}\n`, insertionPosition);
+        // Use EditorPanel's snapshotted position for precise insertion
+        if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
+          this.$refs.editorPanel.insertCueAtSnapshotPosition(allCues);
+          console.log('✅ FSQ cue(s) inserted via EditorPanel.insertCueAtSnapshotPosition');
+        } else {
+          this.appendToScriptContent(`\n${allCues}\n`, insertionPosition);
+        }
 
         // Clear the snapshot for next time
         this.fsqInsertionIndex = null;
@@ -4951,70 +5003,13 @@ Try dropping an image or video file here!`
           }
         }
 
-        // NORMAL INSERTION: Try placeholder-based insertion first, fall back to paragraph index
-        let insertedViaPlaceholder = false;
-
-        if (this.cuePlaceholderId) {
-          console.log('📍 Attempting placeholder-based insertion with ID:', this.cuePlaceholderId);
-
-          // Find the placeholder in the script container
-          const placeholder = document.getElementById(this.cuePlaceholderId);
-
-          if (placeholder) {
-            console.log('✅ Found placeholder in DOM, replacing with cue content');
-
-            // Create a temporary div to hold the cue block HTML
-            const cueDiv = document.createElement('div');
-            cueDiv.innerHTML = sotCue;
-
-            // Replace the placeholder with the cue content
-            placeholder.parentElement.replaceChild(cueDiv.firstChild || cueDiv, placeholder);
-
-            // Now we need to update the script content from the DOM
-            const editorPanel = this.$refs.editorPanel;
-            if (editorPanel && editorPanel.$refs.scriptContainer) {
-              const scriptHtml = editorPanel.$refs.scriptContainer.innerHTML;
-              console.log('📝 Updated script HTML from DOM (length:', scriptHtml.length, ')');
-
-              // Update the script content
-              this.updateScriptContent(scriptHtml);
-
-              insertedViaPlaceholder = true;
-              console.log('✅ Cue inserted via placeholder successfully');
-            }
-
-            // Clear the placeholder ID
-            this.cuePlaceholderId = null;
-            console.log('🧹 Cleared cuePlaceholderId');
-          } else {
-            console.warn('⚠️ Placeholder not found in DOM, falling back to paragraph index method');
-          }
-        }
-
-        // Fallback to old paragraph index method if placeholder insertion failed
-        if (!insertedViaPlaceholder) {
-          console.log('🎬 SOT cue insertion - using paragraph index fallback');
-
-          const insertionIndex = this.sotInsertionIndex;
-          console.log(`📍 Inserting at cursor position from modal open: ${insertionIndex}`);
-          console.log(`📍 Current scriptContent length: ${this.scriptContent?.length || 0} chars`);
-
-          // FIXED: Use EditorPanel's proper insertion method that handles paragraph boundaries correctly
-          console.log('🔧 Calling EditorPanel.handleSotCueSubmit (proper paragraph boundary detection)...');
-          if (this.$refs.editorPanel && this.$refs.editorPanel.handleSotCueSubmit) {
-            // EditorPanel's method will correctly insert AFTER paragraph, not inside it
-            await this.$refs.editorPanel.handleSotCueSubmit(sotCue);
-            console.log('✅ Used EditorPanel.handleSotCueSubmit - SOT inserted after paragraph boundary');
-          } else {
-            // Last resort fallback - append to end
-            console.warn('⚠️ EditorPanel not available, appending to end');
-            this.appendToScriptContent(`\n${sotCue}\n`, null);  // null = append to end
-          }
-          console.log(`📍 New scriptContent length: ${this.scriptContent?.length || 0} chars`);
-
-          // Clear the snapshot for next time
-          this.sotInsertionIndex = null;
-          console.log('🧹 Cleared sotInsertionIndex snapshot');
+        // Delegate to EditorPanel (uses pendingCueInsertionIndex snapshotted at button-press time)
+        if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
+          this.$refs.editorPanel.insertCueAtSnapshotPosition(sotCue);
+          console.log('✅ SOT cue inserted via EditorPanel.insertCueAtSnapshotPosition');
+        } else {
+          console.warn('⚠️ EditorPanel not available, appending to end');
+          this.appendToScriptContent(`\n${sotCue}\n`, null);
         }
 
         this.hasUnsavedChanges = true;
@@ -5314,8 +5309,8 @@ Try dropping an image or video file here!`
 
     async submitDir(data) {
       try {
-        console.log('🎬 DIR Modal Submit');
-        console.log('📋 DIR data received:', data);
+        console.log('🎬 NOTE Modal Submit');
+        console.log('📋 NOTE data received:', data);
 
         // Close modal first
         this.showDirModal = false;
@@ -5323,14 +5318,13 @@ Try dropping an image or video file here!`
         // Send cue data to EditorPanel for placement-based insertion
         if (this.$refs.editorPanel) {
           await this.$refs.editorPanel.handleDirCueSubmit(data);
-          console.log('✅ DIR cue data sent to EditorPanel - placement overlay now active');
-          console.log('📍 Waiting for user to click drop zone to insert DIR...');
+          console.log('✅ NOTE cue data sent to EditorPanel');
         }
 
       } catch (error) {
         console.error('❌ Error in submitDir:', error);
         if (this.$toast) {
-          this.$toast.error(`Failed to insert DIR cue: ${error.message}`);
+          this.$toast.error(`Failed to insert NOTE cue: ${error.message}`);
         }
       }
     },
@@ -5384,11 +5378,11 @@ Try dropping an image or video file here!`
     submitVox(data) {
       const voxCue = `[VOX: ${data.slug} | ${data.description} | ${data.duration}]\n`;
 
-      this.handleInsertCue({
-        cueType: 'VOX',
-        cueText: voxCue,
-        editorMode: this.editorMode
-      });
+      if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
+        this.$refs.editorPanel.insertCueAtSnapshotPosition(voxCue);
+      } else {
+        this.handleInsertCue({ cueType: 'VOX', cueText: voxCue, editorMode: this.editorMode });
+      }
 
       this.showVoxModal = false;
       this.$toast.success('VOX cue inserted successfully!');
@@ -5398,11 +5392,11 @@ Try dropping an image or video file here!`
     submitMus(data) {
       const musCue = `[MUS: ${data.slug} | ${data.description} | ${data.duration}]\n`;
 
-      this.handleInsertCue({
-        cueType: 'MUS',
-        cueText: musCue,
-        editorMode: this.editorMode
-      });
+      if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
+        this.$refs.editorPanel.insertCueAtSnapshotPosition(musCue);
+      } else {
+        this.handleInsertCue({ cueType: 'MUS', cueText: musCue, editorMode: this.editorMode });
+      }
 
       this.showMusModal = false;
       this.$toast.success('MUS cue inserted successfully!');
@@ -5412,11 +5406,11 @@ Try dropping an image or video file here!`
     submitLive(data) {
       const liveCue = `[LIVE: ${data.slug} | ${data.description} | ${data.duration}]\n`;
 
-      this.handleInsertCue({
-        cueType: 'LIVE',
-        cueText: liveCue,
-        editorMode: this.editorMode
-      });
+      if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
+        this.$refs.editorPanel.insertCueAtSnapshotPosition(liveCue);
+      } else {
+        this.handleInsertCue({ cueType: 'LIVE', cueText: liveCue, editorMode: this.editorMode });
+      }
 
       this.showLiveModal = false;
       this.$toast.success('LIVE cue inserted successfully!');
@@ -5906,59 +5900,13 @@ Try dropping an image or video file here!`
         const effectiveMode = ['script', 'scratch', 'code'].includes(this.editorMode) ? this.editorMode : 'script';
         console.log('📝 Using editor mode:', effectiveMode);
 
-        // Try placeholder-based insertion first (like SOT does)
-        let insertedViaPlaceholder = false;
-
-        if (this.cuePlaceholderId) {
-          console.log('📍 Attempting placeholder-based insertion with ID:', this.cuePlaceholderId);
-
-          const placeholder = document.getElementById(this.cuePlaceholderId);
-
-          if (placeholder) {
-            console.log('✅ Found placeholder in DOM, replacing with cue content');
-
-            // Create a temporary div to hold the cue block HTML
-            const cueDiv = document.createElement('div');
-            cueDiv.innerHTML = imgCueBlock;
-
-            // Replace the placeholder with the cue content
-            placeholder.parentElement.replaceChild(cueDiv.firstChild || cueDiv, placeholder);
-
-            insertedViaPlaceholder = true;
-            console.log('✅ IMG cue inserted via placeholder');
-
-            // Sync the DOM change back to rawMarkdownContent
-            const editorPanel = this.$refs.editorPanel;
-            if (editorPanel && editorPanel.$refs.scriptContainer) {
-              const newHtml = editorPanel.$refs.scriptContainer.innerHTML;
-              this.syncDomToRawMarkdown(newHtml);
-            }
-
-            // Clear the placeholder ID
-            this.cuePlaceholderId = null;
-            console.log('🧹 Cleared cuePlaceholderId');
-          } else {
-            console.warn('⚠️ Placeholder not found in DOM, falling back to paragraph index method');
-          }
-        }
-
-        // Fallback to old method if placeholder insertion failed
-        if (!insertedViaPlaceholder) {
-          console.log('🎬 IMG cue insertion - using EditorPanel method (same as SOT)');
-
-          // Use EditorPanel's handleSotCueSubmit which properly uses selectedSegmentIndex
-          // This is the same method SOT uses and it works correctly
-          if (this.$refs.editorPanel && this.$refs.editorPanel.handleSotCueSubmit) {
-            await this.$refs.editorPanel.handleSotCueSubmit(imgCueBlock);
-            console.log('✅ IMG cue inserted via EditorPanel.handleSotCueSubmit');
-          } else {
-            // Ultimate fallback: append at end
-            console.warn('⚠️ EditorPanel.handleSotCueSubmit not available, appending at end');
-            this.appendToScriptContent(`\n${imgCueBlock}\n`);
-          }
-
-          // Clear the snapshot
-          this.imgInsertionIndex = null;
+        // Delegate to EditorPanel (uses pendingCueInsertionIndex snapshotted at button-press time)
+        if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
+          this.$refs.editorPanel.insertCueAtSnapshotPosition(imgCueBlock);
+          console.log('✅ IMG cue inserted via EditorPanel.insertCueAtSnapshotPosition');
+        } else {
+          console.warn('⚠️ EditorPanel not available, appending at end');
+          this.appendToScriptContent(`\n${imgCueBlock}\n`);
         }
 
         this.hasUnsavedChanges = true;

@@ -214,14 +214,14 @@
               <v-btn
                 variant="flat"
                 class="cue-btn-flex dir-btn"
-                :style="getCueButtonStyle('DIR')"
-                @click="insertCue('DIR')"
+                :style="getCueButtonStyle('NOTE')"
+                @click="insertCue('NOTE')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">DIR</span>
+                  <span class="cue-label">NOTE</span>
                   <span class="hotkey-display">[ALT+D]</span>
                 </div>
-                <v-tooltip activator="parent" location="bottom">Director Note</v-tooltip>
+                <v-tooltip activator="parent" location="bottom">Note</v-tooltip>
               </v-btn>
 
               <v-btn
@@ -708,6 +708,18 @@
                       </div>
                     </div>
                   </Teleport>
+
+                  <!-- Add Paragraph Button (bottom center of cue) -->
+                  <v-btn
+                    v-if="hoveredCueIndex === index"
+                    icon
+                    size="small"
+                    class="cue-add-paragraph-btn"
+                    @click.stop="createNewParagraphAfter(index)"
+                    tabindex="-1"
+                  >
+                    <v-icon size="medium">mdi-plus</v-icon>
+                  </v-btn>
                   </template>
                 </div>
                     </div>
@@ -852,14 +864,14 @@
               <v-btn
                 variant="flat"
                 class="cue-btn-flex dir-btn"
-                :style="getCueButtonStyle('DIR')"
-                @click="insertCue('DIR')"
+                :style="getCueButtonStyle('NOTE')"
+                @click="insertCue('NOTE')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">DIR</span>
+                  <span class="cue-label">NOTE</span>
                   <span class="hotkey-display">[ALT+D]</span>
                 </div>
-                <v-tooltip activator="parent" location="bottom">Director Note</v-tooltip>
+                <v-tooltip activator="parent" location="bottom">Note</v-tooltip>
               </v-btn>
 
               <v-btn
@@ -1322,14 +1334,14 @@
               <v-btn
                 variant="flat"
                 class="cue-btn-flex dir-btn"
-                :style="getCueButtonStyle('DIR')"
-                @click="insertCue('DIR')"
+                :style="getCueButtonStyle('NOTE')"
+                @click="insertCue('NOTE')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">DIR</span>
+                  <span class="cue-label">NOTE</span>
                   <span class="hotkey-display">[ALT+D]</span>
                 </div>
-                <v-tooltip activator="parent" location="bottom">Director Note</v-tooltip>
+                <v-tooltip activator="parent" location="bottom">Note</v-tooltip>
               </v-btn>
 
               <v-btn
@@ -1490,6 +1502,7 @@ export default {
       deletingCueIndex: null,
       selectedCueIndex: null,
       selectedSegmentIndex: null,
+      pendingCueInsertionIndex: null, // Snapshotted at cue-button-press time, survives modal interaction
       multiSelectedSegments: new Set(),
       showSpeakerSelector: false,
       cueCardAlignment: 'left', // Default alignment, loaded from settings
@@ -1576,7 +1589,8 @@ export default {
       scrollContainerRef: null,
       scriptContainerRef: null,
       colorLoadTrigger: 0, // Reactive trigger to force re-computation of color-dependent properties
-      collapseMode: false // Collapse mode for easier drag-and-drop reordering
+      collapseMode: false, // Collapse mode for easier drag-and-drop reordering
+      segmentReparseKey: 0 // Incremented on item switch to force scriptSegments re-evaluation
     }
   },
   mounted() {
@@ -1760,16 +1774,16 @@ export default {
           return;
         }
 
-        // CRITICAL: Clear edit buffer when content changes significantly
-        // This prevents stale buffered content from a previous item being displayed
-        const significantChange = Math.abs((newVal?.length || 0) - (oldVal?.length || 0)) > 100;
+        // CRITICAL: Clear edit buffer and cache when content changes
+        // This prevents stale buffered content from a previous item being displayed.
+        // Previously only cleared on "significant" changes (>100 chars difference),
+        // but that missed item switches where both items had similar content lengths.
         const contentDifferent = newVal !== oldVal && oldVal !== undefined;
 
-        if (contentDifferent && (significantChange || !oldVal)) {
-          console.log('🧹 Clearing segmentEditBuffer and cache - item appears to have changed');
+        if (contentDifferent) {
+          console.log('🧹 Clearing segmentEditBuffer and cache - content changed');
           this.segmentEditBuffer = {};
-          // CRITICAL: Also clear cached segments to force re-parsing
-          // This prevents stale cue blocks from appearing across different items
+          // Clear cached segments to force re-parsing
           this.cachedScriptSegments = null;
           this.lastParsedContent = null;
         }
@@ -2169,7 +2183,13 @@ export default {
     // eslint-disable-next-line vue/no-side-effects-in-computed-properties
     scriptSegments: {
       get() {
-        console.log('🔄 scriptSegments getter called');
+        // CRITICAL: Read segmentReparseKey to create a Vue dependency.
+        // When this key is incremented (on item switch), Vue will invalidate this
+        // computed even if the manual cache thinks nothing changed.
+        // eslint-disable-next-line no-unused-vars
+        const _reparseKey = this.segmentReparseKey;
+
+        console.log('🔄 scriptSegments getter called (reparseKey:', _reparseKey, ')');
         console.log('  rawScriptContent length:', this.rawScriptContent?.length);
         console.log('  editorMode:', this.editorMode);
         console.log('  useVisualScriptMode:', this.useVisualScriptMode);
@@ -3896,6 +3916,7 @@ export default {
         'RIF': '#E91E63',
         'PKG': '#607D8B',
         'DIR': '#FF5722',
+        'NOTE': '#FF5722',
         'BUMP': '#3F51B5',
         'STING': '#8BC34A',
         'VOX': '#009688',
@@ -3944,15 +3965,22 @@ export default {
     stripYamlFrontmatter(content) {
       if (!content) return '';
 
-      // Check if content starts with YAML frontmatter (---)
-      if (content.trim().startsWith('---')) {
+      // Helper to detect both '---' and '- - -' (sanitized) frontmatter delimiters
+      const isFmDelimiter = (line) => {
+        const t = line.trim();
+        return t === '---' || t === '- - -';
+      };
+
+      // Check if content starts with YAML frontmatter (--- or - - -)
+      const trimmed = content.trim();
+      if (trimmed.startsWith('---') || trimmed.startsWith('- - -')) {
         const lines = content.split('\n');
         let frontmatterEnd = -1;
         let bodyStart = -1;
 
-        // Find the closing --- (skip the first line which is the opening ---)
+        // Find the closing delimiter (skip the first line which is the opening)
         for (let i = 1; i < lines.length; i++) {
-          if (lines[i].trim() === '---') {
+          if (isFmDelimiter(lines[i])) {
             frontmatterEnd = i;
             bodyStart = i + 1;
             break;
@@ -3992,13 +4020,20 @@ export default {
     extractYamlFrontmatter(content) {
       if (!content) return '';
 
-      if (content.trim().startsWith('---')) {
+      // Helper to detect both '---' and '- - -' (sanitized) frontmatter delimiters
+      const isFmDelimiter = (line) => {
+        const t = line.trim();
+        return t === '---' || t === '- - -';
+      };
+
+      const trimmed = content.trim();
+      if (trimmed.startsWith('---') || trimmed.startsWith('- - -')) {
         const lines = content.split('\n');
         let frontmatterEnd = -1;
 
-        // Find the closing --- (skip the first line which is the opening ---)
+        // Find the closing delimiter (skip the first line which is the opening)
         for (let i = 1; i < lines.length; i++) {
-          if (lines[i].trim() === '---') {
+          if (isFmDelimiter(lines[i])) {
             frontmatterEnd = i;
             break;
           }
@@ -4580,7 +4615,7 @@ export default {
           return;
         }
 
-        if (cueType === 'DIR') {
+        if (cueType === 'NOTE' || cueType === 'DIR') {
           this.$emit('show-dir-modal');
           return;
         }
@@ -4612,6 +4647,16 @@ export default {
 
       // All cue types now use the same workflow: flash -> modal -> placement
       this.pendingCueType = cueType;
+
+      // Snapshot insertion index NOW before modal opens and blur clears state
+      if (this.selectedSegmentIndex !== null && this.selectedSegmentIndex >= 0) {
+        this.pendingCueInsertionIndex = this.selectedSegmentIndex + 1;
+      } else if (this.lastKnownParagraphIndex !== null && this.lastKnownParagraphIndex >= 0) {
+        this.pendingCueInsertionIndex = this.lastKnownParagraphIndex + 1;
+      } else {
+        this.pendingCueInsertionIndex = this.scriptSegments.length; // End of ALL segments
+      }
+      console.log('📍 Snapshotted pendingCueInsertionIndex:', this.pendingCueInsertionIndex);
 
       // Small delay to let flash complete
       setTimeout(() => {
@@ -4664,9 +4709,9 @@ export default {
           return;
         }
 
-        if (cueType === 'DIR') {
+        if (cueType === 'NOTE' || cueType === 'DIR') {
           this.$emit('show-dir-modal');
-          console.log('🎬 DIR modal opened - placement overlay will activate when modal closes');
+          console.log('🎬 NOTE modal opened - placement overlay will activate when modal closes');
           return;
         }
 
@@ -4679,6 +4724,24 @@ export default {
         if (cueType === 'STING') {
           this.$emit('show-sting-modal');
           console.log('🎬 STING modal opened - placement overlay will activate when modal closes');
+          return;
+        }
+
+        if (cueType === 'VOX') {
+          this.$emit('show-vox-modal');
+          console.log('🎬 VOX modal opened - placement overlay will activate when modal closes');
+          return;
+        }
+
+        if (cueType === 'MUS') {
+          this.$emit('show-mus-modal');
+          console.log('🎬 MUS modal opened - placement overlay will activate when modal closes');
+          return;
+        }
+
+        if (cueType === 'LIVE') {
+          this.$emit('show-live-modal');
+          console.log('🎬 LIVE modal opened - placement overlay will activate when modal closes');
           return;
         }
 
@@ -5556,18 +5619,11 @@ export default {
 
     // Reconstruct raw markdown from segments
     reconstructRawContent(segments) {
-      // Get existing YAML frontmatter (only the FIRST block)
-      const frontmatterMatch = this.rawScriptContent.match(/^(---\n[\s\S]*?\n---\n)/);
-      const frontmatter = frontmatterMatch ? frontmatterMatch[1] : '';
-
       // Reconstruct content body using CueParser
       const contentBody = CueParser.reconstructContent(segments);
 
-      // CRITICAL: Ensure content body doesn't start with frontmatter
-      // This prevents duplicate frontmatter blocks
-      const cleanContentBody = this.stripYamlFrontmatter(contentBody);
-
-      return frontmatter + cleanContentBody;
+      // Strip any YAML frontmatter - database-first means no frontmatter in script_content
+      return this.stripYamlFrontmatter(contentBody);
     },
 
     reconstructScriptContent(segments) {
@@ -5624,8 +5680,8 @@ export default {
       } else if (cueData.type === 'GFX') {
         // Emit event to parent (ContentEditor) to open GFX modal with cue data
         this.$emit('edit-gfx-cue', cueData);
-      } else if (cueData.type === 'DIR') {
-        // Emit event to parent (ContentEditor) to open DIR modal with cue data
+      } else if (cueData.type === 'DIR' || cueData.type === 'NOTE') {
+        // Emit event to parent (ContentEditor) to open NOTE modal with cue data
         this.$emit('edit-dir-cue', cueData);
       }
       // Add other cue type modals as needed
@@ -6141,6 +6197,7 @@ export default {
       this.pendingCueData = null;
       this.pendingInsertionPoint = null;
       this.pendingCursorPosition = null;
+      this.pendingCueInsertionIndex = null;
       console.log('✅ Drop locator terminated for this rundown/user');
     },
 
@@ -6174,31 +6231,9 @@ export default {
         return;
       }
 
-      // SCRIPT MODE: Auto-insert based on selection
-      console.log('📄 Script mode: Auto-inserting SOT based on selection');
-
-      // Determine insertion point based on selection
-      let insertionIndex;
-      if (this.selectedSegmentIndex !== null && this.selectedSegmentIndex >= 0) {
-        // Insert AFTER the selected segment (between zones)
-        insertionIndex = this.selectedSegmentIndex + 1;
-        console.log(`📍 Selected segment found at index ${this.selectedSegmentIndex}, inserting AFTER at between-zone ${insertionIndex}`);
-      } else {
-        // No selection - insert at bottom (after last paragraph)
-        const paragraphCount = this.scriptSegments.filter(seg => seg.type === 'text').length;
-        insertionIndex = paragraphCount;
-        console.log(`📍 No segment selected, inserting at bottom (between-zone ${insertionIndex})`);
-      }
-
-      // Create placement object for between-paragraph insertion
-      const placement = {
-        type: 'between',  // CRITICAL: Always use 'between' for SOT, never 'paragraph'
-        index: insertionIndex,
-        cueType: 'SOT'
-      };
-
-      // Insert SOT at determined location
-      this.insertCueBetweenParagraphsInRawScript(placement, sotCueText);
+      // SCRIPT MODE: Auto-insert using snapshotted position
+      console.log('📄 Script mode: Auto-inserting SOT using snapshotted position');
+      this.insertCueAtSnapshotPosition(sotCueText);
 
       // Clear pending data
       this.pendingCueData = null;
@@ -6232,31 +6267,9 @@ export default {
         return;
       }
 
-      // SCRIPT MODE: Auto-insert based on selection (same behavior as SOT)
-      console.log('📄 Script mode: Auto-inserting VO based on selection');
-
-      // Determine insertion point based on selection
-      let insertionIndex;
-      if (this.selectedSegmentIndex !== null && this.selectedSegmentIndex >= 0) {
-        // Insert AFTER the selected segment (between zones)
-        insertionIndex = this.selectedSegmentIndex + 1;
-        console.log(`📍 Selected segment found at index ${this.selectedSegmentIndex}, inserting AFTER at between-zone ${insertionIndex}`);
-      } else {
-        // No selection - insert at bottom (after last paragraph)
-        const paragraphCount = this.scriptSegments.filter(seg => seg.type === 'text').length;
-        insertionIndex = paragraphCount;
-        console.log(`📍 No segment selected, inserting at bottom (between-zone ${insertionIndex})`);
-      }
-
-      // Create placement object for between-paragraph insertion
-      const placement = {
-        type: 'between',  // CRITICAL: Always use 'between' for VO, never 'paragraph'
-        index: insertionIndex,
-        cueType: 'VO'
-      };
-
-      // Insert VO at determined location
-      this.insertCueBetweenParagraphsInRawScript(placement, voCueText);
+      // SCRIPT MODE: Auto-insert using snapshotted position
+      console.log('📄 Script mode: Auto-inserting VO using snapshotted position');
+      this.insertCueAtSnapshotPosition(voCueText);
 
       // Clear pending data
       this.pendingCueData = null;
@@ -6290,9 +6303,14 @@ export default {
         return;
       }
 
-      console.log('📄 Script mode: Activating placement overlay for NAT insertion');
-      this.showCuePlacement = true;
-      console.log('📍 Placement overlay activated - waiting for user to click drop zone');
+      // SCRIPT MODE: Auto-insert using snapshotted position
+      console.log('📄 Script mode: Auto-inserting NAT using snapshotted position');
+      this.insertCueAtSnapshotPosition(natCueText);
+
+      // Clear pending data
+      this.pendingCueData = null;
+      this.pendingCueType = null;
+      console.log('✅ NAT cue auto-inserted in script mode');
     },
 
     async handleRifCueSubmit(rifCueText) {
@@ -6323,31 +6341,9 @@ export default {
         return;
       }
 
-      // SCRIPT MODE: Auto-insert based on selection (same as SOT)
-      console.log('📄 Script mode: Auto-inserting RIF based on selection');
-
-      // Determine insertion point based on selection
-      let insertionIndex;
-      if (this.selectedSegmentIndex !== null && this.selectedSegmentIndex >= 0) {
-        // Insert AFTER the selected segment (between zones)
-        insertionIndex = this.selectedSegmentIndex + 1;
-        console.log(`📍 Selected segment found at index ${this.selectedSegmentIndex}, inserting AFTER at between-zone ${insertionIndex}`);
-      } else {
-        // No selection - insert at bottom (after last paragraph)
-        const paragraphCount = this.scriptSegments.filter(seg => seg.type === 'text').length;
-        insertionIndex = paragraphCount;
-        console.log(`📍 No segment selected, inserting at bottom (between-zone ${insertionIndex})`);
-      }
-
-      // Create placement object for between-paragraph insertion
-      const placement = {
-        type: 'between',
-        index: insertionIndex,
-        cueType: 'RIF'
-      };
-
-      // Insert RIF at determined location
-      this.insertCueBetweenParagraphsInRawScript(placement, rifCueText);
+      // SCRIPT MODE: Auto-insert using snapshotted position
+      console.log('📄 Script mode: Auto-inserting RIF using snapshotted position');
+      this.insertCueAtSnapshotPosition(rifCueText);
 
       // Clear pending data
       this.pendingCueData = null;
@@ -6381,22 +6377,22 @@ export default {
         return;
       }
 
-      // Script mode: Insert at end of script (placement overlay is disabled)
-      console.log('📄 Script mode: Inserting PKG at end of script');
-      this.insertCueAtCursor(pkgCueText);
+      // SCRIPT MODE: Auto-insert using snapshotted position
+      console.log('📄 Script mode: Auto-inserting PKG using snapshotted position');
+      this.insertCueAtSnapshotPosition(pkgCueText);
       this.pendingCueData = null;
       this.pendingCueType = null;
-      console.log('✅ PKG cue inserted at end of script');
+      console.log('✅ PKG cue auto-inserted in script mode');
     },
 
     async handleDirCueSubmit(dirCueText) {
-      console.log('🎬 DIR cue submitted to EditorPanel for insertion');
+      console.log('🎬 NOTE cue submitted to EditorPanel for insertion');
 
       this.pendingCueData = dirCueText;
-      this.pendingCueType = 'DIR';
+      this.pendingCueType = 'NOTE';
 
       if (this.editorMode === 'code') {
-        console.log('📝 Code mode: Inserting DIR at cursor position');
+        console.log('📝 Code mode: Inserting NOTE at cursor position');
 
         // CRITICAL FIX: Get FRESH cursor position at submission time
         const codeTextarea = document.querySelector('.code-textarea textarea');
@@ -6411,16 +6407,16 @@ export default {
         this.insertCueAtCursor(dirCueText);
         this.pendingCueData = null;
         this.pendingCueType = null;
-        console.log('✅ DIR cue inserted in code mode');
+        console.log('✅ NOTE cue inserted in code mode');
         return;
       }
 
-      // Script mode: Insert at end of script (placement overlay is disabled)
-      console.log('📄 Script mode: Inserting DIR at end of script');
-      this.insertCueAtCursor(dirCueText);
+      // SCRIPT MODE: Auto-insert using snapshotted position
+      console.log('📄 Script mode: Auto-inserting NOTE using snapshotted position');
+      this.insertCueAtSnapshotPosition(dirCueText);
       this.pendingCueData = null;
       this.pendingCueType = null;
-      console.log('✅ DIR cue inserted at end of script');
+      console.log('✅ NOTE cue auto-inserted in script mode');
     },
 
     async handleBumpCueSubmit(bumpCueText) {
@@ -6449,12 +6445,12 @@ export default {
         return;
       }
 
-      // Script mode: Insert at end of script (placement overlay is disabled)
-      console.log('📄 Script mode: Inserting BUMP at end of script');
-      this.insertCueAtCursor(bumpCueText);
+      // SCRIPT MODE: Auto-insert using snapshotted position
+      console.log('📄 Script mode: Auto-inserting BUMP using snapshotted position');
+      this.insertCueAtSnapshotPosition(bumpCueText);
       this.pendingCueData = null;
       this.pendingCueType = null;
-      console.log('✅ BUMP cue inserted at end of script');
+      console.log('✅ BUMP cue auto-inserted in script mode');
     },
 
     async handleStingCueSubmit(stingCueText) {
@@ -6483,12 +6479,12 @@ export default {
         return;
       }
 
-      // Script mode: Insert at end of script (placement overlay is disabled)
-      console.log('📄 Script mode: Inserting STING at end of script');
-      this.insertCueAtCursor(stingCueText);
+      // SCRIPT MODE: Auto-insert using snapshotted position
+      console.log('📄 Script mode: Auto-inserting STING using snapshotted position');
+      this.insertCueAtSnapshotPosition(stingCueText);
       this.pendingCueData = null;
       this.pendingCueType = null;
-      console.log('✅ STING cue inserted at end of script');
+      console.log('✅ STING cue auto-inserted in script mode');
     },
 
     generateCueBlock(cueType) {
@@ -6724,6 +6720,24 @@ export default {
       this.pendingCursorPosition = null;
 
       console.log('✅ Cue inserted at cursor position');
+    },
+
+    // Unified cue insertion using snapshotted position (survives modal interaction)
+    insertCueAtSnapshotPosition(cueContent) {
+      let insertionIndex;
+      if (this.pendingCueInsertionIndex !== null && this.pendingCueInsertionIndex >= 0) {
+        insertionIndex = this.pendingCueInsertionIndex;
+        console.log('📍 Using snapshotted pendingCueInsertionIndex:', insertionIndex);
+      } else if (this.selectedSegmentIndex !== null && this.selectedSegmentIndex >= 0) {
+        insertionIndex = this.selectedSegmentIndex + 1;
+        console.log('📍 Using live selectedSegmentIndex + 1:', insertionIndex);
+      } else {
+        insertionIndex = this.scriptSegments.length; // ALL segments, not just text
+        console.log('📍 No selection - inserting at end of all segments:', insertionIndex);
+      }
+      const placement = { type: 'between', index: insertionIndex };
+      this.insertCueBetweenParagraphsInRawScript(placement, cueContent);
+      this.pendingCueInsertionIndex = null;
     },
 
     // Raw Script Insertion Methods (Direct to Database)
@@ -6970,7 +6984,7 @@ export default {
 
       if (target.tagName === 'INPUT' ||
           (target.tagName === 'TEXTAREA' && !isInSpeakerParagraph) ||
-          target.isContentEditable) {
+          (target.isContentEditable && !isInSpeakerParagraph)) {
         return;
       }
 
@@ -7028,9 +7042,9 @@ export default {
           this.insertCue('PKG');
           break;
         case 'd':
-          console.log('✅ ALT+D triggered - calling insertCue(DIR)');
+          console.log('✅ ALT+D triggered - calling insertCue(NOTE)');
           event.preventDefault();
-          this.insertCue('DIR');
+          this.insertCue('NOTE');
           break;
         case 'b':
           event.preventDefault();
@@ -7604,6 +7618,17 @@ export default {
       let hasChanges = false;
       let formattedContent = this.scriptContent;
 
+      // === STEP 0: Strip YAML frontmatter if present ===
+      // Database-first architecture means frontmatter should never be in script_content
+      if (formattedContent.trim().startsWith('---')) {
+        const stripped = this.stripYamlFrontmatter(formattedContent);
+        if (stripped !== formattedContent) {
+          formattedContent = stripped;
+          hasChanges = true;
+          console.log('Autoformat: Stripped YAML frontmatter');
+        }
+      }
+
       // === STEP 1: Strip ALL span tags and inline styles FIRST ===
       if (stripSpans) {
       // Google Docs pastes often have unclosed <span> tags that corrupt content
@@ -7645,8 +7670,8 @@ export default {
       formattedContent = formattedContent.replace(/<p([^>]*)>\s+/gi, '<p$1>');
       formattedContent = formattedContent.replace(/\s+<\/p>/gi, '</p>');
 
-      // Remove paragraphs that are now empty or contain only whitespace/br
-      formattedContent = formattedContent.replace(/<p[^>]*>(\s|<br\s*\/?>)*<\/p>\s*/gi, '');
+      // DISABLED: Do NOT remove empty paragraphs - users need them for spacing around cues
+      // formattedContent = formattedContent.replace(/<p[^>]*>(\s|<br\s*\/?>)*<\/p>\s*/gi, '');
 
         if (formattedContent.length !== originalLength) {
           hasChanges = true;
@@ -10554,8 +10579,27 @@ export default {
 }
 
 .paragraph-delete-btn:hover,
-.paragraph-add-btn:hover {
+.paragraph-add-btn:hover,
+.cue-add-paragraph-btn:hover {
   opacity: 1 !important;
+}
+
+/* Add Paragraph button on cue blocks */
+.cue-add-paragraph-btn {
+  position: absolute !important;
+  left: 50%;
+  bottom: -10px;
+  transform: translateX(-50%);
+  background-color: #2196f3 !important;
+  color: white !important;
+  opacity: 0;
+  animation: fadeIn 0.2s ease-in forwards;
+  z-index: 10;
+  width: 18px !important;
+  height: 18px !important;
+  border-radius: 50% !important;
+  min-width: 18px !important;
+  padding: 0 !important;
 }
 
 /* Clean textarea styling */

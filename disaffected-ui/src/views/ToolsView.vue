@@ -71,6 +71,19 @@
                   </template>
                 </v-list-item>
 
+                <v-list-item @click="showMp3Modal = true">
+                  <template v-slot:prepend>
+                    <v-icon color="primary">mdi-music</v-icon>
+                  </template>
+                  <v-list-item-title class="font-weight-bold">Generate MP3</v-list-item-title>
+                  <v-list-item-subtitle>Extract audio from episode master video to MP3</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-btn variant="outlined" size="small" color="primary">Open</v-btn>
+                  </template>
+                </v-list-item>
+
+                <v-divider />
+
                 <v-list-item disabled>
                   <template v-slot:prepend>
                     <v-icon>mdi-cogs</v-icon>
@@ -327,6 +340,171 @@
       </v-col>
     </v-row>
 
+    <!-- Generate MP3 Modal -->
+    <v-dialog v-model="showMp3Modal" max-width="650" persistent>
+      <v-card>
+        <v-card-title class="d-flex align-center bg-primary text-white">
+          <v-icon class="me-2">mdi-music</v-icon>
+          Generate MP3 from Episode Video
+        </v-card-title>
+        <v-card-text class="pa-4">
+          <!-- Eligible Episodes Table -->
+          <div class="d-flex align-center mb-3">
+            <span class="text-subtitle-2 font-weight-bold">Eligible Episodes</span>
+            <v-spacer />
+            <v-btn
+              size="small"
+              variant="text"
+              prepend-icon="mdi-refresh"
+              :loading="mp3LoadingEligible"
+              @click="loadEligibleEpisodes"
+            >
+              Refresh
+            </v-btn>
+          </div>
+
+          <v-card variant="outlined" class="mb-4">
+            <div v-if="mp3LoadingEligible" class="pa-6 text-center">
+              <v-progress-circular indeterminate color="primary" size="24" />
+            </div>
+            <v-table v-else-if="mp3EligibleEpisodes.length > 0" density="compact" class="mp3-table">
+              <thead>
+                <tr>
+                  <th>Episode</th>
+                  <th>Title</th>
+                  <th>Source</th>
+                  <th>MP3</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="ep in mp3EligibleEpisodes"
+                  :key="ep.episode"
+                  :class="{ 'bg-blue-lighten-5': mp3SelectedEpisode === ep.episode }"
+                  style="cursor: pointer"
+                  @click="mp3SelectedEpisode = ep.episode"
+                >
+                  <td class="font-weight-bold">{{ ep.episode }}</td>
+                  <td class="text-truncate" style="max-width: 200px">{{ ep.title }}</td>
+                  <td>
+                    <v-chip size="x-small" variant="outlined">
+                      {{ ep.source_file }}
+                    </v-chip>
+                  </td>
+                  <td>
+                    <v-chip
+                      v-if="ep.mp3_exists"
+                      size="x-small"
+                      color="success"
+                      variant="flat"
+                    >
+                      {{ ep.mp3_size_mb }} MB
+                    </v-chip>
+                    <v-chip v-else size="x-small" color="warning" variant="outlined">
+                      Not generated
+                    </v-chip>
+                  </td>
+                  <td>
+                    <v-radio-group
+                      v-model="mp3SelectedEpisode"
+                      hide-details
+                      density="compact"
+                      class="ma-0 pa-0"
+                    >
+                      <v-radio :value="ep.episode" density="compact" />
+                    </v-radio-group>
+                  </td>
+                </tr>
+              </tbody>
+            </v-table>
+            <div v-else class="pa-4 text-center text-grey">
+              No episodes with master video files found
+            </div>
+          </v-card>
+
+          <!-- Profile Selector -->
+          <v-select
+            v-model="mp3SelectedProfileId"
+            :items="mp3Profiles"
+            item-title="name"
+            item-value="id"
+            label="Encoding Profile"
+            variant="outlined"
+            density="comfortable"
+            class="mb-2"
+          >
+            <template v-slot:item="{ item, props: itemProps }">
+              <v-list-item v-bind="itemProps">
+                <template v-slot:subtitle>
+                  {{ item.raw.bitrate }} / {{ item.raw.sample_rate }} Hz / {{ item.raw.channels === 1 ? 'Mono' : 'Stereo' }}
+                  <span v-if="item.raw.is_default"> (default)</span>
+                </template>
+              </v-list-item>
+            </template>
+          </v-select>
+
+          <!-- Progress / Status -->
+          <v-alert
+            v-if="mp3TaskStatus === 'running'"
+            type="info"
+            variant="tonal"
+            class="mb-2"
+          >
+            <div class="d-flex align-center">
+              <v-progress-circular indeterminate size="20" width="2" class="me-3" />
+              <span>Encoding MP3 for episode {{ mp3SelectedEpisode }}...</span>
+            </div>
+            <v-progress-linear
+              v-if="mp3TaskProgress > 0"
+              :model-value="mp3TaskProgress"
+              color="primary"
+              class="mt-2"
+              height="6"
+              rounded
+            />
+          </v-alert>
+
+          <v-alert
+            v-if="mp3TaskStatus === 'completed'"
+            type="success"
+            variant="tonal"
+            class="mb-2"
+          >
+            MP3 generated successfully!
+            <span v-if="mp3TaskResult">
+              {{ mp3TaskResult.file_size_mb }} MB
+              ({{ mp3TaskResult.profile }}, {{ mp3TaskResult.bitrate }})
+            </span>
+          </v-alert>
+
+          <v-alert
+            v-if="mp3TaskStatus === 'failed'"
+            type="error"
+            variant="tonal"
+            class="mb-2"
+          >
+            MP3 generation failed: {{ mp3TaskError }}
+          </v-alert>
+        </v-card-text>
+
+        <v-card-actions class="pa-4">
+          <v-spacer />
+          <v-btn variant="text" @click="closeMp3Modal">Close</v-btn>
+          <v-btn
+            color="primary"
+            variant="flat"
+            :loading="mp3TaskStatus === 'running'"
+            :disabled="!mp3SelectedEpisode || !mp3SelectedProfileId || mp3TaskStatus === 'running'"
+            @click="startMp3Generation"
+          >
+            <v-icon class="me-1">mdi-music</v-icon>
+            Generate MP3
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Script Generator Modal -->
     <v-dialog v-model="showScriptGeneratorModal" max-width="500">
       <v-card>
@@ -386,15 +564,9 @@
 </template>
 
 <script setup>
-import { ref, inject } from 'vue'
+import { ref, inject, watch, onBeforeUnmount } from 'vue'
 import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'
 import EpisodeNameNormalizerModal from '@/components/EpisodeNameNormalizerModal.vue'
-// Production Tools - Disabled pending testing
-// import HealthCheckModal from '@/components/tools/HealthCheckModal.vue'
-// import AssetValidatorModal from '@/components/tools/AssetValidatorModal.vue'
-// import DurationReconcileModal from '@/components/tools/DurationReconcileModal.vue'
-// import RundownDiffModal from '@/components/tools/RundownDiffModal.vue'
-// import ProductionReportModal from '@/components/tools/ProductionReportModal.vue'
 
 // Inject axios
 const axios = inject('axios')
@@ -408,7 +580,139 @@ const showScriptGeneratorModal = ref(false)
 const scriptEpisodeNumber = ref('')
 const generatingScript = ref(false)
 
-// Event handlers
+// ─── MP3 Generation State ────────────────────────────────────
+const showMp3Modal = ref(false)
+const mp3EligibleEpisodes = ref([])
+const mp3LoadingEligible = ref(false)
+const mp3Profiles = ref([])
+const mp3SelectedEpisode = ref(null)
+const mp3SelectedProfileId = ref(null)
+const mp3TaskId = ref(null)
+const mp3TaskStatus = ref(null) // null, 'running', 'completed', 'failed'
+const mp3TaskProgress = ref(0)
+const mp3TaskResult = ref(null)
+const mp3TaskError = ref(null)
+let mp3PollTimer = null
+
+const loadEligibleEpisodes = async () => {
+  mp3LoadingEligible.value = true
+  try {
+    const response = await axios.get('/tools/generate-mp3/eligible')
+    mp3EligibleEpisodes.value = response.data.eligible || []
+  } catch (error) {
+    console.error('Failed to load eligible episodes:', error)
+  } finally {
+    mp3LoadingEligible.value = false
+  }
+}
+
+const loadMp3Profiles = async () => {
+  try {
+    const response = await axios.get('/settings/mp3-profiles/', {
+      params: { is_active: true }
+    })
+    mp3Profiles.value = response.data || []
+    // Select default profile
+    const defaultProfile = mp3Profiles.value.find(p => p.is_default)
+    if (defaultProfile) {
+      mp3SelectedProfileId.value = defaultProfile.id
+    } else if (mp3Profiles.value.length > 0) {
+      mp3SelectedProfileId.value = mp3Profiles.value[0].id
+    }
+  } catch (error) {
+    console.error('Failed to load MP3 profiles:', error)
+  }
+}
+
+const startMp3Generation = async () => {
+  if (!mp3SelectedEpisode.value || !mp3SelectedProfileId.value) return
+
+  mp3TaskStatus.value = 'running'
+  mp3TaskProgress.value = 0
+  mp3TaskResult.value = null
+  mp3TaskError.value = null
+
+  try {
+    const response = await axios.post('/tools/generate-mp3', {
+      episode: mp3SelectedEpisode.value,
+      profile_id: mp3SelectedProfileId.value
+    })
+    mp3TaskId.value = response.data.task_id
+    startMp3Polling()
+  } catch (error) {
+    mp3TaskStatus.value = 'failed'
+    mp3TaskError.value = error.response?.data?.detail || error.message
+  }
+}
+
+const startMp3Polling = () => {
+  stopMp3Polling()
+  mp3PollTimer = setInterval(pollMp3Status, 3000)
+}
+
+const stopMp3Polling = () => {
+  if (mp3PollTimer) {
+    clearInterval(mp3PollTimer)
+    mp3PollTimer = null
+  }
+}
+
+const pollMp3Status = async () => {
+  if (!mp3TaskId.value) return
+
+  try {
+    const response = await axios.get(`/tools/generate-mp3/status/${mp3TaskId.value}`)
+    const data = response.data
+
+    if (data.status === 'running' || data.status === 'pending') {
+      mp3TaskStatus.value = 'running'
+      mp3TaskProgress.value = data.progress || 0
+    } else if (data.status === 'completed') {
+      mp3TaskStatus.value = 'completed'
+      mp3TaskResult.value = data.result
+      mp3TaskProgress.value = 100
+      stopMp3Polling()
+      // Refresh episode list to show updated MP3 status
+      loadEligibleEpisodes()
+    } else if (data.status === 'failed') {
+      mp3TaskStatus.value = 'failed'
+      mp3TaskError.value = data.error || 'Unknown error'
+      stopMp3Polling()
+    }
+  } catch (error) {
+    console.error('Failed to poll MP3 status:', error)
+    mp3TaskStatus.value = 'failed'
+    mp3TaskError.value = 'Lost connection to task'
+    stopMp3Polling()
+  }
+}
+
+const closeMp3Modal = () => {
+  showMp3Modal.value = false
+  stopMp3Polling()
+  // Reset status on close only if not running
+  if (mp3TaskStatus.value !== 'running') {
+    mp3TaskStatus.value = null
+    mp3TaskProgress.value = 0
+    mp3TaskResult.value = null
+    mp3TaskError.value = null
+  }
+}
+
+// Load data when MP3 modal opens
+// Load data when MP3 modal opens
+watch(showMp3Modal, (val) => {
+  if (val) {
+    loadEligibleEpisodes()
+    loadMp3Profiles()
+  }
+})
+
+onBeforeUnmount(() => {
+  stopMp3Polling()
+})
+
+// ─── Event Handlers ──────────────────────────────────────────
 const handleEpisodeCreated = (episode) => {
   successMessage.value = `Episode ${episode.episode_number} created successfully!`
   showSuccessMessage.value = true
@@ -457,5 +761,10 @@ const generateHostScript = async () => {
 
 .v-card[disabled] {
   opacity: 0.6;
+}
+
+.mp3-table {
+  max-height: 280px;
+  overflow-y: auto;
 }
 </style>

@@ -380,14 +380,35 @@ export default {
             font-size: 74% !important; /* 14pt / 19pt = 74% */
           }
 
-          /* Block Headers - 147% */
+          /* Block Headers - BEGIN BLOCK indicator */
           .block-header {
             font-size: 147% !important; /* 28pt / 19pt = 147% */
+            text-align: center;
+            font-weight: bold;
             margin-top: 1.5em;
             margin-bottom: 0.5em;
             padding: 0.5em 0;
-            border-top: 3px solid #1976d2;
-            border-bottom: 3px solid #1976d2;
+            border-top: 4px solid #1976d2;
+            border-bottom: 4px solid #1976d2;
+            background: #e3f2fd !important;
+            color: #0d47a1 !important;
+            letter-spacing: 0.15em;
+            page-break-before: auto !important;
+          }
+
+          /* Block Footer - END BLOCK indicator */
+          .block-end {
+            font-size: 116% !important;
+            text-align: center;
+            font-weight: bold;
+            margin-top: 1em;
+            margin-bottom: 1em;
+            padding: 0.4em 0;
+            border-top: 3px solid #1565c0;
+            border-bottom: 3px solid #1565c0;
+            background: #e8eaf6 !important;
+            color: #283593 !important;
+            letter-spacing: 0.1em;
           }
 
           .block-number {
@@ -404,6 +425,23 @@ export default {
 
           .segment-title-number {
             font-size: 63% !important; /* 12pt / 19pt = 63% */
+          }
+
+          /* End Segment divider (tease items) */
+          .segment-end-divider {
+            text-align: center;
+            font-size: 63% !important;
+            font-weight: bold;
+            color: #888 !important;
+            margin: 0.5em 0 0.3em 0;
+            padding: 0.2em 0;
+            letter-spacing: 0.15em;
+            border-top: 1px solid #ccc;
+          }
+
+          .segment-tease .script-content {
+            font-style: italic;
+            color: #555 !important;
           }
 
           /* Speaker Names - 84% */
@@ -464,6 +502,56 @@ export default {
             padding: 1em;
             background: #f5f5f5;
             border-left: 4px solid #1976d2;
+          }
+
+          /* Inline production notes - monospace, compact */
+          .inline-note {
+            font-family: 'Courier New', Courier, monospace !important;
+            font-size: 80% !important;
+            color: #555 !important;
+            margin: 2em 0 !important;
+            line-height: 1.4 !important;
+          }
+
+          /* Break indicators between blocks */
+          .break-indicator {
+            text-align: center;
+            font-size: 100% !important;
+            font-weight: bold;
+            padding: 0.4em 0;
+            margin: 0.5em 0;
+            background: #e8f5e9 !important;
+            border: 2px dashed #4caf50 !important;
+            color: #2e7d32 !important;
+          }
+
+          /* Ad break - distinct from generic breaks */
+          .break-indicator.ad-break {
+            background: #e3f2fd !important;
+            border: 2px dashed #1976d2 !important;
+            color: #0d47a1 !important;
+          }
+
+          .ad-label {
+            font-weight: bold;
+            font-size: 68% !important;
+            background: #1976d2;
+            color: #fff !important;
+            padding: 2px 10px;
+            border-radius: 4px;
+            margin-right: 10px;
+          }
+
+          .ad-slug {
+            font-weight: bold;
+            font-size: 100% !important;
+            color: #0d47a1;
+          }
+
+          .ad-duration {
+            font-size: 63% !important;
+            color: #64b5f6;
+            margin-left: 10px;
           }
 
           /* Small Metadata */
@@ -611,13 +699,57 @@ export default {
   background-color: #000000 !important;
 }
 
-.ipad-scroll-container.inverted :deep(.block-header),
+/* Block indicators - keep distinctive styling in inverted mode */
+.ipad-scroll-container.inverted :deep(.block-header) {
+  background-color: #1a237e !important;
+  color: #90caf9 !important;
+  border-color: #42a5f5 !important;
+}
+
+.ipad-scroll-container.inverted :deep(.block-end) {
+  background-color: #1a237e !important;
+  color: #9fa8da !important;
+  border-color: #5c6bc0 !important;
+}
+
+.ipad-scroll-container.inverted :deep(.break-indicator) {
+  background-color: #1b5e20 !important;
+  color: #a5d6a7 !important;
+  border-color: #66bb6a !important;
+}
+
+.ipad-scroll-container.inverted :deep(.break-indicator.ad-break) {
+  background-color: #0d47a1 !important;
+  color: #90caf9 !important;
+  border-color: #42a5f5 !important;
+}
+
+.ipad-scroll-container.inverted :deep(.ad-label) {
+  background-color: #1976d2 !important;
+  color: #ffffff !important;
+}
+
 .ipad-scroll-container.inverted :deep(.segment-title) {
   border-color: #ffffff !important;
 }
 
+.ipad-scroll-container.inverted :deep(.segment-end-divider) {
+  color: #666 !important;
+  border-color: #444 !important;
+}
+
+.ipad-scroll-container.inverted :deep(.segment-tease .script-content) {
+  color: #aaa !important;
+}
+
+.ipad-scroll-container.inverted :deep(.inline-note) {
+  color: #aaa !important;
+}
+
+/* Images should NOT be inverted - they need to display in original colors */
 .ipad-scroll-container.inverted :deep(img) {
-  filter: invert(1);
+  filter: none !important;
+  background-color: transparent !important;
 }
 
 /* Floating Controls - Vertically Centered */

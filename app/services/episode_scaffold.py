@@ -445,42 +445,26 @@ class EpisodeScaffoldService:
                 }
             )
 
-            # Build script content with YAML frontmatter
-            frontmatter_data = {
-                'slug': metadata.get('slug', node.name.lower().replace(' ', '-')),
-                'type': metadata.get('item_type', 'segment'),
-                'order': (idx + 1) * 10,  # Spacing of 10 for future insertions
-                'index': (idx + 1) * 10,
-                'duration': metadata.get('duration', '00:05:00'),
-                'status': metadata.get('status', 'draft'),
-                'title': node.name
-            }
+            # Build metadata for rundown item fields (no frontmatter in script_content)
+            item_slug = metadata.get('slug', node.name.lower().replace(' ', '-'))
+            item_type = metadata.get('item_type', 'segment')
+            item_order = (idx + 1) * 10
+            item_duration = metadata.get('duration', '00:05:00')
+            item_status = metadata.get('status', 'draft')
 
-            # Add YAML frontmatter to content
-            script_content = "---\n"
-            for key, value in frontmatter_data.items():
-                if isinstance(value, str):
-                    script_content += f"{key}: \"{value}\"\n"
-                else:
-                    script_content += f"{key}: {value}\n"
-            script_content += "---\n\n"
-
-            # Add template content if provided
-            if node.content:
-                script_content += node.content
-            else:
-                script_content += f"# {node.name}\n\n[Content to be added]\n"
+            # Script content is just the body - no YAML frontmatter
+            script_content = node.content if node.content else ''
 
             # Create rundown item with correct rundown_id and asset_id
             rundown_item = RundownItem(
                 asset_id=item_asset_id,
                 rundown_id=rundown.id,
                 title=node.name,
-                slug=frontmatter_data['slug'],
-                item_type=frontmatter_data['type'],
-                order_in_rundown=frontmatter_data['order'],
-                duration=frontmatter_data['duration'],
-                status=frontmatter_data['status'],
+                slug=item_slug,
+                item_type=item_type,
+                order_in_rundown=item_order,
+                duration=item_duration,
+                status=item_status,
                 script_content=script_content
             )
 
@@ -566,42 +550,25 @@ class EpisodeScaffoldService:
                 }
             )
 
-            # Build script content with YAML frontmatter
-            frontmatter_data = {
-                'slug': template_item.slug or template_item.title.lower().replace(' ', '-'),
-                'type': template_item.item_type,
-                'order': (idx + 1) * 10,  # Spacing of 10 for future insertions
-                'index': (idx + 1) * 10,
-                'duration': template_item.duration or '00:05:00',
-                'status': 'draft',
-                'title': template_item.title or template_item.item_type
-            }
+            # Build metadata for rundown item fields (no frontmatter in script_content)
+            item_slug = template_item.slug or template_item.title.lower().replace(' ', '-')
+            item_order = (idx + 1) * 10
+            item_duration = template_item.duration or '00:05:00'
+            item_title = template_item.title or template_item.item_type
 
-            # Add YAML frontmatter to content
-            script_content = "---\n"
-            for key, value in frontmatter_data.items():
-                if isinstance(value, str):
-                    script_content += f"{key}: \"{value}\"\n"
-                else:
-                    script_content += f"{key}: {value}\n"
-            script_content += "---\n\n"
-
-            # Add template script content if provided
-            if template_item.script_content:
-                script_content += template_item.script_content
-            else:
-                script_content += f"# {template_item.title or template_item.item_type}\n\n[Content to be added]\n"
+            # Script content is just the body - no YAML frontmatter
+            script_content = template_item.script_content if template_item.script_content else ''
 
             # Create rundown item with correct rundown_id and asset_id
             rundown_item = RundownItem(
                 asset_id=item_asset_id,
                 rundown_id=rundown.id,
-                title=template_item.title or template_item.item_type,
-                slug=frontmatter_data['slug'],
+                title=item_title,
+                slug=item_slug,
                 item_type=template_item.item_type,
-                order_in_rundown=frontmatter_data['order'],
-                duration=frontmatter_data['duration'],
-                status=frontmatter_data['status'],
+                order_in_rundown=item_order,
+                duration=item_duration,
+                status='draft',
                 script_content=script_content
             )
 

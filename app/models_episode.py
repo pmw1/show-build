@@ -1,12 +1,12 @@
 """
-Database models for episode management and blueprint templates
+Database models for episode management, blueprint templates, and encoding profiles
 """
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 class BlueprintTemplate(Base):
@@ -312,3 +312,72 @@ class RundownTemplateImport(BaseModel):
     organization_id: int
     episode_template_id: int
     items: List[RundownTemplateItemCreate]
+
+
+# ============================================================================
+# MP3 Encoding Profiles
+# ============================================================================
+
+class Mp3EncodingProfile(Base):
+    """User-defined MP3 encoding profiles for episode audio export."""
+    __tablename__ = "mp3_encoding_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+
+    # Encoding parameters
+    bitrate = Column(String(20), nullable=False, default="192k")       # e.g. "128k", "192k", "320k"
+    sample_rate = Column(Integer, nullable=False, default=44100)       # e.g. 44100, 48000
+    channels = Column(Integer, nullable=False, default=2)              # 1=mono, 2=stereo
+    quality = Column(Integer, nullable=True)                           # VBR quality 0-9 (lower=better), null=CBR
+    normalize_audio = Column(Boolean, nullable=False, default=False)   # Apply loudness normalization
+
+    # Profile management
+    is_default = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+# Pydantic schemas for MP3 Encoding Profiles
+
+class Mp3EncodingProfileBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    bitrate: str = "192k"
+    sample_rate: int = 44100
+    channels: int = Field(default=2, ge=1, le=2)
+    quality: Optional[int] = Field(default=None, ge=0, le=9)
+    normalize_audio: bool = False
+    is_default: bool = False
+    is_active: bool = True
+    sort_order: int = 0
+
+
+class Mp3EncodingProfileCreate(Mp3EncodingProfileBase):
+    pass
+
+
+class Mp3EncodingProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    bitrate: Optional[str] = None
+    sample_rate: Optional[int] = None
+    channels: Optional[int] = Field(default=None, ge=1, le=2)
+    quality: Optional[int] = Field(default=None, ge=0, le=9)
+    normalize_audio: Optional[bool] = None
+    is_default: Optional[bool] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class Mp3EncodingProfileResponse(Mp3EncodingProfileBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

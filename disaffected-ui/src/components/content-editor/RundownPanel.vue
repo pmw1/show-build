@@ -27,6 +27,10 @@
       <!-- Rundown Header -->
       <v-card-title class="d-flex align-center pa-2 rundown-title">
         <span class="text-h6">Rundown</span>
+        <span :class="['master-duration-header', durationThemeClass, 'ml-2']" :title="'Total rundown duration'">
+          <v-icon size="x-small" class="mr-1">mdi-clock-outline</v-icon>
+          {{ computedTotalDuration }}
+        </span>
         <v-spacer></v-spacer>
         <v-btn
           size="small"
@@ -356,7 +360,7 @@
 
                             <!-- Duration (Right side) -->
                             <div class="duration-display">
-                              {{ formatDurationShort(item?.duration || '0:00') }}
+                              {{ formatDurationShort(getEffectiveItemDuration(item)) }}
                             </div>
 
                             <!-- Hamburger menu for selected item -->
@@ -407,6 +411,20 @@
           <p class="text-caption text-grey">Switch to Rundown Manager to add items</p>
         </div>
         </div> <!-- End list-view -->
+
+        <!-- Master Duration Footer -->
+        <div v-if="items && items.length > 0" :class="['master-duration-footer', durationThemeClass]">
+          <div class="master-duration-row">
+            <v-icon size="small" class="mr-2">mdi-sigma</v-icon>
+            <span class="master-duration-label">Total Duration</span>
+            <v-spacer></v-spacer>
+            <span class="master-duration-value">{{ computedTotalDuration }}</span>
+          </div>
+          <div class="master-duration-items-count">
+            {{ items.length }} {{ items.length === 1 ? 'item' : 'items' }}
+          </div>
+        </div>
+
       </v-card-text>
     </v-card>
 
@@ -783,6 +801,43 @@ export default {
     }
   },
   computed: {
+    totalDurationSeconds() {
+      if (!this.items || this.items.length === 0) return 0
+      let totalSeconds = 0
+      this.items.forEach(item => {
+        // 1. Add the item-level duration
+        if (item.duration) {
+          totalSeconds += this.parseDurationToSeconds(item.duration)
+        }
+        // 2. Add durations from embedded cue blocks (RIF, SOT, VOX, etc.)
+        const scriptContent = item.script || item.script_content
+        if (scriptContent) {
+          const cuePattern = /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g
+          let match
+          while ((match = cuePattern.exec(scriptContent)) !== null) {
+            const cueBlock = match[1]
+            const durMatch = cueBlock.match(/\[Duration:\s*([^\]]+)\]/i)
+            if (durMatch) {
+              totalSeconds += this.parseDurationToSeconds(durMatch[1].trim())
+            }
+          }
+        }
+      })
+      return totalSeconds
+    },
+    computedTotalDuration() {
+      const totalSeconds = this.totalDurationSeconds
+      const h = Math.floor(totalSeconds / 3600)
+      const m = Math.floor((totalSeconds % 3600) / 60)
+      const s = totalSeconds % 60
+      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+    },
+    durationThemeClass() {
+      const secs = this.totalDurationSeconds
+      if (secs >= 3600) return 'duration-over'       // >= 1:00:00 red
+      if (secs >= 3300) return 'duration-target'      // >= 0:55:00 green
+      return 'duration-under'                          // < 0:50:00 blue
+    },
     panelWidthValue() {
       return this.panelWidth === 'narrow' ? '300px' : '520px'
     },
@@ -1043,6 +1098,41 @@ export default {
       return result;
     },
 
+    // Get effective duration for an item including embedded cue durations
+    getEffectiveItemDuration(item) {
+      let totalSeconds = this.parseDurationToSeconds(item?.duration)
+      const scriptContent = item?.script || item?.script_content
+      if (scriptContent) {
+        const cuePattern = /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g
+        let match
+        while ((match = cuePattern.exec(scriptContent)) !== null) {
+          const durMatch = match[1].match(/\[Duration:\s*([^\]]+)\]/i)
+          if (durMatch) {
+            totalSeconds += this.parseDurationToSeconds(durMatch[1].trim())
+          }
+        }
+      }
+      if (totalSeconds === 0) return '0:00'
+      const h = Math.floor(totalSeconds / 3600)
+      const m = Math.floor((totalSeconds % 3600) / 60)
+      const s = totalSeconds % 60
+      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+    },
+
+    // Parse any duration string (HH:MM:SS:FF, HH:MM:SS, MM:SS) to seconds
+    parseDurationToSeconds(duration) {
+      if (!duration) return 0
+      const parts = String(duration).split(':').map(Number)
+      if (parts.length === 4) {
+        return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0)
+      } else if (parts.length === 3) {
+        return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0)
+      } else if (parts.length === 2) {
+        return (parts[0] || 0) * 60 + (parts[1] || 0)
+      }
+      return 0
+    },
+
     // Region visibility toggle
     toggleRegionsVisibility() {
       this.showRegions = !this.showRegions;
@@ -1072,9 +1162,19 @@ export default {
 
       let totalSeconds = 0
       region.items.forEach(item => {
-        if (item.duration) {
-          const [hours, minutes, seconds] = item.duration.split(':').map(Number)
-          totalSeconds += hours * 3600 + minutes * 60 + seconds
+        // Item-level duration
+        totalSeconds += this.parseDurationToSeconds(item.duration)
+        // Embedded cue durations
+        const scriptContent = item.script || item.script_content
+        if (scriptContent) {
+          const cuePattern = /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g
+          let match
+          while ((match = cuePattern.exec(scriptContent)) !== null) {
+            const durMatch = match[1].match(/\[Duration:\s*([^\]]+)\]/i)
+            if (durMatch) {
+              totalSeconds += this.parseDurationToSeconds(durMatch[1].trim())
+            }
+          }
         }
       })
 
@@ -4045,5 +4145,113 @@ export default {
 
 .tab-btn .v-icon {
   color: white !important;
+}
+
+/* Master Duration - Header Badge */
+.master-duration-header {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 1px 6px;
+  display: inline-flex;
+  align-items: center;
+  font-family: 'Roboto Mono', monospace;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  transition: color 0.3s, background 0.3s, border-color 0.3s;
+}
+
+/* Duration theme: UNDER 50min - Blue */
+.master-duration-header.duration-under {
+  color: #90CAF9;
+  background: rgba(25, 118, 210, 0.15);
+  border: 1px solid rgba(25, 118, 210, 0.3);
+}
+
+/* Duration theme: 55min-1hr - Green (on target) */
+.master-duration-header.duration-target {
+  color: #A5D6A7;
+  background: rgba(56, 142, 60, 0.18);
+  border: 1px solid rgba(56, 142, 60, 0.4);
+}
+
+/* Duration theme: OVER 1hr - Red */
+.master-duration-header.duration-over {
+  color: #EF9A9A;
+  background: rgba(211, 47, 47, 0.18);
+  border: 1px solid rgba(211, 47, 47, 0.4);
+}
+
+.rundown-panel.narrow .master-duration-header {
+  font-size: 9px;
+  padding: 1px 4px;
+}
+
+/* Master Duration - Footer */
+.master-duration-footer {
+  padding: 6px 10px;
+  margin-top: 4px;
+  transition: border-color 0.3s, background 0.3s;
+}
+
+.master-duration-footer.duration-under {
+  border-top: 2px solid rgba(25, 118, 210, 0.4);
+  background: rgba(25, 118, 210, 0.08);
+}
+
+.master-duration-footer.duration-target {
+  border-top: 2px solid rgba(56, 142, 60, 0.5);
+  background: rgba(56, 142, 60, 0.08);
+}
+
+.master-duration-footer.duration-over {
+  border-top: 2px solid rgba(211, 47, 47, 0.5);
+  background: rgba(211, 47, 47, 0.08);
+}
+
+.master-duration-row {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #E3F2FD;
+}
+
+.master-duration-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.8;
+}
+
+.master-duration-value {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  transition: color 0.3s;
+}
+
+.duration-under .master-duration-value { color: #90CAF9; }
+.duration-target .master-duration-value { color: #A5D6A7; }
+.duration-over .master-duration-value { color: #EF9A9A; }
+
+.master-duration-items-count {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: right;
+  margin-top: 2px;
+}
+
+.rundown-panel.narrow .master-duration-value {
+  font-size: 12px;
+}
+
+.rundown-panel.narrow .master-duration-label {
+  font-size: 10px;
+}
+
+.rundown-panel.narrow .master-duration-items-count {
+  font-size: 9px;
 }
 </style>

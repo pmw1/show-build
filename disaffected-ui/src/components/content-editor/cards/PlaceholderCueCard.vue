@@ -34,7 +34,7 @@
     <v-card-title class="cue-card-header" :style="headerStyleWithStatus">
       <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 8px;">mdi-drag-vertical</v-icon>
       <div class="cue-type-badge" :style="badgeStyle">
-        {{ cueData.type }}
+        {{ cueTypeBadgeLabel }}
       </div>
 
       <!-- Enumerator Badge (if present) -->
@@ -664,8 +664,8 @@
         </div>
       </div>
 
-      <!-- DIR (Directors Note) Display -->
-      <div v-else-if="cueData.type === 'DIR'" class="dir-container">
+      <!-- NOTE (Directors Note) Display -->
+      <div v-else-if="cueData.type === 'NOTE' || cueData.type === 'DIR'" class="dir-container">
         <div class="dir-content">
           <div class="dir-icon-section">
             <v-icon size="32" :color="cueTypeColor">mdi-note-text</v-icon>
@@ -1031,6 +1031,16 @@ export default {
   },
   computed: {
     /**
+     * Badge label - shows "NOTE: DIRECTOR" for NOTE cues with noteFor, otherwise just the type
+     */
+    cueTypeBadgeLabel() {
+      const t = this.cueData.type;
+      if ((t === 'NOTE' || t === 'DIR') && this.cueData.noteFor) {
+        return `${t}: ${this.cueData.noteFor.toUpperCase()}`;
+      }
+      return t;
+    },
+    /**
      * Checkbox icon based on cue_status
      */
     checkboxIcon() {
@@ -1167,16 +1177,23 @@ export default {
 
     /**
      * Get all SOT thumbnail options (array of URLs)
+     * Uses relative URLs - Vue dev proxy forwards /episodes to backend
      */
     sotThumbnailOptions() {
+      // Helper function to normalize URL path
+      const makeAbsoluteUrl = (url) => {
+        if (url.startsWith('http')) {
+          return url;
+        }
+        if (url.startsWith('/episodes')) {
+          return url;
+        }
+        return `/episodes/${url}`;
+      };
+
       // First check cue data for ThumbnailOptions (array from processing)
       if (this.cueData?.thumbnailOptions && Array.isArray(this.cueData.thumbnailOptions)) {
-        return this.cueData.thumbnailOptions.map(url => {
-          if (url.startsWith('/episodes') || url.startsWith('http')) {
-            return url;
-          }
-          return `/episodes/${url}`;
-        });
+        return this.cueData.thumbnailOptions.map(makeAbsoluteUrl);
       }
 
       // Check job status for thumbnail_candidates (from database)
@@ -1185,11 +1202,12 @@ export default {
         const thumbnailPath = this.jobStatus.final_thumbnail_path || '';
         if (thumbnailPath) {
           // Extract the base pattern from final_thumbnail_path (e.g., "0257/assets/thumbnails/airplane-girl-thumb-01.jpg")
-          const match = thumbnailPath.match(/^(.+)-thumb-\d+\.jpg$/);
+          const match = thumbnailPath.match(/^(.+)-thumb-\d+\.(jpg|png)$/);
           if (match) {
             const basePath = match[1];  // "0257/assets/thumbnails/airplane-girl"
+            const ext = match[2];  // preserve original extension
             return this.jobStatus.thumbnail_candidates.map((_, i) => {
-              return `/episodes/${basePath}-thumb-${String(i + 1).padStart(2, '0')}.jpg`;
+              return `/episodes/${basePath}-thumb-${String(i + 1).padStart(2, '0')}.${ext}`;
             });
           }
         }
@@ -1206,12 +1224,11 @@ export default {
 
       // Generate options based on single thumbnail URL pattern
       if (this.sotThumbnailUrl) {
-        // Try to extract base pattern (e.g., /episodes/0251/assets/thumbnails/slug-thumb-08.jpg)
-        const match = this.sotThumbnailUrl.match(/^(.+)-thumb-(\d+)\.jpg$/);
+        const match = this.sotThumbnailUrl.match(/^(.+)-thumb-(\d+)\.(jpg|png)$/);
         if (match) {
           const base = match[1];
-          // Generate 15 thumbnail URLs
-          return Array.from({ length: 15 }, (_, i) => `${base}-thumb-${String(i + 1).padStart(2, '0')}.jpg`);
+          const ext = match[3];  // preserve original extension
+          return Array.from({ length: 15 }, (_, i) => `${base}-thumb-${String(i + 1).padStart(2, '0')}.${ext}`);
         }
       }
 
@@ -1356,20 +1373,35 @@ export default {
 
     /**
      * Get SOT thumbnail URL from cue data or job status (base/primary thumbnail)
+     * Uses relative URLs - Vue dev proxy forwards /episodes to backend
      */
     sotThumbnailUrl() {
-      // First check cue data for ThumbnailURL
-      if (this.cueData?.thumbnailUrl) {
-        // If it's a relative path, prepend /episodes
-        if (this.cueData.thumbnailUrl.startsWith('/episodes') || this.cueData.thumbnailUrl.startsWith('http')) {
+      const backendUrl = '';
+
+      // First check cue data for ThumbnailURL (skip stale blob: URLs)
+      if (this.cueData?.thumbnailUrl && !this.cueData.thumbnailUrl.startsWith('blob:')) {
+        // If already an absolute URL, return as-is
+        if (this.cueData.thumbnailUrl.startsWith('http')) {
           return this.cueData.thumbnailUrl;
         }
+        // If starts with /episodes, use as relative URL
+        if (this.cueData.thumbnailUrl.startsWith('/episodes')) {
+          return this.cueData.thumbnailUrl;
+        }
+        // Otherwise, construct full path
         return `/episodes/${this.cueData.thumbnailUrl}`;
       }
 
       // Fall back to job status thumbnail path
       if (this.jobStatus?.final_thumbnail_path) {
-        return `/episodes/${this.jobStatus.final_thumbnail_path}`;
+        const path = this.jobStatus.final_thumbnail_path;
+        if (path.startsWith('http')) {
+          return path;
+        }
+        if (path.startsWith('/episodes')) {
+          return `${backendUrl}${path}`;
+        }
+        return `${backendUrl}/episodes/${path}`;
       }
 
       return '';
@@ -1403,19 +1435,35 @@ export default {
 
     /**
      * Get SOT video URL for inline player
+     * Uses relative URLs - Vue dev proxy forwards /episodes to backend
      */
     sotVideoUrl() {
-      // First check cue data for MediaURL
-      if (this.cueData?.mediaUrl) {
-        if (this.cueData.mediaUrl.startsWith('/episodes') || this.cueData.mediaUrl.startsWith('http')) {
+      const backendUrl = '';
+
+      // First check cue data for MediaURL (skip stale blob: URLs)
+      if (this.cueData?.mediaUrl && !this.cueData.mediaUrl.startsWith('blob:')) {
+        // If already an absolute URL, return as-is
+        if (this.cueData.mediaUrl.startsWith('http')) {
           return this.cueData.mediaUrl;
         }
+        // If starts with /episodes, use as relative URL
+        if (this.cueData.mediaUrl.startsWith('/episodes')) {
+          return this.cueData.mediaUrl;
+        }
+        // Otherwise, construct full path
         return `/episodes/${this.cueData.mediaUrl}`;
       }
 
       // Fall back to job status final video path
       if (this.jobStatus?.final_video_path) {
-        return `/episodes/${this.jobStatus.final_video_path}`;
+        const path = this.jobStatus.final_video_path;
+        if (path.startsWith('http')) {
+          return path;
+        }
+        if (path.startsWith('/episodes')) {
+          return `${backendUrl}${path}`;
+        }
+        return `${backendUrl}/episodes/${path}`;
       }
 
       return '';
@@ -1878,11 +1926,20 @@ export default {
 
     /**
      * Open video player for SOT (in new tab)
+     * Uses relative URLs - Vue dev proxy forwards /episodes to backend
      */
     openVideoPlayer() {
+      const backendUrl = '';
       const videoPath = this.cueData.mediaUrl || this.jobStatus?.final_video_path;
       if (videoPath) {
-        const fullPath = videoPath.startsWith('/episodes') ? videoPath : `/episodes/${videoPath}`;
+        let fullPath;
+        if (videoPath.startsWith('http')) {
+          fullPath = videoPath;
+        } else if (videoPath.startsWith('/episodes')) {
+          fullPath = `${backendUrl}${videoPath}`;
+        } else {
+          fullPath = `${backendUrl}/episodes/${videoPath}`;
+        }
         window.open(fullPath, '_blank');
       }
     },

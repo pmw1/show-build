@@ -1,42 +1,41 @@
 <template>
   <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="500">
     <v-card :style="modalStyles">
-      <v-card-title :style="headerStyles">Add Director Note (DIR) Cue</v-card-title>
+      <v-card-title :style="headerStyles">Add Note Cue</v-card-title>
       <v-card-text>
-        <v-text-field
-          ref="slugField"
-          v-model="slug"
-          label="Slug"
-          required
-          :rules="[v => !!v || 'Slug is required', v => !duplicateSlugs.includes(v) || 'Slug must be unique']"
-        ></v-text-field>
-        <v-text-field
-          v-model="assetId"
-          label="AssetID (optional)"
-          hint="Associated asset identifier"
+        <v-select
+          v-model="noteFor"
+          :items="productionRoles"
+          item-title="name"
+          item-value="name"
+          label="Note For"
+          clearable
+          hint="Who is this note intended for?"
           persistent-hint
-        ></v-text-field>
+          class="mb-3"
+        ></v-select>
         <v-textarea
+          ref="noteField"
           v-model="noteText"
-          label="Director Note"
+          label="Note"
           required
           :rules="[v => !!v || 'Note text is required']"
           rows="4"
-          hint="Special note or instruction for the director"
+          hint="Special note or instruction for the director/crew"
           persistent-hint
         ></v-textarea>
-        <v-text-field v-model="duration" label="Duration (HH:MM:SS, optional)" :rules="[v => !v || /^\d{2}:\d{2}:\d{2}$/.test(v) || 'Format must be HH:MM:SS']"></v-text-field>
       </v-card-text>
       <v-card-actions>
         <v-spacer></v-spacer>
         <v-btn color="error" @click="handleAbort">Cancel (ESC)</v-btn>
-        <v-btn color="success" @click="handleSubmit" :disabled="!slug || !noteText">Submit (Shift+Enter)</v-btn>
+        <v-btn color="success" @click="handleSubmit" :disabled="!noteText">Submit (Shift+Enter)</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
 </template>
 <script>
 import { cueModalMixin } from '@/mixins/cueModalMixin';
+import axios from 'axios';
 
 export default {
   name: 'DirModal',
@@ -50,7 +49,7 @@ export default {
     },
     cueType: {
       type: String,
-      default: 'dir'
+      default: 'NOTE'
     },
     editingCueData: {
       type: Object,
@@ -59,16 +58,27 @@ export default {
   },
   data() {
     return {
-      slug: '',
-      assetId: '',
       noteText: '',
-      duration: ''
+      noteFor: null,
+      productionRoles: []
     };
   },
   methods: {
+    async loadProductionRoles() {
+      try {
+        const token = localStorage.getItem('auth-token');
+        const response = await axios.get('/api/production-roles/', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        if (response.data && response.data.data) {
+          this.productionRoles = response.data.data;
+        }
+      } catch (err) {
+        console.warn('Failed to load production roles:', err);
+      }
+    },
     async handleSubmit() {
-      // Validate before submitting
-      if (!this.slug || !this.noteText) {
+      if (!this.noteText) {
         return;
       }
       await this.submit();
@@ -80,15 +90,11 @@ export default {
     },
     buildCueBlock() {
       let block = '<!-- Begin Cue -->\n';
-      block += `[Type: ${this.cueType}]\n`;
-      block += `[Slug: ${this.slug}]\n`;
-      if (this.assetId) {
-        block += `[AssetID: ${this.assetId}]\n`;
+      block += '[Type: NOTE]\n';
+      if (this.noteFor) {
+        block += `[Note For: ${this.noteFor}]\n`;
       }
       block += `[Note Text: ${this.noteText}]\n`;
-      if (this.duration) {
-        block += `[Duration: ${this.duration}]\n`;
-      }
       block += '<!-- End Cue -->';
       return block;
     },
@@ -97,10 +103,8 @@ export default {
       this.reset();
     },
     reset() {
-      this.slug = '';
-      this.assetId = '';
       this.noteText = '';
-      this.duration = '';
+      this.noteFor = null;
     },
     handleKeydown(event) {
       if (event.key === 'Escape' && this.show) {
@@ -114,10 +118,8 @@ export default {
     show(newVal) {
       // Populate fields when opening in edit mode
       if (newVal && this.editingCueData) {
-        this.slug = this.editingCueData.slug || '';
-        this.assetId = this.editingCueData.assetId || '';
         this.noteText = this.editingCueData.noteText || '';
-        this.duration = this.editingCueData.duration || '';
+        this.noteFor = this.editingCueData.noteFor || null;
       }
       // Only reset when closing, mixin handles opening/focus
       if (!newVal) {
@@ -125,8 +127,9 @@ export default {
       }
     }
   },
-  mounted() {
+  async mounted() {
     document.addEventListener('keydown', this.handleKeydown);
+    await this.loadProductionRoles();
   },
   beforeUnmount() {
     document.removeEventListener('keydown', this.handleKeydown);
@@ -153,7 +156,17 @@ export default {
   padding-bottom: 12px;
 }
 
-/* Fix textarea input fading/cutoff issue */
+/* Fix textarea input fading/cutoff issue (Vuetify clip-path bug) */
+:deep(.v-field),
+:deep(.v-field__field),
+:deep(.v-field__input),
+:deep(textarea) {
+  clip-path: none !important;
+  mask: none !important;
+  -webkit-mask: none !important;
+  overflow: visible !important;
+}
+
 :deep(.v-field__input) {
   padding-top: 8px !important;
   min-height: auto !important;

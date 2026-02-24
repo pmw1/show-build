@@ -174,6 +174,39 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/script/ipad',
+    name: 'script-ipad',
+    meta: { requiresAuth: true },
+    beforeEnter: async (to, from, next) => {
+      try {
+        const token = localStorage.getItem('auth-token')
+        const res = await fetch('/api/episodes', {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        })
+        if (!res.ok) { next('/login'); return }
+        const episodes = await res.json()
+        const real = (episodes || []).filter(e => !e.is_test_data)
+        // Find most recent production episode (highest episode_number with status=production)
+        const production = real
+          .filter(e => e.status === 'production')
+          .sort((a, b) => (b.episode_number || 0) - (a.episode_number || 0))
+        if (production.length > 0) {
+          next(`/ipad-scroll/${production[0].episode_number}`)
+        } else {
+          // Fallback: highest episode number
+          const sorted = [...real].sort((a, b) => (b.episode_number || 0) - (a.episode_number || 0))
+          if (sorted.length > 0) {
+            next(`/ipad-scroll/${sorted[0].episode_number}`)
+          } else {
+            next('/')
+          }
+        }
+      } catch {
+        next('/login')
+      }
+    }
+  },
+  {
     path: '/ipad-scroll/:episodeNumber',
     name: 'ipad-scroll',
     component: () => import('@/views/IpadScrollView.vue'),

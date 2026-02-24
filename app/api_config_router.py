@@ -120,6 +120,93 @@ async def update_service_config(service_update: ServiceConfigUpdate, token_data=
         logger.error(f"Error updating service config: {e}")
         raise HTTPException(status_code=500, detail="Failed to update service configuration")
 
+async def test_whisper_connection(service_config: dict):
+    """
+    Test connection to Whisper service by checking health endpoint.
+    """
+    host = service_config.get("host")
+    if not host:
+        raise HTTPException(status_code=400, detail="Whisper host not configured")
+
+    try:
+        import requests
+
+        # Test basic connectivity by trying health endpoint
+        health_url = f"{host}/health"
+        try:
+            response = requests.get(health_url, timeout=5)
+            response.raise_for_status()
+        except:
+            # If no health endpoint, try the main endpoint
+            endpoint = service_config.get("endpoint", "/v1/audio/transcriptions")
+            test_url = f"{host}{endpoint}"
+            response = requests.get(test_url, timeout=5)
+
+        return {
+            "success": True,
+            "message": f"Whisper connection successful",
+            "service": "whisper",
+            "status": "connected",
+            "details": {
+                "host": host,
+                "response_time_ms": response.elapsed.total_seconds() * 1000
+            }
+        }
+
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=408, detail="Whisper service timeout - check if service is running")
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail=f"Cannot connect to Whisper service at {host}")
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"Whisper service error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Whisper connection test failed: {str(e)}")
+
+async def test_fishspeech_connection(service_config: dict):
+    """
+    Test connection to Fish Speech service by checking health endpoint.
+    """
+    host = service_config.get("host")
+    if not host:
+        raise HTTPException(status_code=400, detail="Fish Speech host not configured")
+
+    try:
+        import requests
+
+        # Test basic connectivity by trying health endpoint
+        health_url = f"{host}/v1/health"
+        try:
+            response = requests.get(health_url, timeout=5)
+            response.raise_for_status()
+            health_data = response.json()
+        except:
+            # If no health endpoint, try the main endpoint
+            endpoint = service_config.get("endpoint", "/v1/audio/speech")
+            test_url = f"{host}{endpoint}"
+            response = requests.get(test_url, timeout=5)
+            health_data = {}
+
+        return {
+            "success": True,
+            "message": f"Fish Speech connection successful",
+            "service": "fishspeech",
+            "status": "connected",
+            "details": {
+                "host": host,
+                "response_time_ms": response.elapsed.total_seconds() * 1000,
+                "health": health_data
+            }
+        }
+
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=408, detail="Fish Speech service timeout - check if service is running")
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail=f"Cannot connect to Fish Speech service at {host}")
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"Fish Speech service error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fish Speech connection test failed: {str(e)}")
+
 async def test_xtts_connection(service_config: dict):
     """
     Test connection to XTTS service by checking health and speakers endpoints.
@@ -211,6 +298,10 @@ async def test_api_connection(service: str, token_data=Depends(get_current_user_
         # Implement actual API testing logic for specific services
         if service == "xtts":
             return await test_xtts_connection(service_config)
+        elif service == "whisper":
+            return await test_whisper_connection(service_config)
+        elif service == "fishspeech":
+            return await test_fishspeech_connection(service_config)
         else:
             # For other services, simulate testing for now
             import asyncio

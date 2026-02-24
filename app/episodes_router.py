@@ -1663,7 +1663,7 @@ async def enumerate_cue_blocks(
 
         # Patterns
         slug_pattern = re.compile(r'\[Slug:\s*([^\]]+)\]', re.IGNORECASE)
-        mediaurl_pattern = re.compile(r'\[Mediaurl:\s*([^\]]+)\]', re.IGNORECASE)
+        mediaurl_pattern = re.compile(r'\[Media\s*Url:\s*([^\]]+)\]', re.IGNORECASE)
         enumerator_pattern = re.compile(r'\[Enumerator:\s*[^\]]*\]\n?', re.IGNORECASE)
         enum_prefix_pattern = re.compile(r'^(\d+)[-_](.+)$')
         type_pattern = re.compile(r'\[Type:\s*([^\]]+)\]', re.IGNORECASE)
@@ -1834,9 +1834,10 @@ async def enumerate_cue_blocks(
             new_slug = f"{enumeration_counter:02d}-{normalized_slug}"
             enumerator_value = f"{enumeration_counter:02d}"
 
-            # Extract current mediaurl
-            mediaurl_match = mediaurl_pattern.search(cue_body)
-            old_mediaurl = mediaurl_match.group(1).strip() if mediaurl_match else None
+            # Extract current mediaurl - use last match if multiple exist
+            # (previous enumerations may have left duplicate fields)
+            mediaurl_matches = mediaurl_pattern.findall(cue_body)
+            old_mediaurl = mediaurl_matches[-1].strip() if mediaurl_matches else None
 
             # Extract cue type to determine correct asset directory
             type_match = re.search(r'\[Type:\s*([^\]]+)\]', cue_body, re.IGNORECASE)
@@ -1844,33 +1845,34 @@ async def enumerate_cue_blocks(
 
             # Determine new mediaurl and rename file
             new_mediaurl = None
+
+            # Determine asset type directory based on CUE TYPE first, then path
+            if cue_type == 'SOT':
+                asset_type = "video"
+            elif cue_type == 'IMG':
+                asset_type = "images"
+            elif cue_type == 'FSQ':
+                asset_type = "quotes"
+            elif cue_type == 'AUDIO':
+                asset_type = "audio"
+            elif old_mediaurl and "/video/" in old_mediaurl:
+                asset_type = "video"
+            elif old_mediaurl and "/images/" in old_mediaurl:
+                asset_type = "images"
+            elif old_mediaurl and "/audio/" in old_mediaurl:
+                asset_type = "audio"
+            elif old_mediaurl and "/sot/" in old_mediaurl:
+                asset_type = "video"
+            else:
+                asset_type = "quotes"  # fallback
+
             if old_mediaurl:
                 old_filename = Path(old_mediaurl).name
                 ext = Path(old_filename).suffix
 
-                # Determine asset type directory based on CUE TYPE first, then path
-                # SOT cues should ALWAYS go to video directory
-                if cue_type == 'SOT':
-                    asset_type = "video"
-                    # SOT files are mp4, ensure correct extension
-                    if not ext or ext.lower() not in ['.mp4', '.mov', '.mp3']:
-                        ext = '.mp4'
-                elif cue_type == 'IMG':
-                    asset_type = "images"
-                elif cue_type == 'FSQ':
-                    asset_type = "quotes"
-                elif cue_type == 'AUDIO':
-                    asset_type = "audio"
-                elif "/video/" in old_mediaurl:
-                    asset_type = "video"
-                elif "/images/" in old_mediaurl:
-                    asset_type = "images"
-                elif "/audio/" in old_mediaurl:
-                    asset_type = "audio"
-                elif "/sot/" in old_mediaurl:
-                    asset_type = "video"  # sot goes to video
-                else:
-                    asset_type = "quotes"  # fallback for FSQ and unknown
+                # SOT files are mp4, ensure correct extension
+                if cue_type == 'SOT' and (not ext or ext.lower() not in ['.mp4', '.mov', '.mp3']):
+                    ext = '.mp4'
 
                 new_filename = f"{new_slug}{ext}"
                 new_mediaurl = f"/episodes/{episode_id_normalized}/assets/{asset_type}/{new_filename}"
@@ -1887,6 +1889,32 @@ async def enumerate_cue_blocks(
                         logger.info(f"Renamed: {old_file_path.name} -> {new_file_path.name}")
                     except Exception as e:
                         logger.warning(f"Could not rename file {old_file_path}: {e}")
+
+            elif cue_type == 'FSQ':
+                # FSQ cues with no MediaUrl - try to find file by slug with fsq_ prefix
+                clean_slug_for_search = normalized_slug
+                ext = '.png'
+                asset_dir = episode_assets_dir / asset_type
+
+                # Try fsq_{slug}.png first
+                fsq_path = asset_dir / f"fsq_{clean_slug_for_search}{ext}"
+                if fsq_path.exists():
+                    new_filename = f"{new_slug}{ext}"
+                    new_file_path = asset_dir / new_filename
+                    new_mediaurl = f"/episodes/{episode_id_normalized}/assets/{asset_type}/{new_filename}"
+                    if str(fsq_path) != str(new_file_path):
+                        try:
+                            shutil.move(str(fsq_path), str(new_file_path))
+                            renamed_files += 1
+                            logger.info(f"Renamed FSQ (no mediaurl): {fsq_path.name} -> {new_file_path.name}")
+                        except Exception as e:
+                            logger.warning(f"Could not rename FSQ file {fsq_path}: {e}")
+                else:
+                    # Try {slug}.png (already enumerated name)
+                    existing_path = asset_dir / f"{new_slug}{ext}"
+                    if existing_path.exists():
+                        new_mediaurl = f"/episodes/{episode_id_normalized}/assets/{asset_type}/{new_slug}{ext}"
+                        logger.info(f"FSQ file already at target: {existing_path.name}")
 
             # Store update info for this item
             if item.id not in items_to_update:
@@ -1927,9 +1955,19 @@ async def enumerate_cue_blocks(
                     # Update slug
                     updated_body = slug_pattern.sub(f"[Slug: {repl['new_slug']}]", updated_body)
 
-                    # Update mediaurl if applicable
-                    if repl['new_mediaurl'] and repl['old_mediaurl']:
-                        updated_body = mediaurl_pattern.sub(f"[Mediaurl: {repl['new_mediaurl']}]", updated_body)
+                    # Update mediaurl if applicable - remove ALL old MediaUrl fields, add single clean one
+                    if repl['new_mediaurl']:
+                        # Remove all existing MediaUrl/Media Url/Mediaurl fields
+                        updated_body = mediaurl_pattern.sub('', updated_body)
+                        # Clean up any resulting blank lines from removal
+                        updated_body = re.sub(r'\n{3,}', '\n\n', updated_body)
+                        # Add single clean Mediaurl field before <!-- End Cue -->
+                        updated_body = updated_body.rstrip()
+                        if updated_body.endswith('<!-- End Cue -->'):
+                            updated_body = updated_body[:-len('<!-- End Cue -->')].rstrip()
+                            updated_body += f"\n[Mediaurl: {repl['new_mediaurl']}]\n<!-- End Cue -->"
+                        else:
+                            updated_body += f"\n[Mediaurl: {repl['new_mediaurl']}]"
 
                     # Add Enumerator field after [Type: XXX] line
                     type_pattern = re.compile(r'(\[Type:\s*[^\]]+\]\n)', re.IGNORECASE)
@@ -3028,6 +3066,7 @@ async def save_rundown_items(
             # FULL RUNDOWN MODE
             items = rundown_data.get('items', [])
         saved_count = 0
+        blocked_saves = []  # Track destructive saves that were blocked
 
         for i, item_data in enumerate(items):
             logger.info(f"Processing item {i}: {type(item_data)} - {item_data}")
@@ -3067,17 +3106,26 @@ async def save_rundown_items(
                         # script_content should NEVER contain YAML frontmatter - only the body
                         # Frontmatter is stored in separate database fields (title, type, status, etc.)
                         import re
-                        if new_script and new_script.strip().startswith('---'):
+
+                        def _is_frontmatter_delimiter(line):
+                            t = line.strip()
+                            return t == '---' or t == '- - -'
+
+                        def _starts_with_frontmatter(text):
+                            t = text.strip()
+                            return t.startswith('---') or t.startswith('- - -')
+
+                        if new_script and _starts_with_frontmatter(new_script):
                             logger.warning(f"🚨 STRIPPING FRONTMATTER from script_content for {asset_id}")
                             logger.warning(f"   Original content preview: {new_script[:200]}...")
 
-                            # Find the closing --- and extract only the body
+                            # Find the closing delimiter and extract only the body
                             lines = new_script.split('\n')
                             dash_count = 0
                             body_start_index = 0
 
                             for i, line in enumerate(lines):
-                                if line.strip() == '---':
+                                if _is_frontmatter_delimiter(line):
                                     dash_count += 1
                                     if dash_count == 2:
                                         body_start_index = i + 1
@@ -3089,14 +3137,14 @@ async def save_rundown_items(
 
                                 # ADDITIONAL CHECK: If body still contains another frontmatter block,
                                 # this is duplicated content - strip it again
-                                while body_content.strip().startswith('---'):
+                                while _starts_with_frontmatter(body_content):
                                     logger.warning(f"🚨 DOUBLE FRONTMATTER DETECTED! Stripping again...")
                                     body_lines = body_content.split('\n')
                                     inner_dash_count = 0
                                     inner_body_start = 0
 
                                     for j, bline in enumerate(body_lines):
-                                        if bline.strip() == '---':
+                                        if _is_frontmatter_delimiter(bline):
                                             inner_dash_count += 1
                                             if inner_dash_count == 2:
                                                 inner_body_start = j + 1
@@ -3110,7 +3158,7 @@ async def save_rundown_items(
                                 new_script = body_content
                                 logger.warning(f"✅ Stripped frontmatter, body length: {len(new_script)} chars")
                             else:
-                                logger.warning(f"⚠️ Found opening --- but no closing ---, keeping original")
+                                logger.warning(f"⚠️ Found opening delimiter but no closing one, keeping original")
 
                         # Calculate content lengths (strip HTML tags for accurate word count)
                         new_content_length = len(re.sub(r'<[^>]+>', '', new_script or '').strip())
@@ -3124,7 +3172,12 @@ async def save_rundown_items(
                             logger.error(f"   New content: {new_content_length} chars ({new_script[:100]})")
                             logger.error(f"   This would delete {existing_content_length} characters!")
                             logger.error(f"   Save operation BLOCKED to prevent data loss")
-                            # Skip this update but don't fail the whole operation
+                            blocked_saves.append({
+                                "asset_id": asset_id,
+                                "existing_length": existing_content_length,
+                                "new_length": new_content_length,
+                                "reason": "destructive_save_blocked"
+                            })
                             continue
 
                         logger.info(f"💾 Saving script content for {asset_id}: {new_script[:100] if new_script else 'EMPTY'}")
@@ -3224,14 +3277,64 @@ async def save_rundown_items(
                 saved_count += 1
                 logger.info(f"Created completely new rundown item with new asset_id: {new_asset_id}")
 
+        # Calculate and store total duration on the episode
+        # Includes both item-level durations AND embedded cue durations (RIF, SOT, VOX, etc.)
+        import re as re_mod
+        all_items = db.query(RundownItem).filter(RundownItem.rundown_id == rundown.id).all()
+        total_duration_seconds = 0
+
+        def _parse_dur(dur_str):
+            """Parse HH:MM:SS:FF, HH:MM:SS, or MM:SS to seconds"""
+            try:
+                parts = dur_str.split(':')
+                if len(parts) == 4:
+                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                elif len(parts) == 3:
+                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                elif len(parts) == 2:
+                    return int(parts[0]) * 60 + int(parts[1])
+            except (ValueError, IndexError):
+                pass
+            return 0
+
+        for ri in all_items:
+            # 1. Item-level duration
+            if ri.duration:
+                total_duration_seconds += _parse_dur(ri.duration)
+            # 2. Embedded cue durations from script_content
+            if ri.script_content:
+                cue_blocks = re_mod.findall(
+                    r'<!-- Begin Cue -->(.*?)<!-- End Cue -->',
+                    ri.script_content, re_mod.DOTALL
+                )
+                for cue_block in cue_blocks:
+                    dur_match = re_mod.search(r'\[Duration:\s*([^\]]+)\]', cue_block, re_mod.IGNORECASE)
+                    if dur_match:
+                        total_duration_seconds += _parse_dur(dur_match.group(1).strip())
+
+        episode.actual_duration = total_duration_seconds
+        h = total_duration_seconds // 3600
+        m = (total_duration_seconds % 3600) // 60
+        s = total_duration_seconds % 60
+        episode.duration_formatted = f"{h:02d}:{m:02d}:{s:02d}"
+
         db.commit()
 
         logger.info(f"Saved {saved_count} rundown items for episode {episode_number} with order synchronization")
-        return {
-            "status": "success",
+        logger.info(f"Updated episode total duration: {episode.duration_formatted} ({total_duration_seconds}s)")
+        if blocked_saves:
+            logger.warning(f"⚠️ {len(blocked_saves)} save(s) were blocked to prevent data loss")
+        response = {
+            "status": "warning" if blocked_saves else "success",
             "message": f"Saved {saved_count} rundown items with order synchronization",
-            "items_saved": saved_count
+            "items_saved": saved_count,
+            "total_duration": episode.duration_formatted,
+            "total_duration_seconds": total_duration_seconds,
         }
+        if blocked_saves:
+            response["blocked_saves"] = blocked_saves
+            response["message"] += f" ({len(blocked_saves)} destructive save(s) blocked)"
+        return response
 
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid episode number format")
@@ -3907,9 +4010,10 @@ async def gather_media_for_show(
                     print(f"   ⏭️ Skipping non-enumerated cue: {cue_type_local} '{slug_local}' (run enumerate-cues first for media cues)")
                     continue
 
-                # Extract MediaURL
-                mediaurl_match = mediaurl_pattern.search(cue_content)
-                media_url = mediaurl_match.group(1).strip() if mediaurl_match else None
+                # Extract MediaURL - use LAST match if multiple exist
+                # (enumeration adds [Mediaurl: ...] with updated path, but original [Media Url: ...] remains)
+                mediaurl_matches = mediaurl_pattern.findall(cue_content)
+                media_url = mediaurl_matches[-1].strip() if mediaurl_matches else None
 
                 # Check if MediaURL is a blob URL (unprocessed) - treat as no URL
                 is_blob_url = media_url and media_url.startswith('blob:')
@@ -3956,6 +4060,15 @@ async def gather_media_for_show(
                                 media_url = f"episodes/{episode_id}/assets/{asset_folder}/{filename_base}{ext}"
                                 print(f"   🔧 {cue_type_local} path constructed from slug: {media_url}")
                                 break
+
+                        # FSQ fallback: also try fsq_ prefix if enumerated name not found
+                        if not media_url and cue_type_local == 'FSQ':
+                            for ext in extensions:
+                                fsq_path = episode_path / "assets" / asset_folder / f"fsq_{clean_slug}{ext}"
+                                if fsq_path.exists():
+                                    media_url = f"episodes/{episode_id}/assets/{asset_folder}/fsq_{clean_slug}{ext}"
+                                    print(f"   🔧 FSQ fallback found with fsq_ prefix: {media_url}")
+                                    break
 
                 # Skip if still no media URL
                 if not media_url:
@@ -4017,8 +4130,9 @@ async def gather_media_for_show(
 
                     # Also try with fsq_ prefix for quotes
                     if not fallback_found and cue_type == 'FSQ':
-                        # Try fsq_{slug}.png format
-                        slug_part = re.sub(r'^\d+[-_]', '', filename)
+                        # Extract slug without enumeration prefix or fsq_ prefix
+                        slug_part = re.sub(r'^\d+[-_]', '', filename)  # Strip enum prefix
+                        slug_part = re.sub(r'^fsq_', '', slug_part)    # Strip existing fsq_ prefix
                         slug_part = re.sub(r'\.png$', '', slug_part, flags=re.IGNORECASE)
                         fsq_fallback = source_path.parent / f"fsq_{slug_part}.png"
                         if fsq_fallback.exists():

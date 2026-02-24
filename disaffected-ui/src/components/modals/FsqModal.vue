@@ -87,8 +87,108 @@
                   hide-details="auto"
                   @paste="handleQuotePaste"
                   @input="handleQuoteInput"
+                  @click="updateCursorPosition"
+                  @keyup="updateCursorPosition"
                 />
               </div>
+
+              <!-- Split Mode Selector -->
+              <div class="split-mode-selector mb-2">
+                <div class="text-caption text-grey mb-1">SPLIT MODE</div>
+                <v-btn-toggle
+                  v-model="splitMode"
+                  mandatory
+                  density="compact"
+                  color="purple"
+                  class="w-100"
+                >
+                  <v-btn value="ai" size="small" class="flex-grow-1">
+                    <v-icon left size="small">mdi-robot</v-icon>
+                    <span class="text-caption">AI</span>
+                  </v-btn>
+                  <v-btn value="manual" size="small" class="flex-grow-1">
+                    <v-icon left size="small">mdi-cursor-text</v-icon>
+                    <span class="text-caption">Manual</span>
+                  </v-btn>
+                  <v-btn value="none" size="small" class="flex-grow-1">
+                    <v-icon left size="small">mdi-file-document</v-icon>
+                    <span class="text-caption">Full</span>
+                  </v-btn>
+                </v-btn-toggle>
+              </div>
+
+              <!-- Manual Split Panel (visible when splitMode === 'manual') -->
+              <v-expand-transition>
+                <v-card v-if="splitMode === 'manual'" class="manual-split-panel mb-2" variant="outlined">
+                  <v-card-title class="text-caption py-2 bg-purple-lighten-5 d-flex align-center">
+                    <v-icon size="small" class="mr-1">mdi-scissors-cutting</v-icon>
+                    Manual Split Mode
+                  </v-card-title>
+
+                  <v-card-text class="pa-2">
+                    <!-- Instructions -->
+                    <v-alert type="info" variant="tonal" density="compact" class="mb-2 text-caption">
+                      Click in quote where you want to split, then "Add Split"
+                    </v-alert>
+
+                    <!-- Split Controls -->
+                    <div class="d-flex gap-1 mb-2">
+                      <v-btn
+                        color="purple"
+                        variant="outlined"
+                        size="x-small"
+                        @click="markManualSplit"
+                        :disabled="!cursorPosition || !quote"
+                      >
+                        <v-icon left size="x-small">mdi-plus</v-icon>
+                        Add Split
+                      </v-btn>
+
+                      <v-btn
+                        color="grey"
+                        variant="outlined"
+                        size="x-small"
+                        @click="clearManualSplits"
+                        :disabled="manualSplitPoints.length === 0"
+                      >
+                        <v-icon left size="x-small">mdi-delete-sweep</v-icon>
+                        Clear All
+                      </v-btn>
+
+                      <v-spacer></v-spacer>
+
+                      <v-chip size="x-small" color="purple" variant="outlined">
+                        {{ manualSplitPoints.length }} split(s)
+                      </v-chip>
+                    </div>
+
+                    <!-- Visual Split Preview - Full FSQ Previews -->
+                    <div v-if="manualSplitPoints.length > 0" class="manual-split-preview mt-2">
+                      <v-divider class="mb-2"></v-divider>
+                      <div class="text-caption text-grey mb-2">MANUAL SPLITS PREVIEW ({{ manualSplitSegments.length }} parts)</div>
+                      <div class="split-parts-grid">
+                        <div
+                          v-for="(segment, index) in manualSplitSegments"
+                          :key="`manual-split-${index}`"
+                          class="split-part-preview"
+                        >
+                          <div class="part-label">{{ index + 1 }}/{{ manualSplitSegments.length }}</div>
+                          <div class="quote-preview-container split-container">
+                            <video class="preview-video-background" autoplay loop muted playsinline>
+                              <source :src="previewBackgroundVideo" type="video/mp4">
+                            </video>
+                            <div class="black-bar-overlay"></div>
+                            <div class="quote-preview" :style="getSplitPreviewStyle">
+                              <div class="quote-text" :style="getSplitTextStyle" v-html="formatSplitSegment(segment)"></div>
+                              <div v-if="includeAttribution" class="quote-source" :style="getSplitSourceStyle">{{ attributionPrefix }}{{ source || 'Source' }}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+              </v-expand-transition>
 
               <!-- Slug -->
               <v-text-field
@@ -211,32 +311,67 @@
 
               <!-- Action Buttons -->
               <div class="action-buttons mt-2">
-                <v-btn
-                  block
-                  color="warning"
-                  @click="rejectAIRecommendation"
-                  :disabled="!formValid || !quote"
-                  :loading="loading"
-                  variant="elevated"
-                  size="default"
-                >
-                  <v-icon size="small" class="mr-1">mdi-plus</v-icon>
-                  {{ splitRecommendations && splitRecommendations.length > 1 ? 'Insert Full Quote' : 'Insert Quote' }}
-                </v-btn>
-                <v-btn
-                  v-if="splitRecommendations && splitRecommendations.length > 1"
-                  block
-                  color="deep-purple"
-                  @click="acceptAIRecommendation"
-                  :disabled="!formValid"
-                  :loading="loading"
-                  variant="elevated"
-                  size="small"
-                  class="mt-1"
-                >
-                  <v-icon size="small" class="mr-1">mdi-robot</v-icon>
-                  Insert {{ splitRecommendations.length }} Splits
-                </v-btn>
+                <!-- Manual Split Mode Buttons -->
+                <template v-if="splitMode === 'manual'">
+                  <v-btn
+                    block
+                    color="purple"
+                    @click="insertManualSplit"
+                    :disabled="!formValid || !quote || manualSplitPoints.length === 0"
+                    :loading="loading"
+                    variant="elevated"
+                    size="default"
+                  >
+                    <v-icon size="small" class="mr-1">mdi-scissors-cutting</v-icon>
+                    Insert {{ manualSplitSegments.length }} Split(s)
+                  </v-btn>
+                </template>
+
+                <!-- AI Split Mode Buttons -->
+                <template v-else-if="splitMode === 'ai'">
+                  <v-btn
+                    block
+                    color="warning"
+                    @click="rejectAIRecommendation"
+                    :disabled="!formValid || !quote"
+                    :loading="loading"
+                    variant="elevated"
+                    size="default"
+                  >
+                    <v-icon size="small" class="mr-1">mdi-plus</v-icon>
+                    {{ splitRecommendations && splitRecommendations.length > 1 ? 'Insert Full Quote' : 'Insert Quote' }}
+                  </v-btn>
+                  <v-btn
+                    v-if="splitRecommendations && splitRecommendations.length > 1"
+                    block
+                    color="deep-purple"
+                    @click="acceptAIRecommendation"
+                    :disabled="!formValid"
+                    :loading="loading"
+                    variant="elevated"
+                    size="small"
+                    class="mt-1"
+                  >
+                    <v-icon size="small" class="mr-1">mdi-robot</v-icon>
+                    Insert {{ splitRecommendations.length }} Splits
+                  </v-btn>
+                </template>
+
+                <!-- None Mode (Full Quote) Button -->
+                <template v-else>
+                  <v-btn
+                    block
+                    color="warning"
+                    @click="rejectAIRecommendation"
+                    :disabled="!formValid || !quote"
+                    :loading="loading"
+                    variant="elevated"
+                    size="default"
+                  >
+                    <v-icon size="small" class="mr-1">mdi-plus</v-icon>
+                    Insert Full Quote
+                  </v-btn>
+                </template>
               </div>
             </v-col>
           </v-row>
@@ -774,6 +909,9 @@ export default {
       splitQuoteStyle: 'left',
       splitFontFamily: 'serif',
       splitFontSize: 25,
+      // Split mode control
+      splitMode: 'ai',  // 'ai' | 'manual' | 'none'
+      cursorPosition: null,  // Track cursor position in manual split textarea
       // Manual split markers
       manualSplitPoints: [],  // Array of character positions for manual splits
       manualSplitExpanded: false,  // Whether manual split section is expanded
@@ -1577,6 +1715,17 @@ export default {
     },
 
     async analyzeQuote() {
+      // Skip AI analysis if in manual or none mode
+      if (this.splitMode === 'manual') {
+        console.log('⏭️ Manual split mode - skipping AI analysis')
+        return
+      }
+
+      if (this.splitMode === 'none') {
+        console.log('⏭️ No split mode - skipping AI analysis')
+        return
+      }
+
       if (!this.quote || this.quote.length < 20) {
         console.log('⏭️ Quote too short for AI analysis (< 20 chars)')
         return
@@ -2097,22 +2246,47 @@ export default {
     },
 
     /**
-     * Mark manual split point
+     * Update cursor position from textarea
+     */
+    updateCursorPosition(event) {
+      if (event && event.target) {
+        this.cursorPosition = event.target.selectionStart;
+      }
+    },
+
+    /**
+     * Clear all manual split points
+     */
+    clearManualSplits() {
+      this.manualSplitPoints = [];
+      console.log('🗑️ All manual split points cleared');
+    },
+
+    /**
+     * Mark manual split point at current cursor position
      */
     markManualSplit() {
-      // Get cursor position in the quote text
-      const selection = window.getSelection();
-      if (selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        const offset = range.startOffset;
-
-        // Add split point if not already present
-        if (!this.manualSplitPoints.includes(offset)) {
-          this.manualSplitPoints.push(offset);
-          this.manualSplitPoints.sort((a, b) => a - b);
-          console.log('✂️ Manual split point added at position:', offset);
-        }
+      if (!this.cursorPosition && this.cursorPosition !== 0) {
+        this.$toast?.warning('Click in the quote text to place cursor');
+        return;
       }
+
+      // Check if split already exists at this position (within 5 chars)
+      const exists = this.manualSplitPoints.some(
+        pos => Math.abs(pos - this.cursorPosition) < 5
+      );
+
+      if (exists) {
+        this.$toast?.warning('Split marker already exists near this position');
+        return;
+      }
+
+      // Add split point and sort
+      this.manualSplitPoints.push(this.cursorPosition);
+      this.manualSplitPoints.sort((a, b) => a - b);
+
+      this.$toast?.success(`Split added at position ${this.cursorPosition}`);
+      console.log('✂️ Manual split points:', this.manualSplitPoints);
     },
 
     /**
@@ -2434,4 +2608,47 @@ export default {
 }
 
 /* No responsive changes needed - already vertical stacking */
+
+/* Manual Split Mode Styling */
+.manual-split-panel {
+  background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
+}
+
+.manual-split-panel .v-card-title {
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+.split-segment-preview {
+  background: white;
+  border-left: 3px solid #9C27B0;
+  font-style: italic;
+  color: #424242;
+  line-height: 1.5;
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  transition: all 0.2s ease;
+}
+
+.split-segment-preview:hover {
+  border-left-width: 5px;
+  background: #fafafa;
+  box-shadow: 0 2px 4px rgba(156, 39, 176, 0.1);
+}
+
+.split-mode-selector {
+  margin-top: 12px;
+}
+
+.split-mode-selector .v-btn-toggle {
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.split-mode-selector .v-btn {
+  text-transform: none;
+  font-weight: 500;
+}
 </style>

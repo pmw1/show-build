@@ -7,155 +7,245 @@
     <v-card-text>
       <v-row>
         <!-- Whisper Configuration -->
-        <v-col cols="12" md="6">
+        <v-col cols="12">
           <v-card variant="outlined" class="pa-4">
-            <v-card-title class="text-subtitle-1">Whisper (Speech-to-Text)</v-card-title>
-            <v-text-field
-              :model-value="whisperConfig.host || ''"
-              label="Host URL"
-              placeholder="http://localhost:9000"
-              persistent-hint
-              hint="Local Whisper transcription endpoint"
-              @update:model-value="updateVoiceConfig('whisper', 'host', $event)"
-            />
-            <v-text-field
-              :model-value="whisperConfig.endpoint || ''"
-              label="Transcription Endpoint"
-              placeholder="/v1/audio/transcriptions"
-              persistent-hint
-              hint="API endpoint for speech-to-text conversion"
-              @update:model-value="updateVoiceConfig('whisper', 'endpoint', $event)"
-            />
-            <v-switch
-              :model-value="whisperConfig.enabled || false"
-              label="Enable Whisper transcription"
-              color="primary"
-              @update:model-value="updateVoiceConfig('whisper', 'enabled', $event)"
-            />
-            <v-btn
-              v-if="whisperConfig.host"
-              color="primary"
-              variant="outlined"
-              size="small"
-              class="mt-2"
-              @click="testConnection('whisper')"
-            >
-              <v-icon left>mdi-connection</v-icon>
-              Test Connection
-            </v-btn>
+            <div class="d-flex align-center mb-3">
+              <v-icon class="mr-3" size="large">mdi-microphone</v-icon>
+              <v-card-title class="text-subtitle-1 pa-0 flex-grow-1">Whisper (Speech-to-Text)</v-card-title>
+              <v-switch
+                :model-value="whisperConfig.enabled || false"
+                label="Enable"
+                color="primary"
+                density="compact"
+                hide-details
+                @update:model-value="updateVoiceConfig('whisper', 'enabled', $event)"
+              />
+            </div>
+
+            <v-expand-transition>
+              <div v-if="whisperConfig.enabled">
+                <v-divider class="mb-4" />
+                <v-text-field
+                  :model-value="whisperConfig.host || ''"
+                  label="Host URL"
+                  placeholder="http://192.168.51.197:8887"
+                  persistent-hint
+                  hint="Local Whisper transcription endpoint"
+                  @update:model-value="updateVoiceConfig('whisper', 'host', $event)"
+                />
+                <v-text-field
+                  :model-value="whisperConfig.endpoint || ''"
+                  label="Transcription Endpoint"
+                  placeholder="/v1/audio/transcriptions"
+                  persistent-hint
+                  hint="API endpoint for speech-to-text conversion"
+                  @update:model-value="updateVoiceConfig('whisper', 'endpoint', $event)"
+                />
+                <v-btn
+                  v-if="whisperConfig.host"
+                  color="primary"
+                  variant="outlined"
+                  size="small"
+                  class="mt-2"
+                  @click="testConnection('whisper')"
+                >
+                  <v-icon left>mdi-connection</v-icon>
+                  Test Connection
+                </v-btn>
+              </div>
+            </v-expand-transition>
           </v-card>
         </v-col>
 
         <!-- XTTS Configuration -->
-        <v-col cols="12" md="6">
+        <v-col cols="12">
           <v-card variant="outlined" class="pa-4">
-            <v-card-title class="text-subtitle-1">XTTS (Text-to-Speech)</v-card-title>
-            <v-text-field
-              :model-value="xttsConfig.host || ''"
-              label="Host URL"
-              placeholder="http://192.168.51.197:5001"
-              persistent-hint
-              hint="XTTS text-to-speech service endpoint"
-              @update:model-value="updateVoiceConfig('xtts', 'host', $event)"
-            />
-            <v-text-field
-              :model-value="xttsConfig.endpoint || ''"
-              label="TTS Endpoint"
-              placeholder="/synthesize"
-              persistent-hint
-              hint="XTTS API endpoint for text-to-speech"
-              @update:model-value="updateVoiceConfig('xtts', 'endpoint', $event)"
-            />
-            <v-text-field
-              :model-value="xttsConfig.language || ''"
-              label="Default Language"
-              placeholder="en"
-              persistent-hint
-              hint="Default language code (e.g., en, es, fr)"
-              @update:model-value="updateVoiceConfig('xtts', 'language', $event)"
-            />
-            <v-text-field
-              :model-value="xttsConfig.speed || 1.0"
-              label="Speech Speed"
-              type="number"
-              step="0.1"
-              min="0.1"
-              max="4.0"
-              persistent-hint
-              hint="Speed multiplier for speech synthesis (0.1 to 4.0)"
-              @update:model-value="updateVoiceConfig('xtts', 'speed', parseFloat($event) || 1.0)"
-            />
-            <v-select
-              :model-value="xttsConfig.speaker || ''"
-              :items="availableSpeakers"
-              label="Available Speakers"
-              persistent-hint
-              hint="Select a voice speaker for text-to-speech (OpenAI + XTTS speakers)"
-              density="compact"
-              item-title="name"
-              item-value="id"
-              clearable
-              :loading="loadingSpeakers"
-              @update:model-value="updateVoiceConfig('xtts', 'speaker', $event)"
-            >
-              <template v-slot:item="{ props, item }">
-                <v-list-item
-                  v-if="item.raw.id === '---separator---'"
-                  :title="item.raw.name"
-                  disabled
-                  class="text-center font-weight-bold text-grey-darken-1"
-                />
-                <v-list-item v-else v-bind="props" />
-              </template>
-              <template v-slot:no-data>
-                <v-list-item>
-                  <v-list-item-title>{{ speakersError || 'No speakers available' }}</v-list-item-title>
-                </v-list-item>
-              </template>
-            </v-select>
-            <v-btn
-              v-if="xttsConfig.host"
-              color="secondary"
-              variant="outlined"
-              size="small"
-              :loading="loadingSpeakers"
-              @click="fetchAvailableSpeakers()"
-              class="mt-2"
-            >
-              <v-icon left>mdi-account-voice</v-icon>
-              Fetch Speakers
-            </v-btn>
-            <v-switch
-              :model-value="xttsConfig.enabled || false"
-              label="Enable XTTS text-to-speech"
-              color="primary"
-              @update:model-value="updateVoiceConfig('xtts', 'enabled', $event)"
-            />
-            <div class="d-flex mt-2" style="gap: 16px;">
-              <v-btn
-                v-if="xttsConfig.host"
+            <div class="d-flex align-center mb-3">
+              <v-icon class="mr-3" size="large">mdi-account-voice</v-icon>
+              <v-card-title class="text-subtitle-1 pa-0 flex-grow-1">XTTS (Text-to-Speech)</v-card-title>
+              <v-switch
+                :model-value="xttsConfig.enabled || false"
+                label="Enable"
                 color="primary"
-                variant="outlined"
-                @click="testConnection('xtts')"
-                class="flex-1"
-              >
-                <v-icon left>mdi-connection</v-icon>
-                Test Connection
-              </v-btn>
-              <v-btn
-                v-if="xttsConfig.host && xttsConfig.enabled"
-                color="success"
-                variant="outlined"
-                :loading="testingVoice"
-                @click="testVoiceSynthesis()"
-                class="flex-1"
-              >
-                <v-icon left>mdi-play-circle</v-icon>
-                Test Voice
-              </v-btn>
+                density="compact"
+                hide-details
+                @update:model-value="updateVoiceConfig('xtts', 'enabled', $event)"
+              />
             </div>
 
+            <v-expand-transition>
+              <div v-if="xttsConfig.enabled">
+                <v-divider class="mb-4" />
+                <v-text-field
+                  :model-value="xttsConfig.host || ''"
+                  label="Host URL"
+                  placeholder="http://192.168.51.197:5001"
+                  persistent-hint
+                  hint="XTTS text-to-speech service endpoint"
+                  @update:model-value="updateVoiceConfig('xtts', 'host', $event)"
+                />
+                <v-text-field
+                  :model-value="xttsConfig.endpoint || ''"
+                  label="TTS Endpoint"
+                  placeholder="/v1/audio/speech"
+                  persistent-hint
+                  hint="XTTS API endpoint for text-to-speech"
+                  @update:model-value="updateVoiceConfig('xtts', 'endpoint', $event)"
+                />
+                <v-text-field
+                  :model-value="xttsConfig.language || ''"
+                  label="Default Language"
+                  placeholder="en"
+                  persistent-hint
+                  hint="Default language code (e.g., en, es, fr)"
+                  @update:model-value="updateVoiceConfig('xtts', 'language', $event)"
+                />
+                <v-text-field
+                  :model-value="xttsConfig.speed || 1.0"
+                  label="Speech Speed"
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="4.0"
+                  persistent-hint
+                  hint="Speed multiplier for speech synthesis (0.1 to 4.0)"
+                  @update:model-value="updateVoiceConfig('xtts', 'speed', parseFloat($event) || 1.0)"
+                />
+                <v-select
+                  :model-value="xttsConfig.speaker || ''"
+                  :items="availableSpeakers"
+                  label="Available Speakers"
+                  persistent-hint
+                  hint="Select a voice speaker for text-to-speech (OpenAI + XTTS speakers)"
+                  density="compact"
+                  item-title="name"
+                  item-value="id"
+                  clearable
+                  :loading="loadingSpeakers"
+                  @update:model-value="updateVoiceConfig('xtts', 'speaker', $event)"
+                >
+                  <template v-slot:item="{ props, item }">
+                    <v-list-item
+                      v-if="item.raw.id === '---separator---'"
+                      :title="item.raw.name"
+                      disabled
+                      class="text-center font-weight-bold text-grey-darken-1"
+                    />
+                    <v-list-item v-else v-bind="props" />
+                  </template>
+                  <template v-slot:no-data>
+                    <v-list-item>
+                      <v-list-item-title>{{ speakersError || 'No speakers available' }}</v-list-item-title>
+                    </v-list-item>
+                  </template>
+                </v-select>
+                <v-btn
+                  v-if="xttsConfig.host"
+                  color="secondary"
+                  variant="outlined"
+                  size="small"
+                  :loading="loadingSpeakers"
+                  @click="fetchAvailableSpeakers()"
+                  class="mt-2 mr-2"
+                >
+                  <v-icon left>mdi-account-voice</v-icon>
+                  Fetch Speakers
+                </v-btn>
+                <v-btn
+                  v-if="xttsConfig.host"
+                  color="primary"
+                  variant="outlined"
+                  size="small"
+                  @click="testConnection('xtts')"
+                  class="mt-2 mr-2"
+                >
+                  <v-icon left>mdi-connection</v-icon>
+                  Test Connection
+                </v-btn>
+                <v-btn
+                  v-if="xttsConfig.host && xttsConfig.enabled"
+                  color="success"
+                  variant="outlined"
+                  size="small"
+                  :loading="testingVoice"
+                  @click="testVoiceSynthesis()"
+                  class="mt-2"
+                >
+                  <v-icon left>mdi-play-circle</v-icon>
+                  Test Voice
+                </v-btn>
+              </div>
+            </v-expand-transition>
+          </v-card>
+        </v-col>
 
+        <!-- Fish Speech Configuration -->
+        <v-col cols="12">
+          <v-card variant="outlined" class="pa-4">
+            <div class="d-flex align-center mb-3">
+              <v-icon class="mr-3" size="large">mdi-fish</v-icon>
+              <v-card-title class="text-subtitle-1 pa-0 flex-grow-1">Fish Speech (Text-to-Speech)</v-card-title>
+              <v-switch
+                :model-value="fishspeechConfig.enabled || false"
+                label="Enable"
+                color="primary"
+                density="compact"
+                hide-details
+                @update:model-value="updateVoiceConfig('fishspeech', 'enabled', $event)"
+              />
+            </div>
+
+            <v-expand-transition>
+              <div v-if="fishspeechConfig.enabled">
+                <v-divider class="mb-4" />
+                <v-alert type="info" variant="tonal" class="mb-4">
+                  Fish Speech provides high-quality, natural-sounding text-to-speech synthesis with support for fine-tuned custom voices.
+                </v-alert>
+                <v-text-field
+                  :model-value="fishspeechConfig.host || ''"
+                  label="Host URL"
+                  placeholder="http://192.168.51.197:8080"
+                  persistent-hint
+                  hint="Fish Speech API endpoint"
+                  @update:model-value="updateVoiceConfig('fishspeech', 'host', $event)"
+                />
+                <v-text-field
+                  :model-value="fishspeechConfig.endpoint || ''"
+                  label="TTS Endpoint"
+                  placeholder="/v1/audio/speech"
+                  persistent-hint
+                  hint="API endpoint for text-to-speech synthesis"
+                  @update:model-value="updateVoiceConfig('fishspeech', 'endpoint', $event)"
+                />
+                <v-text-field
+                  :model-value="fishspeechConfig.voice || ''"
+                  label="Voice/Reference"
+                  placeholder="kairo_main"
+                  persistent-hint
+                  hint="Voice reference ID or name"
+                  @update:model-value="updateVoiceConfig('fishspeech', 'voice', $event)"
+                />
+                <v-select
+                  :model-value="fishspeechConfig.format || 'wav'"
+                  :items="['wav', 'mp3', 'flac', 'ogg']"
+                  label="Audio Format"
+                  persistent-hint
+                  hint="Output audio format"
+                  @update:model-value="updateVoiceConfig('fishspeech', 'format', $event)"
+                />
+                <v-btn
+                  v-if="fishspeechConfig.host"
+                  color="primary"
+                  variant="outlined"
+                  size="small"
+                  class="mt-2"
+                  @click="testConnection('fishspeech')"
+                >
+                  <v-icon left>mdi-connection</v-icon>
+                  Test Connection
+                </v-btn>
+              </div>
+            </v-expand-transition>
           </v-card>
         </v-col>
       </v-row>
@@ -253,6 +343,7 @@ const emit = defineEmits(['update:modelValue', 'save'])
 // Create individual computed properties to avoid recursive update issues
 const whisperConfig = computed(() => props.modelValue?.whisper || {})
 const xttsConfig = computed(() => props.modelValue?.xtts || {})
+const fishspeechConfig = computed(() => props.modelValue?.fishspeech || {})
 const allConfigs = computed(() => props.modelValue || {})
 
 const saving = ref(false)
@@ -278,7 +369,9 @@ function updateVoiceConfig(service, field, value) {
   if (!newConfigs[service]) {
     newConfigs[service] = {
       host: '',
-      endpoint: service === 'xtts' ? '/v1/audio/speech' : '/v1/audio/transcriptions',
+      endpoint: service === 'xtts' ? '/v1/audio/speech' :
+                service === 'fishspeech' ? '/v1/audio/speech' :
+                '/v1/audio/transcriptions',
       enabled: false
     }
 
@@ -288,6 +381,12 @@ function updateVoiceConfig(service, field, value) {
         language: 'en',
         speaker: '',
         speed: 1.0
+      }
+    } else if (service === 'fishspeech') {
+      newConfigs[service] = {
+        ...newConfigs[service],
+        voice: 'kairo_main',
+        format: 'wav'
       }
     }
   }
@@ -358,25 +457,51 @@ async function fetchAvailableSpeakers() {
 
 async function testConnection(service) {
   try {
+    const config = allConfigs.value[service]
+
+    // For fishspeech, test the health endpoint directly if it has one
+    if (service === 'fishspeech' && config.host) {
+      try {
+        const healthUrl = `${config.host}/v1/health`
+        const healthResponse = await fetch(healthUrl, {
+          method: 'GET',
+          signal: AbortSignal.timeout(5000)
+        })
+        if (healthResponse.ok) {
+          alert(`Fish Speech connection successful! Service is healthy.`)
+          return
+        }
+      } catch (e) {
+        console.warn('Fish Speech health check failed, trying backend proxy:', e)
+      }
+    }
+
+    // Use backend proxy for testing
     const response = await fetch(`/api/settings/test/${service}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${localStorage.getItem('auth-token') || localStorage.getItem('token')}`
       },
-      body: JSON.stringify(allConfigs.value[service])
+      body: JSON.stringify(config)
     })
 
     if (response.ok) {
       const result = await response.json()
-      alert(`${service} connection successful! ${result.message || ''}`)
+      const serviceName = service === 'fishspeech' ? 'Fish Speech' :
+                          service === 'xtts' ? 'XTTS' :
+                          service === 'whisper' ? 'Whisper' : service
+      alert(`${serviceName} connection successful! ${result.message || ''}`)
     } else {
       const errorData = await response.json().catch(() => ({}))
       throw new Error(errorData.detail || 'Connection failed')
     }
   } catch (error) {
     console.error(`Error testing ${service} connection:`, error)
-    alert(`Failed to connect to ${service}: ${error.message}`)
+    const serviceName = service === 'fishspeech' ? 'Fish Speech' :
+                        service === 'xtts' ? 'XTTS' :
+                        service === 'whisper' ? 'Whisper' : service
+    alert(`Failed to connect to ${serviceName}: ${error.message}`)
   }
 }
 

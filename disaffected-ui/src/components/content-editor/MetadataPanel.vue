@@ -996,8 +996,13 @@ export default {
         )
 
         if (response.data.success) {
-          const { enumerated, files_renamed, total } = response.data
-          this.enumerationStatus = `Enumerated: ${enumerated}/${total} cues, ${files_renamed} files renamed`
+          const { enumerated, files_renamed, total, skipped_non_media } = response.data
+          const mediaCues = total - (skipped_non_media || 0)
+          let status = `${enumerated} of ${mediaCues} media cues enumerated, ${files_renamed} files renamed`
+          if (skipped_non_media > 0) {
+            status += ` (${skipped_non_media} non-media skipped)`
+          }
+          this.enumerationStatus = status
           // Emit event to refresh the rundown data
           this.$emit('refresh-rundown')
         } else {

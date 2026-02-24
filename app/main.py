@@ -37,7 +37,7 @@ from sqlalchemy.orm import Session
 # from models import ProcessingJob  # REMOVED - models.py deleted
 from models_episode import BlueprintTemplate, BlueprintNode, Blueprint
 from models_assetid import AssetIDRegistry, AssetIDRelationship, AssetIDPendingMessage
-from models_v2 import Organization, Show, Season, Episode, Break, Rundown, RundownItem, Segment, Script, Element, Cue, AssetLink, AssetMessage, Speaker
+from models_v2 import Organization, Show, Season, Episode, Break, Rundown, RundownItem, Segment, Script, Element, Cue, AssetLink, AssetMessage, Speaker, ProductionRole
 from models_content_library import ContentLibrary, ContentPlacement, ContentTypeSettings
 from services.script_compilation import compile_episode_script
 from websocket import websocket_endpoint, manager
@@ -69,6 +69,7 @@ try:
     from episodes_router import router as episodes_router
     from episode_scaffold_router import router as episode_scaffold_router
     from rundown_templates_router import router as rundown_templates_router
+    from mp3_profiles_router import router as mp3_profiles_router
     from setup_router import router as setup_router
     from rbac_router import router as rbac_router
     from duration_analysis_router import router as duration_router
@@ -104,6 +105,7 @@ try:
     from segment_locks_router import router as segment_locks_router
     from tools_router import router as tools_router
     from segment_llm_router import router as segment_llm_router
+    from production_roles_router import router as production_roles_router
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Current directory: {os.getcwd()}")
@@ -183,6 +185,9 @@ app.include_router(episode_scaffold_router, prefix="/api")
 
 # Include the rundown templates router
 app.include_router(rundown_templates_router, prefix="/api/rundown-templates", tags=["rundown-templates"])
+
+# Include the MP3 encoding profiles router
+app.include_router(mp3_profiles_router, prefix="/api/settings/mp3-profiles", tags=["mp3-profiles"])
 
 # Include the setup router
 app.include_router(setup_router, prefix="/api")
@@ -291,6 +296,9 @@ app.include_router(tools_router)
 
 # Include the segment LLM preprocessing router (entity extraction, prechewed data)
 app.include_router(segment_llm_router)
+
+# Include the production roles router (Note For dropdown options)
+app.include_router(production_roles_router, prefix="/api/production-roles", tags=["production-roles"])
 
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024

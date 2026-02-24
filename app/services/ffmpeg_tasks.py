@@ -93,23 +93,24 @@ def transcribe_audio_simple(audio_path: str, max_retries: int = 3) -> str:
     import httpx
     import time
 
-    # Whisper servers - use Docker container names when running inside Docker network
-    # Worker must be connected to kairo_kairo-network for container names to resolve
+    # Whisper servers - try Docker internal first, then LAN fallbacks
+    # Worker on kairo_kairo-network can reach whisper-medium container directly
+    # CRITICAL: whisper-medium internal port is 8000 (mapped to host 8887)
     whisper_servers = [
         {
             "name": "whisper-medium (docker)",
-            "url": "http://whisper-medium:5000/v1/audio/transcriptions",
+            "url": "http://whisper-medium:8000/v1/audio/transcriptions",
+            "timeout": 120.0
+        },
+        {
+            "name": "whisperbox (LAN)",
+            "url": "http://192.168.51.210:8885/v1/audio/transcriptions",
             "timeout": 120.0
         },
         {
             "name": "whisper-medium (host)",
             "url": "http://192.168.51.197:8887/v1/audio/transcriptions",
             "timeout": 120.0
-        },
-        {
-            "name": "openwebui-whisper-api (host)",
-            "url": "http://192.168.51.197:8886/v1/audio/transcriptions",
-            "timeout": 180.0
         }
     ]
 
@@ -431,9 +432,9 @@ def process_sot_video(
             task_id=task_id
         )
 
-        # 2. Generate thumbnail at 1 second mark (PNG for lossless quality)
+        # 2. Generate thumbnail at 1 second mark (JPEG format)
         self.update_state(state='PROGRESS', meta={'stage': 'Generating thumbnail', 'progress': 30})
-        thumbnail_path = episode_dir / f"{base_name}-thumb.png"
+        thumbnail_path = episode_dir / f"{base_name}-thumb.jpg"
         thumbnail_cmd = [
             ffmpeg, "-y",
             "-ss", "1",
@@ -603,6 +604,143 @@ def extract_audio_from_video(self, video_path: str, output_path: str):
         return {"audio_path": output_path, "status": "completed"}
     except Exception as e:
         logger.error(f"Audio extraction failed: {str(e)}")
+        raise
+
+
+@shared_task(bind=True, queue='media', name='services.ffmpeg_tasks.generate_episode_mp3',
+             soft_time_limit=3600, time_limit=7200)
+def generate_episode_mp3(self, episode: str, profile_id: int = None, bitrate: str = "192k"):
+    """Generate MP3 from master episode video file.
+
+    Supports .mov and .mp4 source files in the episode exports directory.
+    Reports progress via celery state updates for UI polling.
+
+    When profile_id is provided, encoding parameters are loaded from the
+    mp3_encoding_profiles database table. Otherwise falls back to bitrate arg.
+
+    Args:
+        episode: Episode number string (e.g. "0261")
+        profile_id: Optional database profile ID to load encoding settings from
+        bitrate: Fallback MP3 bitrate if no profile_id (default "192k")
+    """
+    # Load profile settings from database if profile_id provided
+    profile_settings = None
+    if profile_id:
+        try:
+            from database import SessionLocal
+            from models_episode import Mp3EncodingProfile
+            db = SessionLocal()
+            try:
+                profile = db.query(Mp3EncodingProfile).filter(
+                    Mp3EncodingProfile.id == profile_id
+                ).first()
+                if profile:
+                    profile_settings = {
+                        "bitrate": profile.bitrate,
+                        "sample_rate": profile.sample_rate,
+                        "channels": profile.channels,
+                        "quality": profile.quality,
+                        "normalize_audio": profile.normalize_audio,
+                        "name": profile.name,
+                    }
+                    logger.info(f"Using MP3 profile '{profile.name}': {profile.bitrate}, {profile.sample_rate}Hz, {profile.channels}ch")
+                else:
+                    logger.warning(f"MP3 profile {profile_id} not found, using defaults")
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning(f"Failed to load MP3 profile {profile_id}: {e}, using defaults")
+
+    # Resolve encoding parameters
+    enc_bitrate = profile_settings["bitrate"] if profile_settings else bitrate
+    enc_sample_rate = profile_settings["sample_rate"] if profile_settings else 44100
+    enc_channels = profile_settings["channels"] if profile_settings else 2
+    enc_quality = profile_settings["quality"] if profile_settings else None
+    enc_normalize = profile_settings["normalize_audio"] if profile_settings else False
+
+    media_root = get_media_root()
+    exports_dir = os.path.join(media_root, "episodes", episode, "exports")
+
+    # Find source video (.mov preferred, then .mp4, then .avi)
+    source_path = None
+    for ext in [".mov", ".mp4", ".avi"]:
+        candidate = os.path.join(exports_dir, f"{episode}{ext}")
+        if os.path.isfile(candidate):
+            source_path = candidate
+            break
+
+    if not source_path:
+        raise FileNotFoundError(f"No source video found for episode {episode} in {exports_dir}")
+
+    output_path = os.path.join(exports_dir, f"{episode}.mp3")
+    logger.info(f"Generating MP3: {source_path} -> {output_path}")
+
+    self.update_state(state='PROGRESS', meta={'progress': 5, 'stage': 'starting'})
+
+    try:
+        ffmpeg = get_ffmpeg_binary()
+        cmd = [
+            ffmpeg, "-y",
+            "-i", source_path,
+            "-vn",
+            "-acodec", "libmp3lame",
+        ]
+
+        # VBR mode (quality) takes precedence over CBR (bitrate)
+        if enc_quality is not None:
+            cmd.extend(["-q:a", str(enc_quality)])
+        else:
+            cmd.extend(["-ab", enc_bitrate])
+
+        cmd.extend(["-ar", str(enc_sample_rate)])
+        cmd.extend(["-ac", str(enc_channels)])
+
+        # Audio normalization (EBU R128)
+        if enc_normalize:
+            cmd.extend(["-af", "loudnorm=I=-16:LRA=11:TP=-1.5"])
+
+        cmd.append(output_path)
+
+        self.update_state(state='PROGRESS', meta={'progress': 10, 'stage': 'encoding'})
+
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        _, stderr = process.communicate()
+
+        if process.returncode != 0:
+            error_msg = stderr.decode('utf-8', errors='replace')[-500:]
+            raise subprocess.CalledProcessError(process.returncode, cmd, stderr=error_msg)
+
+        self.update_state(state='PROGRESS', meta={'progress': 95, 'stage': 'finalizing'})
+
+        file_size = os.path.getsize(output_path)
+        file_size_mb = round(file_size / (1024 * 1024), 1)
+
+        logger.info(f"MP3 generated: {output_path} ({file_size_mb} MB)")
+
+        return {
+            "mp3_path": output_path,
+            "file_size_mb": file_size_mb,
+            "source": os.path.basename(source_path),
+            "profile": profile_settings["name"] if profile_settings else "default",
+            "bitrate": enc_bitrate,
+            "sample_rate": enc_sample_rate,
+            "channels": enc_channels,
+            "status": "completed"
+        }
+
+    except subprocess.CalledProcessError as e:
+        error_msg = str(e.stderr) if hasattr(e, 'stderr') else str(e)
+        logger.error(f"MP3 generation failed: {error_msg}")
+        # Clean up partial output
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        raise
+    except Exception as e:
+        logger.error(f"MP3 generation error: {str(e)}")
+        if os.path.exists(output_path):
+            os.remove(output_path)
         raise
 
 
@@ -950,13 +1088,14 @@ def _update_sot_cue_block(episode: str, slug: str, asset_id: str, updates: dict)
                     continue
 
                 # Look for SOT cue block with matching AssetID (case-insensitive for field names)
-                # The cue block contains [Type: SOT] and [AssetID: xxx] (or [Assetid: xxx]) in any order
+                # The cue block contains [Type: SOT] and [Asset Id: xxx] or [AssetID: xxx] in any order
                 cue_pattern = re.compile(
                     r'(<!-- Begin Cue -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
                     re.DOTALL | re.IGNORECASE
                 )
                 # Find cue blocks and check if they contain our asset_id
-                asset_pattern = re.compile(r'\[Asset[Ii][Dd]:\s*' + re.escape(asset_id) + r'\s*\]', re.IGNORECASE)
+                # Match both "Asset Id" (space-separated) and "AssetId"/"AssetID" (camelCase)
+                asset_pattern = re.compile(r'\[Asset\s*[Ii][Dd]:\s*' + re.escape(asset_id) + r'\s*\]', re.IGNORECASE)
 
                 # Find all SOT cue blocks and check each for our asset_id
                 for match in cue_pattern.finditer(item.script_content):
@@ -1310,10 +1449,10 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
     # PHASE 3: Skip (no trimming needed for already-extracted clips)
     phase3_output = phase2_output
 
-    # PHASE 4: Generate thumbnails (PNG) and MP3
+    # PHASE 4: Generate thumbnails (JPEG) and MP3
     # Generate 1 thumbnail (middle of clip)
     thumb_time = clip_duration / 2
-    thumb_file = working_dir / f"clip{clip_index}_thumb.png"
+    thumb_file = working_dir / f"clip{clip_index}_thumb.jpg"
     thumb_cmd = [
         ffmpeg, "-y",
         "-ss", str(thumb_time),
@@ -1357,7 +1496,7 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
     final_thumb_dir.mkdir(parents=True, exist_ok=True)
 
     final_video = final_video_dir / f"{normalized_clip_slug}.mp4"
-    final_thumb = final_thumb_dir / f"{normalized_clip_slug}-thumb.png"
+    final_thumb = final_thumb_dir / f"{normalized_clip_slug}-thumb.jpg"
     final_audio = final_video_dir / f"{normalized_clip_slug}.mp3"
 
     import shutil
@@ -1371,7 +1510,7 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
         "asset_id": clip_asset_id,
         "slug": clip_slug,
         "media_url": f"/episodes/{episode}/assets/video/{normalized_clip_slug}.mp4",
-        "thumbnail_url": f"/episodes/{episode}/assets/thumbnails/{normalized_clip_slug}-thumb.png",
+        "thumbnail_url": f"/episodes/{episode}/assets/thumbnails/{normalized_clip_slug}-thumb.jpg",
         "audio_url": f"/episodes/{episode}/assets/video/{normalized_clip_slug}.mp3",
         "duration": duration_formatted,
         "transcription": transcription_text,
@@ -2504,10 +2643,10 @@ def process_sot_video_multi_phase(
         phase4_thumbs = []
         thumbnail_data = []  # Store (filename, sharpness, time_point) tuples
         for i, time_point in enumerate(thumbnail_times, 1):
-            thumb_file = working_dir / f"{temp_job_id}_4_thumb_{i:02d}.png"
+            thumb_file = working_dir / f"{temp_job_id}_4_thumb_{i:02d}.jpg"
             # Use accurate seeking (-ss after -i) for better frame quality
             # This decodes from nearest keyframe ensuring sharp frames
-            # PNG format for lossless quality
+            # JPEG format for compatibility
             thumb_cmd = [
                 ffmpeg, "-y",
                 "-i", str(phase3_output),
@@ -2518,10 +2657,10 @@ def process_sot_video_multi_phase(
             subprocess.run(thumb_cmd, check=True, capture_output=True)
             phase4_thumbs.append(thumb_file)
 
-            # Calculate sharpness score - also validates file exists and is valid PNG
+            # Calculate sharpness score - also validates file exists and is valid image
             sharpness = calculate_sharpness_simple(str(thumb_file))
             thumbnail_data.append({
-                'filename': f"{temp_job_id}_4_thumb_{i:02d}.png",
+                'filename': f"{temp_job_id}_4_thumb_{i:02d}.jpg",
                 'sharpness': sharpness,
                 'time': time_point,
                 'index': i
@@ -2618,10 +2757,10 @@ def process_sot_video_multi_phase(
         shutil.move(str(phase3_output), str(final_video))
         shutil.move(str(phase4_audio), str(final_audio))
 
-        # Move all 15 thumbnails to thumbnails directory (PNG format)
+        # Move all 15 thumbnails to thumbnails directory (JPEG format)
         final_thumbs = []
         for i, thumb_file in enumerate(phase4_thumbs, 1):
-            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.png"
+            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.jpg"
             shutil.move(str(thumb_file), str(final_thumb))
             final_thumbs.append(final_thumb)
 
@@ -2695,9 +2834,9 @@ def process_sot_video_multi_phase(
         seconds = int(duration % 60)
         duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-        # Build thumbnail URLs for all 15 options (PNG format in thumbnails directory)
+        # Build thumbnail URLs for all 15 options (JPEG format in thumbnails directory)
         thumbnail_urls = [
-            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.png"
+            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.jpg"
             for i in range(1, 16)
         ]
 
@@ -3226,10 +3365,10 @@ def process_vo_video(
         phase3_thumbs = []
         thumbnail_data = []  # Store (filename, sharpness, time_point) tuples
         for i, time_point in enumerate(thumbnail_times, 1):
-            thumb_file = working_dir / f"{temp_job_id}_thumb_{i:02d}.png"
+            thumb_file = working_dir / f"{temp_job_id}_thumb_{i:02d}.jpg"
             # Use accurate seeking (-ss after -i) for better frame quality
             # This decodes from nearest keyframe ensuring sharp frames
-            # PNG format for lossless quality
+            # JPEG format for compatibility
             thumb_cmd = [
                 ffmpeg, "-y",
                 "-i", str(current_input),
@@ -3240,10 +3379,10 @@ def process_vo_video(
             subprocess.run(thumb_cmd, check=True, capture_output=True)
             phase3_thumbs.append(thumb_file)
 
-            # Calculate sharpness score - also validates file exists and is valid PNG
+            # Calculate sharpness score - also validates file exists and is valid image
             sharpness = calculate_sharpness_simple(str(thumb_file))
             thumbnail_data.append({
-                'filename': f"{temp_job_id}_thumb_{i:02d}.png",
+                'filename': f"{temp_job_id}_thumb_{i:02d}.jpg",
                 'sharpness': sharpness,
                 'time': time_point,
                 'index': i
@@ -3317,10 +3456,10 @@ def process_vo_video(
         final_video = final_video_dir / f"{normalized_slug}.mp4"
         shutil.move(str(current_input), str(final_video))
 
-        # Move thumbnails (PNG format)
+        # Move thumbnails (JPEG format)
         final_thumbs = []
         for i, thumb_file in enumerate(phase3_thumbs, 1):
-            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.png"
+            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.jpg"
             shutil.move(str(thumb_file), str(final_thumb))
             final_thumbs.append(final_thumb)
 
@@ -3377,9 +3516,9 @@ def process_vo_video(
                 job.processing_report = processing_report
                 db.commit()
 
-        # Build thumbnail URLs (PNG format)
+        # Build thumbnail URLs (JPEG format)
         thumbnail_urls = [
-            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.png"
+            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.jpg"
             for i in range(1, 16)
         ]
 

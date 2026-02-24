@@ -1,5 +1,48 @@
 <template>
   <v-container fluid class="pa-2">
+    <!-- iPad Script Mode Banner - Production episode (primary) -->
+    <v-card
+      v-if="productionEpisode"
+      class="ipad-mode-card mb-3"
+      :to="`/ipad-scroll/${productionEpisode.episode_number}`"
+      hover
+      ripple
+    >
+      <div class="ipad-mode-inner d-flex align-center justify-space-between pa-4">
+        <div class="d-flex align-center">
+          <v-icon size="48" color="white" class="me-4">mdi-tablet</v-icon>
+          <div>
+            <div class="ipad-mode-title">iPad Script Mode</div>
+            <div class="ipad-mode-subtitle">
+              Episode {{ productionEpisode.episode_number }}
+              <span v-if="productionEpisode.title"> — {{ productionEpisode.title }}</span>
+            </div>
+            <v-chip size="x-small" color="orange" variant="flat" class="mt-1">IN PRODUCTION</v-chip>
+          </div>
+        </div>
+        <v-icon size="36" color="white">mdi-arrow-right-circle</v-icon>
+      </div>
+    </v-card>
+
+    <!-- Fallback: latest episode if no production episode -->
+    <v-card
+      v-else-if="latestEpisodeNumber"
+      class="ipad-mode-card ipad-mode-card-fallback mb-3"
+      :to="`/ipad-scroll/${latestEpisodeNumber}`"
+      hover
+      ripple
+    >
+      <div class="ipad-mode-inner ipad-mode-inner-fallback d-flex align-center justify-space-between pa-3">
+        <div class="d-flex align-center">
+          <v-icon size="36" color="white" class="me-3">mdi-tablet</v-icon>
+          <div>
+            <div class="ipad-mode-title-sm">iPad Script Mode — Episode {{ latestEpisodeNumber }}</div>
+          </div>
+        </div>
+        <v-icon size="28" color="white">mdi-arrow-right-circle</v-icon>
+      </div>
+    </v-card>
+
     <v-row>
       <v-col>
         <h2 class="text-h4 font-weight-bold mb-4">Dashboard</h2>
@@ -449,6 +492,33 @@ const { health } = useSystemHealth()
 const upcomingEpisodes = ref([])
 const loadingEpisodes = ref(true)
 const episodeError = ref('')
+const latestEpisodeNumber = ref(null)
+const productionEpisode = ref(null)
+
+// Fetch production episode and latest episode for iPad mode buttons
+const fetchLatestEpisode = async () => {
+  try {
+    const response = await axios.get('/api/episodes')
+    const episodes = response.data || []
+    if (episodes.length > 0) {
+      const real = episodes.filter(e => !e.is_test_data)
+
+      // Find the episode currently in production
+      const inProduction = real.find(e => e.status === 'production')
+      if (inProduction) {
+        productionEpisode.value = inProduction
+      }
+
+      // Sort by episode number descending, pick the highest as fallback
+      const sorted = [...real].sort((a, b) => (b.episode_number || 0) - (a.episode_number || 0))
+      if (sorted.length > 0) {
+        latestEpisodeNumber.value = sorted[0].episode_number
+      }
+    }
+  } catch (error) {
+    console.error('Failed to fetch latest episode:', error)
+  }
+}
 
 // Fetch upcoming episodes data
 const fetchUpcomingEpisodes = async () => {
@@ -535,6 +605,7 @@ const exportData = () => {
 
 // Load data on component mount
 onMounted(() => {
+  fetchLatestEpisode()
   fetchUpcomingEpisodes()
 })
 </script>
@@ -664,6 +735,51 @@ onMounted(() => {
 .episode-header h3 {
   font-family: 'Courier New', monospace;
   letter-spacing: 1px;
+}
+
+/* iPad Mode Banner Card */
+.ipad-mode-card {
+  cursor: pointer;
+  border-radius: 12px !important;
+  overflow: hidden;
+  text-decoration: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ipad-mode-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(103, 58, 183, 0.4) !important;
+}
+
+.ipad-mode-inner {
+  background: linear-gradient(135deg, #512da8 0%, #7c4dff 50%, #651fff 100%);
+  min-height: 80px;
+}
+
+.ipad-mode-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: white;
+  letter-spacing: 0.5px;
+}
+
+.ipad-mode-subtitle {
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.85);
+  margin-top: 2px;
+}
+
+/* Fallback (non-production) variant - smaller, less prominent */
+.ipad-mode-inner-fallback {
+  background: linear-gradient(135deg, #455a64 0%, #607d8b 100%);
+  min-height: 56px;
+}
+
+.ipad-mode-title-sm {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: white;
+  letter-spacing: 0.5px;
 }
 
 /* Mobile responsive adjustments */

@@ -22,7 +22,8 @@ const defaultColors = {
   'fsq': 'lime',             // #CDDC39 - Lime for full screen quotes
   'nat': 'light-green',      // #8BC34A - Light green for natural sound
   'vox': 'yellow',           // #FFEB3B - Yellow for vox pops
-  'dir': 'amber-darken-3',   // #FF6F00 - Amber for director notes
+  'dir': 'amber-darken-3',   // #FF6F00 - Amber for director notes (legacy)
+  'note': 'amber-darken-3',  // #FF6F00 - Amber for notes
   'bump': 'purple-darken-2', // #7B1FA2 - Purple for bumpers
   'sting': 'pink-darken-2',  // #C2185B - Pink for stingers
   'credits': 'blue-grey',    // #607D8B - Blue grey for credits

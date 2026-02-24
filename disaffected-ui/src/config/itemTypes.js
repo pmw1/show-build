@@ -90,13 +90,33 @@ export const CORE_ITEM_TYPES = [
     isCore: true
   },
   {
-    title: 'Call to Action',
-    value: 'cta',
+    title: 'Break',
+    value: 'break',
     category: TYPE_CATEGORY.CORE,
-    description: 'Direct viewer engagement prompts',
-    color: 'accent',
-    icon: 'mdi-hand-pointing-right',
-    sortOrder: 12,
+    description: 'Commercial break transition (separates blocks)',
+    color: 'warning',
+    icon: 'mdi-pause-circle',
+    sortOrder: 13,
+    isCore: true
+  },
+  {
+    title: 'Close',
+    value: 'close',
+    category: TYPE_CATEGORY.CORE,
+    description: 'Show closing segment',
+    color: 'error',
+    icon: 'mdi-stop-circle-outline',
+    sortOrder: 14,
+    isCore: true
+  },
+  {
+    title: 'Open',
+    value: 'open',
+    category: TYPE_CATEGORY.CORE,
+    description: 'Show opening segment',
+    color: 'blue-darken-2',
+    icon: 'mdi-play-circle',
+    sortOrder: 15,
     isCore: true
   }
 ];

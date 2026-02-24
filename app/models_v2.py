@@ -22,7 +22,7 @@ class RundownItemType(str, enum.Enum):
     OPEN = "open"
     COLDOPEN = "coldopen"
     TEASE = "tease"
-    ADVERTISEMENT = "advertisement"
+    AD = "ad"  # Changed from "advertisement" to match frontend and be more concise
     PROMO = "promo"
     INTERVIEW = "interview"
     PACKAGE = "package"
@@ -707,6 +707,17 @@ class Cue(Base):
     # Relationships
     segment = relationship("Segment", back_populates="cues")
     element = relationship("Element", back_populates="cues")
+
+
+class ProductionRole(Base):
+    """Production roles for note assignment (e.g., Host, Director, Teleprompter)."""
+    __tablename__ = "production_roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    display_order = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class AssetLink(Base):

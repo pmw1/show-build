@@ -36,8 +36,10 @@ class ScriptPreset(Enum):
     PRODUCTION = "production"      # Technical view with all details
 
 
-# Item types that represent a BREAK (commercial/transition period)
-BREAK_ITEM_TYPES = {'break', 'advertisement', 'ad'}
+# Item types that represent a BREAK (block separator)
+# Must match useRegions.js break region allowedItemTypes + legacy types
+# Regions break types: ad, promo, cta  |  Legacy: break, advertisement
+BREAK_ITEM_TYPES = {'break', 'advertisement', 'ad', 'promo', 'cta'}
 
 # Speaker display configuration
 SPEAKER_CONFIG = {
@@ -287,6 +289,9 @@ def _detect_blocks(items: List[RundownItem]) -> List[Dict[str, Any]]:
     - BLOCK C: Content after BREAK 2 until BREAK 3
     - etc.
 
+    NOTE: Only 'break' type items separate blocks. 'ad' and 'advertisement'
+    items are treated as content and rendered inline with their specific slug.
+
     Returns list of blocks with:
     - letter: Block letter (A, B, C...)
     - items: List of content RundownItems (excludes breaks)
@@ -312,7 +317,7 @@ def _detect_blocks(items: List[RundownItem]) -> List[Dict[str, Any]]:
                 current_items = []
                 block_index += 1
         else:
-            # Content item - add to current block
+            # Content item (including ads) - add to current block
             current_items.append(item)
 
     # Final block (after last break, or only block if no breaks)
@@ -602,10 +607,21 @@ def _generate_markdown_block(
     # Break indicator
     if block.get('break_after'):
         break_item = block['break_after']
-        break_title = break_item.title
-        if not break_title or break_title.lower() == 'untitled':
-            break_title = "BREAK"
-        parts.append(f"### ▶ {break_title.upper()} ◀")
+        item_type = (break_item.item_type or 'break').lower()
+        is_ad = item_type in ('ad', 'advertisement')
+
+        if is_ad:
+            ad_slug = break_item.slug or break_item.title or 'Advertisement'
+            if ad_slug.lower() in ('advertisement', 'ad', 'untitled'):
+                ad_slug = break_item.slug or 'Advertisement'
+            ad_duration = break_item.duration or ''
+            dur_str = f" `{ad_duration}`" if ad_duration else ''
+            parts.append(f"### ▶ AD: {ad_slug.upper()} ◀{dur_str}")
+        else:
+            break_title = break_item.title
+            if not break_title or break_title.lower() in ('untitled', 'break'):
+                break_title = "COMMERCIAL BREAK"
+            parts.append(f"### ▶ {break_title.upper()} ◀")
         parts.append("")
 
     parts.append("---")
@@ -932,16 +948,17 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
             color: #555;
         }}
 
-        /* Block Headers */
+        /* Block Headers - prominent delineators */
         .block-header {{
             text-align: center;
-            font-size: 22pt;
+            font-size: 28pt;
             font-weight: bold;
-            padding: 0.25in 0;
-            margin: 0.5in 0 0.3in 0;
-            border-top: 4px solid #222;
-            border-bottom: 4px solid #222;
-            background: #f8f8f8;
+            padding: 0.3in 0;
+            margin: 0.6in 0 0.3in 0;
+            border-top: 6px solid #1565c0;
+            border-bottom: 6px solid #1565c0;
+            background: #e3f2fd;
+            color: #0d47a1;
             letter-spacing: 0.2em;
             page-break-before: always;
         }}
@@ -952,13 +969,14 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
 
         .block-end {{
             text-align: center;
-            font-size: 16pt;
+            font-size: 20pt;
             font-weight: bold;
-            padding: 0.2in 0;
-            margin: 0.4in 0;
-            border-top: 2px solid #666;
-            border-bottom: 2px solid #666;
-            color: #555;
+            padding: 0.25in 0;
+            margin: 0.5in 0;
+            border-top: 4px solid #1565c0;
+            border-bottom: 4px solid #1565c0;
+            background: #e8eaf6;
+            color: #283593;
             letter-spacing: 0.15em;
         }}
 
@@ -984,6 +1002,23 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
             font-weight: normal;
             float: right;
             text-transform: none;
+        }}
+
+        /* Tease / End Segment divider */
+        .segment-end-divider {{
+            text-align: center;
+            font-size: 12pt;
+            font-weight: bold;
+            color: #888;
+            margin: 0.2in 0 0.1in 0;
+            padding: 0.05in 0;
+            letter-spacing: 0.15em;
+            border-top: 1px solid #ccc;
+        }}
+
+        .segment-tease .script-content {{
+            font-style: italic;
+            color: #555;
         }}
 
         /* Script Content */
@@ -1121,6 +1156,15 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
             margin: 0.15in 0;
         }}
 
+        /* Inline production note - compact monospace */
+        .inline-note {{
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 85%;
+            color: #555;
+            margin: 2em 0;
+            line-height: 1.4;
+        }}
+
         /* Production preset - compact tables */
         .production-cue {{
             background: #f9f9f9;
@@ -1135,16 +1179,46 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
             color: #333;
         }}
 
-        /* Break indicator */
+        /* Break indicator - prominent */
         .break-indicator {{
             text-align: center;
-            padding: 0.15in;
-            margin: 0.3in 0;
+            padding: 0.25in;
+            margin: 0.4in 0;
             background: #fff3e0;
-            border: 2px dashed #ff9800;
+            border: 4px dashed #ff9800;
             color: #e65100;
             font-weight: bold;
+            font-size: 20pt;
+            letter-spacing: 0.1em;
+        }}
+
+        /* Ad break - prominent blue styling */
+        .break-indicator.ad-break {{
+            background: #e3f2fd;
+            border: 4px dashed #1976d2;
+            color: #0d47a1;
+        }}
+
+        .ad-label {{
+            font-weight: bold;
             font-size: 14pt;
+            background: #1976d2;
+            color: #fff;
+            padding: 4px 14px;
+            border-radius: 4px;
+            margin-right: 12px;
+        }}
+
+        .ad-slug {{
+            font-weight: bold;
+            font-size: 22pt;
+            color: #0d47a1;
+        }}
+
+        .ad-duration {{
+            font-size: 13pt;
+            color: #42a5f5;
+            margin-left: 12px;
         }}
 
         @media print {{
@@ -1230,11 +1304,28 @@ def _generate_block(
     # Break indicator (if there's a break after this block)
     if block.get('break_after'):
         break_item = block['break_after']
-        # Use "BREAK" as fallback for empty or "Untitled" titles
-        break_title = break_item.title
-        if not break_title or break_title.lower() == 'untitled':
-            break_title = "BREAK"
-        parts.append(f'<div class="break-indicator">▶ {html.escape(break_title.upper())} ◀</div>')
+        item_type = (break_item.item_type or 'break').lower()
+        is_ad = item_type in ('ad', 'advertisement')
+
+        if is_ad:
+            # Ad break - show the specific ad slug prominently
+            ad_slug = break_item.slug or break_item.title or 'Advertisement'
+            # Don't show generic titles like "Advertisement" or "Ad" - use slug instead
+            if ad_slug.lower() in ('advertisement', 'ad', 'untitled'):
+                ad_slug = break_item.slug or 'Advertisement'
+            ad_duration = break_item.duration or ''
+            parts.append('<div class="break-indicator ad-break">')
+            parts.append(f'<span class="ad-label">AD</span> ')
+            parts.append(f'<span class="ad-slug">{html.escape(ad_slug.upper())}</span>')
+            if ad_duration:
+                parts.append(f' <span class="ad-duration">[{html.escape(ad_duration)}]</span>')
+            parts.append('</div>')
+        else:
+            # Generic break
+            break_title = break_item.title
+            if not break_title or break_title.lower() in ('untitled', 'break'):
+                break_title = "COMMERCIAL BREAK"
+            parts.append(f'<div class="break-indicator">▶ {html.escape(break_title.upper())} ◀</div>')
 
     return '\n'.join(parts)
 
@@ -1263,18 +1354,25 @@ def _process_segment(
     if not content_check.strip():
         return '', last_speaker
 
-    parts = ['<div class="segment">']
+    item_type = (item.item_type or 'segment').lower()
 
-    # Segment header - use slug as fallback for empty or "Untitled" titles
-    title = item.title
-    if not title or title.lower() == 'untitled':
-        title = item.slug or "Segment"
-    duration = item.duration or ""
+    # Tease items render as subtle end-of-segment dividers, not full segment headers
+    if item_type == 'tease':
+        parts = ['<div class="segment segment-tease">']
+        parts.append('<div class="segment-end-divider">— END SEGMENT —</div>')
+    else:
+        parts = ['<div class="segment">']
 
-    parts.append(f'<div class="segment-header">{html.escape(title)}')
-    if duration:
-        parts.append(f'<span class="segment-duration">{html.escape(duration)}</span>')
-    parts.append('</div>')
+        # Segment header - use slug as fallback for empty or "Untitled" titles
+        title = item.title
+        if not title or title.lower() == 'untitled':
+            title = item.slug or "Segment"
+        duration = item.duration or ""
+
+        parts.append(f'<div class="segment-header">{html.escape(title)}')
+        if duration:
+            parts.append(f'<span class="segment-duration">{html.escape(duration)}</span>')
+        parts.append('</div>')
 
     # Process content based on preset
     content_html, last_speaker = _process_content(content, last_speaker, preset, url_mapping, transcription_cache)
@@ -1431,8 +1529,27 @@ def _process_cue(
         return _format_sot(cue_content, slug, url_mapping, transcription_cache)
     elif cue_type in ('IMG', 'GFX'):
         return _format_img(cue_content, slug, cue_type, url_mapping)
+    elif cue_type == 'NOTE':
+        return _format_note(cue_content)
     else:
         return f'<div class="cue-marker">[{cue_type}: {html.escape(slug)}]</div>'
+
+
+def _format_note(cue_content: str) -> str:
+    """Format NOTE cue as inline production note for iPad script view."""
+    # Extract note recipient
+    note_for_match = re.search(r'\[Note For:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    note_for = note_for_match.group(1).strip().upper() if note_for_match else ''
+
+    # Extract note text
+    note_text_match = re.search(r'\[Note Text:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    note_text = note_text_match.group(1).strip() if note_text_match else ''
+
+    if not note_text:
+        return ''
+
+    label = f'{note_for}:NOTE' if note_for else 'NOTE'
+    return f'<div class="inline-note">[[{html.escape(label)}--{html.escape(note_text)}]]</div>'
 
 
 def _format_fsq(cue_content: str, slug: str, url_mapping: Dict[str, str]) -> str:

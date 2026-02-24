@@ -469,23 +469,28 @@ const itemForm = ref({
   sort_order: 10
 })
 
-// Item types
-const itemTypes = [
-  { title: 'Segment', value: 'segment' },
-  { title: 'Open', value: 'open' },
-  { title: 'Cold Open', value: 'coldopen' },
-  { title: 'Tease', value: 'tease' },
-  { title: 'Advertisement', value: 'advertisement' },
-  { title: 'Promo', value: 'promo' },
-  { title: 'Interview', value: 'interview' },
-  { title: 'Package', value: 'package' },
-  { title: 'Transition', value: 'transition' },
-  { title: 'Stinger', value: 'stinger' },
-  { title: 'Rejoin', value: 'rejoin' },
-  { title: 'Reader', value: 'reader' },
-  { title: 'Close', value: 'close' },
-  { title: 'Break', value: 'break' }
-]
+// Item types - loaded dynamically from API
+const itemTypes = ref([])
+
+// Load rundown item types from backend enum
+const loadItemTypes = async () => {
+  try {
+    const response = await axios.get('/api/rundown-templates/item-types', { headers: getAuthHeaders() })
+    // Convert enum object {SEGMENT: 'segment', AD: 'ad', ...} to dropdown format
+    itemTypes.value = Object.entries(response.data).map(([key, value]) => ({
+      title: key.split('_').map(word => word.charAt(0) + word.slice(1).toLowerCase()).join(' '),
+      value: value
+    })).sort((a, b) => a.title.localeCompare(b.title))
+  } catch (error) {
+    console.error('Error loading item types:', error)
+    // Fallback to basic types if API fails
+    itemTypes.value = [
+      { title: 'Segment', value: 'segment' },
+      { title: 'Ad', value: 'ad' },
+      { title: 'Break', value: 'break' }
+    ]
+  }
+}
 
 // Validation rules
 const durationRules = [
@@ -767,7 +772,8 @@ onMounted(async () => {
   await Promise.all([
     loadTemplates(),
     loadEpisodeTemplates(),
-    loadOrganizations()
+    loadOrganizations(),
+    loadItemTypes()
   ])
 })
 </script>

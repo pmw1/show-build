@@ -95,6 +95,13 @@ class ProductionReportRequest(BaseModel):
     include_timeline: bool = True
 
 
+class GenerateMp3Request(BaseModel):
+    """Request for MP3 generation from episode master video."""
+    episode: str
+    profile_id: Optional[int] = None
+    bitrate: str = "192k"
+
+
 # ============================================================================
 # Sync Endpoints (Immediate Response)
 # ============================================================================
@@ -283,6 +290,153 @@ async def get_report_status(
     current_user: dict = Depends(get_current_user_or_key)
 ):
     """Get status of production report task."""
+    return _get_task_status(task_id)
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+# ============================================================================
+# Generate MP3 Endpoints
+# ============================================================================
+
+@router.get("/generate-mp3/eligible")
+async def get_eligible_mp3_episodes(
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    List episodes eligible for MP3 generation.
+
+    An episode is eligible if it has a master video file (.mov, .mp4, or .avi)
+    in its exports directory and does not already have an MP3.
+    """
+    import os
+    from platform_utils import get_media_root
+
+    media_root = get_media_root()
+    episodes_dir = os.path.join(media_root, "episodes")
+
+    # Get all episodes from database
+    episodes = db.execute(
+        text("SELECT episode_number, title, status FROM episodes WHERE episode_number IS NOT NULL ORDER BY episode_number DESC")
+    ).fetchall()
+
+    eligible = []
+    for ep in episodes:
+        ep_num = str(ep.episode_number).zfill(4)
+        exports_dir = os.path.join(episodes_dir, ep_num, "exports")
+
+        source_file = None
+        for ext in [".mov", ".mp4", ".avi"]:
+            candidate = os.path.join(exports_dir, f"{ep_num}{ext}")
+            if os.path.isfile(candidate):
+                source_file = f"{ep_num}{ext}"
+                break
+
+        if source_file:
+            mp3_path = os.path.join(exports_dir, f"{ep_num}.mp3")
+            mp3_exists = os.path.isfile(mp3_path)
+            mp3_size_mb = None
+            if mp3_exists:
+                mp3_size_mb = round(os.path.getsize(mp3_path) / (1024 * 1024), 1)
+
+            eligible.append({
+                "episode": ep_num,
+                "title": ep.title,
+                "status": ep.status,
+                "source_file": source_file,
+                "mp3_exists": mp3_exists,
+                "mp3_size_mb": mp3_size_mb,
+            })
+
+    return {"eligible": eligible}
+
+
+@router.get("/generate-mp3/check/{episode}")
+async def check_mp3_status(
+    episode: str,
+    current_user: dict = Depends(get_current_user_or_key)
+):
+    """Check if source video exists and MP3 status for an episode."""
+    import os
+    from platform_utils import get_media_root
+
+    media_root = get_media_root()
+    exports_dir = os.path.join(media_root, "episodes", episode, "exports")
+
+    source_file = None
+    for ext in [".mov", ".mp4", ".avi"]:
+        candidate = os.path.join(exports_dir, f"{episode}{ext}")
+        if os.path.isfile(candidate):
+            source_file = f"{episode}{ext}"
+            break
+
+    mp3_path = os.path.join(exports_dir, f"{episode}.mp3")
+    mp3_exists = os.path.isfile(mp3_path)
+    mp3_size_mb = None
+    if mp3_exists:
+        mp3_size_mb = round(os.path.getsize(mp3_path) / (1024 * 1024), 1)
+
+    return {
+        "episode": episode,
+        "source_exists": source_file is not None,
+        "source_file": source_file,
+        "mp3_exists": mp3_exists,
+        "mp3_size_mb": mp3_size_mb,
+    }
+
+
+@router.post("/generate-mp3", response_model=TaskResponse)
+async def generate_mp3(
+    request: GenerateMp3Request,
+    current_user: dict = Depends(get_current_user_or_key)
+):
+    """Start async MP3 generation from episode master video."""
+    import os
+    from platform_utils import get_media_root
+
+    # Validate source exists before dispatching
+    media_root = get_media_root()
+    exports_dir = os.path.join(media_root, "episodes", request.episode, "exports")
+
+    source_exists = False
+    for ext in [".mov", ".mp4", ".avi"]:
+        if os.path.isfile(os.path.join(exports_dir, f"{request.episode}{ext}")):
+            source_exists = True
+            break
+
+    if not source_exists:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No source video found for episode {request.episode}"
+        )
+
+    from services.ffmpeg_tasks import generate_episode_mp3
+
+    try:
+        task = generate_episode_mp3.apply_async(
+            args=[request.episode, request.profile_id, request.bitrate],
+            queue='media'
+        )
+
+        return TaskResponse(
+            task_id=task.id,
+            status="started",
+            message=f"MP3 generation started for episode {request.episode}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to start MP3 generation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start task: {str(e)}")
+
+
+@router.get("/generate-mp3/status/{task_id}", response_model=TaskStatusResponse)
+async def get_mp3_status(
+    task_id: str,
+    current_user: dict = Depends(get_current_user_or_key)
+):
+    """Get status of MP3 generation task."""
     return _get_task_status(task_id)
 
 
