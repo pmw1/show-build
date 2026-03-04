@@ -458,6 +458,7 @@
                         @input="handleContentEditableInput(index, $event)"
                         @keydown="handleContentEditableKeydown(index, $event)"
                         @paste="handleContentEditablePaste(index, $event)"
+                        @mousedown="handleContentEditableMousedown(index, $event)"
                         @focus="setEditingFlags(index); handleParagraphFocus(index)"
                         @blur="handleParagraphBlur(index)"
                         class="speaker-textarea speaker-contenteditable"
@@ -579,9 +580,14 @@
                     `cue-align-${cueCardAlignment}`,
                     { 'cue-focused': focusedCueIndex === index },
                     { 'cue-needs-attention': segment.data?.needsAttention },
-                    { 'cue-collapsed': collapseMode }
+                    { 'cue-collapsed': collapseMode },
+                    { 'multi-selected': multiSelectedSegments.has(index) }
                   ]"
-                  :style="focusedCueIndex === index ? { backgroundColor: highlightBackgroundColor } : {}"
+                  :style="multiSelectedSegments.has(index) ? {
+                    'background-color': selectionBackgroundColor,
+                    'border-left': `6px solid ${selectionColor}`,
+                    'box-shadow': `0 0 0 2px ${selectionShadowColor}`
+                  } : (focusedCueIndex === index ? { backgroundColor: highlightBackgroundColor } : {})"
                   :data-pending="segment.isPending || null"
                   tabindex="0"
                   @focus="handleCueFocus(index)"
@@ -7138,6 +7144,16 @@ export default {
     },
 
     // Handle paragraph click for selection and cursor position tracking
+    handleContentEditableMousedown(index, event) {
+      // Intercept Ctrl+Click on contenteditable to enable multi-select
+      // Without this, the browser's native Ctrl+Click (word select) consumes the event
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.handleParagraphClick(index, event);
+      }
+    },
+
     handleParagraphClick(index, event) {
       // Always update lastKnownParagraphIndex for cue insertion positioning
       this.lastKnownParagraphIndex = index;
@@ -7147,7 +7163,10 @@ export default {
         // Ctrl+click for multi-selection
         this.toggleMultiSelection(index);
       } else {
-        // Regular click for single selection
+        // Regular click - clear multi-selection and do single select
+        if (this.multiSelectedSegments.size > 0) {
+          this.multiSelectedSegments.clear();
+        }
         this.selectSegment(index);
       }
     },
@@ -7257,7 +7276,20 @@ export default {
       if (event.target.closest('button') || event.target.closest('.v-btn')) {
         return;
       }
-      // Otherwise focus the row itself
+
+      // Ctrl+click for multi-selection (works same as paragraphs)
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        this.toggleMultiSelection(index);
+        return;
+      }
+
+      // Regular click - clear multi-selection
+      if (this.multiSelectedSegments.size > 0) {
+        this.multiSelectedSegments.clear();
+      }
+
+      // Focus the row itself
       this.focusedCueIndex = index;
       event.currentTarget.focus();
     },

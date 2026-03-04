@@ -24,6 +24,7 @@ from database import get_db
 from auth.utils import get_current_user_or_key
 from celery_app import celery_app
 from celery.result import AsyncResult
+from celery_jobs_router import register_celery_job
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ class GenerateMp3Request(BaseModel):
     episode: str
     profile_id: Optional[int] = None
     bitrate: str = "192k"
+    source_file: Optional[str] = None  # Override auto-detected source file
 
 
 # ============================================================================
@@ -186,6 +188,8 @@ async def validate_asset_metadata(
             queue='assets'
         )
 
+        register_celery_job(db, task.id, "services.tools_tasks.validate_metadata", "Validate Metadata", "tools", request.episode, "assets")
+
         return TaskResponse(
             task_id=task.id,
             status="started",
@@ -225,6 +229,8 @@ async def reconcile_durations(
             args=[request.episode],
             queue='media'  # Uses ffprobe, route to media queue
         )
+
+        register_celery_job(db, task.id, "services.tools_tasks.reconcile_durations", "Reconcile Durations", "tools", request.episode, "media")
 
         return TaskResponse(
             task_id=task.id,
@@ -273,6 +279,8 @@ async def generate_production_report(
             ],
             queue='assets'
         )
+
+        register_celery_job(db, task.id, "services.tools_tasks.generate_production_report", "Production Report", "tools", request.episode, "assets")
 
         return TaskResponse(
             task_id=task.id,
@@ -328,14 +336,24 @@ async def get_eligible_mp3_episodes(
         ep_num = str(ep.episode_number).zfill(4)
         exports_dir = os.path.join(episodes_dir, ep_num, "exports")
 
-        source_file = None
+        # Find all candidate video files
+        candidate_files = []
+        preferred_source = None
         for ext in [".mov", ".mp4", ".avi"]:
             candidate = os.path.join(exports_dir, f"{ep_num}{ext}")
             if os.path.isfile(candidate):
-                source_file = f"{ep_num}{ext}"
-                break
+                file_size = os.path.getsize(candidate)
+                file_info = {
+                    "filename": f"{ep_num}{ext}",
+                    "path": os.path.join("episodes", ep_num, "exports", f"{ep_num}{ext}"),
+                    "size_mb": round(file_size / (1024 * 1024), 1),
+                    "extension": ext,
+                }
+                candidate_files.append(file_info)
+                if preferred_source is None:
+                    preferred_source = file_info["filename"]
 
-        if source_file:
+        if candidate_files:
             mp3_path = os.path.join(exports_dir, f"{ep_num}.mp3")
             mp3_exists = os.path.isfile(mp3_path)
             mp3_size_mb = None
@@ -346,7 +364,9 @@ async def get_eligible_mp3_episodes(
                 "episode": ep_num,
                 "title": ep.title,
                 "status": ep.status,
-                "source_file": source_file,
+                "source_file": preferred_source,
+                "candidate_files": candidate_files,
+                "exports_path": os.path.join("episodes", ep_num, "exports"),
                 "mp3_exists": mp3_exists,
                 "mp3_size_mb": mp3_size_mb,
             })
@@ -391,7 +411,8 @@ async def check_mp3_status(
 @router.post("/generate-mp3", response_model=TaskResponse)
 async def generate_mp3(
     request: GenerateMp3Request,
-    current_user: dict = Depends(get_current_user_or_key)
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
 ):
     """Start async MP3 generation from episode master video."""
     import os
@@ -401,25 +422,35 @@ async def generate_mp3(
     media_root = get_media_root()
     exports_dir = os.path.join(media_root, "episodes", request.episode, "exports")
 
-    source_exists = False
-    for ext in [".mov", ".mp4", ".avi"]:
-        if os.path.isfile(os.path.join(exports_dir, f"{request.episode}{ext}")):
-            source_exists = True
-            break
-
-    if not source_exists:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No source video found for episode {request.episode}"
-        )
+    # If specific source_file provided, validate it exists
+    if request.source_file:
+        source_path = os.path.join(exports_dir, request.source_file)
+        if not os.path.isfile(source_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Source file not found: {request.source_file}"
+            )
+    else:
+        source_exists = False
+        for ext in [".mov", ".mp4", ".avi"]:
+            if os.path.isfile(os.path.join(exports_dir, f"{request.episode}{ext}")):
+                source_exists = True
+                break
+        if not source_exists:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No source video found for episode {request.episode}"
+            )
 
     from services.ffmpeg_tasks import generate_episode_mp3
 
     try:
         task = generate_episode_mp3.apply_async(
-            args=[request.episode, request.profile_id, request.bitrate],
+            args=[request.episode, request.profile_id, request.bitrate, request.source_file],
             queue='media'
         )
+
+        register_celery_job(db, task.id, "services.ffmpeg_tasks.generate_episode_mp3", "Generate MP3", "tools", request.episode, "media")
 
         return TaskResponse(
             task_id=task.id,

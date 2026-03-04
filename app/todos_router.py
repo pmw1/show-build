@@ -10,6 +10,7 @@ from database import get_db
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime
 from sqlalchemy.sql import func
 from database import Base
+from auth.utils import get_current_user_or_key
 import json
 from pathlib import Path
 
@@ -120,15 +121,18 @@ async def get_user_todos(
 @router.post("/user")
 async def create_user_todo(
     todo: UserTodoCreate,
+    current_user: dict = Depends(get_current_user_or_key),
     db: Session = Depends(get_db)
 ) -> UserTodoResponse:
     """Create a new user todo"""
     try:
+        username = current_user.get("username", current_user.get("client_name", "unknown"))
         new_todo = UserTodo(
             content=todo.content,
             description=todo.description,
             priority=todo.priority,
-            status="pending"
+            status="pending",
+            created_by=username
         )
 
         db.add(new_todo)

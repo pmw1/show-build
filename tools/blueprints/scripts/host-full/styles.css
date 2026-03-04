@@ -1,0 +1,386 @@
+/* Host Script (Full) - Stylesheet */
+/* Blueprint: host-full v1.0 */
+
+/* Embed Montserrat font (Gotham alternative) */
+@font-face {
+    font-family: 'Montserrat';
+    src: url('/tools/blueprints/fonts/Montserrat-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Montserrat';
+    src: url('/tools/blueprints/fonts/Montserrat-Medium.ttf') format('truetype');
+    font-weight: 500;
+    font-style: normal;
+}
+
+@page {
+    size: {{ config.output.page_size }};
+    margin: {{ config.output.margins.top }} {{ config.output.margins.right }} {{ config.output.margins.bottom }} {{ config.output.margins.left }};
+
+    @bottom-left {
+        content: "Episode {{ episode.episode_number }}";
+        font-size: 9pt;
+        color: #666;
+    }
+    @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 9pt;
+        color: #666;
+    }
+}
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: {{ config.typography.body.font_family }};
+    font-size: {{ config.typography.body.font_size }};
+    line-height: {{ config.typography.body.line_height }};
+    color: #111;
+    margin: 0;
+    padding: 0.5in;
+    background: #fff;
+}
+
+/* ===========================================
+   COVER PAGE
+   =========================================== */
+
+.cover-page {
+    text-align: center;
+    page-break-after: always;
+    padding-top: 1.5in;
+}
+
+.show-title {
+    font-family: {{ config.typography.show_title.font_family }};
+    font-size: {{ config.typography.show_title.font_size }};
+    font-weight: normal;  /* Gotham Book is a regular weight */
+    letter-spacing: 0.15em;
+    margin-bottom: 0.3in;
+    color: #111;
+}
+
+.episode-number {
+    font-size: 24pt;
+    color: #444;
+    margin-bottom: 0.15in;
+}
+
+.episode-date {
+    font-size: 14pt;
+    color: #666;
+    margin-bottom: 0.4in;
+}
+
+.episode-title {
+    font-size: 28pt;
+    font-weight: 600;
+    margin-bottom: 0.3in;
+    color: #222;
+}
+
+.guest-info {
+    font-size: 16pt;
+    color: #444;
+    font-style: italic;
+    margin-bottom: 0.5in;
+}
+
+.duration-info {
+    font-size: 14pt;
+    color: #666;
+    margin-top: 0.5in;
+}
+
+.block-summary {
+    margin-top: 0.75in;
+    text-align: left;
+    padding: 0.3in;
+    background: #f5f5f5;
+    border-radius: 8px;
+}
+
+.block-summary h3 {
+    margin: 0 0 0.15in 0;
+    font-size: 14pt;
+    color: #333;
+}
+
+.block-summary ul {
+    margin: 0;
+    padding-left: 1.2em;
+    font-size: 12pt;
+    color: #555;
+}
+
+/* ===========================================
+   BLOCK HEADERS
+   =========================================== */
+
+.block-header {
+    text-align: center;
+    font-size: {{ config.typography.header.font_size }};
+    font-weight: bold;
+    padding: 0.25in 0;
+    margin: 0.5in 0 0.3in 0;
+    border-top: 4px solid #222;
+    border-bottom: 4px solid #222;
+    background: #f8f8f8;
+    letter-spacing: 0.2em;
+    page-break-before: always;
+}
+
+.block-header.first {
+    page-break-before: auto;
+}
+
+.block-end {
+    text-align: center;
+    font-size: 16pt;
+    font-weight: bold;
+    padding: 0.2in 0;
+    margin: 0.4in 0;
+    border-top: 2px solid #666;
+    border-bottom: 2px solid #666;
+    color: #555;
+    letter-spacing: 0.15em;
+}
+
+/* ===========================================
+   SEGMENTS
+   =========================================== */
+
+.segment {
+    margin-bottom: 0.3in;
+}
+
+.segment-header {
+    font-size: {{ config.typography.segment_title.font_size }};
+    font-weight: bold;
+    color: #1565c0;
+    margin: 0.3in 0 0.15in 0;
+    padding-bottom: 0.1in;
+    border-bottom: 2px solid #1565c0;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.segment-duration {
+    font-size: 12pt;
+    color: #888;
+    font-weight: normal;
+    float: right;
+    text-transform: none;
+}
+
+/* ===========================================
+   SCRIPT CONTENT
+   =========================================== */
+
+.script-content {
+    margin: 0.15in 0;
+}
+
+.script-paragraph {
+    text-align: left;
+    margin: 0.2in 0;
+    text-indent: 0;
+}
+
+/* ===========================================
+   SPEAKER TAGS
+   =========================================== */
+
+.speaker-tag {
+    font-weight: bold;
+    font-size: 11pt;
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 4px;
+    margin-right: 10px;
+    margin-bottom: 5px;
+}
+
+{% for speaker_id, speaker in config.speakers.items() %}
+.speaker-{{ speaker_id }} {
+    background: {{ speaker.background }};
+    color: {{ speaker.color }};
+}
+{% endfor %}
+
+/* ===========================================
+   CUE BLOCKS - COMMON
+   =========================================== */
+
+.cue-block {
+    margin: 0.25in 0;
+    padding: 0.2in;
+    border-radius: 6px;
+    page-break-inside: avoid;
+}
+
+.cue-label {
+    font-size: 11pt;
+    font-weight: bold;
+    margin-bottom: 0.1in;
+}
+
+/* ===========================================
+   CUE: FSQ (Full Screen Quote)
+   =========================================== */
+
+.cue-fsq {
+    background: {{ config.cue_styles.fsq.background }};
+    border-left: 5px solid {{ config.cue_styles.fsq.border_color }};
+    border-right: 5px solid {{ config.cue_styles.fsq.border_color }};
+}
+
+.cue-fsq .cue-label {
+    color: #666;
+}
+
+.cue-fsq blockquote {
+    font-size: 18pt;
+    font-style: italic;
+    color: #333;
+    margin: 0.1in 0;
+    line-height: 1.5;
+}
+
+.cue-fsq .attribution {
+    text-align: right;
+    font-size: 13pt;
+    color: #555;
+    margin-top: 0.1in;
+}
+
+.cue-fsq .quote-image {
+    max-width: 450px;
+    margin-bottom: 0.1in;
+}
+
+/* ===========================================
+   CUE: SOT (Sound On Tape)
+   =========================================== */
+
+.cue-sot {
+    background: {{ config.cue_styles.sot.background }};
+    border: 2px solid {{ config.cue_styles.sot.border_color }};
+}
+
+.cue-sot .cue-label {
+    color: #f57c00;
+}
+
+.sot-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.2in;
+    justify-content: space-between;
+}
+
+.sot-thumbnail {
+    max-width: 280px;
+    max-height: 280px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    order: 2;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.sot-info {
+    flex: 1;
+    order: 1;
+}
+
+.sot-slug {
+    font-weight: bold;
+    font-size: 13pt;
+}
+
+.sot-duration {
+    font-size: 11pt;
+    color: #666;
+}
+
+.sot-outcue {
+    font-size: 12pt;
+    color: #d84315;
+    font-weight: bold;
+    margin-top: 0.05in;
+}
+
+.sot-transcription {
+    font-size: 11pt;
+    color: #444;
+    font-style: italic;
+    margin-top: 0.1in;
+}
+
+/* ===========================================
+   CUE: IMG / GFX
+   =========================================== */
+
+.cue-img,
+.cue-gfx {
+    background: {{ config.cue_styles.img.background }};
+    border: 1px solid {{ config.cue_styles.img.border_color }};
+    text-align: center;
+}
+
+.cue-img .cue-label,
+.cue-gfx .cue-label {
+    color: #666;
+}
+
+.cue-img img,
+.cue-gfx img {
+    max-width: 675px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+.img-caption {
+    font-size: 11pt;
+    color: #666;
+    margin-top: 0.1in;
+    font-style: italic;
+}
+
+/* ===========================================
+   BREAK INDICATOR
+   =========================================== */
+
+.break-indicator {
+    text-align: center;
+    padding: 0.15in;
+    margin: 0.3in 0;
+    background: #fff3e0;
+    border: 2px dashed #ff9800;
+    color: #e65100;
+    font-weight: bold;
+    font-size: 14pt;
+}
+
+/* ===========================================
+   PRINT STYLES
+   =========================================== */
+
+@media print {
+    body {
+        padding: 0;
+    }
+    .block-header {
+        page-break-before: always;
+    }
+    .block-header.first {
+        page-break-before: avoid;
+    }
+}

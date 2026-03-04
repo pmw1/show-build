@@ -70,6 +70,7 @@ try:
     from episode_scaffold_router import router as episode_scaffold_router
     from rundown_templates_router import router as rundown_templates_router
     from mp3_profiles_router import router as mp3_profiles_router
+    from blueprint_config_router import router as blueprint_config_router
     from setup_router import router as setup_router
     from rbac_router import router as rbac_router
     from duration_analysis_router import router as duration_router
@@ -106,6 +107,7 @@ try:
     from tools_router import router as tools_router
     from segment_llm_router import router as segment_llm_router
     from production_roles_router import router as production_roles_router
+    from celery_jobs_router import router as celery_jobs_router, register_celery_job
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Current directory: {os.getcwd()}")
@@ -188,6 +190,7 @@ app.include_router(rundown_templates_router, prefix="/api/rundown-templates", ta
 
 # Include the MP3 encoding profiles router
 app.include_router(mp3_profiles_router, prefix="/api/settings/mp3-profiles", tags=["mp3-profiles"])
+app.include_router(blueprint_config_router, prefix="/api/settings/blueprint-nodes", tags=["blueprint-config"])
 
 # Include the setup router
 app.include_router(setup_router, prefix="/api")
@@ -299,6 +302,9 @@ app.include_router(segment_llm_router)
 
 # Include the production roles router (Note For dropdown options)
 app.include_router(production_roles_router, prefix="/api/production-roles", tags=["production-roles"])
+
+# Celery job monitoring
+app.include_router(celery_jobs_router, prefix="/api/celery-jobs", tags=["celery-jobs"])
 
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
@@ -1954,7 +1960,9 @@ async def compile_script_async(
             include_cues=include_cues,
             validate_only=validate_only
         )
-        
+
+        register_celery_job(db, job.id, "services.script_tasks.compile_episode_script", "Compile Script", "tools", episode_id, "compilation")
+
         # Create database record for job tracking
         # from models import ProcessingStatus  # REMOVED - models.py deleted
         db_job = ProcessingJob(

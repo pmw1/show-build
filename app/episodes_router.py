@@ -439,6 +439,8 @@ def create_episode_directory(episode_number: str) -> Path:
         episode_dir / "rundown" / "ordered_media",
         episode_dir / "preshow",
         episode_dir / "captures",
+        episode_dir / "captures" / "orig",
+        episode_dir / "captures" / "preview",
         episode_dir / "exports",
         episode_dir / "publish"
     ]
@@ -4229,3 +4231,156 @@ async def gather_media_for_show(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{episode_number}/graphics-package")
+async def create_graphics_package(
+    episode_number: str,
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a ZIP archive of the rundown/media-list directory for download.
+
+    The zip file is cached on disk. If any file in media-list is newer than
+    the existing zip, the zip is regenerated automatically.
+
+    Returns:
+        JSON summary of the package contents and a download URL.
+    """
+    import zipfile
+    from models_v2 import Episode
+    from core.paths import ShowBuildPaths
+
+    path_manager = ShowBuildPaths()
+
+    try:
+        episode_id = episode_number.zfill(4) if len(episode_number) < 4 else episode_number
+
+        episode = db.query(Episode).filter(
+            Episode.episode_number == int(episode_id)
+        ).first()
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_id} not found")
+
+        episode_dir = path_manager.get_episode_dir(episode_id)
+        media_list_dir = Path(episode_dir) / "rundown" / "media-list"
+
+        if not media_list_dir.exists() or not any(media_list_dir.iterdir()):
+            raise HTTPException(
+                status_code=404,
+                detail="No media-list directory found. Run 'Gather for Show' first."
+            )
+
+        # Collect all files in media-list
+        media_files = sorted([
+            f for f in media_list_dir.iterdir()
+            if f.is_file() and f.name != f"{episode_id}-graphics-package.zip"
+        ])
+
+        if not media_files:
+            raise HTTPException(
+                status_code=404,
+                detail="media-list directory is empty. Run 'Gather for Show' first."
+            )
+
+        zip_path = media_list_dir / f"{episode_id}-graphics-package.zip"
+
+        # Check if zip needs regeneration
+        needs_rebuild = not zip_path.exists()
+        if not needs_rebuild:
+            zip_mtime = zip_path.stat().st_mtime
+            for f in media_files:
+                if f.stat().st_mtime > zip_mtime:
+                    needs_rebuild = True
+                    break
+
+        # Build file manifest
+        file_manifest = []
+        total_size = 0
+        type_counts = {}
+
+        for f in media_files:
+            fsize = f.stat().st_size
+            total_size += fsize
+            # Extract type from filename pattern: {enum}-{type}-{slug}.{ext}
+            parts = f.stem.split("-", 2)
+            ftype = parts[1].upper() if len(parts) >= 2 else "OTHER"
+            type_counts[ftype] = type_counts.get(ftype, 0) + 1
+            file_manifest.append({
+                "name": f.name,
+                "size": fsize,
+                "type": ftype
+            })
+
+        # Create or reuse zip
+        if needs_rebuild:
+            logger.info(f"📦 Building graphics package for episode {episode_id} ({len(media_files)} files)")
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for f in media_files:
+                    zf.write(f, f.name)
+            logger.info(f"✅ Graphics package created: {zip_path} ({zip_path.stat().st_size} bytes)")
+        else:
+            logger.info(f"📦 Using cached graphics package for episode {episode_id}")
+
+        zip_size = zip_path.stat().st_size
+
+        return {
+            "success": True,
+            "episode_id": episode_id,
+            "cached": not needs_rebuild,
+            "zip_filename": zip_path.name,
+            "zip_size": zip_size,
+            "file_count": len(media_files),
+            "total_uncompressed_size": total_size,
+            "type_counts": type_counts,
+            "files": file_manifest,
+            "download_url": f"/episodes/{episode_id}/graphics-package/download"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating graphics package for episode {episode_number}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{episode_number}/graphics-package/download")
+async def download_graphics_package(
+    episode_number: str,
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Download the cached graphics package ZIP file.
+    """
+    from fastapi.responses import FileResponse
+    from models_v2 import Episode
+    from core.paths import ShowBuildPaths
+
+    path_manager = ShowBuildPaths()
+
+    episode_id = episode_number.zfill(4) if len(episode_number) < 4 else episode_number
+
+    episode = db.query(Episode).filter(
+        Episode.episode_number == int(episode_id)
+    ).first()
+    if not episode:
+        raise HTTPException(status_code=404, detail=f"Episode {episode_id} not found")
+
+    episode_dir = path_manager.get_episode_dir(episode_id)
+    zip_path = Path(episode_dir) / "rundown" / "media-list" / f"{episode_id}-graphics-package.zip"
+
+    if not zip_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Graphics package not found. Create it first."
+        )
+
+    return FileResponse(
+        path=str(zip_path),
+        filename=f"{episode_id}-graphics-package.zip",
+        media_type="application/zip"
+    )

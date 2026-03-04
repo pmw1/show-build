@@ -505,6 +505,17 @@ const getNextNumber = async () => {
   }
 }
 
+const getNextAirDate = async () => {
+  try {
+    const response = await axios.get('/api/episodes/next-air-date', { headers: getAuthHeaders() })
+    if (response.data.next_air_date) {
+      airDate.value = response.data.next_air_date
+    }
+  } catch (error) {
+    console.error('Error getting next air date:', error)
+  }
+}
+
 const checkEpisodeNumber = async () => {
   if (!episodeNumber.value) {
     numberAvailable.value = null
@@ -604,7 +615,7 @@ watch(dialog, async (isOpen) => {
   if (isOpen) {
     document.addEventListener('keydown', handleEscapeKey)
     loadTemplates()
-    await getNextNumber()
+    await Promise.all([getNextNumber(), getNextAirDate()])
   } else {
     document.removeEventListener('keydown', handleEscapeKey)
   }

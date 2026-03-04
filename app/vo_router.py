@@ -28,6 +28,7 @@ from services.ffmpeg_tasks import process_vo_video
 from auth.router import get_current_user_or_key
 from database import get_db
 from models_v2 import SOTProcessingJob  # Reuse SOT model with job_category field
+from celery_jobs_router import register_celery_job
 from models_assetid import AssetIDRegistry
 from platform_utils import get_media_root
 
@@ -240,6 +241,9 @@ async def process_vo_endpoint(
         )
 
         job.celery_task_id = task.id
+
+        register_celery_job(db, task.id, "services.ffmpeg_tasks.process_vo_video", "Process VO Video", "media", request.episode, "media")
+
         db.commit()
 
         return VOUploadResponse(

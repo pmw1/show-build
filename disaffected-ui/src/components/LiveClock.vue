@@ -146,7 +146,7 @@ onUnmounted(() => {
 .label-secondary {
   font-family: 'Courier New', Courier, monospace;
   font-size: 0.56rem;
-  color: rgba(0, 0, 0, 0.7);
+  color: rgba(255, 255, 255, 0.85);
   font-weight: bold;
   text-align: center;
   text-transform: uppercase;
@@ -155,19 +155,19 @@ onUnmounted(() => {
 }
 
 .countdown-green {
-  color: #4caf50;
+  color: white;
 }
 
 .countdown-yellow {
-  color: #ffc107;
+  color: white;
 }
 
 .countdown-red {
-  color: #f44336;
+  color: white;
 }
 
 .countdown-live {
-  color: #f44336;
+  color: white;
   animation: pulse 1s infinite;
 }
 

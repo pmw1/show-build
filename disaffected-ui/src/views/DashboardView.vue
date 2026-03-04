@@ -47,30 +47,21 @@
       <v-col>
         <h2 class="text-h4 font-weight-bold mb-4">Dashboard</h2>
 
-        <!-- All Dashboard Panels - Single Masonry Grid -->
-        <v-row dense class="mb-2 dashboard-row">
+        <!-- All Dashboard Panels - True Masonry Grid -->
+        <div class="masonry-grid">
           <!-- Next Show Panel - Featured -->
-          <v-col cols="12" lg="6" class="pa-1">
+          <div class="masonry-item masonry-item-wide">
             <NextShowPanel />
-          </v-col>
+          </div>
 
           <!-- Active Tools Panel -->
-          <v-col cols="12" sm="6" lg="3" class="pa-1">
+          <div class="masonry-item">
             <v-card class="elevation-4">
               <v-card-title class="d-flex align-center bg-primary text-white">
                 <v-icon class="me-2">mdi-star-circle</v-icon>
                 <span>Active Tools</span>
               </v-card-title>
               <v-card-text class="pa-2">
-                <v-card variant="outlined" class="hover-card mb-2" @click="openEpisodeModal">
-                  <v-card-text class="d-flex align-center pa-3">
-                    <v-icon color="primary" size="32" class="me-3">mdi-plus-circle-outline</v-icon>
-                    <div>
-                      <div class="text-subtitle-1 font-weight-bold">Create New Episode</div>
-                      <div class="text-caption text-grey">Scaffold episode directory</div>
-                    </div>
-                  </v-card-text>
-                </v-card>
                 <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/consolidation')">
                   <v-card-text class="d-flex align-center pa-3">
                     <v-icon color="primary" size="32" class="me-3">mdi-folder-sync</v-icon>
@@ -91,207 +82,20 @@
                 </v-card>
               </v-card-text>
             </v-card>
-          </v-col>
+          </div>
 
           <!-- Announcements -->
-          <v-col cols="12" sm="6" lg="3" class="pa-1">
+          <div class="masonry-item">
             <AnnouncementsPanel />
-          </v-col>
+          </div>
 
           <!-- Todo Panel -->
-          <v-col cols="12" sm="6" lg="3" class="pa-1">
+          <div class="masonry-item">
             <TodoPanel />
-          </v-col>
-
-          <!-- Preproduction Panel -->
-          <v-col cols="12" sm="6" lg="3" class="pa-1">
-            <v-card class="elevation-4">
-              <v-card-title class="d-flex align-center bg-purple text-white">
-                <v-icon class="me-2">mdi-lightbulb-on</v-icon>
-                <span>Preproduction</span>
-              </v-card-title>
-              <v-card-text class="pa-2">
-                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/whiteboard')">
-                  <v-card-text class="d-flex align-center pa-3">
-                    <v-icon color="purple" size="32" class="me-3">mdi-notebook-edit</v-icon>
-                    <div>
-                      <div class="text-subtitle-1 font-weight-bold">Whiteboard</div>
-                      <div class="text-caption text-grey">Brainstorm ideas and links</div>
-                    </div>
-                  </v-card-text>
-                </v-card>
-                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/generator')">
-                  <v-card-text class="d-flex align-center pa-3">
-                    <v-icon color="purple" size="32" class="me-3">mdi-creation</v-icon>
-                    <div>
-                      <div class="text-subtitle-1 font-weight-bold">Generator</div>
-                      <div class="text-caption text-grey">AI content generation</div>
-                    </div>
-                  </v-card-text>
-                </v-card>
-                <v-card variant="outlined" class="hover-card" @click="$router.push('/voice-meeting')">
-                  <v-card-text class="d-flex align-center pa-3">
-                    <v-icon color="purple" size="32" class="me-3">mdi-microphone</v-icon>
-                    <div>
-                      <div class="text-subtitle-1 font-weight-bold">Production Meeting</div>
-                      <div class="text-caption text-grey">Voice conference call</div>
-                    </div>
-                  </v-card-text>
-                </v-card>
-              </v-card-text>
-            </v-card>
-          </v-col>
-
-          <!-- Upcoming Episodes Section - Only show if episodes exist -->
-          <v-col v-if="upcomingEpisodes.length > 0" cols="12" sm="6" lg="3" class="pa-1">
-            <v-card class="current-episode-card" elevation="3">
-              <v-card-title class="d-flex align-center">
-                <v-icon color="primary" class="me-2">mdi-television-classic</v-icon>
-                <span>Upcoming Episodes</span>
-                <v-spacer />
-                <v-chip
-                  v-if="upcomingEpisodes.length > 0"
-                  color="primary"
-                  size="small"
-                  variant="flat"
-                >
-                  {{ upcomingEpisodes.length }} Shows
-                </v-chip>
-              </v-card-title>
-
-              <v-card-text v-if="loadingEpisodes">
-                <v-skeleton-loader type="article" />
-              </v-card-text>
-
-              <v-card-text v-else-if="episodeError" class="text-center">
-                <v-icon color="grey" size="48" class="mb-2">mdi-television-off</v-icon>
-                <p class="text-grey">{{ episodeError }}</p>
-              </v-card-text>
-
-              <v-card-text v-else-if="upcomingEpisodes.length === 0" class="text-center">
-                <v-icon color="grey" size="48" class="mb-2">mdi-calendar-clock</v-icon>
-                <p class="text-grey">No upcoming episodes scheduled</p>
-              </v-card-text>
-
-              <v-card-text v-else class="pt-4">
-                <!-- Episodes List -->
-                <div v-for="(episodeData, index) in upcomingEpisodes.slice(0, 3)" :key="episodeData.episode.number"
-                     class="episode-card mb-4"
-                     :class="{ 'dummy-episode': episodeData.episode.is_dummy }">
-
-                  <!-- Dummy Episode Top Banner -->
-                  <div v-if="episodeData.episode.is_dummy" class="dummy-banner dummy-banner-top">
-                    DUMMY EPISODE
-                  </div>
-
-                  <div class="d-flex align-center justify-space-between mb-2">
-                    <div>
-                      <h3 class="text-h6 font-weight-bold text-primary">
-                        Episode {{ episodeData.episode.number }}
-                      </h3>
-                      <h4 class="text-subtitle-1 mb-1">{{ episodeData.episode.title }}</h4>
-                      <div class="d-flex align-center text-grey">
-                        <v-icon size="small" class="me-1">mdi-calendar</v-icon>
-                        <span>{{ formatAirDate(episodeData.episode.air_date) }}</span>
-                      </div>
-                    </div>
-                    <v-chip
-                      :color="getStatusColor(episodeData.episode.status)"
-                      size="small"
-                      variant="flat"
-                    >
-                      {{ episodeData.episode.status?.toUpperCase() || 'DRAFT' }}
-                    </v-chip>
-                  </div>
-
-                  <!-- Episode Statistics -->
-                  <v-row v-if="episodeData.statistics" class="mb-3">
-                    <v-col cols="3">
-                      <div class="stat-item-small">
-                        <div class="stat-number-small">{{ episodeData.statistics.total_items }}</div>
-                        <div class="stat-label-small">Items</div>
-                      </div>
-                    </v-col>
-                    <v-col cols="3">
-                      <div class="stat-item-small">
-                        <div class="stat-number-small">{{ episodeData.statistics.by_status?.draft || 0 }}</div>
-                        <div class="stat-label-small">Draft</div>
-                      </div>
-                    </v-col>
-                    <v-col cols="3">
-                      <div class="stat-item-small">
-                        <div class="stat-number-small">{{ (episodeData.statistics.by_status?.approved || 0) + (episodeData.statistics.by_status?.completed || 0) }}</div>
-                        <div class="stat-label-small">Ready</div>
-                      </div>
-                    </v-col>
-                    <v-col cols="3">
-                      <div class="stat-item-small">
-                        <div class="stat-number-small">{{ episodeData.statistics.progress_percentage || 0 }}%</div>
-                        <div class="stat-label-small">Progress</div>
-                      </div>
-                    </v-col>
-                  </v-row>
-
-                  <!-- Progress Bar -->
-                  <v-progress-linear
-                    :model-value="episodeData.statistics?.progress_percentage || 0"
-                    color="primary"
-                    height="4"
-                    rounded
-                    class="mb-3"
-                  />
-
-                  <!-- Guest Information -->
-                  <div v-if="episodeData.episode.guest?.name" class="guest-info">
-                    <v-icon size="small" color="primary" class="me-1">mdi-account</v-icon>
-                    <span class="text-body-2 font-weight-medium">{{ episodeData.episode.guest.name }}</span>
-                  </div>
-
-                  <!-- Quick Actions for this episode -->
-                  <div class="episode-actions mt-2">
-                    <v-btn
-                      size="small"
-                      color="primary"
-                      variant="outlined"
-                      :to="`/content-editor/${episodeData.episode.number}`"
-                      class="me-2"
-                    >
-                      Content Editor
-                    </v-btn>
-                    <v-btn
-                      size="small"
-                      color="secondary"
-                      variant="outlined"
-                      :to="`/stack/${episodeData.episode.number}`"
-                    >
-                      Timing
-                    </v-btn>
-                  </div>
-
-                  <!-- Dummy Episode Bottom Banner -->
-                  <div v-if="episodeData.episode.is_dummy" class="dummy-banner dummy-banner-bottom">
-                    DUMMY EPISODE
-                  </div>
-
-                  <v-divider v-if="index < Math.min(upcomingEpisodes.length, 3) - 1" class="mt-4" />
-                </div>
-
-                <!-- Show more link -->
-                <div v-if="upcomingEpisodes.length > 3" class="text-center mt-4">
-                  <v-btn
-                    variant="text"
-                    :to="`/episodes`"
-                    append-icon="mdi-arrow-right"
-                  >
-                    View All {{ upcomingEpisodes.length }} Upcoming Episodes
-                  </v-btn>
-                </div>
-              </v-card-text>
-            </v-card>
-          </v-col>
+          </div>
 
           <!-- Quick Actions Panel -->
-          <v-col cols="12" sm="6" lg="3" class="pa-1">
+          <div class="masonry-item">
             <v-card class="quick-actions-card" elevation="3">
               <v-card-title class="d-flex align-center">
                 <v-icon color="primary" class="me-2">mdi-lightning-bolt</v-icon>
@@ -345,10 +149,199 @@
                 </v-list>
               </v-card-text>
             </v-card>
-          </v-col>
+          </div>
+
+          <!-- Upcoming Episodes Section - Only show if episodes exist -->
+          <div v-if="upcomingEpisodes.length > 0" class="masonry-item">
+            <v-card class="current-episode-card" elevation="3">
+              <v-card-title class="d-flex align-center">
+                <v-icon color="primary" class="me-2">mdi-television-classic</v-icon>
+                <span>Upcoming Episodes</span>
+                <v-spacer />
+                <v-chip
+                  v-if="upcomingEpisodes.length > 0"
+                  color="primary"
+                  size="small"
+                  variant="flat"
+                >
+                  {{ upcomingEpisodes.length }} Shows
+                </v-chip>
+              </v-card-title>
+
+              <v-card-text v-if="loadingEpisodes">
+                <v-skeleton-loader type="article" />
+              </v-card-text>
+
+              <v-card-text v-else-if="episodeError" class="text-center">
+                <v-icon color="grey" size="48" class="mb-2">mdi-television-off</v-icon>
+                <p class="text-grey">{{ episodeError }}</p>
+              </v-card-text>
+
+              <v-card-text v-else-if="upcomingEpisodes.length === 0" class="text-center">
+                <v-icon color="grey" size="48" class="mb-2">mdi-calendar-clock</v-icon>
+                <p class="text-grey">No upcoming episodes scheduled</p>
+              </v-card-text>
+
+              <v-card-text v-else class="pa-2">
+                <v-expansion-panels variant="accordion">
+                  <v-expansion-panel
+                    v-for="episodeData in upcomingEpisodes.slice(0, 5)"
+                    :key="episodeData.episode.number"
+                  >
+                    <v-expansion-panel-title class="py-2">
+                      <div class="d-flex align-center justify-space-between w-100 me-2">
+                        <div class="d-flex align-center">
+                          <span class="text-body-2 font-weight-bold text-primary me-2">
+                            {{ episodeData.episode.number }}
+                          </span>
+                          <span v-if="episodeData.episode.title" class="text-body-2 me-2">
+                            {{ episodeData.episode.title }}
+                          </span>
+                        </div>
+                        <div class="d-flex align-center ga-2">
+                          <span class="text-caption text-grey">
+                            {{ formatAirDateShort(episodeData.episode.air_date) }}
+                          </span>
+                          <v-chip
+                            :color="getStatusColor(episodeData.episode.status)"
+                            size="x-small"
+                            variant="flat"
+                          >
+                            {{ episodeData.episode.status?.toUpperCase() || 'DRAFT' }}
+                          </v-chip>
+                        </div>
+                      </div>
+                    </v-expansion-panel-title>
+
+                    <v-expansion-panel-text>
+                      <!-- Dummy Episode Banner -->
+                      <div v-if="episodeData.episode.is_dummy" class="dummy-banner dummy-banner-top mb-2">
+                        DUMMY EPISODE
+                      </div>
+
+                      <!-- Episode Statistics -->
+                      <v-row v-if="episodeData.statistics" dense class="mb-2">
+                        <v-col cols="3">
+                          <div class="stat-item-small">
+                            <div class="stat-number-small">{{ episodeData.statistics.total_items }}</div>
+                            <div class="stat-label-small">Items</div>
+                          </div>
+                        </v-col>
+                        <v-col cols="3">
+                          <div class="stat-item-small">
+                            <div class="stat-number-small">{{ episodeData.statistics.by_status?.draft || 0 }}</div>
+                            <div class="stat-label-small">Draft</div>
+                          </div>
+                        </v-col>
+                        <v-col cols="3">
+                          <div class="stat-item-small">
+                            <div class="stat-number-small">{{ (episodeData.statistics.by_status?.approved || 0) + (episodeData.statistics.by_status?.completed || 0) }}</div>
+                            <div class="stat-label-small">Ready</div>
+                          </div>
+                        </v-col>
+                        <v-col cols="3">
+                          <div class="stat-item-small">
+                            <div class="stat-number-small">{{ episodeData.statistics.progress_percentage || 0 }}%</div>
+                            <div class="stat-label-small">Progress</div>
+                          </div>
+                        </v-col>
+                      </v-row>
+
+                      <!-- Progress Bar -->
+                      <v-progress-linear
+                        :model-value="episodeData.statistics?.progress_percentage || 0"
+                        color="primary"
+                        height="4"
+                        rounded
+                        class="mb-2"
+                      />
+
+                      <!-- Guest Information -->
+                      <div v-if="episodeData.episode.guest?.name" class="guest-info mb-2">
+                        <v-icon size="small" color="primary" class="me-1">mdi-account</v-icon>
+                        <span class="text-body-2 font-weight-medium">{{ episodeData.episode.guest.name }}</span>
+                      </div>
+
+                      <!-- Quick Actions -->
+                      <div class="episode-actions">
+                        <v-btn
+                          size="small"
+                          color="primary"
+                          variant="outlined"
+                          :to="`/content-editor/${episodeData.episode.number}`"
+                          class="me-2"
+                        >
+                          Content Editor
+                        </v-btn>
+                        <v-btn
+                          size="small"
+                          color="secondary"
+                          variant="outlined"
+                          :to="`/stack/${episodeData.episode.number}`"
+                        >
+                          Timing
+                        </v-btn>
+                      </div>
+                    </v-expansion-panel-text>
+                  </v-expansion-panel>
+                </v-expansion-panels>
+
+                <!-- Show more link -->
+                <div v-if="upcomingEpisodes.length > 5" class="text-center mt-3">
+                  <v-btn
+                    variant="text"
+                    :to="`/episodes`"
+                    append-icon="mdi-arrow-right"
+                    size="small"
+                  >
+                    View All {{ upcomingEpisodes.length }} Upcoming
+                  </v-btn>
+                </div>
+              </v-card-text>
+            </v-card>
+          </div>
+
+          <!-- Preproduction Panel -->
+          <div class="masonry-item">
+            <v-card class="elevation-4">
+              <v-card-title class="d-flex align-center bg-purple text-white">
+                <v-icon class="me-2">mdi-lightbulb-on</v-icon>
+                <span>Preproduction</span>
+              </v-card-title>
+              <v-card-text class="pa-2">
+                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/whiteboard')">
+                  <v-card-text class="d-flex align-center pa-3">
+                    <v-icon color="purple" size="32" class="me-3">mdi-notebook-edit</v-icon>
+                    <div>
+                      <div class="text-subtitle-1 font-weight-bold">Whiteboard</div>
+                      <div class="text-caption text-grey">Brainstorm ideas and links</div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/generator')">
+                  <v-card-text class="d-flex align-center pa-3">
+                    <v-icon color="purple" size="32" class="me-3">mdi-creation</v-icon>
+                    <div>
+                      <div class="text-subtitle-1 font-weight-bold">Generator</div>
+                      <div class="text-caption text-grey">AI content generation</div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+                <v-card variant="outlined" class="hover-card" @click="$router.push('/voice-meeting')">
+                  <v-card-text class="d-flex align-center pa-3">
+                    <v-icon color="purple" size="32" class="me-3">mdi-microphone</v-icon>
+                    <div>
+                      <div class="text-subtitle-1 font-weight-bold">Production Meeting</div>
+                      <div class="text-caption text-grey">Voice conference call</div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+              </v-card-text>
+            </v-card>
+          </div>
 
           <!-- System Health -->
-          <v-col cols="12" sm="6" lg="3" class="pa-1">
+          <div class="masonry-item">
             <v-card>
               <v-card-title>System Health</v-card-title>
               <v-card-text>
@@ -431,10 +424,10 @@
                 </div>
               </v-card-text>
             </v-card>
-          </v-col>
+          </div>
 
           <!-- Storage & Usage -->
-          <v-col cols="12" sm="6" lg="3" class="pa-1">
+          <div class="masonry-item">
             <v-card>
               <v-card-title>Storage & Usage</v-card-title>
               <v-card-text>
@@ -462,8 +455,8 @@
                 </div>
               </v-card-text>
             </v-card>
-          </v-col>
-        </v-row>
+          </div>
+        </div>
       </v-col>
     </v-row>
 
@@ -543,22 +536,15 @@ const fetchUpcomingEpisodes = async () => {
   }
 }
 
-// Format air date for display
-const formatAirDate = (dateString) => {
-  if (!dateString) return 'No air date set'
-
+// Format air date short (for collapsed episode rows)
+const formatAirDateShort = (dateString) => {
+  if (!dateString) return 'TBD'
   const date = new Date(dateString)
-  const options = {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
     day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
     timeZone: 'America/New_York'
-  }
-
-  return date.toLocaleDateString('en-US', options) + ' ET'
+  })
 }
 
 // Get status color for chip
@@ -611,18 +597,39 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* Allow columns to have natural height instead of equal heights */
-.dashboard-row {
-  align-items: flex-start !important;
+/* True masonry layout using CSS columns */
+.masonry-grid {
+  column-count: 4;
+  column-gap: 10px;
 }
 
-.dashboard-row > .v-col {
-  align-self: flex-start !important;
-  height: auto !important;
+.masonry-item {
+  break-inside: avoid;
+  margin-bottom: 10px;
+  display: inline-block;
+  width: 100%;
 }
 
-.dashboard-row .v-card {
-  height: 100% !important;
+.masonry-item-wide {
+  column-span: all;
+}
+
+@media (max-width: 1264px) {
+  .masonry-grid {
+    column-count: 3;
+  }
+}
+
+@media (max-width: 960px) {
+  .masonry-grid {
+    column-count: 2;
+  }
+}
+
+@media (max-width: 600px) {
+  .masonry-grid {
+    column-count: 1;
+  }
 }
 
 .hover-card {

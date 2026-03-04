@@ -187,7 +187,7 @@ export default {
     
     // Computed properties
     const wordCount = computed(() => {
-      const text = content.value.replace(/<[^>]*>/g, '').replace(/\[.*?\]/g, '');
+      const text = content.value.replace(/<[^>]*>/g, '').replace(/<!-- (?:Begin|End) Cue -->/g, '');
       return text.split(/\s+/).filter(word => word.length > 0).length;
     });
     

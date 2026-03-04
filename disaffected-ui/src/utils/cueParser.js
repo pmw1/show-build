@@ -468,7 +468,8 @@ export class CueParser {
     fieldOrder.forEach(key => {
       if (cueData[key] && key !== 'imageTag' && key !== 'imageSrc') {
         const displayKey = this.formatFieldForDisplay(key);
-        cueBlock += `[${displayKey}: ${cueData[key]}]\n`;
+        const value = key === 'quote' ? `"${cueData[key]}"` : cueData[key];
+        cueBlock += `[${displayKey}: ${value}]\n`;
       }
     });
 
@@ -480,7 +481,8 @@ export class CueParser {
           key !== 'imageSrc' &&
           cueData[key]) {
         const displayKey = this.formatFieldForDisplay(key);
-        cueBlock += `[${displayKey}: ${cueData[key]}]\n`;
+        const value = key === 'quote' ? `"${cueData[key]}"` : cueData[key];
+        cueBlock += `[${displayKey}: ${value}]\n`;
       }
     });
 

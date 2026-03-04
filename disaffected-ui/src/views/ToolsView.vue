@@ -341,110 +341,167 @@
     </v-row>
 
     <!-- Generate MP3 Modal -->
-    <v-dialog v-model="showMp3Modal" max-width="650" persistent>
+    <v-dialog v-model="showMp3Modal" max-width="900" persistent>
       <v-card>
         <v-card-title class="d-flex align-center bg-primary text-white">
           <v-icon class="me-2">mdi-music</v-icon>
           Generate MP3 from Episode Video
         </v-card-title>
-        <v-card-text class="pa-4">
-          <!-- Eligible Episodes Table -->
-          <div class="d-flex align-center mb-3">
-            <span class="text-subtitle-2 font-weight-bold">Eligible Episodes</span>
-            <v-spacer />
-            <v-btn
-              size="small"
-              variant="text"
-              prepend-icon="mdi-refresh"
-              :loading="mp3LoadingEligible"
-              @click="loadEligibleEpisodes"
-            >
-              Refresh
-            </v-btn>
-          </div>
-
-          <v-card variant="outlined" class="mb-4">
-            <div v-if="mp3LoadingEligible" class="pa-6 text-center">
-              <v-progress-circular indeterminate color="primary" size="24" />
-            </div>
-            <v-table v-else-if="mp3EligibleEpisodes.length > 0" density="compact" class="mp3-table">
-              <thead>
-                <tr>
-                  <th>Episode</th>
-                  <th>Title</th>
-                  <th>Source</th>
-                  <th>MP3</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="ep in mp3EligibleEpisodes"
-                  :key="ep.episode"
-                  :class="{ 'bg-blue-lighten-5': mp3SelectedEpisode === ep.episode }"
-                  style="cursor: pointer"
-                  @click="mp3SelectedEpisode = ep.episode"
+        <v-card-text class="pa-5">
+          <v-row>
+            <!-- Left Column: Episode Selection + Source File -->
+            <v-col cols="12" md="7">
+              <!-- Eligible Episodes Table -->
+              <div class="d-flex align-center mb-3">
+                <span class="text-subtitle-1 font-weight-bold">Select Episode</span>
+                <v-spacer />
+                <v-btn
+                  size="small"
+                  variant="text"
+                  prepend-icon="mdi-refresh"
+                  :loading="mp3LoadingEligible"
+                  @click="loadEligibleEpisodes"
                 >
-                  <td class="font-weight-bold">{{ ep.episode }}</td>
-                  <td class="text-truncate" style="max-width: 200px">{{ ep.title }}</td>
-                  <td>
-                    <v-chip size="x-small" variant="outlined">
-                      {{ ep.source_file }}
-                    </v-chip>
-                  </td>
-                  <td>
-                    <v-chip
-                      v-if="ep.mp3_exists"
-                      size="x-small"
-                      color="success"
-                      variant="flat"
-                    >
-                      {{ ep.mp3_size_mb }} MB
-                    </v-chip>
-                    <v-chip v-else size="x-small" color="warning" variant="outlined">
-                      Not generated
-                    </v-chip>
-                  </td>
-                  <td>
-                    <v-radio-group
-                      v-model="mp3SelectedEpisode"
-                      hide-details
-                      density="compact"
-                      class="ma-0 pa-0"
-                    >
-                      <v-radio :value="ep.episode" density="compact" />
-                    </v-radio-group>
-                  </td>
-                </tr>
-              </tbody>
-            </v-table>
-            <div v-else class="pa-4 text-center text-grey">
-              No episodes with master video files found
-            </div>
-          </v-card>
+                  Refresh
+                </v-btn>
+              </div>
 
-          <!-- Profile Selector -->
-          <v-select
-            v-model="mp3SelectedProfileId"
-            :items="mp3Profiles"
-            item-title="name"
-            item-value="id"
-            label="Encoding Profile"
-            variant="outlined"
-            density="comfortable"
-            class="mb-2"
-          >
-            <template v-slot:item="{ item, props: itemProps }">
-              <v-list-item v-bind="itemProps">
-                <template v-slot:subtitle>
-                  {{ item.raw.bitrate }} / {{ item.raw.sample_rate }} Hz / {{ item.raw.channels === 1 ? 'Mono' : 'Stereo' }}
-                  <span v-if="item.raw.is_default"> (default)</span>
+              <v-card variant="outlined" class="mb-4">
+                <div v-if="mp3LoadingEligible" class="pa-6 text-center">
+                  <v-progress-circular indeterminate color="primary" size="24" />
+                </div>
+                <v-table v-else-if="mp3EligibleEpisodes.length > 0" density="compact" class="mp3-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 30px"></th>
+                      <th>Episode</th>
+                      <th>Title</th>
+                      <th>MP3</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="ep in mp3EligibleEpisodes"
+                      :key="ep.episode"
+                      :class="{ 'bg-blue-lighten-5': mp3SelectedEpisode === ep.episode }"
+                      style="cursor: pointer"
+                      @click="selectEpisode(ep)"
+                    >
+                      <td>
+                        <v-radio-group
+                          v-model="mp3SelectedEpisode"
+                          hide-details
+                          density="compact"
+                          class="ma-0 pa-0"
+                        >
+                          <v-radio :value="ep.episode" density="compact" />
+                        </v-radio-group>
+                      </td>
+                      <td class="font-weight-bold">{{ ep.episode }}</td>
+                      <td class="text-truncate" style="max-width: 180px">{{ ep.title }}</td>
+                      <td>
+                        <v-chip
+                          v-if="ep.mp3_exists"
+                          size="x-small"
+                          color="success"
+                          variant="flat"
+                        >
+                          {{ ep.mp3_size_mb }} MB
+                        </v-chip>
+                        <v-chip v-else size="x-small" color="warning" variant="outlined">
+                          None
+                        </v-chip>
+                      </td>
+                    </tr>
+                  </tbody>
+                </v-table>
+                <div v-else class="pa-4 text-center text-grey">
+                  No episodes with master video files found
+                </div>
+              </v-card>
+
+              <!-- Source Video File Selector -->
+              <div v-if="mp3SelectedEpisode && selectedEpisodeData">
+                <span class="text-subtitle-2 font-weight-bold d-block mb-2">Source Video File</span>
+                <v-select
+                  v-model="mp3SelectedSourceFile"
+                  :items="selectedEpisodeData.candidate_files"
+                  item-title="filename"
+                  item-value="filename"
+                  variant="outlined"
+                  density="comfortable"
+                  class="mb-1"
+                  prepend-inner-icon="mdi-video-outline"
+                >
+                  <template v-slot:selection="{ item }">
+                    <span class="text-body-2">{{ item.raw.filename }}</span>
+                    <v-chip size="x-small" class="ml-2" variant="outlined">{{ item.raw.size_mb }} MB</v-chip>
+                  </template>
+                  <template v-slot:item="{ item, props: itemProps }">
+                    <v-list-item v-bind="itemProps">
+                      <template v-slot:prepend>
+                        <v-icon size="small">mdi-filmstrip</v-icon>
+                      </template>
+                      <template v-slot:subtitle>
+                        {{ item.raw.path }} &mdash; {{ item.raw.size_mb }} MB
+                      </template>
+                    </v-list-item>
+                  </template>
+                </v-select>
+                <p class="text-caption text-grey-darken-1 mt-n1 mb-3">
+                  {{ selectedEpisodeData.exports_path }}/{{ mp3SelectedSourceFile }}
+                </p>
+              </div>
+            </v-col>
+
+            <!-- Right Column: Thumbnail + Profile + Actions -->
+            <v-col cols="12" md="5">
+              <!-- Thumbnail Placeholder -->
+              <span class="text-subtitle-2 font-weight-bold d-block mb-2">Episode Thumbnail</span>
+              <v-card variant="outlined" class="mb-4 d-flex align-center justify-center" style="height: 160px; background: #f5f5f5;">
+                <div class="text-center text-grey">
+                  <v-icon size="48" color="grey-lighten-1">mdi-image-outline</v-icon>
+                  <p class="text-caption mt-1">Thumbnail preview<br>(coming soon)</p>
+                </div>
+              </v-card>
+
+              <!-- Encoding Profile Selector -->
+              <span class="text-subtitle-2 font-weight-bold d-block mb-2">Encoding Profile</span>
+              <v-select
+                v-model="mp3SelectedProfileId"
+                :items="mp3Profiles"
+                item-title="name"
+                item-value="id"
+                variant="outlined"
+                density="comfortable"
+                class="mb-1"
+                prepend-inner-icon="mdi-tune-variant"
+              >
+                <template v-slot:selection="{ item }">
+                  <span>{{ item.raw.name }}</span>
+                  <v-chip v-if="item.raw.is_default" size="x-small" color="primary" class="ml-2" variant="flat">default</v-chip>
                 </template>
-              </v-list-item>
-            </template>
-          </v-select>
+                <template v-slot:item="{ item, props: itemProps }">
+                  <v-list-item v-bind="itemProps">
+                    <template v-slot:prepend>
+                      <v-icon size="small" :color="item.raw.is_default ? 'primary' : undefined">
+                        {{ item.raw.is_default ? 'mdi-star' : 'mdi-tune-variant' }}
+                      </v-icon>
+                    </template>
+                    <template v-slot:subtitle>
+                      {{ item.raw.bitrate }} / {{ item.raw.sample_rate }} Hz / {{ item.raw.channels === 1 ? 'Mono' : 'Stereo' }}
+                      {{ item.raw.quality != null ? '(VBR)' : '(CBR)' }}
+                    </template>
+                  </v-list-item>
+                </template>
+              </v-select>
+              <p v-if="selectedProfileDetail" class="text-caption text-grey-darken-1 mt-n1 mb-3">
+                {{ selectedProfileDetail }}
+              </p>
+            </v-col>
+          </v-row>
 
-          <!-- Progress / Status -->
+          <!-- Progress / Status (full width) -->
           <v-alert
             v-if="mp3TaskStatus === 'running'"
             type="info"
@@ -495,7 +552,7 @@
             color="primary"
             variant="flat"
             :loading="mp3TaskStatus === 'running'"
-            :disabled="!mp3SelectedEpisode || !mp3SelectedProfileId || mp3TaskStatus === 'running'"
+            :disabled="!mp3SelectedEpisode || !mp3SelectedProfileId || !mp3SelectedSourceFile || mp3TaskStatus === 'running'"
             @click="startMp3Generation"
           >
             <v-icon class="me-1">mdi-music</v-icon>
@@ -564,12 +621,14 @@
 </template>
 
 <script setup>
-import { ref, inject, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import axios from 'axios'
 import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'
 import EpisodeNameNormalizerModal from '@/components/EpisodeNameNormalizerModal.vue'
 
-// Inject axios
-const axios = inject('axios')
+const authHeaders = () => ({
+  headers: { Authorization: `Bearer ${localStorage.getItem('auth-token')}` }
+})
 
 // Reactive data
 const showSuccessMessage = ref(false)
@@ -586,6 +645,7 @@ const mp3EligibleEpisodes = ref([])
 const mp3LoadingEligible = ref(false)
 const mp3Profiles = ref([])
 const mp3SelectedEpisode = ref(null)
+const mp3SelectedSourceFile = ref(null)
 const mp3SelectedProfileId = ref(null)
 const mp3TaskId = ref(null)
 const mp3TaskStatus = ref(null) // null, 'running', 'completed', 'failed'
@@ -594,10 +654,32 @@ const mp3TaskResult = ref(null)
 const mp3TaskError = ref(null)
 let mp3PollTimer = null
 
+// Computed: data object for the currently selected episode
+const selectedEpisodeData = computed(() => {
+  if (!mp3SelectedEpisode.value) return null
+  return mp3EligibleEpisodes.value.find(ep => ep.episode === mp3SelectedEpisode.value) || null
+})
+
+// Computed: profile detail text for the selected profile
+const selectedProfileDetail = computed(() => {
+  if (!mp3SelectedProfileId.value) return null
+  const profile = mp3Profiles.value.find(p => p.id === mp3SelectedProfileId.value)
+  if (!profile) return null
+  const mode = profile.quality != null ? `VBR Q${profile.quality}` : `CBR ${profile.bitrate}`
+  const norm = profile.normalize_audio ? ', Loudness Normalized' : ''
+  return `${mode}, ${profile.sample_rate} Hz, ${profile.channels === 1 ? 'Mono' : 'Stereo'}${norm}`
+})
+
+// Select episode and auto-pick preferred source file
+const selectEpisode = (ep) => {
+  mp3SelectedEpisode.value = ep.episode
+  mp3SelectedSourceFile.value = ep.source_file
+}
+
 const loadEligibleEpisodes = async () => {
   mp3LoadingEligible.value = true
   try {
-    const response = await axios.get('/tools/generate-mp3/eligible')
+    const response = await axios.get('/api/tools/generate-mp3/eligible', authHeaders())
     mp3EligibleEpisodes.value = response.data.eligible || []
   } catch (error) {
     console.error('Failed to load eligible episodes:', error)
@@ -608,8 +690,9 @@ const loadEligibleEpisodes = async () => {
 
 const loadMp3Profiles = async () => {
   try {
-    const response = await axios.get('/settings/mp3-profiles/', {
-      params: { is_active: true }
+    const response = await axios.get('/api/settings/mp3-profiles/', {
+      params: { is_active: true },
+      ...authHeaders()
     })
     mp3Profiles.value = response.data || []
     // Select default profile
@@ -625,7 +708,7 @@ const loadMp3Profiles = async () => {
 }
 
 const startMp3Generation = async () => {
-  if (!mp3SelectedEpisode.value || !mp3SelectedProfileId.value) return
+  if (!mp3SelectedEpisode.value || !mp3SelectedProfileId.value || !mp3SelectedSourceFile.value) return
 
   mp3TaskStatus.value = 'running'
   mp3TaskProgress.value = 0
@@ -633,10 +716,11 @@ const startMp3Generation = async () => {
   mp3TaskError.value = null
 
   try {
-    const response = await axios.post('/tools/generate-mp3', {
+    const response = await axios.post('/api/tools/generate-mp3', {
       episode: mp3SelectedEpisode.value,
-      profile_id: mp3SelectedProfileId.value
-    })
+      profile_id: mp3SelectedProfileId.value,
+      source_file: mp3SelectedSourceFile.value
+    }, authHeaders())
     mp3TaskId.value = response.data.task_id
     startMp3Polling()
   } catch (error) {
@@ -661,7 +745,7 @@ const pollMp3Status = async () => {
   if (!mp3TaskId.value) return
 
   try {
-    const response = await axios.get(`/tools/generate-mp3/status/${mp3TaskId.value}`)
+    const response = await axios.get(`/api/tools/generate-mp3/status/${mp3TaskId.value}`, authHeaders())
     const data = response.data
 
     if (data.status === 'running' || data.status === 'pending') {
@@ -700,7 +784,6 @@ const closeMp3Modal = () => {
 }
 
 // Load data when MP3 modal opens
-// Load data when MP3 modal opens
 watch(showMp3Modal, (val) => {
   if (val) {
     loadEligibleEpisodes()
@@ -724,7 +807,7 @@ const generateHostScript = async () => {
 
   generatingScript.value = true
   try {
-    const response = await axios.post(`/scripts/host/${scriptEpisodeNumber.value}`)
+    const response = await axios.post(`/api/scripts/host/${scriptEpisodeNumber.value}`, {}, authHeaders())
 
     if (response.data.success) {
       successMessage.value = `Host script generated: ${response.data.output_path}`

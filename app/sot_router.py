@@ -25,7 +25,8 @@ from celery_app import celery_app
 from services.ffmpeg_tasks import process_sot_video, process_sot_video_multi_phase
 from auth.router import get_current_user_or_key
 from database import get_db
-from models_v2 import SOTProcessingJob
+from models_v2 import SOTProcessingJob, CeleryJobLog
+from celery_jobs_router import register_celery_job
 from models_assetid import AssetIDRegistry, AssetRelationship
 from platform_utils import get_media_root  # Cross-platform path handling
 
@@ -506,6 +507,7 @@ async def process_sot_multi_phase_endpoint(
         )
 
         job.celery_task_id = task.id
+        register_celery_job(db, task.id, "services.ffmpeg_tasks.process_sot_video_multi_phase", f"SOT: {request.slug or request.temp_job_id}", "sot", request.episode, "media")
         db.commit()
 
         return SOTUploadResponse(
@@ -993,7 +995,7 @@ async def reprocess_sot_by_asset_id(
             # Find all files matching the slug pattern
             patterns = [
                 f"{slug}.*",  # Main files (video, audio)
-                f"{slug}-thumb*.jpg",  # Thumbnails
+                f"{slug}-thumb*.png",  # Thumbnails
                 f"{slug}-*.mp4",  # Clip derivatives if any
                 f"{slug}-*.mp3"   # Audio derivatives if any
             ]

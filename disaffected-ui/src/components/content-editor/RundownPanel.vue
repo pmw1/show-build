@@ -1,7 +1,7 @@
 <template>
   <div
     :class="['rundown-panel', panelWidth === 'narrow' ? 'narrow' : 'wide']"
-    :style="{ ...rundownPanelCssVars, width: panelWidthValue }"
+    :style="{ ...rundownPanelCssVars, width: panelWidthValue, height: panelHeightValue }"
   >
     <!-- Tab-shaped control buttons on right edge -->
     <div class="tab-controls-right">
@@ -713,6 +713,10 @@ export default {
       default: 'wide',
       validator: (value) => ['narrow', 'wide'].includes(value)
     },
+    panelHeight: {
+      type: Number,
+      default: null
+    },
     items: {
       type: Array,
       default: () => []
@@ -840,6 +844,9 @@ export default {
     },
     panelWidthValue() {
       return this.panelWidth === 'narrow' ? '300px' : '520px'
+    },
+    panelHeightValue() {
+      return this.panelHeight ? `${this.panelHeight}px` : '100vh'
     },
     // Get needs-attention color from settings for flagged items
     needsAttentionColor() {
@@ -2791,7 +2798,8 @@ export default {
 .rundown-panel {
   position: sticky !important;
   top: 0 !important;
-  height: 100vh; /* Full viewport height - reach bottom no matter what */
+  /* height is set dynamically via inline style from panelHeight prop */
+  max-height: 100vh;
   border-right: none; /* Remove border */
   overflow-y: auto; /* Allow internal scrolling for long rundowns */
   overflow-x: visible; /* Allow items to extend beyond right edge */

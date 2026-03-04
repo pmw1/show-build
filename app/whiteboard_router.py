@@ -38,6 +38,7 @@ class WhiteboardItemCreate(BaseModel):
     caption: Optional[str] = None
     width: Optional[int] = None
     z_index: int = 1
+    collapsed: bool = False
     # Link preview fields
     preview_title: Optional[str] = None
     preview_description: Optional[str] = None
@@ -61,6 +62,7 @@ class WhiteboardItemResponse(BaseModel):
     caption: Optional[str] = None
     width: Optional[int] = None
     z_index: int
+    collapsed: bool = False
     # Link preview fields
     preview_title: Optional[str] = None
     preview_description: Optional[str] = None
@@ -85,11 +87,20 @@ class WhiteboardResponse(BaseModel):
         from_attributes = True
 
 
+class NodeLinkSave(BaseModel):
+    source_client_id: int  # Client-side card ID for source
+    target_client_id: int  # Client-side card ID for target
+    relationship_type: Optional[str] = None
+    label: Optional[str] = None
+    color: Optional[str] = "#1976d2"
+
+
 class WhiteboardSaveRequest(BaseModel):
     episode_number: Optional[str] = None
     workspace_id: Optional[str] = None
     name: Optional[str] = None
     items: List[WhiteboardItemCreate]
+    node_links: Optional[List[NodeLinkSave]] = None
 
 
 @router.post("/generate-workspace-id")
@@ -178,6 +189,7 @@ async def get_whiteboard(
     """
     Get whiteboard by episode number or workspace ID.
     Creates new whiteboard if it doesn't exist.
+    Whiteboards are shared per-episode (no user filter).
     """
     user_id = current_user.get("user_id")
 
@@ -186,13 +198,11 @@ async def get_whiteboard(
 
     if is_episode:
         whiteboard = db.query(Whiteboard).filter(
-            Whiteboard.episode_number == identifier,
-            Whiteboard.created_by == user_id
+            Whiteboard.episode_number == identifier
         ).first()
     else:
         whiteboard = db.query(Whiteboard).filter(
-            Whiteboard.workspace_id == identifier,
-            Whiteboard.created_by == user_id
+            Whiteboard.workspace_id == identifier
         ).first()
 
     # Create new whiteboard if doesn't exist
@@ -207,7 +217,35 @@ async def get_whiteboard(
         db.refresh(whiteboard)
         logger.info(f"Created new whiteboard for {'episode ' if is_episode else 'workspace '}{identifier}")
 
-    return WhiteboardResponse.from_orm(whiteboard)
+    # Load node links for this whiteboard
+    links = db.query(WhiteboardNodeLink).filter(
+        WhiteboardNodeLink.whiteboard_id == whiteboard.id
+    ).all()
+
+    # Build item ID-to-index map for frontend mapping
+    item_id_to_index = {}
+    for idx, item in enumerate(whiteboard.items):
+        item_id_to_index[item.id] = idx
+
+    link_data = []
+    for link in links:
+        source_idx = item_id_to_index.get(link.source_item_id)
+        target_idx = item_id_to_index.get(link.target_item_id)
+        if source_idx is not None and target_idx is not None:
+            link_data.append({
+                "id": link.id,
+                "source_index": source_idx,
+                "target_index": target_idx,
+                "relationship_type": link.relationship_type,
+                "label": link.label,
+                "color": link.color
+            })
+
+    response = WhiteboardResponse.from_orm(whiteboard)
+    # Add links to response dict
+    response_dict = response.dict()
+    response_dict["node_links"] = link_data
+    return response_dict
 
 
 @router.post("/{identifier}/save")
@@ -220,6 +258,7 @@ async def save_whiteboard(
     """
     Save whiteboard items (bulk save - replaces all items).
     Auto-creates whiteboard if it doesn't exist.
+    Whiteboards are shared per-episode (no user filter).
     """
     user_id = current_user.get("user_id")
 
@@ -228,13 +267,11 @@ async def save_whiteboard(
 
     if is_episode:
         whiteboard = db.query(Whiteboard).filter(
-            Whiteboard.episode_number == identifier,
-            Whiteboard.created_by == user_id
+            Whiteboard.episode_number == identifier
         ).first()
     else:
         whiteboard = db.query(Whiteboard).filter(
-            Whiteboard.workspace_id == identifier,
-            Whiteboard.created_by == user_id
+            Whiteboard.workspace_id == identifier
         ).first()
 
     # Create new whiteboard if doesn't exist
@@ -252,13 +289,19 @@ async def save_whiteboard(
         if data.name:
             whiteboard.name = data.name
 
+    # Delete existing links first (FK references items)
+    db.query(WhiteboardNodeLink).filter(
+        WhiteboardNodeLink.whiteboard_id == whiteboard.id
+    ).delete()
+
     # Delete existing items
     db.query(WhiteboardItem).filter(
         WhiteboardItem.whiteboard_id == whiteboard.id
     ).delete()
 
-    # Add new items
-    for item_data in data.items:
+    # Add new items and build client-ID-to-DB-ID map
+    client_id_to_db_id = {}
+    for idx, item_data in enumerate(data.items):
         item = WhiteboardItem(
             whiteboard_id=whiteboard.id,
             item_type=item_data.item_type,
@@ -277,19 +320,42 @@ async def save_whiteboard(
             preview_image=item_data.preview_image,
             preview_domain=item_data.preview_domain,
             preview_favicon=item_data.preview_favicon,
-            social_metadata=item_data.social_metadata
+            social_metadata=item_data.social_metadata,
+            collapsed=item_data.collapsed
         )
         db.add(item)
+        db.flush()  # Get the DB-assigned ID
+        # Store mapping: use array index as the client reference key
+        client_id_to_db_id[idx] = item.id
+
+    # Save node links using client-ID-to-DB-ID mapping
+    link_count = 0
+    if data.node_links:
+        for link_data in data.node_links:
+            source_db_id = client_id_to_db_id.get(link_data.source_client_id)
+            target_db_id = client_id_to_db_id.get(link_data.target_client_id)
+            if source_db_id and target_db_id:
+                node_link = WhiteboardNodeLink(
+                    whiteboard_id=whiteboard.id,
+                    source_item_id=source_db_id,
+                    target_item_id=target_db_id,
+                    relationship_type=link_data.relationship_type,
+                    label=link_data.label,
+                    color=link_data.color or "#1976d2"
+                )
+                db.add(node_link)
+                link_count += 1
 
     db.commit()
     db.refresh(whiteboard)
 
-    logger.info(f"Saved {len(data.items)} items to whiteboard {identifier}")
+    logger.info(f"Saved {len(data.items)} items and {link_count} links to whiteboard {identifier}")
 
     return {
         "success": True,
         "whiteboard_id": whiteboard.id,
-        "item_count": len(data.items)
+        "item_count": len(data.items),
+        "link_count": link_count
     }
 
 
@@ -302,20 +368,17 @@ async def delete_whiteboard(
     """
     Delete whiteboard and all its items.
     """
-    user_id = current_user.get("user_id")
 
     # Check if identifier is episode number or workspace ID
     is_episode = identifier.isdigit() and len(identifier) == 4
 
     if is_episode:
         whiteboard = db.query(Whiteboard).filter(
-            Whiteboard.episode_number == identifier,
-            Whiteboard.created_by == user_id
+            Whiteboard.episode_number == identifier
         ).first()
     else:
         whiteboard = db.query(Whiteboard).filter(
-            Whiteboard.workspace_id == identifier,
-            Whiteboard.created_by == user_id
+            Whiteboard.workspace_id == identifier
         ).first()
 
     if not whiteboard:

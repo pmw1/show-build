@@ -1,5 +1,5 @@
 <template>
-  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="1200" persistent scrollable>
+  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="1200" scrollable>
     <v-card class="sot-modal-card">
       <v-card-title class="d-flex align-center bg-orange-darken-2 text-white">
         <v-icon class="mr-2">mdi-video-outline</v-icon>
@@ -388,24 +388,20 @@ export default {
       ]
     }
   },
-  mounted() {
-    // Add ESC key listener
-    document.addEventListener('keydown', this.handleKeydown)
+  watch: {
+    show(newVal) {
+      if (!newVal) {
+        this.resetForm()
+      }
+    }
   },
   beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown)
     // Clean up video URL
     if (this.videoPreviewUrl) {
       URL.revokeObjectURL(this.videoPreviewUrl)
     }
   },
   methods: {
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        this.cancel()
-      }
-    },
-
     // Video handling methods
     handleVideoSelect(event) {
       const file = event.target.files[0]

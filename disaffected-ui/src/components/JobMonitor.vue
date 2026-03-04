@@ -1,6 +1,6 @@
 <template>
   <div class="job-monitor">
-    <!-- Job Monitor Icon Button -->
+    <!-- Celery Jobs Icon Button -->
     <v-badge
       :content="activeJobCount"
       :color="badgeColor"
@@ -17,26 +17,25 @@
         </v-icon>
         <v-tooltip activator="parent" location="bottom">
           {{ activeJobCount }} active job{{ activeJobCount !== 1 ? 's' : '' }}
-          <span v-if="stalledJobCount > 0"> ({{ stalledJobCount }} stalled)</span>
         </v-tooltip>
       </v-btn>
     </v-badge>
 
-    <!-- Job Monitor Panel (teleported to body to escape stacking context) -->
+    <!-- Celery Jobs Panel -->
     <Teleport to="body">
       <v-navigation-drawer
         v-model="panelOpen"
         temporary
         location="right"
-        width="450"
+        width="480"
         class="job-panel"
         :scrim="true"
         style="position: fixed !important; z-index: 9000 !important;"
       >
       <v-card elevation="0">
         <v-card-title class="d-flex align-center bg-primary text-white">
-          <v-icon left>mdi-briefcase-outline</v-icon>
-          <span class="ml-2">Job Monitor</span>
+          <v-icon start>mdi-briefcase-outline</v-icon>
+          <span class="ml-2">Celery Jobs</span>
           <v-spacer></v-spacer>
           <v-btn
             icon
@@ -56,7 +55,7 @@
               v-if="activeJobCount > 0"
               size="small"
               class="ml-2"
-              :color="hasIssues ? 'warning' : 'primary'"
+              color="white"
             >
               {{ activeJobCount }}
             </v-chip>
@@ -74,77 +73,62 @@
           </v-tab>
         </v-tabs>
 
-        <v-card-text class="pa-0" style="max-height: calc(100vh - 200px); overflow-y: auto;">
+        <v-card-text class="pa-0" style="max-height: calc(100vh - 250px); overflow-y: auto;">
           <v-tabs-window v-model="activeTab">
             <!-- Active Jobs Tab -->
             <v-tabs-window-item value="active">
               <v-list v-if="activeJobs.length > 0" density="compact">
                 <v-list-item
                   v-for="job in activeJobs"
-                  :key="job.job_id"
+                  :key="job.task_id"
                   class="job-item"
                 >
                   <template v-slot:prepend>
                     <v-icon
                       :color="getStatusColor(job)"
-                      :class="{ 'rotating': job.status === 'processing' && !job.is_stalled }"
+                      :class="{ 'rotating': job.status === 'running' }"
                     >
                       {{ getJobIcon(job) }}
                     </v-icon>
                   </template>
 
-                  <v-list-item-title>
-                    <strong>{{ job.slug }}</strong>
+                  <v-list-item-title class="d-flex align-center">
+                    <strong>{{ job.display_name }}</strong>
                     <v-chip
                       size="x-small"
                       class="ml-2"
                       :color="getStatusColor(job)"
                     >
-                      {{ job.is_stalled ? 'STALLED' : job.status }}
+                      {{ job.status }}
+                    </v-chip>
+                    <v-chip
+                      size="x-small"
+                      class="ml-1"
+                      :color="getCategoryColor(job.category)"
+                      variant="outlined"
+                    >
+                      {{ job.category }}
                     </v-chip>
                   </v-list-item-title>
 
                   <v-list-item-subtitle>
-                    <div>Episode {{ job.episode }} • {{ getPhaseDisplayName(job.current_phase) }}</div>
+                    <div v-if="job.episode">Episode {{ job.episode }}</div>
+                    <div v-if="job.queue" class="text-caption">Queue: {{ job.queue }}</div>
+                    <v-progress-linear
+                      v-if="job.progress != null && job.status === 'running'"
+                      :model-value="job.progress"
+                      color="primary"
+                      class="my-1"
+                      height="6"
+                      rounded
+                    ></v-progress-linear>
+                    <div v-if="job.stage" class="text-caption text-primary font-weight-medium">
+                      {{ job.stage }}
+                    </div>
                     <div class="text-caption mt-1">
-                      Started {{ getTimeAgo(job.created_at) }} • Updated {{ getTimeAgo(job.updated_at) }}
+                      Started {{ getTimeAgo(job.created_at) }}
                     </div>
-                    <div v-if="job.error_message" class="error-box mt-2 pa-2">
-                      <div class="error-title">
-                        <v-icon size="small" color="error">mdi-alert-circle</v-icon>
-                        <strong class="ml-1">Error:</strong>
-                      </div>
-                      <div class="error-message">{{ job.error_message }}</div>
-                    </div>
-                    <v-expansion-panels v-if="job.error_message || job.is_stalled" class="mt-2" density="compact">
-                      <v-expansion-panel>
-                        <v-expansion-panel-title class="text-caption">
-                          Debug Info
-                        </v-expansion-panel-title>
-                        <v-expansion-panel-text class="text-caption">
-                          <div><strong>Job ID:</strong> {{ job.job_id }}</div>
-                          <div><strong>Asset ID:</strong> {{ job.asset_id }}</div>
-                          <div><strong>Celery Task:</strong> {{ job.celery_task_id }}</div>
-                          <div><strong>Phase:</strong> {{ job.current_phase }}</div>
-                          <div><strong>Created:</strong> {{ new Date(job.created_at).toLocaleString() }}</div>
-                          <div><strong>Updated:</strong> {{ new Date(job.updated_at).toLocaleString() }}</div>
-                        </v-expansion-panel-text>
-                      </v-expansion-panel>
-                    </v-expansion-panels>
                   </v-list-item-subtitle>
-
-                  <template v-slot:append>
-                    <v-btn
-                      v-if="job.is_stalled"
-                      icon
-                      size="small"
-                      color="warning"
-                      @click="markAsFailedAndRefresh(job)"
-                    >
-                      <v-icon>mdi-alert-circle</v-icon>
-                      <v-tooltip activator="parent">Mark as failed</v-tooltip>
-                    </v-btn>
-                  </template>
                 </v-list-item>
               </v-list>
 
@@ -159,7 +143,7 @@
               <v-list v-if="recentJobs.length > 0" density="compact">
                 <v-list-item
                   v-for="job in recentJobs"
-                  :key="job.job_id"
+                  :key="job.task_id"
                   class="job-item"
                 >
                   <template v-slot:prepend>
@@ -168,8 +152,8 @@
                     </v-icon>
                   </template>
 
-                  <v-list-item-title>
-                    <strong>{{ job.slug }}</strong>
+                  <v-list-item-title class="d-flex align-center">
+                    <strong>{{ job.display_name }}</strong>
                     <v-chip
                       size="x-small"
                       class="ml-2"
@@ -177,35 +161,24 @@
                     >
                       {{ job.status }}
                     </v-chip>
+                    <v-chip
+                      size="x-small"
+                      class="ml-1"
+                      :color="getCategoryColor(job.category)"
+                      variant="outlined"
+                    >
+                      {{ job.category }}
+                    </v-chip>
                   </v-list-item-title>
 
                   <v-list-item-subtitle>
-                    <div>Episode {{ job.episode }}</div>
+                    <div v-if="job.episode">Episode {{ job.episode }}</div>
+                    <div v-if="job.result_summary" class="text-caption mt-1 result-text">
+                      {{ job.result_summary }}
+                    </div>
                     <div class="text-caption mt-1">
-                      Completed {{ getTimeAgo(job.updated_at) }}
+                      {{ getTimeAgo(job.updated_at) }}
                     </div>
-                    <div v-if="job.error_message" class="error-box mt-2 pa-2">
-                      <div class="error-title">
-                        <v-icon size="small" color="error">mdi-alert-circle</v-icon>
-                        <strong class="ml-1">Error:</strong>
-                      </div>
-                      <div class="error-message">{{ job.error_message }}</div>
-                    </div>
-                    <v-expansion-panels v-if="job.error_message" class="mt-2" density="compact">
-                      <v-expansion-panel>
-                        <v-expansion-panel-title class="text-caption">
-                          Debug Info
-                        </v-expansion-panel-title>
-                        <v-expansion-panel-text class="text-caption">
-                          <div><strong>Job ID:</strong> {{ job.job_id }}</div>
-                          <div><strong>Asset ID:</strong> {{ job.asset_id }}</div>
-                          <div><strong>Celery Task:</strong> {{ job.celery_task_id }}</div>
-                          <div><strong>Phase:</strong> {{ job.current_phase }}</div>
-                          <div><strong>Created:</strong> {{ new Date(job.created_at).toLocaleString() }}</div>
-                          <div><strong>Completed:</strong> {{ new Date(job.updated_at).toLocaleString() }}</div>
-                        </v-expansion-panel-text>
-                      </v-expansion-panel>
-                    </v-expansion-panels>
                   </v-list-item-subtitle>
                 </v-list-item>
               </v-list>
@@ -230,9 +203,20 @@
           <v-spacer></v-spacer>
           <v-btn
             size="small"
+            variant="text"
+            color="error"
+            @click="handleClear"
+            :disabled="recentJobs.length === 0"
+          >
+            <v-icon start>mdi-delete-sweep</v-icon>
+            Clear
+          </v-btn>
+          <v-btn
+            size="small"
+            variant="text"
             @click="fetchActiveJobs(); fetchRecentJobs();"
           >
-            <v-icon left>mdi-refresh</v-icon>
+            <v-icon start>mdi-refresh</v-icon>
             Refresh
           </v-btn>
         </v-card-actions>
@@ -258,16 +242,16 @@ export default {
       recentJobs,
       isPolling,
       activeJobCount,
-      stalledJobCount,
       recentFailureCount,
       hasIssues,
       fetchActiveJobs,
       fetchRecentJobs,
+      clearJobs,
       startPolling,
       stopPolling,
       getTimeAgo,
-      getPhaseDisplayName,
-      getStatusColor
+      getStatusColor,
+      getCategoryColor
     } = useJobMonitor()
 
     const togglePanel = () => {
@@ -275,22 +259,19 @@ export default {
     }
 
     const badgeColor = computed(() => {
-      if (stalledJobCount.value > 0) return 'warning'
+      if (hasIssues.value) return 'warning'
       if (activeJobCount.value > 0) return 'primary'
       return 'grey'
     })
 
     const getJobIcon = (job) => {
-      if (job.is_stalled) return 'mdi-alert-circle'
-      if (job.status === 'queued') return 'mdi-clock-outline'
-      if (job.status === 'processing') return 'mdi-cog'
+      if (job.status === 'pending') return 'mdi-clock-outline'
+      if (job.status === 'running') return 'mdi-cog'
       return 'mdi-help-circle'
     }
 
-    const markAsFailedAndRefresh = async (job) => {
-      // TODO: Add API endpoint to mark job as failed
-      console.log('Mark as failed:', job.job_id)
-      await fetchActiveJobs()
+    const handleClear = async () => {
+      await clearJobs()
     }
 
     onMounted(() => {
@@ -302,29 +283,24 @@ export default {
     })
 
     return {
-      // State
       panelOpen,
       activeTab,
       activeJobs,
       recentJobs,
       isPolling,
-
-      // Computed
       activeJobCount,
-      stalledJobCount,
       recentFailureCount,
       hasIssues,
       badgeColor,
-
-      // Methods
       togglePanel,
       fetchActiveJobs,
       fetchRecentJobs,
+      clearJobs,
       getTimeAgo,
-      getPhaseDisplayName,
       getStatusColor,
+      getCategoryColor,
       getJobIcon,
-      markAsFailedAndRefresh
+      handleClear
     }
   }
 }
@@ -347,31 +323,13 @@ export default {
   border-bottom: none;
 }
 
-.error-text {
-  color: #f44336;
-  font-size: 0.75rem;
+.result-text {
+  color: rgba(0, 0, 0, 0.6);
   font-style: italic;
-}
-
-.error-box {
-  background-color: rgba(244, 67, 54, 0.1);
-  border-left: 3px solid #f44336;
-  border-radius: 4px;
-}
-
-.error-title {
-  display: flex;
-  align-items: center;
-  font-size: 0.75rem;
-  margin-bottom: 4px;
-}
-
-.error-message {
-  font-size: 0.75rem;
-  color: #d32f2f;
-  font-family: monospace;
-  white-space: pre-wrap;
-  word-break: break-word;
+  max-width: 350px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes rotate {

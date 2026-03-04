@@ -432,9 +432,9 @@ def process_sot_video(
             task_id=task_id
         )
 
-        # 2. Generate thumbnail at 1 second mark (JPEG format)
+        # 2. Generate thumbnail at 1 second mark (PNG format)
         self.update_state(state='PROGRESS', meta={'stage': 'Generating thumbnail', 'progress': 30})
-        thumbnail_path = episode_dir / f"{base_name}-thumb.jpg"
+        thumbnail_path = episode_dir / f"{base_name}-thumb.png"
         thumbnail_cmd = [
             ffmpeg, "-y",
             "-ss", "1",
@@ -609,10 +609,10 @@ def extract_audio_from_video(self, video_path: str, output_path: str):
 
 @shared_task(bind=True, queue='media', name='services.ffmpeg_tasks.generate_episode_mp3',
              soft_time_limit=3600, time_limit=7200)
-def generate_episode_mp3(self, episode: str, profile_id: int = None, bitrate: str = "192k"):
+def generate_episode_mp3(self, episode: str, profile_id: int = None, bitrate: str = "192k", source_file: str = None):
     """Generate MP3 from master episode video file.
 
-    Supports .mov and .mp4 source files in the episode exports directory.
+    Supports .mov, .mp4, and .avi source files in the episode exports directory.
     Reports progress via celery state updates for UI polling.
 
     When profile_id is provided, encoding parameters are loaded from the
@@ -622,6 +622,7 @@ def generate_episode_mp3(self, episode: str, profile_id: int = None, bitrate: st
         episode: Episode number string (e.g. "0261")
         profile_id: Optional database profile ID to load encoding settings from
         bitrate: Fallback MP3 bitrate if no profile_id (default "192k")
+        source_file: Optional specific source filename to use (e.g. "0261.avi")
     """
     # Load profile settings from database if profile_id provided
     profile_settings = None
@@ -661,13 +662,21 @@ def generate_episode_mp3(self, episode: str, profile_id: int = None, bitrate: st
     media_root = get_media_root()
     exports_dir = os.path.join(media_root, "episodes", episode, "exports")
 
-    # Find source video (.mov preferred, then .mp4, then .avi)
+    # Use specific source file if provided, otherwise auto-detect
     source_path = None
-    for ext in [".mov", ".mp4", ".avi"]:
-        candidate = os.path.join(exports_dir, f"{episode}{ext}")
+    if source_file:
+        candidate = os.path.join(exports_dir, source_file)
         if os.path.isfile(candidate):
             source_path = candidate
-            break
+        else:
+            raise FileNotFoundError(f"Specified source file not found: {source_file}")
+    else:
+        # Find source video (.mov preferred, then .mp4, then .avi)
+        for ext in [".mov", ".mp4", ".avi"]:
+            candidate = os.path.join(exports_dir, f"{episode}{ext}")
+            if os.path.isfile(candidate):
+                source_path = candidate
+                break
 
     if not source_path:
         raise FileNotFoundError(f"No source video found for episode {episode} in {exports_dir}")
@@ -1449,10 +1458,10 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
     # PHASE 3: Skip (no trimming needed for already-extracted clips)
     phase3_output = phase2_output
 
-    # PHASE 4: Generate thumbnails (JPEG) and MP3
+    # PHASE 4: Generate thumbnails (PNG) and MP3
     # Generate 1 thumbnail (middle of clip)
     thumb_time = clip_duration / 2
-    thumb_file = working_dir / f"clip{clip_index}_thumb.jpg"
+    thumb_file = working_dir / f"clip{clip_index}_thumb.png"
     thumb_cmd = [
         ffmpeg, "-y",
         "-ss", str(thumb_time),
@@ -1496,7 +1505,7 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
     final_thumb_dir.mkdir(parents=True, exist_ok=True)
 
     final_video = final_video_dir / f"{normalized_clip_slug}.mp4"
-    final_thumb = final_thumb_dir / f"{normalized_clip_slug}-thumb.jpg"
+    final_thumb = final_thumb_dir / f"{normalized_clip_slug}-thumb.png"
     final_audio = final_video_dir / f"{normalized_clip_slug}.mp3"
 
     import shutil
@@ -1510,7 +1519,7 @@ def _process_single_clip(clip_file, clip_slug, clip_asset_id, episode, working_d
         "asset_id": clip_asset_id,
         "slug": clip_slug,
         "media_url": f"/episodes/{episode}/assets/video/{normalized_clip_slug}.mp4",
-        "thumbnail_url": f"/episodes/{episode}/assets/thumbnails/{normalized_clip_slug}-thumb.jpg",
+        "thumbnail_url": f"/episodes/{episode}/assets/thumbnails/{normalized_clip_slug}-thumb.png",
         "audio_url": f"/episodes/{episode}/assets/video/{normalized_clip_slug}.mp3",
         "duration": duration_formatted,
         "transcription": transcription_text,
@@ -2643,10 +2652,10 @@ def process_sot_video_multi_phase(
         phase4_thumbs = []
         thumbnail_data = []  # Store (filename, sharpness, time_point) tuples
         for i, time_point in enumerate(thumbnail_times, 1):
-            thumb_file = working_dir / f"{temp_job_id}_4_thumb_{i:02d}.jpg"
+            thumb_file = working_dir / f"{temp_job_id}_4_thumb_{i:02d}.png"
             # Use accurate seeking (-ss after -i) for better frame quality
             # This decodes from nearest keyframe ensuring sharp frames
-            # JPEG format for compatibility
+            # PNG format for sharpness validation
             thumb_cmd = [
                 ffmpeg, "-y",
                 "-i", str(phase3_output),
@@ -2660,7 +2669,7 @@ def process_sot_video_multi_phase(
             # Calculate sharpness score - also validates file exists and is valid image
             sharpness = calculate_sharpness_simple(str(thumb_file))
             thumbnail_data.append({
-                'filename': f"{temp_job_id}_4_thumb_{i:02d}.jpg",
+                'filename': f"{temp_job_id}_4_thumb_{i:02d}.png",
                 'sharpness': sharpness,
                 'time': time_point,
                 'index': i
@@ -2757,10 +2766,10 @@ def process_sot_video_multi_phase(
         shutil.move(str(phase3_output), str(final_video))
         shutil.move(str(phase4_audio), str(final_audio))
 
-        # Move all 15 thumbnails to thumbnails directory (JPEG format)
+        # Move all 15 thumbnails to thumbnails directory (PNG format)
         final_thumbs = []
         for i, thumb_file in enumerate(phase4_thumbs, 1):
-            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.jpg"
+            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.png"
             shutil.move(str(thumb_file), str(final_thumb))
             final_thumbs.append(final_thumb)
 
@@ -2834,9 +2843,9 @@ def process_sot_video_multi_phase(
         seconds = int(duration % 60)
         duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-        # Build thumbnail URLs for all 15 options (JPEG format in thumbnails directory)
+        # Build thumbnail URLs for all 15 options (PNG format in thumbnails directory)
         thumbnail_urls = [
-            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.jpg"
+            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.png"
             for i in range(1, 16)
         ]
 
@@ -3365,10 +3374,10 @@ def process_vo_video(
         phase3_thumbs = []
         thumbnail_data = []  # Store (filename, sharpness, time_point) tuples
         for i, time_point in enumerate(thumbnail_times, 1):
-            thumb_file = working_dir / f"{temp_job_id}_thumb_{i:02d}.jpg"
+            thumb_file = working_dir / f"{temp_job_id}_thumb_{i:02d}.png"
             # Use accurate seeking (-ss after -i) for better frame quality
             # This decodes from nearest keyframe ensuring sharp frames
-            # JPEG format for compatibility
+            # PNG format for sharpness validation
             thumb_cmd = [
                 ffmpeg, "-y",
                 "-i", str(current_input),
@@ -3382,7 +3391,7 @@ def process_vo_video(
             # Calculate sharpness score - also validates file exists and is valid image
             sharpness = calculate_sharpness_simple(str(thumb_file))
             thumbnail_data.append({
-                'filename': f"{temp_job_id}_thumb_{i:02d}.jpg",
+                'filename': f"{temp_job_id}_thumb_{i:02d}.png",
                 'sharpness': sharpness,
                 'time': time_point,
                 'index': i
@@ -3456,10 +3465,10 @@ def process_vo_video(
         final_video = final_video_dir / f"{normalized_slug}.mp4"
         shutil.move(str(current_input), str(final_video))
 
-        # Move thumbnails (JPEG format)
+        # Move thumbnails (PNG format)
         final_thumbs = []
         for i, thumb_file in enumerate(phase3_thumbs, 1):
-            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.jpg"
+            final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.png"
             shutil.move(str(thumb_file), str(final_thumb))
             final_thumbs.append(final_thumb)
 
@@ -3516,9 +3525,9 @@ def process_vo_video(
                 job.processing_report = processing_report
                 db.commit()
 
-        # Build thumbnail URLs (JPEG format)
+        # Build thumbnail URLs (PNG format)
         thumbnail_urls = [
-            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.jpg"
+            f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.png"
             for i in range(1, 16)
         ]
 

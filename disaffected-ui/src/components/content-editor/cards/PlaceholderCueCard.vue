@@ -176,6 +176,20 @@
             Edit FSQ
           </v-btn>
 
+          <!-- Download PNG Button -->
+          <v-btn
+            v-if="cueData.mediaUrl"
+            block
+            size="small"
+            variant="text"
+            color="deep-purple"
+            class="mb-2"
+            @click.stop="downloadFsqPNG"
+          >
+            <v-icon size="small" start>mdi-download</v-icon>
+            Download PNG
+          </v-btn>
+
           <!-- Status Indicator -->
           <div v-if="fsqGenerationStatus" class="fsq-status-chip mb-2">
             <v-chip size="x-small" :color="fsqStatusChipColor" variant="tonal">
@@ -889,6 +903,17 @@
             {{ cueData.slug || 'No slug' }}
           </v-chip>
           <v-spacer></v-spacer>
+          <v-btn
+            v-if="cueData.mediaUrl"
+            size="small"
+            variant="tonal"
+            color="deep-purple-lighten-2"
+            @click="downloadFsqPNG"
+            class="mr-2"
+          >
+            <v-icon size="small" start>mdi-download</v-icon>
+            Download PNG
+          </v-btn>
           <span class="text-caption text-grey-lighten-1">Press ESC to close</span>
         </v-card-actions>
       </v-card>
@@ -2322,6 +2347,34 @@ export default {
     /**
      * Handle Generate PNG button click - Queue Celery task for FSQ PNG generation
      */
+    downloadFsqPNG() {
+      if (!this.cueData.mediaUrl) return
+
+      const url = this.fsqThumbnailUrl
+      const filename = this.cueData.mediaUrl.split('/').pop() || `${this.cueData.slug || 'fsq'}.png`
+
+      const authToken = localStorage.getItem('auth-token')
+      fetch(url, {
+        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+      })
+        .then(res => {
+          if (!res.ok) throw new Error('Download failed')
+          return res.blob()
+        })
+        .then(blob => {
+          const a = document.createElement('a')
+          a.href = URL.createObjectURL(blob)
+          a.download = filename
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          URL.revokeObjectURL(a.href)
+        })
+        .catch(err => {
+          console.error('FSQ PNG download error:', err)
+        })
+    },
+
     async handleGeneratePNG() {
       if (!this.cueData.assetId) {
         console.error('Cannot generate PNG: no assetId found');

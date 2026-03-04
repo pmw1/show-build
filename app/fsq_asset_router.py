@@ -27,6 +27,7 @@ from services.asset_processing import generate_fsq_png
 from services.asset_id import AssetIDService
 from database import get_db
 from sqlalchemy.orm import Session
+from celery_jobs_router import register_celery_job
 
 router = APIRouter()
 path_manager = ShowBuildPaths()
@@ -331,7 +332,8 @@ async def regenerate_fsq_asset(
 @router.post("/generate-async", response_model=FSQAssetTaskResponse)
 async def generate_fsq_asset_async(
     request: FSQAssetAsyncRequest,
-    current_user=Depends(get_current_user_or_key)
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
 ):
     """
     Generate FSQ PNG asset asynchronously using Celery.
@@ -395,6 +397,8 @@ async def generate_fsq_asset_async(
         print(f"   ✅ Task queued: {task.id}")
         print(f"   📊 Queue: {queue_name}")
         print(f"   🔍 Monitor at: /api/fsq/task/{task.id}")
+
+        register_celery_job(db, task.id, "services.asset_processing.generate_fsq_png", "Generate FSQ", "assets", request.episode_id, queue_name)
 
         return FSQAssetTaskResponse(
             success=True,
@@ -728,10 +732,16 @@ def _parse_cue_block(cue_content: str) -> Dict[str, Any]:
 
     cue_data = {}
 
-    # Parse field lines [Field: Value]
-    field_pattern = re.compile(r'\[([^:]+):\s*([^\]]*)\]')
+    # Parse field lines [Field: Value] line-by-line
+    # Use greedy (.*) to match to the LAST ] on each line, so that
+    # square brackets inside quote text (e.g. "[I am] interested...")
+    # are preserved instead of being treated as field terminators.
+    field_pattern = re.compile(r'^\s*\[([^:]+):\s*(.*)\]\s*$')
 
-    for match in field_pattern.finditer(cue_content):
+    for line in cue_content.split('\n'):
+        match = field_pattern.match(line)
+        if not match:
+            continue
         field_name = match.group(1).strip()
         field_value = match.group(2).strip()
 

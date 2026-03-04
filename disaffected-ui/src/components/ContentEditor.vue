@@ -59,6 +59,7 @@
         :llm-state="llmState"
         :loading="loadingRundown"
         :panel-width="rundownPanelWidth"
+        :panel-height="sidePanelHeight"
         :collapse-break-regions="interfaceSettings.collapseBreakRegions"
         :save-state="episodeSaveState"
         @select-item="selectRundownItem"
@@ -154,6 +155,7 @@
         ref="metadataPanel"
         :item="currentRundownItem"
         :panel-width="metadataPanelWidth"
+        :panel-height="sidePanelHeight"
         :item-types="rundownItemTypes"
         :episode-number="currentEpisodeNumber"
         :media-list-loading="generatingMediaList"
@@ -554,6 +556,17 @@ export default {
       }
     };
     window.addEventListener('beforeunload', this.handleBeforeUnload);
+
+    // Side panel height: track available space below ShowInfoHeader
+    this.$nextTick(() => {
+      this._scrollWrapper = this.$el.querySelector('.scrollable-content-wrapper');
+      this._headerEl = this.$el.querySelector('.show-info-header');
+      if (this._scrollWrapper) {
+        this._scrollWrapper.addEventListener('scroll', this.updateSidePanelHeight, { passive: true });
+        window.addEventListener('resize', this.updateSidePanelHeight, { passive: true });
+        this.updateSidePanelHeight();
+      }
+    });
   },
 
   beforeUnmount() {
@@ -568,6 +581,11 @@ export default {
     }
     // Clean up keyboard event listener
     document.removeEventListener('keydown', this.handleKeydown);
+    // Clean up side panel height listeners
+    if (this._scrollWrapper) {
+      this._scrollWrapper.removeEventListener('scroll', this.updateSidePanelHeight);
+      window.removeEventListener('resize', this.updateSidePanelHeight);
+    }
     // Clean up episode check interval
     if (this.checkEpisodeInterval) {
       clearInterval(this.checkEpisodeInterval);
@@ -700,6 +718,7 @@ export default {
       rundownPanelWidth: 'wide', // 'narrow' or 'wide'
       showMetadataPanel: true,
       metadataPanelWidth: 'wide', // 'narrow' or 'wide'
+      sidePanelHeight: null, // Dynamic height for side panels (px), null = 100vh fallback
 
       // Interface settings - will be loaded from database
       interfaceSettings: {
@@ -3790,6 +3809,19 @@ Try dropping an image or video file here!`
       console.log('Metadata panel width toggled to:', this.metadataPanelWidth);
     },
 
+    // Calculate available height for side panels based on how much header is visible
+    updateSidePanelHeight() {
+      const wrapper = this._scrollWrapper;
+      const header = this._headerEl;
+      if (!wrapper) return;
+      const viewportHeight = wrapper.clientHeight;
+      const headerHeight = header ? header.offsetHeight : 0;
+      const scrollTop = wrapper.scrollTop;
+      // How much of the header is still visible in the scroll viewport
+      const headerVisible = Math.max(0, headerHeight - scrollTop);
+      this.sidePanelHeight = viewportHeight - headerVisible;
+    },
+
     handleMetadataFieldUpdate({ field, value }) {
       if (this.currentRundownItem) {
         console.log(`Updating field ${field} to:`, value);
@@ -4661,18 +4693,13 @@ Try dropping an image or video file here!`
     
     submitFsq(fsqCueData) {
       console.log('🎬 FSQ cue submitted:', fsqCueData);
-      console.log('🔍 Checking $refs.editorPanel:', this.$refs.editorPanel);
-      console.log('🔍 All $refs:', Object.keys(this.$refs));
 
       // Verify editorPanel ref exists
       if (!this.$refs.editorPanel) {
         console.error('❌ EditorPanel ref not found');
-        console.error('❌ Available refs:', Object.keys(this.$refs));
         alert('Error: Editor panel not ready. Please try again.');
         return;
       }
-
-      console.log('✅ EditorPanel ref found, proceeding...');
 
       // Format the FSQ cue block with all metadata
       let fsqCueBlock = `<!-- Begin Cue -->\n`;
@@ -4704,6 +4731,76 @@ Try dropping an image or video file here!`
         fsqCueBlock += `[RenderMode: ${fsqCueData.renderMode}]\n`;
       }
       fsqCueBlock += `<!-- End Cue -->`;
+
+      // ── EDIT MODE: Replace existing cue in-place ──
+      if (this.editingFsqCueData) {
+        const editAssetId = this.editingFsqCueData.assetId || this.editingFsqCueData.rawData?.assetId;
+        console.log(`📝 EDIT MODE: Replacing FSQ cue with assetId ${editAssetId}`);
+
+        const segments = this.$refs.editorPanel.scriptSegments;
+        const segmentIndex = segments.findIndex(seg =>
+          seg.type === 'cue' &&
+          (seg.data?.assetId === editAssetId || seg.data?.rawData?.assetId === editAssetId)
+        );
+
+        if (segmentIndex !== -1) {
+          // Build updated data object matching the segment structure
+          const oldSegment = segments[segmentIndex];
+          const updatedRawData = {
+            ...oldSegment.data?.rawData,
+            type: 'FSQ',
+            assetId: fsqCueData.assetId,
+            slug: fsqCueData.slug,
+            quote: fsqCueData.quote,
+            attribution: fsqCueData.source || fsqCueData.attribution || '',
+            style: fsqCueData.style,
+            fontFamily: fsqCueData.fontFamily,
+            fontSize: fsqCueData.fontSize ? `${fsqCueData.fontSize}px` : undefined,
+            duration: fsqCueData.duration,
+            wordCount: fsqCueData.wordCount,
+            part: fsqCueData.part,
+            mediaUrl: fsqCueData.mediaUrl || oldSegment.data?.mediaUrl,
+            renderMode: fsqCueData.renderMode
+          };
+
+          const updatedData = {
+            ...oldSegment.data,
+            ...updatedRawData,
+            rawData: updatedRawData
+          };
+
+          // Replace the segment in-place
+          segments.splice(segmentIndex, 1, {
+            ...oldSegment,
+            data: updatedData,
+            rawContent: fsqCueBlock
+          });
+
+          // Reconstruct and update script content
+          const newRawContent = this.$refs.editorPanel.reconstructRawContent(segments);
+          this.updateScriptContent(newRawContent);
+
+          console.log(`✅ FSQ cue replaced in-place at segment index ${segmentIndex}`);
+        } else {
+          console.warn('⚠️ Could not find existing cue to replace, inserting as new');
+          // Fall through to insert logic below
+          this.editingFsqCueData = null;
+          this.submitFsq(fsqCueData);
+          return;
+        }
+
+        // Close modal and clean up edit state
+        this.showFsqModal = false;
+        this.editingFsqCueData = null;
+        this.hasUnsavedChanges = true;
+        this.checkForUnsavedRundownChanges();
+
+        // Trigger PNG regeneration
+        this.triggerFsqGeneration([fsqCueData]);
+        return;
+      }
+
+      // ── NEW MODE: Insert new cue(s) ──
 
       // Initialize pending cues arrays if this is the first part
       if (!this.$refs.editorPanel.pendingCueDataArray) {
@@ -4758,12 +4855,9 @@ Try dropping an image or video file here!`
 
         // Clear the snapshot for next time
         this.fsqInsertionIndex = null;
-        console.log('🧹 Cleared fsqInsertionIndex snapshot');
 
         this.hasUnsavedChanges = true;
         this.checkForUnsavedRundownChanges();
-
-        console.log(`✅ ${totalParts} FSQ cue(s) inserted successfully at bottom of script`);
 
         // Trigger automatic PNG generation for each FSQ
         const fsqDataToGenerate = [...this.$refs.editorPanel.pendingFsqDataArray];
@@ -4871,6 +4965,9 @@ Try dropping an image or video file here!`
 
       // When modal is closed (isVisible becomes false)
       if (!isVisible) {
+        // Clear edit mode state
+        this.editingFsqCueData = null;
+
         // Only clear placement if there's NO pending cue waiting to be placed
         // (if user submitted, placement overlay should remain active)
         if (this.$refs.editorPanel && !this.$refs.editorPanel.pendingCueData) {

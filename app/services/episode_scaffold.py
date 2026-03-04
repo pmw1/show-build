@@ -23,6 +23,53 @@ class EpisodeScaffoldService:
         self.db = db
         self.media_paths = media_paths
     
+
+    async def get_next_available_air_date(self):
+        """Find the next Sunday that doesn't already have a scheduled episode.
+
+        Starts from the upcoming Sunday relative to today. If that Sunday already
+        has an episode in the database, moves to the following Sunday, and so on.
+
+        Returns:
+            date: The next available Sunday air date
+        """
+        from datetime import date, timedelta
+        from models_v2 import Episode
+        from sqlalchemy import func, cast, Date
+
+        today = date.today()
+
+        # Find next Sunday (weekday 6 = Sunday)
+        days_until_sunday = (6 - today.weekday()) % 7
+        if days_until_sunday == 0:
+            # Today is Sunday - use today as candidate
+            candidate = today
+        else:
+            candidate = today + timedelta(days=days_until_sunday)
+
+        # Get all existing air dates from the database (just the date portion)
+        existing_air_dates = set()
+        episodes = self.db.query(Episode.air_date).filter(
+            Episode.air_date.isnot(None)
+        ).all()
+
+        for (air_date_val,) in episodes:
+            if air_date_val:
+                if hasattr(air_date_val, 'date'):
+                    existing_air_dates.add(air_date_val.date())
+                else:
+                    existing_air_dates.add(air_date_val)
+
+        # Keep advancing by 7 days until we find a Sunday with no episode
+        max_iterations = 52  # Don't look more than a year ahead
+        for _ in range(max_iterations):
+            if candidate not in existing_air_dates:
+                return candidate
+            candidate += timedelta(days=7)
+
+        # Fallback: return the candidate even after 52 weeks
+        return candidate
+
     async def get_next_episode_number(self) -> str:
         """Generate next available episode number"""
         try:

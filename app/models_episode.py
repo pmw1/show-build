@@ -93,6 +93,7 @@ class BlueprintNode(Base):
     parent_id = Column(Integer, ForeignKey("blueprint_nodes.id", ondelete="CASCADE"), nullable=True)
     node_type = Column(String(20), nullable=False)  # 'directory', 'file', 'rundown_item'
     name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)  # Human/LLM-readable purpose of this node
     content = Column(Text, nullable=True)  # File content for file nodes, script content for rundown items
     sort_order = Column(Integer, default=0, nullable=False)
     is_required = Column(Boolean, default=True, nullable=False)
@@ -151,11 +152,21 @@ class BlueprintTemplateResponse(BlueprintTemplateBase):
 class BlueprintNodeBase(BaseModel):
     node_type: str  # 'directory' or 'file'
     name: str
+    description: Optional[str] = None
     content: Optional[str] = None
     sort_order: int = 0
     is_required: bool = True
 
 class BlueprintNodeCreate(BlueprintNodeBase):
+    parent_id: Optional[int] = None
+
+class BlueprintNodeUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    node_type: Optional[str] = None
+    content: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_required: Optional[bool] = None
     parent_id: Optional[int] = None
 
 class BlueprintNodeResponse(BlueprintNodeBase):

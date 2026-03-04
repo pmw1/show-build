@@ -122,12 +122,17 @@ This document defines the **ONLY** acceptable directory structure and naming con
 │           └── source/
 │
 ├── captures/                                       # Raw vMix recordings
-│   ├── BLOCK-A.mov
-│   ├── BLOCK-B.mov
-│   ├── BLOCK-B2.mov                               # If recording interrupted
-│   ├── BLOCK-C.mov
-│   ├── BREAK-1.mov
-│   └── BREAK-2.mov
+│   ├── orig/                                       # Original full-resolution recordings
+│   │   ├── BLOCK-A.mov
+│   │   ├── BLOCK-B.mov
+│   │   ├── BLOCK-B2.mov                           # If recording interrupted
+│   │   ├── BLOCK-C.mov
+│   │   ├── BREAK-1.mov
+│   │   └── BREAK-2.mov
+│   └── preview/                                    # Lightweight preview/proxy versions
+│       ├── BLOCK-A.mp4
+│       ├── BLOCK-B.mp4
+│       └── ...
 │
 ├── thumbnails/                                     # Master artwork sources
 │   ├── master-16x9.psd                            # Photoshop master (widescreen)
@@ -324,6 +329,17 @@ The `projects/` folder is extensible for other production software:
 
 **Purpose**: Raw vMix recording captures (unedited)
 **Location**: `{EPISODE}/captures/`
+
+### Subdirectory Organization
+
+Captures are organized into two subdirectories:
+
+| Directory | Purpose |
+|-----------|---------|
+| `captures/orig/` | Original raw recordings directly from vMix — never modified |
+| `captures/preview/` | Preview/proxy copies for quick review (lower bitrate, smaller files) |
+
+All raw captures go into `orig/`. Preview copies (if generated) go into `preview/` using the same filename.
 
 ### Block Recordings
 
@@ -1321,7 +1337,8 @@ mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/projects/teasers
 mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/projects/graphics
 
 # Captures
-mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/captures
+mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/captures/orig
+mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/captures/preview
 
 # Thumbnails
 mkdir -p /mnt/sync/disaffected/episodes/{EPISODE}/thumbnails

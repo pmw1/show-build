@@ -98,73 +98,6 @@
           </v-card-text>
         </v-card>
 
-        <!-- Episode Statistics Grid -->
-        <v-row v-if="statistics" dense class="mb-3">
-          <v-col cols="6" sm="3">
-            <v-card variant="tonal" color="primary">
-              <v-card-text class="text-center pa-3">
-                <div class="text-h4 font-weight-bold">{{ statistics.total_items || 0 }}</div>
-                <div class="text-caption">Total Items</div>
-              </v-card-text>
-            </v-card>
-          </v-col>
-          <v-col cols="6" sm="3">
-            <v-card variant="tonal" color="warning">
-              <v-card-text class="text-center pa-3">
-                <div class="text-h4 font-weight-bold">{{ statistics.by_status?.draft || 0 }}</div>
-                <div class="text-caption">Draft</div>
-              </v-card-text>
-            </v-card>
-          </v-col>
-          <v-col cols="6" sm="3">
-            <v-card variant="tonal" color="success">
-              <v-card-text class="text-center pa-3">
-                <div class="text-h4 font-weight-bold">{{ (statistics.by_status?.approved || 0) + (statistics.by_status?.completed || 0) }}</div>
-                <div class="text-caption">Ready</div>
-              </v-card-text>
-            </v-card>
-          </v-col>
-          <v-col cols="6" sm="3">
-            <v-card variant="tonal" :color="getProgressColor(statistics.progress_percentage)">
-              <v-card-text class="text-center pa-3">
-                <div class="text-h4 font-weight-bold">{{ statistics.progress_percentage || 0 }}%</div>
-                <div class="text-caption">Complete</div>
-              </v-card-text>
-            </v-card>
-          </v-col>
-        </v-row>
-
-        <!-- Progress Bar -->
-        <v-card variant="outlined" class="mb-3">
-          <v-card-text class="pa-3">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-caption text-grey">Production Progress</span>
-              <span class="text-caption font-weight-bold">{{ statistics?.progress_percentage || 0 }}%</span>
-            </div>
-            <v-progress-linear
-              :model-value="statistics?.progress_percentage || 0"
-              :color="getProgressColor(statistics?.progress_percentage)"
-              height="8"
-              rounded
-            />
-          </v-card-text>
-        </v-card>
-
-        <!-- Content Breakdown by Type -->
-        <v-card v-if="statistics?.by_type" variant="outlined" class="mb-3">
-          <v-card-text class="pa-3">
-            <div class="text-caption text-grey mb-2">Content Breakdown</div>
-            <v-row dense>
-              <v-col v-for="(count, type) in statistics.by_type" :key="type" cols="6">
-                <div class="d-flex align-center justify-space-between">
-                  <span class="text-body-2">{{ formatTypeName(type) }}</span>
-                  <v-chip size="small" variant="flat">{{ count }}</v-chip>
-                </div>
-              </v-col>
-            </v-row>
-          </v-card-text>
-        </v-card>
-
         <!-- Duration -->
         <v-card v-if="nextShow.duration" variant="outlined" class="mb-3">
           <v-card-text class="pa-3">
@@ -195,10 +128,10 @@
       </v-card-actions>
       <v-card-actions class="pa-3 pt-0">
         <v-btn
-          color="secondary"
+          color="grey"
           variant="outlined"
           block
-          :to="`/stack/${nextShow.number}`"
+          disabled
           prepend-icon="mdi-clock-outline"
         >
           Timing & Stack

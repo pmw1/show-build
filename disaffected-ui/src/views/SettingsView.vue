@@ -14,6 +14,7 @@
           <v-tab value="third-party-api">Third Party & API</v-tab>
           <v-tab value="interface">Interface</v-tab>
           <v-tab value="content">Content</v-tab>
+          <v-tab value="whiteboard">Whiteboard</v-tab>
           <v-tab value="system">System</v-tab>
         </v-tabs>
 
@@ -74,6 +75,7 @@
                 <v-tabs v-model="contentSubTab" direction="vertical" color="primary">
                   <v-tab value="rundown-templates" prepend-icon="mdi-file-document-outline">Rundown Templates</v-tab>
                   <v-tab value="content-library" prepend-icon="mdi-library">Content Library</v-tab>
+                  <v-tab value="episode-blueprint" prepend-icon="mdi-folder-tree">Episode Blueprint</v-tab>
                 </v-tabs>
 
                 <v-tabs-window v-model="contentSubTab">
@@ -84,9 +86,18 @@
                   <v-tabs-window-item value="content-library">
                     <ContentLibraryManager />
                   </v-tabs-window-item>
+
+                  <v-tabs-window-item value="episode-blueprint">
+                    <EpisodeBlueprintSettings />
+                  </v-tabs-window-item>
                 </v-tabs-window>
               </v-card-text>
             </v-card>
+          </v-tabs-window-item>
+
+          <!-- Whiteboard Tab -->
+          <v-tabs-window-item value="whiteboard">
+            <WhiteboardSettings />
           </v-tabs-window-item>
 
           <!-- System Tab -->
@@ -111,6 +122,8 @@ import SystemSettings from '@/components/settings/SystemSettings.vue'
 import PromptManager from '@/components/PromptManager.vue'
 import RundownTemplateManager from '@/components/settings/RundownTemplateManager.vue'
 import ContentLibraryManager from '@/components/settings/ContentLibraryManager.vue'
+import EpisodeBlueprintSettings from '@/components/settings/EpisodeBlueprintSettings.vue'
+import WhiteboardSettings from '@/components/settings/WhiteboardSettings.vue'
 
 export default {
   name: 'SettingsView',
@@ -122,7 +135,9 @@ export default {
     SystemSettings,
     PromptManager,
     RundownTemplateManager,
-    ContentLibraryManager
+    ContentLibraryManager,
+    EpisodeBlueprintSettings,
+    WhiteboardSettings
   },
   data() {
     return {
@@ -532,8 +547,7 @@ export default {
         'mistral:7b',
         'deepseek-r1:8b',
         'Qwen2.5-Coder:7b',
-        'codellama:34b',
-        'samantha-mistral:latest'
+        'codellama:34b'
       ]
       this.updateModelOptions()
     },

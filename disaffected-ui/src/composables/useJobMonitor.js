@@ -1,6 +1,6 @@
 /**
- * Job Monitoring Composable
- * Tracks all SOT processing jobs with real-time updates
+ * Celery Job Monitoring Composable
+ * Tracks all celery tasks dispatched from show-build with real-time status updates
  */
 import { ref, computed } from 'vue'
 import axios from 'axios'
@@ -12,18 +12,15 @@ const isPolling = ref(false)
 
 export function useJobMonitor() {
   /**
-   * Fetch all active jobs from the API
+   * Fetch all active (pending/running) jobs from the API
    */
   const fetchActiveJobs = async () => {
     try {
-      const response = await axios.get('/api/sot/jobs/active')
+      const response = await axios.get('/api/celery-jobs/active')
       activeJobs.value = response.data.jobs || []
-
-      console.log(`📊 Active jobs: ${activeJobs.value.length}`)
-
       return activeJobs.value
     } catch (error) {
-      console.error('Failed to fetch active jobs:', error)
+      console.error('Failed to fetch active celery jobs:', error)
       return []
     }
   }
@@ -31,22 +28,39 @@ export function useJobMonitor() {
   /**
    * Fetch recent completed/failed jobs
    */
-  const fetchRecentJobs = async (limit = 10) => {
+  const fetchRecentJobs = async (limit = 20) => {
     try {
-      const response = await axios.get(`/api/sot/jobs/recent?limit=${limit}`)
+      const response = await axios.get(`/api/celery-jobs/recent?limit=${limit}`)
       recentJobs.value = response.data.jobs || []
-
       return recentJobs.value
     } catch (error) {
-      console.error('Failed to fetch recent jobs:', error)
+      console.error('Failed to fetch recent celery jobs:', error)
       return []
+    }
+  }
+
+  /**
+   * Clear completed/failed jobs from the log
+   */
+  const clearJobs = async (status = null) => {
+    try {
+      const url = status
+        ? `/api/celery-jobs/clear?status=${status}`
+        : '/api/celery-jobs/clear'
+      const response = await axios.delete(url)
+      // Refresh after clearing
+      await fetchRecentJobs()
+      return response.data
+    } catch (error) {
+      console.error('Failed to clear celery jobs:', error)
+      return null
     }
   }
 
   /**
    * Start polling for job updates
    */
-  const startPolling = (intervalMs = 3000) => {
+  const startPolling = (intervalMs = 5000) => {
     if (isPolling.value) return
 
     isPolling.value = true
@@ -60,8 +74,6 @@ export function useJobMonitor() {
       fetchActiveJobs()
       fetchRecentJobs()
     }, intervalMs)
-
-    console.log('📡 Started job monitoring')
   }
 
   /**
@@ -72,7 +84,6 @@ export function useJobMonitor() {
       clearInterval(pollInterval.value)
       pollInterval.value = null
       isPolling.value = false
-      console.log('🛑 Stopped job monitoring')
     }
   }
 
@@ -80,13 +91,6 @@ export function useJobMonitor() {
    * Get total active job count
    */
   const activeJobCount = computed(() => activeJobs.value.length)
-
-  /**
-   * Get count of stalled jobs
-   */
-  const stalledJobCount = computed(() => {
-    return activeJobs.value.filter(job => job.is_stalled).length
-  })
 
   /**
    * Get count of failed jobs in recent history
@@ -99,7 +103,7 @@ export function useJobMonitor() {
    * Check if there are any issues that need attention
    */
   const hasIssues = computed(() => {
-    return stalledJobCount.value > 0 || recentFailureCount.value > 0
+    return recentFailureCount.value > 0
   })
 
   /**
@@ -119,38 +123,30 @@ export function useJobMonitor() {
   }
 
   /**
-   * Get phase display name
-   */
-  const getPhaseDisplayName = (phase) => {
-    const phaseNames = {
-      'phase0': 'Pre-Analysis',
-      'phase0.5': 'Transcription',
-      'phase1': 'Video Normalization',
-      'phase1.1': 'Audio Channel Analysis',
-      'phase2': 'Audio Normalization',
-      'phase3': 'Trimming',
-      'phase4': 'Clip Extraction',
-      'phase5': 'Moving to Final Location',
-      'phase6': 'Thumbnail Generation',
-      'phase7': 'Post-Analysis',
-      'phase8': 'Verification'
-    }
-    return phaseNames[phase] || phase
-  }
-
-  /**
    * Get status color for badge
    */
   const getStatusColor = (job) => {
-    if (job.is_stalled) return 'warning'
-
     const colors = {
-      'queued': 'info',
-      'processing': 'primary',
+      'pending': 'info',
+      'running': 'primary',
       'completed': 'success',
       'failed': 'error'
     }
     return colors[job.status] || 'default'
+  }
+
+  /**
+   * Get category display color
+   */
+  const getCategoryColor = (category) => {
+    const colors = {
+      'tools': 'deep-purple',
+      'assets': 'teal',
+      'media': 'orange',
+      'sot': 'blue',
+      'general': 'grey'
+    }
+    return colors[category] || 'grey'
   }
 
   return {
@@ -161,17 +157,17 @@ export function useJobMonitor() {
 
     // Computed
     activeJobCount,
-    stalledJobCount,
     recentFailureCount,
     hasIssues,
 
     // Methods
     fetchActiveJobs,
     fetchRecentJobs,
+    clearJobs,
     startPolling,
     stopPolling,
     getTimeAgo,
-    getPhaseDisplayName,
-    getStatusColor
+    getStatusColor,
+    getCategoryColor
   }
 }

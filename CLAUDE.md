@@ -2,6 +2,40 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ **MANDATORY: REMOTE SESSION OPERATING PROCEDURE** ⚠️
+
+**CRITICAL RULE**: The true project root is `kevin@whisper:/mnt/process/show-build`. This applies to ALL Claude Code sessions, including those running from temporary local working directories.
+
+### When Operating from a Remote/Temporary Workstation:
+1. **Verify SSH access** to `kevin@whisper` at session start
+2. **Read from and write to** all project files via SSH at `/mnt/process/show-build/`
+3. **CLAUDE.md, ACTIVE_WORK_QUEUE.md, and all project data** must be read/written at the remote location
+4. **If SSH is unavailable**: Create a local log file (`remote_transfer_log.md`) documenting all intended changes, to be transferred and processed once access is restored
+5. **Check relay** via SSH: `ssh kevin@whisper "curl -s 'http://192.168.51.223:8001/read?project=show-build&limit=5'"`
+6. **Rebuild/restart** after backend changes: `ssh kevin@whisper "cd /mnt/process/show-build && docker compose restart server"`
+
+### SSH Command Pattern:
+```bash
+# Read files
+ssh kevin@whisper "cat /mnt/process/show-build/{filepath}"
+
+# Write/edit files - use heredoc for multi-line content
+ssh kevin@whisper "cat > /mnt/process/show-build/{filepath}" << 'EOF'
+content here
+EOF
+
+# Run docker commands
+ssh kevin@whisper "cd /mnt/process/show-build && docker compose restart server"
+
+# Run frontend lint
+ssh kevin@whisper "cd /mnt/process/show-build/disaffected-ui && npm run lint -- --fix"
+```
+
+**This is not optional - the remote server is the single source of truth for all project files.**
+
+---
+
+
 ## ⚠️ **CRITICAL: ALWAYS USE HTTPS URLs** ⚠️
 
 **MANDATORY RULE**: ALL URLs provided to the user MUST use HTTPS protocol.
@@ -246,6 +280,7 @@ Show-Build is a **database-first broadcast production platform** designed for th
 
 **📋 Key Documentation**:
 - [`ACTIVE_WORK_QUEUE.md`](ACTIVE_WORK_QUEUE.md) - 🚀 **Active Work Queue** - Current tasks and priorities (CHECK FIRST!)
+- [`docs/EDITOR_PANEL_ARCHITECTURE.md`](docs/EDITOR_PANEL_ARCHITECTURE.md) - 🎬 **EditorPanel Architecture** - Script Mode / Code Mode data flow (READ BEFORE EDITING)
 - [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md) - 📐 **Architecture Decisions** - Strategic decisions and rationale
 - [`UNIVERSAL_LLM_FRAMEWORK_UFDP.md`](UNIVERSAL_LLM_FRAMEWORK_UFDP.md) - ⭐ **Universal LLM Framework** - Unified AI state management (v1.0)
 - [`docs/EPISODE_DIRECTORY_STANDARD.md`](docs/EPISODE_DIRECTORY_STANDARD.md) - 🗂️ **Episode File Structure Standard** - Media asset organization (AUTHORITATIVE)
@@ -253,6 +288,8 @@ Show-Build is a **database-first broadcast production platform** designed for th
 - [`docs/DASHBOARD_ANNOUNCEMENTS.md`](docs/DASHBOARD_ANNOUNCEMENTS.md) - 📢 **Dashboard Announcements Guide** - How to create and manage dashboard announcements
 - [`docs/LLM_GENERATOR_TROUBLESHOOTING.md`](docs/LLM_GENERATOR_TROUBLESHOOTING.md) - LLM test segment generator debugging (legacy patterns)
 - [`docs/THUMBNAIL_GENERATION_RESEARCH.md`](docs/THUMBNAIL_GENERATION_RESEARCH.md) - Thumbnail automation research (pending implementation)
+- [`docs/X_API_COMPLETE_REFERENCE.md`](docs/X_API_COMPLETE_REFERENCE.md) - 🐦 **X (Twitter) API v2 Complete Reference** - All endpoints, auth, rate limits, data dictionary
+- [`docs/x-api-reference/`](docs/x-api-reference/) - X API v2 individual topic reference files (17 files)
 
 ## Architecture
 

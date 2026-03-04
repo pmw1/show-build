@@ -2945,8 +2945,7 @@ export default {
         'mistral:7b',
         'deepseek-r1:8b',
         'Qwen2.5-Coder:7b',
-        'codellama:34b',
-        'samantha-mistral:latest'
+        'codellama:34b'
       ]
       // Also populate llmServiceModels.ollama for preference dropdowns
       this.llmServiceModels.ollama = this.availableOllamaModels.map(m => ({

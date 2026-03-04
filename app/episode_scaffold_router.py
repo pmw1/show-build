@@ -35,6 +35,19 @@ async def get_next_episode_number(
         logger.error(f"Error getting next episode number: {e}")
         raise HTTPException(status_code=500, detail="Failed to get next episode number")
 
+
+@router.get("/next-air-date")
+async def get_next_air_date(
+    service: EpisodeScaffoldService = Depends(get_episode_service)
+):
+    """Get the next available Sunday air date that has no scheduled episode"""
+    try:
+        next_date = await service.get_next_available_air_date()
+        return {"next_air_date": next_date.strftime("%Y-%m-%d")}
+    except Exception as e:
+        logger.error(f"Error getting next air date: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get next air date")
+
 @router.get("/templates")
 async def get_blueprint_templates(
     service: EpisodeScaffoldService = Depends(get_episode_service)

@@ -1,7 +1,7 @@
 <template>
   <div
     :class="['metadata-panel', panelWidth === 'narrow' ? 'narrow' : 'wide']"
-    :style="{ width: panelWidthValue }"
+    :style="{ width: panelWidthValue, height: panelHeightValue }"
   >
     <!-- Tab-shaped control buttons on left edge -->
     <div class="tab-controls-left">
@@ -409,6 +409,23 @@
                 Details
               </v-btn>
             </div>
+
+            <v-btn
+              size="small"
+              variant="tonal"
+              color="deep-purple-darken-1"
+              :loading="packagingGraphics"
+              :disabled="packagingGraphics"
+              @click="downloadGraphicsPackage"
+              class="mb-2 mt-2"
+              block
+            >
+              <v-icon left size="small">mdi-package-down</v-icon>
+              Download Graphics Package
+            </v-btn>
+            <div v-if="graphicsPackageStatus" class="text-caption mt-1" :class="graphicsPackageStatus.includes('Error') ? 'text-error' : 'text-success'">
+              {{ graphicsPackageStatus }}
+            </div>
           </div>
         </div>
 
@@ -516,6 +533,102 @@
             <v-card-actions>
               <v-spacer />
               <v-btn color="primary" @click="showGatherResultsModal = false">Close</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <!-- Graphics Package Modal -->
+        <v-dialog v-model="showGraphicsPackageModal" max-width="550">
+          <v-card>
+            <v-card-title class="d-flex align-center">
+              <v-icon class="mr-2" color="deep-purple">mdi-package-down</v-icon>
+              Graphics Package
+              <v-spacer />
+              <v-btn icon size="small" @click="showGraphicsPackageModal = false">
+                <v-icon>mdi-close</v-icon>
+              </v-btn>
+            </v-card-title>
+
+            <v-card-text>
+              <!-- Loading state -->
+              <div v-if="packagingGraphics" class="text-center py-4">
+                <v-progress-circular indeterminate color="deep-purple" size="48" class="mb-3" />
+                <div class="text-body-2">{{ graphicsPackageModalStatus }}</div>
+              </div>
+
+              <!-- Results -->
+              <div v-else-if="graphicsPackageInfo">
+                <v-alert
+                  type="success"
+                  density="compact"
+                  class="mb-3"
+                >
+                  <strong>{{ graphicsPackageInfo.file_count }}</strong> files packaged
+                  <span v-if="graphicsPackageInfo.cached" class="ml-1">(cached)</span>
+                </v-alert>
+
+                <!-- Size summary -->
+                <div class="d-flex justify-space-between mb-2 text-body-2">
+                  <span>Package size:</span>
+                  <strong>{{ formatFileSize(graphicsPackageInfo.zip_size) }}</strong>
+                </div>
+                <div class="d-flex justify-space-between mb-3 text-body-2">
+                  <span>Uncompressed:</span>
+                  <span>{{ formatFileSize(graphicsPackageInfo.total_uncompressed_size) }}</span>
+                </div>
+
+                <!-- Type breakdown -->
+                <div v-if="graphicsPackageInfo.type_counts" class="mb-3">
+                  <div class="text-subtitle-2 mb-1">Contents by type</div>
+                  <div class="d-flex flex-wrap ga-1">
+                    <v-chip
+                      v-for="(count, type) in graphicsPackageInfo.type_counts"
+                      :key="type"
+                      size="small"
+                      :color="getTypeColor(type)"
+                      variant="tonal"
+                    >
+                      {{ type }}: {{ count }}
+                    </v-chip>
+                  </div>
+                </div>
+
+                <!-- File list -->
+                <div class="mb-3">
+                  <div class="text-subtitle-2 mb-1">Files ({{ graphicsPackageInfo.files.length }})</div>
+                  <v-list density="compact" class="gather-results-list" style="max-height: 250px; overflow-y: auto;">
+                    <v-list-item
+                      v-for="file in graphicsPackageInfo.files"
+                      :key="file.name"
+                      class="px-2"
+                    >
+                      <template v-slot:prepend>
+                        <v-chip size="x-small" :color="getTypeColor(file.type)" class="mr-2">
+                          {{ file.type }}
+                        </v-chip>
+                      </template>
+                      <v-list-item-title class="text-body-2">{{ file.name }}</v-list-item-title>
+                      <template v-slot:append>
+                        <span class="text-caption text-grey">{{ formatFileSize(file.size) }}</span>
+                      </template>
+                    </v-list-item>
+                  </v-list>
+                </div>
+              </div>
+            </v-card-text>
+
+            <v-card-actions>
+              <v-spacer />
+              <v-btn
+                v-if="graphicsPackageInfo"
+                color="deep-purple"
+                variant="flat"
+                @click="triggerGraphicsDownload"
+              >
+                <v-icon left size="small">mdi-download</v-icon>
+                Download ZIP
+              </v-btn>
+              <v-btn variant="text" @click="showGraphicsPackageModal = false">Close</v-btn>
             </v-card-actions>
           </v-card>
         </v-dialog>
@@ -736,6 +849,10 @@ export default {
       default: 'wide',
       validator: (value) => ['narrow', 'wide'].includes(value)
     },
+    panelHeight: {
+      type: Number,
+      default: null
+    },
     item: {
       type: Object,
       default: () => null
@@ -804,6 +921,11 @@ export default {
       gatherStatus: '',
       gatherResults: null,
       showGatherResultsModal: false,
+      packagingGraphics: false,
+      graphicsPackageStatus: '',
+      graphicsPackageInfo: null,
+      graphicsPackageModalStatus: '',
+      showGraphicsPackageModal: false,
       assetIdCopied: false,
       showRevisionsModal: false,
       selectedDocument: null
@@ -825,6 +947,9 @@ export default {
   computed: {
     panelWidthValue() {
       return this.panelWidth === 'narrow' ? '300px' : '400px'
+    },
+    panelHeightValue() {
+      return this.panelHeight ? `${this.panelHeight}px` : '100vh'
     },
     
     itemHeaderStyle() {
@@ -1069,6 +1194,93 @@ export default {
       }
     },
 
+    async downloadGraphicsPackage() {
+      if (!this.episodeNumber) {
+        this.graphicsPackageStatus = 'Error: No episode selected'
+        return
+      }
+
+      this.packagingGraphics = true
+      this.graphicsPackageStatus = ''
+      this.graphicsPackageInfo = null
+      this.graphicsPackageModalStatus = 'Creating graphics package...'
+      this.showGraphicsPackageModal = true
+
+      try {
+        const authToken = localStorage.getItem('auth-token')
+        const response = await this.$axios.post(
+          `/episodes/${this.episodeNumber}/graphics-package`,
+          {},
+          {
+            headers: {
+              'Authorization': `Bearer ${authToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+
+        if (response.data.success) {
+          this.graphicsPackageInfo = response.data
+          this.graphicsPackageStatus = `Package ready: ${response.data.file_count} files (${this.formatFileSize(response.data.zip_size)})`
+
+          this.$emit('show-notification', {
+            message: `Graphics package ready: ${response.data.file_count} files`,
+            type: 'success'
+          })
+        } else {
+          this.graphicsPackageStatus = 'Error: ' + (response.data.message || 'Unknown error')
+        }
+      } catch (error) {
+        console.error('Error creating graphics package:', error)
+        this.graphicsPackageStatus = 'Error: ' + (error.response?.data?.detail || error.message)
+        this.showGraphicsPackageModal = false
+      } finally {
+        this.packagingGraphics = false
+      }
+    },
+
+    triggerGraphicsDownload() {
+      if (!this.graphicsPackageInfo?.download_url) return
+
+      const authToken = localStorage.getItem('auth-token')
+      const baseURL = this.$axios.defaults.baseURL || ''
+      const url = `${baseURL}${this.graphicsPackageInfo.download_url}`
+
+      // Use fetch to download with auth, then trigger browser save
+      fetch(url, {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      })
+        .then(res => {
+          if (!res.ok) throw new Error('Download failed')
+          return res.blob()
+        })
+        .then(blob => {
+          const a = document.createElement('a')
+          a.href = URL.createObjectURL(blob)
+          a.download = this.graphicsPackageInfo.zip_filename
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          URL.revokeObjectURL(a.href)
+        })
+        .catch(err => {
+          console.error('Download error:', err)
+          this.graphicsPackageStatus = 'Error: Download failed'
+        })
+    },
+
+    formatFileSize(bytes) {
+      if (!bytes || bytes === 0) return '0 B'
+      const units = ['B', 'KB', 'MB', 'GB']
+      let i = 0
+      let size = bytes
+      while (size >= 1024 && i < units.length - 1) {
+        size /= 1024
+        i++
+      }
+      return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+    },
+
     getTypeColor(cueType) {
       const colors = {
         'FSQ': 'purple',
@@ -1251,7 +1463,8 @@ export default {
 }
 
 .metadata-panel {
-  height: 100vh; /* Full viewport height */
+  /* height is set dynamically via inline style from panelHeight prop */
+  max-height: 100vh;
   border-left: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
   overflow: hidden; /* Panel itself doesn't scroll - content inside does */
   display: flex;

@@ -20,6 +20,9 @@ from datetime import datetime
 
 from auth.router import get_current_user_or_key
 from services.asset_processing import generate_gfx_png
+from database import get_db
+from sqlalchemy.orm import Session
+from celery_jobs_router import register_celery_job
 
 router = APIRouter()
 
@@ -141,7 +144,8 @@ async def generate_gfx_asset(
 @router.post("/generate-async", response_model=GFXAssetTaskResponse)
 async def generate_gfx_asset_async(
     request: GFXAssetRequest,
-    current_user=Depends(get_current_user_or_key)
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
 ):
     """
     Generate GFX PNG asset asynchronously using Celery.
@@ -187,6 +191,8 @@ async def generate_gfx_asset_async(
         )
 
         print(f"   ✅ Task queued: {task.id}")
+
+        register_celery_job(db, task.id, "services.asset_processing.generate_gfx_png", "Generate GFX", "assets", episode_id, queue_name)
 
         return GFXAssetTaskResponse(
             success=True,

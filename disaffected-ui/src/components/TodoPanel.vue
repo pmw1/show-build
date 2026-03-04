@@ -29,6 +29,7 @@
                 v-for="(todo, index) in activeClaudeTodos"
                 :key="index"
                 class="todo-item"
+                :class="index % 2 === 0 ? 'todo-row-blue' : 'todo-row-white'"
               >
                 <template v-slot:prepend>
                   <v-icon :color="getStatusColor(todo.status)">
@@ -36,7 +37,7 @@
                   </v-icon>
                 </template>
 
-                <v-list-item-title>{{ todo.content }}</v-list-item-title>
+                <v-list-item-title class="todo-text-truncate" @click="showFullText(todo.content)">{{ todo.content }}</v-list-item-title>
                 <v-list-item-subtitle v-if="todo.status === 'in_progress'">
                   {{ todo.activeForm }}
                 </v-list-item-subtitle>
@@ -98,9 +99,10 @@
             <!-- User todos list (active only) -->
             <v-list v-if="activeUserTodos.length > 0" density="compact">
               <v-list-item
-                v-for="todo in activeUserTodos"
+                v-for="(todo, index) in activeUserTodos"
                 :key="todo.id"
                 class="todo-item"
+                :class="index % 2 === 0 ? 'todo-row-blue' : 'todo-row-white'"
               >
                 <template v-slot:prepend>
                   <v-checkbox
@@ -111,11 +113,21 @@
                   ></v-checkbox>
                 </template>
 
-                <v-list-item-title>
+                <v-list-item-title class="todo-text-truncate" @click="showFullText(todo.content)">
                   {{ todo.content }}
                 </v-list-item-title>
 
                 <template v-slot:append>
+                  <v-chip
+                    v-if="todo.created_by"
+                    size="x-small"
+                    variant="tonal"
+                    color="secondary"
+                    class="me-2"
+                    prepend-icon="mdi-account"
+                  >
+                    {{ todo.created_by }}
+                  </v-chip>
                   <v-chip
                     :color="getPriorityColor(todo.priority)"
                     size="x-small"
@@ -151,12 +163,13 @@
                   v-for="(todo, index) in completedClaudeTodos"
                   :key="'claude-' + index"
                   class="todo-item"
+                  :class="index % 2 === 0 ? 'todo-row-blue' : 'todo-row-white'"
                 >
                   <template v-slot:prepend>
                     <v-icon color="success">mdi-check-circle</v-icon>
                   </template>
 
-                  <v-list-item-title class="text-decoration-line-through text-grey">
+                  <v-list-item-title class="text-decoration-line-through text-grey todo-text-truncate" @click="showFullText(todo.content)">
                     {{ todo.content }}
                   </v-list-item-title>
                 </v-list-item>
@@ -168,9 +181,10 @@
               <div class="text-caption text-grey mb-2">User Items</div>
               <v-list density="compact">
                 <v-list-item
-                  v-for="todo in completedUserTodos"
+                  v-for="(todo, index) in completedUserTodos"
                   :key="'user-' + todo.id"
                   class="todo-item"
+                  :class="index % 2 === 0 ? 'todo-row-blue' : 'todo-row-white'"
                 >
                   <template v-slot:prepend>
                     <v-checkbox
@@ -181,11 +195,21 @@
                     ></v-checkbox>
                   </template>
 
-                  <v-list-item-title class="text-decoration-line-through text-grey">
+                  <v-list-item-title class="text-decoration-line-through text-grey todo-text-truncate" @click="showFullText(todo.content)">
                     {{ todo.content }}
                   </v-list-item-title>
 
                   <template v-slot:append>
+                    <v-chip
+                      v-if="todo.created_by"
+                      size="x-small"
+                      variant="tonal"
+                      color="secondary"
+                      class="me-2"
+                      prepend-icon="mdi-account"
+                    >
+                      {{ todo.created_by }}
+                    </v-chip>
                     <v-chip
                       :color="getPriorityColor(todo.priority)"
                       size="x-small"
@@ -213,6 +237,21 @@
       </v-window>
     </v-card-text>
   </v-card>
+
+  <!-- Full Text Modal -->
+  <v-dialog v-model="textModalOpen" max-width="600" @keydown.esc="textModalOpen = false">
+    <v-card>
+      <v-card-title class="d-flex align-center">
+        <span>Full Text</span>
+        <v-spacer />
+        <v-btn icon="mdi-close" variant="text" size="small" @click="textModalOpen = false" />
+      </v-card-title>
+      <v-divider />
+      <v-card-text class="pa-4" style="white-space: pre-wrap; word-break: break-word;">
+        {{ textModalContent }}
+      </v-card-text>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script>
@@ -227,6 +266,8 @@ export default {
       userTodos: [],
       newTodoContent: '',
       newTodoPriority: 'normal',
+      textModalOpen: false,
+      textModalContent: '',
       priorityOptions: [
         { title: 'Low', value: 'low' },
         { title: 'Normal', value: 'normal' },
@@ -419,6 +460,11 @@ export default {
 
     formatStatus(status) {
       return status.replace('_', ' ').toUpperCase()
+    },
+
+    showFullText(text) {
+      this.textModalContent = text
+      this.textModalOpen = true
     }
   }
 }
@@ -431,6 +477,25 @@ export default {
 
 .todo-item:last-child {
   border-bottom: none;
+}
+
+.todo-row-blue {
+  background-color: #e3f2fd !important;
+}
+
+.todo-row-white {
+  background-color: #ffffff !important;
+}
+
+.todo-text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.todo-text-truncate:hover {
+  text-decoration: underline;
 }
 
 .gap-2 {

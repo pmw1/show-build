@@ -758,6 +758,25 @@ class Settings(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class CeleryJobLog(Base):
+    """Lightweight log of all celery tasks dispatched from show-build."""
+    __tablename__ = "celery_job_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(String(255), unique=True, nullable=False, index=True)
+    task_name = Column(String(255), nullable=False)  # e.g. services.ffmpeg_tasks.generate_episode_mp3
+    display_name = Column(String(255), nullable=True)  # Human-friendly name e.g. "Generate MP3"
+    category = Column(String(50), nullable=False, server_default='general')  # sot, tools, fsq, gfx, vo, compilation
+    episode = Column(String(10), nullable=True)
+    status = Column(String(20), nullable=False, server_default='pending')  # pending, running, completed, failed
+    progress = Column(Integer, nullable=True)
+    result_summary = Column(Text, nullable=True)  # Brief result or error message
+    worker = Column(String(100), nullable=True)  # Which worker picked it up
+    queue = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class SOTProcessingJob(Base):
     """Tracks multi-phase SOT video processing pipeline."""
     __tablename__ = "sot_processing_jobs"
