@@ -590,19 +590,13 @@ export default {
   },
 
   beforeUnmount() {
-    // CRITICAL: Flush any pending edits before component unmounts
-    if (this.$refs.editorPanel?.flushPendingChanges) {
-      console.log('💾 Flushing pending changes before unmount...');
-      // Clear editing flags FIRST so the watcher autosave isn't skipped
-      if (this.$refs.editorPanel) {
-        this.$refs.editorPanel.isActivelyEditing = false;
-        this.$refs.editorPanel.activelyEditingSegment = null;
-      }
-      this.$refs.editorPanel.flushPendingChanges();
+    // Flush pending edits and save before component unmounts
+    if (this.$refs.editorPanel) {
+      this.$refs.editorPanel.isActivelyEditing = false;
+      this.$refs.editorPanel.activelyEditingSegment = null;
+      this.$refs.editorPanel.flushPendingChanges?.();
     }
-    // Ensure any pending content gets saved to DB before teardown
-    if (this.hasUnsavedChanges && this.selectedItemIndex >= 0) {
-      console.log('💾 Saving unsaved changes before unmount...');
+    if ((this.hasUnsavedChanges || this._hasUnsavedChanges) && this.selectedItemIndex >= 0) {
       this.saveCurrentItem(false);
     }
     // Clean up beforeunload handler
@@ -640,17 +634,21 @@ export default {
         this.currentEpisodeNumber = lastEpisode;
       }
     }
-    // Real-time autosave with 500ms debounce (aggressive)
-    // Wrapper to capture the paragraph being edited when debounce starts
-    this.debouncedAutoSave = debounce(() => {
-      // Use the captured paragraph index from when typing started
-      this.saveCurrentItem(false, this.paragraphBeingEdited);
-    }, 500);
-
     // Debounced capture for undo stack (300ms to group rapid typing)
     this.debouncedCaptureUndoState = debounce(() => {
       this.captureUndoState();
     }, 300);
+
+    // Scratch-only autosave (2s debounce). Scratch content is edited in the metadata
+    // panel (not contenteditable), so it doesn't have cursor-theft problems.
+    // Script content autosave is owned by EditorPanel — this only covers scratch.
+    this.debouncedScratchSave = debounce(() => {
+      this.saveCurrentItem(false);
+    }, 2000);
+
+    // Non-reactive dirty tracking — used by saveCurrentItem to avoid reactive mutations
+    // while user is editing. Synced to reactive hasUnsavedChanges on blur/idle.
+    this._hasUnsavedChanges = false;
 
     // Remote content sync — reload from DB after 15 seconds of inactivity
     // Picks up changes made by other users without disrupting the current user
@@ -660,36 +658,28 @@ export default {
   },
 
   watch: {
-    // Real-time autosave on content changes
+    // Dirty tracking + Code Mode autosave.
+    // Script Mode autosave is owned by EditorPanel (its own debounce + persistCurrentItemToDatabase).
+    // Code Mode edits bypass EditorPanel's buffer, so we handle them here.
     rawMarkdownContent: {
       handler(newVal, oldVal) {
         if (newVal !== oldVal && this.selectedItemIndex >= 0) {
-          // CRITICAL FIX: Skip autosave when loading item content from the database.
-          // Without this guard, switching items triggers: loadItemContent -> rawMarkdownContent changes
-          // -> watcher fires -> autosave queued -> saves loaded content back unnecessarily.
-          // Combined with the (now removed) duplicate detection, this caused permanent data loss.
-          if (this.isLoadingItemContent) {
-            console.log('📝 Content changed during item load - skipping autosave');
-            return;
-          }
-          // CRITICAL FIX: Skip redundant autosave when EditorPanel is actively editing.
-          // EditorPanel's updateTextSegment already saves via persistCurrentItemToDatabase -> save-current emit.
-          // This watcher-based autosave would trigger a SECOND save that causes a reactivity cascade,
-          // which can re-render v-html in contenteditable elements and reset the cursor position.
-          const editorPanel = this.$refs.editorPanel;
-          if (editorPanel?.isActivelyEditing) {
-            console.log('📝 Content changed during active editing - skipping redundant watcher autosave (EditorPanel handles save)');
-            this.hasUnsavedChanges = true;
-            return;
-          }
-          console.log('📝 Content changed, triggering autosave...');
-          this.hasUnsavedChanges = true;
-          // Capture which paragraph is being edited NOW, before debounce delay
-          this.paragraphBeingEdited = editorPanel?.focusedParagraphIndex ?? editorPanel?.activelyEditingSegment ?? null;
-          console.log('📝 Captured paragraph being edited:', this.paragraphBeingEdited);
-          this.debouncedAutoSave();
+          // Skip during item load — this is not a user edit
+          if (this.isLoadingItemContent) return;
 
-          // Debounced capture for undo stack (groups rapid typing)
+          // Mark dirty (both reactive and non-reactive tracking)
+          this._hasUnsavedChanges = true;
+          this.hasUnsavedChanges = true;
+
+          // Code Mode autosave: if the change came from Code Mode (not from EditorPanel's
+          // Script Mode buffer), trigger a debounced save. EditorPanel's isActivelyEditing
+          // is only true during Script Mode paragraph editing.
+          const editorPanel = this.$refs.editorPanel;
+          if (!editorPanel?.isActivelyEditing && this.editorMode === 'code') {
+            this.debouncedScratchSave(); // Reuse the 2s debounce for Code Mode too
+          }
+
+          // Capture undo state
           this.debouncedCaptureUndoState();
         }
       }
@@ -698,14 +688,13 @@ export default {
     scratchContent: {
       handler(newVal, oldVal) {
         if (newVal !== oldVal && this.selectedItemIndex >= 0) {
-          console.log('📝 Scratch changed, triggering autosave...');
+          this._hasUnsavedChanges = true;
           this.hasUnsavedChanges = true;
-          // Capture which paragraph is being edited NOW
-          const editorPanel = this.$refs.editorPanel;
-          this.paragraphBeingEdited = editorPanel?.focusedParagraphIndex ?? editorPanel?.activelyEditingSegment ?? null;
-          this.debouncedAutoSave();
 
-          // Debounced capture for undo stack (groups rapid typing)
+          // Scratch-only autosave (2s debounce)
+          this.debouncedScratchSave();
+
+          // Capture undo state
           this.debouncedCaptureUndoState();
         }
       }
@@ -781,7 +770,7 @@ export default {
       editingItemIndex: -1, // Index of item being edited (grows by 2%)
       generatingItemIndex: -1, // DEPRECATED - Use llmState instead
       hasUnsavedChanges: false,
-      paragraphBeingEdited: null, // Track which paragraph was being edited when autosave debounce started
+      // paragraphBeingEdited removed — EditorPanel now owns paragraph flash via its own persistCurrentItemToDatabase
       loadingRundown: true, // Start with loading overlay visible until episode loads
       loadingEpisode: false, // Prevent duplicate episode loading
       isLoadingItemContent: false, // Guard to prevent autosave during item content load
@@ -2857,101 +2846,56 @@ Try dropping an image or video file here!`
       }
     },
 
-    // Handle save-current from EditorPanel — silent save when actively editing
+    // Handle save-current from EditorPanel
+    // EditorPanel is the sole owner of edit-time autosave.
+    // This handler just routes to saveCurrentItem, which is smart enough
+    // to skip reactive state mutations when the user is actively editing.
     async handleEditorSaveCurrent() {
+      await this.saveCurrentItem(false)
+      // If editing has ended (blur path), apply any stashed remote content
       const editorPanel = this.$refs.editorPanel
-      if (editorPanel?.isActivelyEditing) {
-        // Silent save: persist to DB without touching any reactive state
-        // This prevents UI changes (save button flash, prop updates) that cause
-        // the contenteditable to lose focus during active editing
-        await this.saveCurrentItemSilent()
-      } else {
-        // Normal save — editing has ended
-        await this.saveCurrentItem(false)
-        // Apply any stashed remote content now that editing is done
+      if (!editorPanel?.isActivelyEditing) {
         this.applyPendingRemoteContent()
-        // Restart the remote sync timer for the next 15s check
         this.resetRemoteSyncTimer()
       }
     },
 
-    // Silent save — persists to DB but does NOT change hasUnsavedChanges, saving, or any
-    // reactive state. This prevents Vue re-renders that steal focus from contenteditable.
-    async saveCurrentItemSilent() {
-      if (this.selectedItemIndex < 0 || !this.currentRundownItem) return
-
-      try {
-        const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber)
-        const headers = this.getAuthHeaders()
-        const currentItem = { ...this.rundownItems[this.selectedItemIndex] }
-        const contentToSave = this.rawMarkdownContent || this.parsedContent.scriptContent || ''
-
-        // Same corruption guards as saveCurrentItem
-        const existingScript = this.rundownItems[this.selectedItemIndex]?.script || ''
-        if (contentToSave.length < 50 && existingScript.length > 100) {
-          console.error('🚨 BLOCKED silent save: would destroy existing content')
-          return
-        }
-
-        const frontmatterBlockPattern = /^(?:---|(?:-\s){2}-)\s*\n\s*(id|slug|type|title):/gm
-        const frontmatterBlockMatches = contentToSave.match(frontmatterBlockPattern)
-        if (frontmatterBlockMatches && frontmatterBlockMatches.length > 1) {
-          console.error('🚨 BLOCKED silent save: multiple segments detected')
-          return
-        }
-
-        currentItem.script = contentToSave
-        currentItem.scratch = this.scratchContent
-        const assetId = currentItem.asset_id || currentItem.AssetID || currentItem.id
-
-        // Fire-and-forget API call — no reactive state changes
-        await axios.put(
-          `/api/episodes/${paddedId}/save-rundown`,
-          { item: currentItem, asset_id: assetId, save_type: 'autosave' },
-          { headers }
-        )
-        console.log('✅ Silent autosave completed (no reactive state touched)')
-      } catch (error) {
-        console.error('❌ Silent autosave failed:', error)
-      }
-    },
-
-    // Save just the current item (autosave - content only, no order changes)
-    // isManualSave: true for manual saves (creates version history), false for autosave
-    // paragraphToFlash: specific paragraph index to flash on success (captured when typing started)
+    // Save the current item to the database.
+    // isManualSave: true for Ctrl+S/Save All (creates version history), false for autosave
+    // paragraphToFlash: paragraph index for visual feedback (captured when typing started)
+    //
+    // KEY DESIGN: When the user is actively editing (isActivelyEditing=true), this method
+    // skips ALL reactive state mutations (saving, hasUnsavedChanges) to prevent Vue re-renders
+    // that would steal cursor focus from contenteditable elements. The API call still fires —
+    // only the reactive bookkeeping is deferred until the user blurs.
     async saveCurrentItem(isManualSave = false, paragraphToFlash = null) {
       if (this.selectedItemIndex < 0 || !this.currentRundownItem) {
         console.log('Cannot save - no valid item selected');
         return;
       }
 
-      this.saving = true;
-      // CRITICAL FIX: Capture the item index NOW, not after async operations.
-      // If selectedItemIndex changes during the await (e.g., user switches items),
-      // the post-save mutation must still target the correct item.
+      // Determine if user is actively typing — if so, skip reactive state changes
+      const editorPanel = this.$refs.editorPanel;
+      const isEditing = editorPanel?.isActivelyEditing;
+
+      // Capture item index NOW (may change during async if user switches items)
       const saveTargetIndex = this.selectedItemIndex;
+
+      // Only mutate reactive 'saving' flag when NOT actively editing
+      if (!isEditing) this.saving = true;
+
       try {
         const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
         const headers = this.getAuthHeaders();
-
-        // Save only the current item's content without touching order
-        // IMPORTANT: Spread rundownItems first, then override with current editor content
-        const currentItem = {
-          ...this.rundownItems[this.selectedItemIndex]
-        };
-
-        // Override with current editor content (must come after spread)
-        // Use rawMarkdownContent if available (preserves frontmatter), otherwise use parsed script content
-        // SAFETY: Only save if we have actual content to save
+        const currentItem = { ...this.rundownItems[this.selectedItemIndex] };
         const contentToSave = this.rawMarkdownContent || this.parsedContent.scriptContent || '';
 
-        // CRITICAL: Prevent saving empty/minimal content that would destroy existing content
-        // NOTE: API returns items with field "script" (not "script_content"), so check .script
+        // Corruption guard: prevent saving empty content that would destroy existing content
         const existingScript = this.rundownItems[this.selectedItemIndex]?.script || '';
         if (contentToSave.length < 50 && existingScript.length > 100) {
           console.warn('Blocked save: would destroy existing content',
             `(new: ${contentToSave.length} chars, existing: ${existingScript.length} chars)`);
-          this.saving = false;
+          if (!isEditing) this.saving = false;
           return;
         }
 
@@ -2959,46 +2903,18 @@ Try dropping an image or video file here!`
         currentItem.scratch = this.scratchContent;
         currentItem.rawMarkdown = this.rawMarkdownContent;
 
-        // Get the AssetID for this item
         const assetId = currentItem.asset_id || currentItem.AssetID || currentItem.id;
 
-        // CRITICAL VALIDATION: Check for corruption before saving
-        // Check rawMarkdownContent for multiple YAML frontmatter blocks (multiple segments)
+        // Corruption guard: check for multiple YAML frontmatter blocks (concatenated segments)
         const rawToCheck = this.rawMarkdownContent || '';
-
-        // More specific check: Look for multiple frontmatter blocks by detecting the pattern
-        // "---" or "- - -" followed by YAML keys like "id:", "slug:", "type:" which indicate segment metadata
         const frontmatterBlockPattern = /^(?:---|(?:-\s){2}-)\s*\n\s*(id|slug|type|title):/gm;
         const frontmatterBlockMatches = rawToCheck.match(frontmatterBlockPattern);
-        const frontmatterBlockCount = frontmatterBlockMatches ? frontmatterBlockMatches.length : 0;
-
-        console.log('🔍 Corruption check:', {
-          frontmatterBlockCount,
-          rawLength: rawToCheck.length,
-          matches: frontmatterBlockMatches,
-          rawPreview: rawToCheck.substring(0, 500)
-        });
-
-        // Should have exactly 1 frontmatter block (the segment's metadata)
-        // More than 1 means multiple segments were concatenated
-        if (frontmatterBlockCount > 1) {
-          console.error('🚨🚨🚨 SAVE BLOCKED: Raw content contains multiple segments!');
-          console.error('Frontmatter block occurrences:', frontmatterBlockCount);
-          console.error('Expected: 1 (single segment)');
-          console.error('Raw content preview:', rawToCheck.substring(0, 500));
-          console.error('All matches:', frontmatterBlockMatches);
-          throw new Error('Cannot save: Multiple segments detected in script content. This would corrupt the database.');
+        if (frontmatterBlockMatches && frontmatterBlockMatches.length > 1) {
+          console.error('SAVE BLOCKED: Multiple segments detected in script content');
+          throw new Error('Cannot save: Multiple segments detected in script content.');
         }
 
-        console.log('💾 Autosaving current item:', {
-          title: currentItem.title,
-          assetId: assetId,
-          selectedIndex: this.selectedItemIndex,
-          scriptLength: this.parsedContent.scriptContent?.length || 0,
-          scriptPreview: this.parsedContent.scriptContent?.substring(0, 50) || ''
-        });
-
-        // Use save-rundown endpoint in single-item mode
+        // API call — this always fires regardless of editing state
         const response = await axios.put(
           `/api/episodes/${paddedId}/save-rundown`,
           {
@@ -3012,59 +2928,47 @@ Try dropping an image or video file here!`
         if (response.data) {
           // Check if backend blocked a destructive save
           if (response.data.blocked_saves && response.data.blocked_saves.length > 0) {
-            console.error('🚨 Backend BLOCKED a destructive save:', response.data.blocked_saves);
-            const editorPanel = this.$refs.editorPanel;
-            if (editorPanel && editorPanel.flashParagraph && paragraphToFlash !== null) {
+            console.error('Backend BLOCKED a destructive save:', response.data.blocked_saves);
+            if (!isEditing && editorPanel?.flashParagraph && paragraphToFlash !== null) {
               editorPanel.flashParagraph(paragraphToFlash, 'error', 5);
             }
             if (window.flashUrgent) {
               window.flashUrgent('Save blocked: content too short to overwrite existing', window.FLASH_COLORS?.RED || '#f44336', 5000);
             }
-            // Keep hasUnsavedChanges true so user knows save didn't fully succeed
-            this.hasUnsavedChanges = true;
+            this._hasUnsavedChanges = true;
+            if (!isEditing) this.hasUnsavedChanges = true;
             return;
           }
 
-          this.hasUnsavedChanges = false;
-          console.log('✅ Current item autosaved successfully');
-
-          // Flash the specific paragraph that was being edited (not necessarily the currently focused one)
-          console.log('💾 Autosave complete, attempting to flash paragraph:', paragraphToFlash);
-          const editorPanel = this.$refs.editorPanel;
-          if (editorPanel && editorPanel.flashParagraph && paragraphToFlash !== null && paragraphToFlash !== undefined) {
-            console.log('💾 Calling flashParagraph for index:', paragraphToFlash);
-            editorPanel.flashParagraph(paragraphToFlash, 'success', 3);
+          // Save succeeded
+          this._hasUnsavedChanges = false;
+          if (!isEditing) {
+            this.hasUnsavedChanges = false;
+            console.log('Autosaved successfully');
           } else {
-            console.log('💾 Skipping flash - no valid paragraph index or editorPanel not ready');
+            console.log('Autosaved successfully (reactive state deferred — user still editing)');
           }
 
-          // Update local state with saved content IN-PLACE
-          // CRITICAL: Use saveTargetIndex (captured at call time) instead of this.selectedItemIndex
-          // which may have changed during the async axios call if the user switched items.
-          // Using the live selectedItemIndex here was Bug #5 - it could write the wrong content
-          // to the wrong item's local state during concurrent saves.
-          // CURSOR FIX: Skip reactive mutation while EditorPanel is actively editing the same item.
-          // This mutation triggers Vue reactivity on rundownItems which can cascade into
-          // v-html re-renders that reset the cursor position in contenteditable elements.
-          // The content is already saved to the DB; local state will sync on blur/item switch.
-          const editorPanelRef = this.$refs.editorPanel;
-          const isStillEditingSameItem = editorPanelRef?.isActivelyEditing && saveTargetIndex === this.selectedItemIndex;
+          // Update local rundown state — but only when user isn't editing the same item
+          // (reactive mutation on rundownItems cascades into v-html re-renders)
+          const isStillEditingSameItem = isEditing && saveTargetIndex === this.selectedItemIndex;
           if (!isStillEditingSameItem) {
             const savedItem = this.rundownItems[saveTargetIndex];
             if (savedItem) {
               savedItem.script = contentToSave;
               savedItem.scratch = this.scratchContent;
-              savedItem.rawMarkdown = null;  // Clear to prevent stale frontmatter-included content
+              savedItem.rawMarkdown = null;
             }
           }
         }
 
       } catch (error) {
-        console.error('❌ Autosave failed:', error);
-        this.hasUnsavedChanges = true;
-        throw error; // Re-throw so EditorPanel can show red flash
+        console.error('Autosave failed:', error);
+        this._hasUnsavedChanges = true;
+        if (!isEditing) this.hasUnsavedChanges = true;
+        throw error;
       } finally {
-        this.saving = false;
+        if (!isEditing) this.saving = false;
       }
     },
 
