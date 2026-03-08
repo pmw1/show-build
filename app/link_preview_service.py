@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 import logging
-from services.social_media import extract_twitter_metadata, fetch_tweet_from_api, get_twitter_oauth_credentials
+from services.social_media import extract_twitter_metadata, fetch_tweet_from_api, fetch_tweet_via_syndication, get_twitter_oauth_credentials
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)  # Force INFO level for cache debugging
@@ -251,33 +251,34 @@ def fetch_link_preview(url: str, db=None) -> dict:
 
         # If Twitter/X, extract enhanced metadata
         if is_twitter:
-            # Try to use Twitter API if credentials are configured
             tweet_id_match = re.search(r'/status/(\d+)', url)
 
             if tweet_id_match:
                 tweet_id = tweet_id_match.group(1)
 
-                # Try OAuth 1.0a first (better rate limits), then Bearer token
+                # Try v2 API first with credentials
                 oauth_creds = get_twitter_oauth_credentials(db)
                 bearer_token = get_twitter_bearer_token(db) if not oauth_creds else None
+                twitter_metadata = None
 
                 if oauth_creds or bearer_token:
                     api_metadata = fetch_tweet_from_api(tweet_id, bearer_token=bearer_token, oauth_creds=oauth_creds)
-
-                    if api_metadata:
-                        # Successfully fetched from API
+                    if api_metadata and not api_metadata.get('_error'):
                         twitter_metadata = api_metadata
-                        logger.info(f"Fetched X/Twitter preview via API for {url}: {api_metadata.get('tweet_text', 'No text')[:50]}... by @{api_metadata.get('author_handle', 'unknown')}")
-                    else:
-                        # API failed, fall back to scraping
-                        twitter_metadata = extract_twitter_metadata(soup, url)
-                        logger.info(f"Twitter API fetch failed, using scraped data for {url}")
-                else:
-                    # No API credentials, use scraping
+                        logger.info(f"Fetched X preview via v2 API for {url}: @{api_metadata.get('author_handle', 'unknown')}")
+
+                # v2 failed or no credentials — try syndication fallback
+                if not twitter_metadata:
+                    syndication_result = fetch_tweet_via_syndication(tweet_id)
+                    if syndication_result:
+                        twitter_metadata = syndication_result
+                        logger.info(f"Fetched X preview via syndication for {url}: @{syndication_result.get('author_handle', 'unknown')}")
+
+                # Both APIs failed — fall back to scraping
+                if not twitter_metadata:
                     twitter_metadata = extract_twitter_metadata(soup, url)
-                    logger.debug("Twitter API not configured, using scraped metadata")
+                    logger.info(f"All X APIs failed, using scraped data for {url}")
             else:
-                # Couldn't extract tweet ID, use scraping
                 twitter_metadata = extract_twitter_metadata(soup, url)
 
             # Merge Twitter data into og_data with 'x_' prefix

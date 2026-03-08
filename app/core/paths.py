@@ -30,14 +30,20 @@ class ShowBuildPaths:
                 # Standard show-build-server container
                 self.episodes_root = Path('/home/episodes')
                 self.shared_media = Path('/shared_media')
+                self.repo_root = Path('/home/repo')
+                self.media_assets_root = Path('/home/media_assets')
             elif Path('/mnt/sync/disaffected/episodes').exists():
                 # Kairo worker with /mnt/sync mount
                 self.episodes_root = Path('/mnt/sync/disaffected/episodes')
                 self.shared_media = Path('/mnt/sync/shared_media')
+                self.repo_root = Path('/mnt/sync/disaffected/repo')
+                self.media_assets_root = Path('/mnt/sync/media_assets')
             else:
                 # Fallback to standard paths (will warn if not found)
                 self.episodes_root = Path('/home/episodes')
                 self.shared_media = Path('/shared_media')
+                self.repo_root = Path('/home/repo')
+                self.media_assets_root = Path('/home/media_assets')
         else:
             # Development paths
             self.app_root = Path(__file__).parent.parent
@@ -45,6 +51,8 @@ class ShowBuildPaths:
             # In development, episodes might be relative or absolute
             self.episodes_root = Path('/mnt/sync/disaffected/episodes')
             self.shared_media = Path('/mnt/sync/shared_media')
+            self.repo_root = Path('/data/sync/disaffected/repo')
+            self.media_assets_root = Path('/data/sync/media_assets')
 
         # Verify critical paths
         self._verify_paths()
@@ -101,6 +109,15 @@ class ShowBuildPaths:
     def get_publish_dir(self, episode_id: str) -> Path:
         """Get the publish directory for an episode."""
         return self.get_episode_dir(episode_id) / 'publish'
+
+    def get_whiteboard_media_dir(self, episode_id: str) -> Path:
+        """Get the whiteboard media directory for an episode.
+
+        Path: /home/repo/whiteboard/{episode}/ (container)
+        Host: /data/sync/disaffected/repo/whiteboard/{episode}/
+        """
+        episode_num = self._normalize_episode_id(episode_id)
+        return self.repo_root / 'whiteboard' / episode_num
     
     # CLI Tool Integration Paths
     def get_compiled_script_path(self, episode_id: str) -> Path:

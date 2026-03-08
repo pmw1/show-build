@@ -11,10 +11,12 @@ services:
       - ./app:/app
       - ./app/storage:/app/storage
       - ./tools/blueprints:/tools/blueprints:ro  # Blueprint templates for document generation
-      - /mnt/sync/disaffected/logs:/home/logs
-      - /mnt/sync/shared_media:/shared_media
-      - /mnt/sync/disaffected/episodes:/home/episodes
-      - /mnt/asterisk/recordings:/asterisk/recordings:ro
+      - ${LOGS_PATH:-/data/sync/disaffected/logs}:/home/logs
+      - ${SHARED_MEDIA_PATH:-/data/sync/shared_media}:/shared_media
+      - ${EPISODES_PATH:-/data/sync/disaffected/episodes}:/home/episodes
+      - ${REPO_PATH:-/data/sync/disaffected/repo}:/home/repo
+      - ${MEDIA_ASSETS_PATH:-/data/sync/media_assets}:/home/media_assets
+      - ${ASTERISK_PATH:-/mnt/asterisk/recordings}:/asterisk/recordings:ro
       - /home/kevin/.claude/todos:/home/kevin/.claude/todos:ro
     networks:
       - video-post
@@ -25,11 +27,11 @@ services:
       - WEB_CONCURRENCY=1
       - TIMEOUT=300
       - GRACEFUL_TIMEOUT=300
-      - JWT_SECRET_KEY=ea7GZD3mQy3EZYD4YZsFmr/9JwBgZFCaWyznnjhOyow=
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-ea7GZD3mQy3EZYD4YZsFmr/9JwBgZFCaWyznnjhOyow=}
       - JWT_ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=2880
       - MEDIA_ROOT=/home
-      - REDIS_URL=redis://:showbuild2025@192.168.51.223:6379/0
+      - REDIS_URL=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
       - LLM_STATE_API_KEY=${LLM_STATE_API_KEY:-}
     restart: unless-stopped
     healthcheck:
@@ -94,23 +96,9 @@ services:
 
   # mqtt-broker service removed 2026-01-01 - archived in app/backup/mqtt_archived_2026-01-01/
   # All async task processing now handled by Celery + Redis (see app/celery_app.py)
-  # To restore: uncomment this service and update server depends_on above
-  #
-  # mqtt-broker:
-  #   image: eclipse-mosquitto
-  #   container_name: mqtt-broker
-  #   networks:
-  #     - video-post
-  #   ports:
-  #     - "1883:1883"
-  #     - "9001:9001"
-  #   volumes:
-  #     # Mount Mosquitto config for remote access
-  #     - ./tools/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
 volumes:
   postgres_data:
 
 networks:
   video-post:
-

@@ -82,6 +82,11 @@ class WhiteboardItem(Base):
     parent_item_id = Column(Integer, ForeignKey("whiteboard_items.id", ondelete="CASCADE"), nullable=True)
     is_child = Column(Boolean, default=False)
 
+    # Media storage (filesystem-based, no base64)
+    media_asset_id = Column(String(50), nullable=True, index=True)  # AssetID used as filename stem
+    media_path = Column(Text, nullable=True)  # Relative path within repo/whiteboard/{episode}/
+    media_fallback_url = Column(Text, nullable=True)  # Fallback URI/URL for off-site media
+
     # Additional media types (new columns)
     video_url = Column(Text, nullable=True)
     audio_url = Column(Text, nullable=True)

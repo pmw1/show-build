@@ -1822,10 +1822,10 @@ export default {
         };
       }
 
-      // Default: use cue type color with 4px border
+      // Default: use darker version of cue type color with 3px border
       return {
-        borderColor: this.cueTypeColor,
-        borderWidth: '4px',
+        borderColor: this.darkenColor(this.cueTypeColor, 0.3),
+        borderWidth: '3px',
         borderStyle: 'solid'
       };
     },
@@ -1868,6 +1868,18 @@ export default {
     }
   },
   methods: {
+    darkenColor(color, amount) {
+      if (!color || color === 'grey') return '#555';
+      // Handle hex colors
+      let hex = color.replace('#', '');
+      if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+      if (hex.length !== 6) return color;
+      const r = Math.max(0, Math.round(parseInt(hex.substring(0, 2), 16) * (1 - amount)));
+      const g = Math.max(0, Math.round(parseInt(hex.substring(2, 4), 16) * (1 - amount)));
+      const b = Math.max(0, Math.round(parseInt(hex.substring(4, 6), 16) * (1 - amount)));
+      return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    },
+
     /**
      * Navigate to previous thumbnail
      */
@@ -2773,7 +2785,7 @@ export default {
 <style scoped>
 .cue-card {
   margin: 8px 0;
-  border: 4px solid;
+  border: 3px solid;
   transition: all 0.2s ease;
   cursor: pointer;
   border-radius: 0 !important;

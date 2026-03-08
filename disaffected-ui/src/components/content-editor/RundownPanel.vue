@@ -27,23 +27,17 @@
       <!-- Rundown Header -->
       <v-card-title class="d-flex align-center pa-2 rundown-title">
         <span class="text-h6">Rundown</span>
-        <span :class="['master-duration-header', durationThemeClass, 'ml-2']" :title="'Total rundown duration'">
-          <v-icon size="x-small" class="mr-1">mdi-clock-outline</v-icon>
-          {{ computedTotalDuration }}
-        </span>
         <v-spacer></v-spacer>
-        <v-btn
-          size="small"
-          variant="text"
-          @click="$emit('toggle-width')"
-        >
-          <v-icon size="small" class="mr-1">{{ panelWidth === 'narrow' ? 'mdi-arrow-expand-horizontal' : 'mdi-arrow-collapse-horizontal' }}</v-icon>
-          <span class="btn-text-tiny">{{ panelWidth === 'narrow' ? 'Expand' : 'Narrow' }}</span>
+        <v-btn icon size="x-small" variant="text" @click="$emit('toggle-width')" :title="panelWidth === 'narrow' ? 'Expand' : 'Narrow'">
+          <v-icon size="small">{{ panelWidth === 'narrow' ? 'mdi-arrow-expand-horizontal' : 'mdi-arrow-collapse-horizontal' }}</v-icon>
         </v-btn>
-        <v-btn size="small" variant="text" @click="$emit('close')">
-          <v-icon size="small" class="mr-1">mdi-close</v-icon>
-          <span class="btn-text-tiny">Close</span>
+        <v-btn icon size="x-small" variant="text" @click="$emit('close')" title="Close">
+          <v-icon size="small">mdi-close</v-icon>
         </v-btn>
+        <div class="trt-box-wrapper ml-2" :title="'Total rundown duration'">
+          <div class="trt-label">TRT</div>
+          <div class="trt-value">{{ computedTotalDuration }}</div>
+        </div>
       </v-card-title>
       
       <v-divider style="border-width: 0.5px; opacity: 0.3;"></v-divider>
@@ -125,14 +119,6 @@
                 <v-list-item-title>Refresh Rundown</v-list-item-title>
                 <v-list-item-subtitle>Reload from database</v-list-item-subtitle>
               </v-list-item>
-              <v-list-item @click="$emit('restore-revision')" :disabled="selectedItemIndex === -1">
-                <template v-slot:prepend>
-                  <v-icon size="small">mdi-history</v-icon>
-                </template>
-                <v-list-item-title>Restore Previous Revision</v-list-item-title>
-                <v-list-item-subtitle>{{ selectedItemIndex === -1 ? 'Select an item first' : 'View version history' }}</v-list-item-subtitle>
-              </v-list-item>
-              <v-divider></v-divider>
               <v-list-item @click="createNewRegion">
                 <template v-slot:prepend>
                   <v-icon size="small">mdi-plus</v-icon>
@@ -161,6 +147,14 @@
                 </template>
                 <v-list-item-title>{{ allBreaksCollapsed ? 'Expand Breaks' : 'Collapse Breaks' }}</v-list-item-title>
                 <v-list-item-subtitle>{{ allBreaksCollapsed ? 'Expand all break regions' : 'Collapse all break regions' }}</v-list-item-subtitle>
+              </v-list-item>
+              <v-divider></v-divider>
+              <v-list-item @click="openEpisodeRollbackModal">
+                <template v-slot:prepend>
+                  <v-icon size="small">mdi-backup-restore</v-icon>
+                </template>
+                <v-list-item-title>Episode Rollback</v-list-item-title>
+                <v-list-item-subtitle>Restore entire episode from snapshot</v-list-item-subtitle>
               </v-list-item>
             </v-list>
           </v-menu>
@@ -392,6 +386,21 @@
                                 </v-list-item>
                               </v-list>
                             </v-menu>
+                            <span
+                              v-if="getItemGlobalIndex(item) === selectedItemIndex"
+                              class="history-link-row"
+                            >
+                              <span v-if="historyStats[item.id]" class="history-stats">
+                                <span>{{ historyStats[item.id].count }} revisions</span>
+                                <span>oldest: {{ historyStats[item.id].oldest }}</span>
+                                <span>largest: {{ historyStats[item.id].largest }}</span>
+                              </span>
+                              <a
+                                href="#"
+                                class="history-link"
+                                @click.stop.prevent="openRollbackModal(item)"
+                              >[view revisions]</a>
+                            </span>
                           </div>
                         </v-card>
                     </template>
@@ -413,14 +422,12 @@
         </div> <!-- End list-view -->
 
         <!-- Master Duration Footer -->
-        <div v-if="items && items.length > 0" :class="['master-duration-footer', durationThemeClass]">
-          <div class="master-duration-row">
-            <v-icon size="small" class="mr-2">mdi-sigma</v-icon>
-            <span class="master-duration-label">Total Duration</span>
-            <v-spacer></v-spacer>
-            <span class="master-duration-value">{{ computedTotalDuration }}</span>
+        <div v-if="items && items.length > 0" class="master-duration-footer-wrapper">
+          <div class="trt-box-wrapper">
+            <div class="trt-label">TRT</div>
+            <div class="trt-value">{{ computedTotalDuration }}</div>
           </div>
-          <div class="master-duration-items-count">
+          <div class="master-duration-items-count-bottom">
             {{ items.length }} {{ items.length === 1 ? 'item' : 'items' }}
           </div>
         </div>
@@ -674,6 +681,211 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Revision History Modal -->
+    <v-dialog v-model="rollbackDialog" max-width="800" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-history</v-icon>
+          Revision History: {{ rollbackItem?.slug || rollbackItem?.title || 'Segment' }}
+          <v-spacer />
+          <v-btn icon size="small" @click="rollbackDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-divider />
+        <v-card-text style="max-height: 500px; overflow-y: auto;">
+          <div class="d-flex align-center ga-1 mb-3 flex-wrap">
+            <span class="text-caption text-grey mr-1">Show only:</span>
+            <v-btn-toggle v-model="historyFilter" density="compact" variant="outlined" divided color="primary">
+              <v-btn value="all" size="x-small">All</v-btn>
+              <v-btn value="auto" size="x-small">Autosaves</v-btn>
+              <v-btn value="manual" size="x-small">Manual</v-btn>
+              <v-btn value="30m" size="x-small">30 min</v-btn>
+              <v-btn value="60m" size="x-small">60 min</v-btn>
+              <v-btn value="1d" size="x-small">1 day</v-btn>
+            </v-btn-toggle>
+          </div>
+          <div v-if="rollbackLoading" class="text-center pa-8">
+            <v-progress-circular indeterminate color="primary" />
+            <p class="mt-2">Loading revisions...</p>
+          </div>
+          <div v-else-if="filteredRollbackSnapshots.length === 0" class="text-center pa-8 text-grey">
+            No revisions match the current filter.
+          </div>
+          <v-table v-else dense class="history-table">
+            <thead>
+              <tr>
+                <th>Ago</th>
+                <th>Date / Time</th>
+                <th>Source</th>
+                <th>Chars</th>
+                <th>Size</th>
+                <th>Preview</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(snap, idx) in filteredRollbackSnapshots"
+                :key="snap.filename + snap.restore_type"
+                :class="{ 'history-row-even': idx % 2 === 0, 'history-row-odd': idx % 2 !== 0 }"
+              >
+                <td class="text-no-wrap history-cell">{{ formatTimeAgo(snap.modified) }}</td>
+                <td class="text-no-wrap history-cell history-date">{{ formatSnapshotDate(snap.modified) }}</td>
+                <td class="history-cell">
+                  <v-chip
+                    :color="snap.source === 'manual' ? 'blue' : 'grey'"
+                    size="x-small"
+                    label
+                  >{{ snap.source }}</v-chip>
+                </td>
+                <td class="history-cell">{{ snap.content_length || '—' }}</td>
+                <td class="history-cell">{{ snap.size_bytes ? (snap.size_bytes / 1024).toFixed(1) + ' KB' : '—' }}</td>
+                <td class="text-truncate history-cell" style="max-width: 200px;">{{ snap.preview || '' }}</td>
+                <td class="text-no-wrap history-cell">
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    color="primary"
+                    @click="previewSnapshot(snap)"
+                  >preview</v-btn>
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    color="warning"
+                    @click="restoreSnapshot(snap)"
+                    :loading="restoringSnapshot === snap.filename"
+                  >restore</v-btn>
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+
+    <!-- Episode Rollback Modal -->
+    <v-dialog v-model="episodeRollbackDialog" max-width="850" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-backup-restore</v-icon>
+          Episode Rollback: {{ episode }}
+          <v-spacer />
+          <v-btn icon size="small" @click="episodeRollbackDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-divider />
+        <v-card-text style="max-height: 500px; overflow-y: auto;">
+          <v-alert type="warning" variant="tonal" class="mb-4" density="compact">
+            Episode rollback restores <strong>all segments</strong> and their order to the state at the snapshot time.
+          </v-alert>
+          <div v-if="episodeRollbackLoading" class="text-center pa-8">
+            <v-progress-circular indeterminate color="primary" />
+            <p class="mt-2">Loading episode snapshots...</p>
+          </div>
+          <div v-else-if="episodeRollbackSnapshots.length === 0" class="text-center pa-8 text-grey">
+            No episode snapshots found.
+          </div>
+          <v-table v-else dense>
+            <thead>
+              <tr>
+                <th>Date / Time</th>
+                <th>Items</th>
+                <th>Total Size</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="snap in episodeRollbackSnapshots" :key="snap.filename">
+                <td class="text-no-wrap">{{ formatSnapshotDate(snap.modified) }}</td>
+                <td>{{ snap.item_count || '—' }}</td>
+                <td>{{ (snap.size_bytes / 1024).toFixed(1) }} KB</td>
+                <td class="text-no-wrap">
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    color="primary"
+                    @click="previewEpisodeSnapshot(snap)"
+                  >preview</v-btn>
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    color="warning"
+                    @click="restoreEpisodeSnapshot(snap)"
+                    :loading="restoringEpisode === snap.filename"
+                  >restore</v-btn>
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+
+    <!-- Episode Snapshot Preview Modal -->
+    <v-dialog v-model="episodePreviewDialog" max-width="750" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-eye</v-icon>
+          Episode Snapshot Preview
+          <v-spacer />
+          <v-btn icon size="small" @click="episodePreviewDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-divider />
+        <v-card-text style="max-height: 500px; overflow-y: auto;">
+          <div v-for="(item, idx) in episodePreviewItems" :key="idx" class="mb-4">
+            <h4 class="text-subtitle-2">[{{ item.order }}] {{ item.title }}</h4>
+            <p class="text-caption text-grey mb-1">{{ item.type }} | {{ (item.script_content || '').length }} chars</p>
+            <div v-html="item.script_content" class="snapshot-preview-content" style="border-left: 2px solid #555; padding-left: 12px;" />
+            <v-divider class="mt-3" />
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn
+            color="warning"
+            @click="restoreEpisodeSnapshot(episodePreviewSnap)"
+            :loading="restoringEpisode === episodePreviewSnap?.filename"
+          >
+            <v-icon left>mdi-restore</v-icon>
+            Restore Entire Episode
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Snapshot Preview Modal -->
+    <v-dialog v-model="previewDialog" max-width="700" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-eye</v-icon>
+          Snapshot Preview
+          <v-spacer />
+          <v-btn icon size="small" @click="previewDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-divider />
+        <v-card-text style="max-height: 500px; overflow-y: auto;">
+          <div v-html="previewContent" class="snapshot-preview-content" />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn
+            color="warning"
+            @click="restoreSnapshot(previewSnap)"
+            :loading="restoringSnapshot === previewSnap?.filename"
+          >
+            <v-icon left>mdi-restore</v-icon>
+            Restore This Version
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -792,7 +1004,29 @@ export default {
       showRegions: false,  // Default to regions hidden
 
       // Color reactivity trigger
-      colorLoadTrigger: 0  // Incremented when colors load to force re-computation
+      colorLoadTrigger: 0,  // Incremented when colors load to force re-computation
+
+      // Rollback modal (segment)
+      rollbackDialog: false,
+      rollbackItem: null,
+      rollbackSnapshots: [],
+      rollbackLoading: false,
+      restoringSnapshot: null,
+      previewDialog: false,
+      previewContent: '',
+      previewSnap: null,
+      // History stats per item (keyed by item id)
+      historyStats: {},
+      historyFilter: 'all',
+
+      // Rollback modal (episode)
+      episodeRollbackDialog: false,
+      episodeRollbackSnapshots: [],
+      episodeRollbackLoading: false,
+      restoringEpisode: null,
+      episodePreviewDialog: false,
+      episodePreviewItems: [],
+      episodePreviewSnap: null
     }
   },
   setup() {
@@ -805,6 +1039,33 @@ export default {
     }
   },
   computed: {
+    filteredRollbackSnapshots() {
+      const f = this.historyFilter
+      if (!f || f === 'all') return this.rollbackSnapshots
+
+      // Source filters
+      if (f === 'auto') return this.rollbackSnapshots.filter(s => s.source === 'auto')
+      if (f === 'manual') return this.rollbackSnapshots.filter(s => s.source === 'manual')
+
+      // Time-bucket filters: show one revision per bucket, pick largest by bytes
+      let bucketMs
+      if (f === '30m') bucketMs = 30 * 60 * 1000
+      else if (f === '60m') bucketMs = 60 * 60 * 1000
+      else if (f === '1d') bucketMs = 24 * 60 * 60 * 1000
+      else return this.rollbackSnapshots
+
+      const buckets = {}
+      for (const snap of this.rollbackSnapshots) {
+        const ts = new Date(snap.modified).getTime()
+        const key = Math.floor(ts / bucketMs)
+        const sz = snap.size_bytes || snap.content_length || 0
+        if (!buckets[key] || sz > (buckets[key].size_bytes || buckets[key].content_length || 0)) {
+          buckets[key] = snap
+        }
+      }
+      return Object.values(buckets).sort((a, b) => new Date(b.modified) - new Date(a.modified))
+    },
+
     totalDurationSeconds() {
       if (!this.items || this.items.length === 0) return 0
       let totalSeconds = 0
@@ -843,7 +1104,7 @@ export default {
       return 'duration-under'                          // < 0:50:00 blue
     },
     panelWidthValue() {
-      return this.panelWidth === 'narrow' ? '300px' : '520px'
+      return this.panelWidth === 'narrow' ? '300px' : '442px'
     },
     panelHeightValue() {
       return this.panelHeight ? `${this.panelHeight}px` : '100vh'
@@ -2267,6 +2528,59 @@ export default {
       }
 
       console.log('Item selected:', item.slug, 'index:', itemIndex, 'Ctrl+click:', isCtrlClick, 'Multi-selections:', this.selectedItemIndices.size)
+
+      // Lazy-load history stats for selected item
+      if (!isCtrlClick && item && item.id && !this.historyStats[item.id]) {
+        this.fetchHistoryStats(item)
+      }
+    },
+
+    async fetchHistoryStats(item) {
+      try {
+        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+        const headers = { 'Authorization': `Bearer ${token}` }
+        let totalCount = 0
+        let oldestDate = null
+        let largestSize = 0
+
+        // Fetch filesystem snapshots
+        const fsRes = await fetch(`/api/episodes/${this.episode}/history/segments/${item.id}`, { headers })
+        if (fsRes.ok) {
+          const fsData = await fsRes.json()
+          const snaps = fsData.snapshots || []
+          totalCount += snaps.length
+          for (const s of snaps) {
+            if (s.modified && (!oldestDate || new Date(s.modified) < new Date(oldestDate))) oldestDate = s.modified
+            if (s.size_bytes > largestSize) largestSize = s.size_bytes
+          }
+        }
+
+        // Fetch DB versions
+        const assetId = item.asset_id || item.AssetID
+        if (assetId) {
+          const dbRes = await fetch(`/api/episodes/rundown-item/${assetId}/versions`, { headers })
+          if (dbRes.ok) {
+            const dbData = await dbRes.json()
+            const vers = dbData.versions || []
+            totalCount += vers.length
+            for (const v of vers) {
+              if (v.created_at && (!oldestDate || new Date(v.created_at) < new Date(oldestDate))) oldestDate = v.created_at
+              const sz = v.content_length || 0
+              if (sz > largestSize) largestSize = sz
+            }
+          }
+        }
+
+        let oldestStr = '—'
+        if (oldestDate) {
+          const days = Math.floor((Date.now() - new Date(oldestDate).getTime()) / (24 * 60 * 60 * 1000))
+          oldestStr = days === 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`
+        }
+        const largestStr = largestSize > 1024 ? (largestSize / 1024).toFixed(0) + 'kb' : largestSize + 'b'
+        this.historyStats[item.id] = { count: totalCount, oldest: oldestStr, largest: largestStr }
+      } catch {
+        // Silent fail — stats are non-critical
+      }
     },
 
     // Create new region button handler
@@ -2586,6 +2900,283 @@ export default {
       this.$emit('select-item', -1)
 
       console.log('✅ All selections cancelled - multi-select mode disabled')
+    },
+
+    // Rollback methods
+    async openRollbackModal(item) {
+      this.rollbackItem = item
+      this.rollbackDialog = true
+      this.rollbackLoading = true
+      this.rollbackSnapshots = []
+
+      const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+      const headers = { 'Authorization': `Bearer ${token}` }
+      const combined = []
+
+      try {
+        // 1. Load filesystem snapshots (autosave)
+        const fsRes = await fetch(`/api/episodes/${this.episode}/history/segments/${item.id}`, { headers })
+        if (fsRes.ok) {
+          const fsData = await fsRes.json()
+          for (const snap of fsData.snapshots) {
+            try {
+              const detailRes = await fetch(`/api/episodes/${this.episode}/history/segments/${item.id}/${snap.filename}`, { headers })
+              if (detailRes.ok) {
+                const detail = await detailRes.json()
+                const rawContent = detail.content || ''
+                const textOnly = rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+                snap.preview = textOnly.substring(0, 80) + (textOnly.length > 80 ? '...' : '')
+                snap.content_length = detail.frontmatter?.content_length || rawContent.length
+                snap.full_content = rawContent
+              }
+            } catch {
+              snap.preview = ''
+            }
+            snap.source = 'auto'
+            snap.restore_type = 'file'
+            combined.push(snap)
+          }
+        }
+
+        // 2. Load DB version history (manual saves)
+        const assetId = item.asset_id || item.AssetID
+        if (assetId) {
+          const dbRes = await fetch(`/api/episodes/rundown-item/${assetId}/versions`, { headers })
+          if (dbRes.ok) {
+            const dbData = await dbRes.json()
+            for (const ver of (dbData.versions || [])) {
+              combined.push({
+                filename: `v${ver.version_number}`,
+                modified: ver.created_at,
+                size_bytes: (ver.content_length || 0),
+                content_length: ver.content_length,
+                preview: '',
+                source: ver.change_type === 'autosave' ? 'auto' : 'manual',
+                restore_type: 'db',
+                version_number: ver.version_number,
+                asset_id: assetId,
+                full_content: null // loaded on preview
+              })
+            }
+          }
+        }
+
+        // Sort all entries by date, newest first
+        combined.sort((a, b) => new Date(b.modified) - new Date(a.modified))
+        this.rollbackSnapshots = combined
+      } catch (e) {
+        console.error('Failed to load history:', e)
+      } finally {
+        this.rollbackLoading = false
+      }
+    },
+
+    formatSnapshotDate(isoString) {
+      if (!isoString) return '—'
+      const d = new Date(isoString)
+      return d.toLocaleString(undefined, {
+        month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      })
+    },
+
+    formatTimeAgo(isoString) {
+      if (!isoString) return '—'
+      const now = Date.now()
+      const then = new Date(isoString).getTime()
+      const diffSec = Math.floor((now - then) / 1000)
+      if (diffSec < 60) return `${diffSec}s`
+      const diffMin = Math.floor(diffSec / 60)
+      if (diffMin < 60) return `${diffMin}m`
+      const diffHr = Math.floor(diffMin / 60)
+      if (diffHr < 24) return `${diffHr}h`
+      const diffDays = Math.floor(diffHr / 24)
+      return `${diffDays}d`
+    },
+
+    stripFrontmatter(text) {
+      if (!text) return text
+      // Strip YAML frontmatter (---\n...\n---)
+      const match = text.match(/^---\s*\n[\s\S]*?\n---\s*\n?/)
+      return match ? text.slice(match[0].length).trim() : text
+    },
+
+    markdownToHtml(md) {
+      if (!md) return ''
+      let html = md
+      // Headers
+      html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      // Bold and italic
+      html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+      // Blockquotes
+      html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+      // Horizontal rules
+      html = html.replace(/^---$/gm, '<hr>')
+      html = html.replace(/^\*\*\*$/gm, '<hr>')
+      // Unordered lists
+      html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+      // Ordered lists
+      html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+      // Paragraphs - wrap lines not already in tags
+      html = html.split('\n\n').map(block => {
+        block = block.trim()
+        if (!block) return ''
+        if (block.startsWith('<')) return block
+        return '<p>' + block.replace(/\n/g, '<br>') + '</p>'
+      }).join('\n')
+      return html
+    },
+
+    renderPreviewContent(rawContent) {
+      if (!rawContent) return '<p style="color:#999">No content</p>'
+      // Strip frontmatter first
+      let content = this.stripFrontmatter(rawContent)
+      // Check if content is primarily HTML (has block-level tags)
+      if (/<(?:p|div|h[1-6]|ul|ol|blockquote|table|br)\b/i.test(content)) {
+        return content
+      }
+      // Otherwise convert markdown to HTML
+      return this.markdownToHtml(content)
+    },
+
+    async previewSnapshot(snap) {
+      if (snap.restore_type === 'db' && !snap.full_content) {
+        // Lazy-load DB version content
+        try {
+          const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+          const res = await fetch(`/api/episodes/rundown-item/${snap.asset_id}/versions/${snap.version_number}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+          if (res.ok) {
+            const data = await res.json()
+            snap.full_content = data.script_content || ''
+            snap.content_length = data.content_length || snap.full_content.length
+            const textOnly = snap.full_content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+            snap.preview = textOnly.substring(0, 80) + (textOnly.length > 80 ? '...' : '')
+          }
+        } catch (e) {
+          console.error('Failed to load version content:', e)
+        }
+      }
+      this.previewSnap = snap
+      this.previewContent = this.renderPreviewContent(snap.full_content || snap.preview || '')
+      this.previewDialog = true
+    },
+
+    async restoreSnapshot(snap) {
+      if (!snap) return
+
+      this.restoringSnapshot = snap.filename
+      try {
+        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+        let response
+
+        if (snap.restore_type === 'db') {
+          // Restore from DB version history
+          response = await fetch(`/api/episodes/rundown-item/${snap.asset_id}/versions/${snap.version_number}/restore`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+        } else {
+          // Restore from filesystem snapshot
+          response = await fetch(`/api/episodes/${this.episode}/history/segments/restore/${snap.filename}`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+        }
+
+        if (response.ok) {
+          this.rollbackDialog = false
+          this.previewDialog = false
+          this.$emit('refresh-rundown')
+          this.flashMessage = `Segment restored from ${snap.source} ${snap.restore_type === 'db' ? 'version' : 'snapshot'}`
+          this.showFlashMessage = true
+        } else {
+          const err = await response.text()
+          alert(`Restore failed: ${err}`)
+        }
+      } catch (e) {
+        alert(`Restore failed: ${e.message}`)
+      } finally {
+        this.restoringSnapshot = null
+      }
+    },
+
+    // Episode-level rollback methods
+    async openEpisodeRollbackModal() {
+      this.episodeRollbackDialog = true
+      this.episodeRollbackLoading = true
+      this.episodeRollbackSnapshots = []
+
+      try {
+        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+        const response = await fetch(`/api/episodes/${this.episode}/history/episode`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (response.ok) {
+          const data = await response.json()
+          // Enrich with item count from detail
+          const enriched = []
+          for (const snap of data.snapshots) {
+            try {
+              const detailRes = await fetch(`/api/episodes/${this.episode}/history/episode/${snap.filename}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              })
+              if (detailRes.ok) {
+                const detail = await detailRes.json()
+                snap.item_count = detail.frontmatter?.item_count || detail.items?.length || 0
+                snap.items = detail.items || []
+              }
+            } catch {
+              snap.item_count = 0
+            }
+            enriched.push(snap)
+          }
+          this.episodeRollbackSnapshots = enriched
+        }
+      } catch (e) {
+        console.error('Failed to load episode snapshots:', e)
+      } finally {
+        this.episodeRollbackLoading = false
+      }
+    },
+
+    previewEpisodeSnapshot(snap) {
+      this.episodePreviewSnap = snap
+      this.episodePreviewItems = snap.items || []
+      this.episodePreviewDialog = true
+    },
+
+    async restoreEpisodeSnapshot(snap) {
+      if (!snap || !snap.filename) return
+
+      this.restoringEpisode = snap.filename
+      try {
+        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+        const response = await fetch(`/api/episodes/${this.episode}/history/episode/restore/${snap.filename}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (response.ok) {
+          const result = await response.json()
+          this.episodeRollbackDialog = false
+          this.episodePreviewDialog = false
+          this.$emit('refresh-rundown')
+          this.flashMessage = `Episode restored: ${result.items_restored} items`
+          this.showFlashMessage = true
+        } else {
+          const err = await response.text()
+          alert(`Episode restore failed: ${err}`)
+        }
+      } catch (e) {
+        alert(`Episode restore failed: ${e.message}`)
+      } finally {
+        this.restoringEpisode = null
+      }
     }
   }
 }
@@ -2805,6 +3396,7 @@ export default {
   overflow-x: visible; /* Allow items to extend beyond right edge */
   display: flex;
   flex-direction: column;
+  flex-shrink: 0; /* Never shrink - maintain width regardless of editor content */
   z-index: 15 !important; /* Above editor panel (z-index: 10) so rows can overhang */
   align-self: flex-start; /* Required for sticky to work in flex container */
 }
@@ -2834,18 +3426,19 @@ export default {
   font-size: 12px;
   text-transform: uppercase;
   color: var(--v-medium-emphasis-opacity);
-  border-bottom: none; /* Remove border */
+  border-bottom: none;
   position: relative;
-  transform: translateX(25px); /* Match data row positioning */
+  transform: translateX(25px);
+  background: rgba(0, 0, 0, 0.04);
 }
 
-/* Position duration header absolutely too */
+/* Position duration header to align with duration values in rows */
 .rundown-headers .header-duration {
   position: absolute;
-  right: 12px;
+  right: 50px;
   top: 50%;
   transform: translateY(-50%);
-  text-align: left;
+  text-align: right;
 }
 
 .rundown-panel.narrow .rundown-headers {
@@ -2973,9 +3566,9 @@ export default {
   z-index: 5;
 }
 
-/* Duration positioning for selected items - keep same position */
+/* Duration positioning for selected items - offset by 25px to compensate for translateX(0) vs translateX(25px) */
 .selected-item .duration-display {
-  right: 50px; /* Pulled left to be visible with row overhang */
+  right: 25px;
 }
 
 /* During drag, all durations maintain position */
@@ -3138,7 +3731,7 @@ export default {
   top: 5px;
   transform: translateY(0);
   font-weight: bold;
-  font-size: calc(9px + 0.2em);
+  font-size: 14px;
   margin-top: 5px;
   text-decoration: underline;
 }
@@ -3276,18 +3869,19 @@ export default {
 }
 
 .toolbar-btn-tile {
-  border-radius: 6px !important;
-  height: 44px !important;
-  min-height: 44px !important;
+  border-radius: 0 !important;
+  height: 22px !important;
+  min-height: 22px !important;
   font-size: 10px !important;
   flex: 1;
   width: 100% !important;
   justify-self: stretch;
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: row !important;
   align-items: center;
   justify-content: center;
-  padding: 4px 8px !important;
+  padding: 2px 6px !important;
+  gap: 4px;
   background-color: #ffffff !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
   border-width: 2px !important;
@@ -3396,7 +3990,7 @@ export default {
   height: 40px !important;
   font-size: 10px !important;
   padding: 4px 6px !important;
-  border-radius: 4px !important;
+  border-radius: 0 !important;
 }
 
 .rundown-panel.narrow .toolbar-btn-tile .btn-text-tiny {
@@ -4118,9 +4712,12 @@ export default {
   }
 }
 
-/* Override needs-attention when item is selected */
+/* Override needs-attention when item is selected — keep attention color, add selection border */
 .needs-attention-item.selected-item {
   border-left: none !important;
+  outline: 6px solid var(--selection-color, #1976D2) !important;
+  outline-offset: -6px;
+  z-index: 10;
 }
 
 /* Tab-shaped control buttons on right edge of RundownPanel */
@@ -4136,7 +4733,7 @@ export default {
 }
 
 .tab-btn {
-  border-radius: 0 8px 8px 0 !important;
+  border-radius: 0 !important;
   background-color: rgba(25, 118, 210, 0.9) !important;
   color: white !important;
   box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3) !important;
@@ -4156,110 +4753,219 @@ export default {
 }
 
 /* Master Duration - Header Badge */
-.master-duration-header {
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 4px;
-  padding: 1px 6px;
+.trt-box-wrapper {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
-  font-family: 'Roboto Mono', monospace;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-  transition: color 0.3s, background 0.3s, border-color 0.3s;
+  gap: 0;
 }
-
-/* Duration theme: UNDER 50min - Blue */
-.master-duration-header.duration-under {
-  color: #90CAF9;
-  background: rgba(25, 118, 210, 0.15);
-  border: 1px solid rgba(25, 118, 210, 0.3);
-}
-
-/* Duration theme: 55min-1hr - Green (on target) */
-.master-duration-header.duration-target {
-  color: #A5D6A7;
-  background: rgba(56, 142, 60, 0.18);
-  border: 1px solid rgba(56, 142, 60, 0.4);
-}
-
-/* Duration theme: OVER 1hr - Red */
-.master-duration-header.duration-over {
-  color: #EF9A9A;
-  background: rgba(211, 47, 47, 0.18);
-  border: 1px solid rgba(211, 47, 47, 0.4);
-}
-
-.rundown-panel.narrow .master-duration-header {
+.trt-label {
+  background: #000000;
+  color: #ffffff;
   font-size: 9px;
-  padding: 1px 4px;
-}
-
-/* Master Duration - Footer */
-.master-duration-footer {
-  padding: 6px 10px;
-  margin-top: 4px;
-  transition: border-color 0.3s, background 0.3s;
-}
-
-.master-duration-footer.duration-under {
-  border-top: 2px solid rgba(25, 118, 210, 0.4);
-  background: rgba(25, 118, 210, 0.08);
-}
-
-.master-duration-footer.duration-target {
-  border-top: 2px solid rgba(56, 142, 60, 0.5);
-  background: rgba(56, 142, 60, 0.08);
-}
-
-.master-duration-footer.duration-over {
-  border-top: 2px solid rgba(211, 47, 47, 0.5);
-  background: rgba(211, 47, 47, 0.08);
-}
-
-.master-duration-row {
-  display: flex;
-  align-items: center;
-  font-size: 13px;
-  font-weight: 600;
-  color: #E3F2FD;
-}
-
-.master-duration-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  opacity: 0.8;
-}
-
-.master-duration-value {
-  font-family: 'Roboto Mono', monospace;
-  font-size: 15px;
   font-weight: 700;
+  font-family: 'Roboto Mono', monospace;
   letter-spacing: 1px;
-  transition: color 0.3s;
+  padding: 1px 8px;
+  border-radius: 0;
+  line-height: 1.3;
+  text-align: center;
+  width: 100%;
+}
+.trt-value {
+  background: #ffffff;
+  color: #000000;
+  font-size: 16px;
+  font-weight: 800;
+  font-family: 'Roboto Mono', monospace;
+  letter-spacing: 0.5px;
+  padding: 2px 10px;
+  border: 2px solid #000000;
+  border-top: none;
+  border-radius: 0;
+  white-space: nowrap;
+  line-height: 1.3;
 }
 
-.duration-under .master-duration-value { color: #90CAF9; }
-.duration-target .master-duration-value { color: #A5D6A7; }
-.duration-over .master-duration-value { color: #EF9A9A; }
+.rundown-panel.narrow .trt-value {
+  font-size: 12px;
+  padding: 1px 6px;
+}
+.rundown-panel.narrow .trt-label {
+  font-size: 7px;
+  padding: 1px 6px;
+}
 
-.master-duration-items-count {
+/* Master Duration - Footer (matches TRT header style) */
+.master-duration-footer-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 6px 0 6px 10px;
+  margin-top: 4px;
+}
+
+.master-duration-footer-wrapper .trt-box-wrapper {
+  margin-bottom: 4px;
+}
+
+.master-duration-items-count-bottom {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.5);
-  text-align: right;
+  color: rgba(0, 0, 0, 0.5);
+  font-family: 'Roboto Mono', monospace;
   margin-top: 2px;
 }
 
-.rundown-panel.narrow .master-duration-value {
-  font-size: 12px;
+.history-link-row {
+  position: absolute;
+  bottom: 2px;
+  right: 27px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  text-align: right;
+  padding: 0;
 }
-
-.rundown-panel.narrow .master-duration-label {
-  font-size: 10px;
+.history-stats {
+  color: rgba(0, 0, 0, 0.7);
+  font-size: 8px;
+  font-family: 'Roboto Mono', monospace;
+  pointer-events: none;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.25;
 }
-
-.rundown-panel.narrow .master-duration-items-count {
+.history-link {
+  color: rgba(0, 0, 0, 0.85) !important;
+  text-decoration: none !important;
+  cursor: pointer;
+  font-weight: 500;
+  letter-spacing: 0.3px;
   font-size: 9px;
+  font-family: 'Roboto Mono', monospace;
+}
+.history-link:hover {
+  color: #000000 !important;
+}
+
+.history-table th {
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+  white-space: nowrap;
+}
+.history-cell {
+  font-size: 11px !important;
+  padding: 2px 8px !important;
+  height: 28px !important;
+  line-height: 28px !important;
+}
+.history-date {
+  font-size: 10px !important;
+  opacity: 0.8;
+}
+.history-row-even {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+.history-row-odd {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.snapshot-preview-content {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #e0e0e0;
+  padding: 12px 16px;
+  background: #1e1e1e;
+  border-radius: 4px;
+}
+.snapshot-preview-content h1 {
+  font-size: 1.6em;
+  margin: 1em 0 0.5em;
+  font-weight: 700;
+  color: #fff;
+  border-bottom: 1px solid #444;
+  padding-bottom: 4px;
+}
+.snapshot-preview-content h2 {
+  font-size: 1.3em;
+  margin: 1em 0 0.4em;
+  font-weight: 600;
+  color: #fff;
+}
+.snapshot-preview-content h3 {
+  font-size: 1.1em;
+  margin: 0.8em 0 0.3em;
+  font-weight: 600;
+  color: #ddd;
+}
+.snapshot-preview-content p {
+  margin-bottom: 1em;
+  text-indent: 0;
+}
+.snapshot-preview-content ul,
+.snapshot-preview-content ol {
+  margin-bottom: 1em;
+  padding-left: 1.8em;
+}
+.snapshot-preview-content li {
+  margin-bottom: 0.3em;
+}
+.snapshot-preview-content blockquote {
+  border-left: 3px solid #666;
+  padding-left: 14px;
+  margin: 1em 0;
+  color: #aaa;
+  font-style: italic;
+}
+.snapshot-preview-content strong,
+.snapshot-preview-content b {
+  font-weight: 700;
+  color: #fff;
+}
+.snapshot-preview-content em,
+.snapshot-preview-content i {
+  font-style: italic;
+}
+.snapshot-preview-content hr {
+  border: none;
+  border-top: 1px solid #444;
+  margin: 1.2em 0;
+}
+.snapshot-preview-content a {
+  color: #64B5F6;
+  text-decoration: underline;
+}
+.snapshot-preview-content pre,
+.snapshot-preview-content code {
+  background: #2a2a2a;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.9em;
+}
+.snapshot-preview-content pre {
+  padding: 10px 14px;
+  margin: 1em 0;
+  overflow-x: auto;
+}
+.snapshot-preview-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+.snapshot-preview-content th,
+.snapshot-preview-content td {
+  border: 1px solid #444;
+  padding: 6px 10px;
+  text-align: left;
+}
+.snapshot-preview-content th {
+  background: #2a2a2a;
+  font-weight: 600;
 }
 </style>

@@ -50,34 +50,45 @@
           <v-icon>mdi-menu</v-icon>
         </v-btn>
 
-        <v-btn-toggle
-          :model-value="editorMode"
-          @update:model-value="$emit('update:editorMode', $event)"
-          mandatory
-          class="mx-2 editor-mode-toggle"
-        >
-          <v-btn value="script" size="small" class="mode-btn" rounded="0">
-            <v-icon left size="small">mdi-script-text</v-icon>
-            Script
-          </v-btn>
-          <v-divider vertical class="mode-separator"></v-divider>
-          <v-btn value="code" size="small" class="mode-btn" rounded="0">
-            <v-icon left size="small">mdi-code-braces</v-icon>
-            Code
-          </v-btn>
-        </v-btn-toggle>
+        <div class="btn-group-wrapper">
+          <span class="btn-group-label">EDIT MODES</span>
+          <v-btn-toggle
+            :model-value="editorMode"
+            @update:model-value="$emit('update:editorMode', $event)"
+            mandatory
+            class="editor-mode-toggle"
+          >
+            <v-btn value="script" size="small" class="mode-btn" rounded="0">
+              <v-icon left size="small">mdi-script-text</v-icon>
+              Script
+            </v-btn>
+            <v-btn value="code" size="small" class="mode-btn" rounded="0">
+              <v-icon left size="small">mdi-code-braces</v-icon>
+              Code
+            </v-btn>
+          </v-btn-toggle>
+        </div>
 
-        <!-- iPad Mode Button -->
-        <v-btn
-          size="small"
-          class="mode-btn ml-2"
-          rounded="0"
-          @click="openIpadMode"
-          :disabled="!currentEpisodeNumber"
-        >
-          <v-icon left size="small">mdi-tablet</v-icon>
-          iPad Mode
-        </v-btn>
+        <v-spacer></v-spacer>
+
+        <!-- Views Group (right side) -->
+        <div class="btn-group-wrapper">
+          <span class="btn-group-label">VIEWS</span>
+          <div class="btn-group-buttons">
+            <v-btn size="small" class="mode-btn" rounded="0" @click="openIpadMode" :disabled="!currentEpisodeNumber">
+              <v-icon left size="small">mdi-tablet</v-icon>
+              iPad
+            </v-btn>
+            <v-btn size="small" class="mode-btn" rounded="0" @click="openCallerView" :disabled="!currentEpisodeNumber">
+              <v-icon left size="small">mdi-phone-outline</v-icon>
+              Caller
+            </v-btn>
+            <v-btn size="small" class="mode-btn" rounded="0" @click="openDirectorView" :disabled="!currentEpisodeNumber">
+              <v-icon left size="small">mdi-monitor-eye</v-icon>
+              Director
+            </v-btn>
+          </div>
+        </div>
 
         <!-- Collapse Mode Indicator (centered, prominent) -->
         <div v-if="collapseMode && editorMode === 'script'" class="collapse-mode-indicator">
@@ -87,26 +98,6 @@
             Press Ctrl+Shift+C to exit collapse mode
           </v-tooltip>
         </div>
-
-        <v-spacer></v-spacer>
-
-        <!-- Save All Button - mirrors main Save All behavior -->
-        <v-tooltip :text="saveState.tooltip" location="bottom">
-          <template v-slot:activator="{ props }">
-            <v-btn
-              v-bind="props"
-              :color="saveState.buttonColor"
-              size="small"
-              :variant="saveState.hasChanges ? 'flat' : 'tonal'"
-              class="mr-2"
-              :disabled="saveState.isDisabled"
-              @click="handleSaveAll"
-            >
-              <v-icon left size="small">{{ saveState.buttonIcon }}</v-icon>
-              {{ saveState.buttonText }}
-            </v-btn>
-          </template>
-        </v-tooltip>
 
       </v-toolbar>
 
@@ -127,8 +118,7 @@
                 @click="insertCue('IMG')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">IMG</span>
-                  <span class="hotkey-display">[ALT+I]</span>
+                  <span class="cue-label">IMG</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+I</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Image/Photo</v-tooltip>
               </v-btn>
@@ -140,8 +130,7 @@
                 @click="insertCue('GFX')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">GFX</span>
-                  <span class="hotkey-display">[ALT+G]</span>
+                  <span class="cue-label">GFX</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+G</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Graphics & Lower Thirds</v-tooltip>
               </v-btn>
@@ -153,8 +142,7 @@
                 @click="insertCue('FSQ')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">FSQ</span>
-                  <span class="hotkey-display">[ALT+Q]</span>
+                  <span class="cue-label">FSQ</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+Q</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Full Screen Quote</v-tooltip>
               </v-btn>
@@ -166,8 +154,7 @@
                 @click="insertCue('SOT')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">SOT</span>
-                  <span class="hotkey-display">[ALT+S]</span>
+                  <span class="cue-label">SOT</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+S</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Sound on Tape</v-tooltip>
               </v-btn>
@@ -179,8 +166,7 @@
                 @click="insertCue('VO')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">VO</span>
-                  <span class="hotkey-display">[ALT+V]</span>
+                  <span class="cue-label">VO</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+V</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Voice Over</v-tooltip>
               </v-btn>
@@ -192,8 +178,7 @@
                 @click="insertCue('NAT')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">NAT</span>
-                  <span class="hotkey-display">[ALT+N]</span>
+                  <span class="cue-label">NAT</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+N</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Natural Sound</v-tooltip>
               </v-btn>
@@ -205,8 +190,7 @@
                 @click="insertCue('PKG')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">PKG</span>
-                  <span class="hotkey-display">[ALT+P]</span>
+                  <span class="cue-label">PKG</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+P</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Package</v-tooltip>
               </v-btn>
@@ -218,8 +202,7 @@
                 @click="insertCue('NOTE')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">NOTE</span>
-                  <span class="hotkey-display">[ALT+D]</span>
+                  <span class="cue-label">NOTE</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+D</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Note</v-tooltip>
               </v-btn>
@@ -231,8 +214,7 @@
                 @click="insertCue('BUMP')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">BUMP</span>
-                  <span class="hotkey-display">[ALT+B]</span>
+                  <span class="cue-label">BUMP</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+B</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Bumper</v-tooltip>
               </v-btn>
@@ -244,8 +226,7 @@
                 @click="insertCue('STING')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">STING</span>
-                  <span class="hotkey-display">[ALT+T]</span>
+                  <span class="cue-label">STING</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+T</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Stinger</v-tooltip>
               </v-btn>
@@ -257,61 +238,77 @@
                 @click="insertCue('RIF')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">RIF</span>
-                  <span class="hotkey-display">[ALT+R]</span>
+                  <span class="cue-label">RIF</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+R</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Riff</v-tooltip>
               </v-btn>
             </div>
           </div>
 
-          <!-- Text formatting shortcuts box below cue toolbar -->
-          <div class="text-formatting-box text-formatting-sticky d-flex align-center justify-center">
-            <span class="formatting-hotkey"><strong>CTRL+B</strong> Bold</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+S</strong> Save</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>ALT+SHIFT+A</strong> Regenerate Cue AssetID</span>
+          <!-- Text formatting styles flyout -->
+          <div class="styles-flyout-container text-formatting-sticky">
+            <v-btn
+              size="x-small"
+              variant="text"
+              class="styles-toggle-btn"
+              @click="showStylesFlyout = !showStylesFlyout"
+            >
+              <v-icon size="small" :class="{ 'rotate-90': showStylesFlyout }">mdi-chevron-right</v-icon>
+              Styles
+            </v-btn>
+            <transition name="flyout">
+              <div v-if="showStylesFlyout" class="styles-flyout-items">
+                <span class="formatting-hotkey"><strong>CTRL+B</strong> Bold</span>
+                <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
+                <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
+                <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
+                <span class="formatting-hotkey"><strong>ALT+SHIFT+A</strong> Regen AssetID</span>
+              </div>
+            </transition>
           </div>
 
           <!-- Script Content Area with embedded fields -->
           <div class="script-content-container flex-grow-1">
             <!-- Multi-Selection Actions -->
-            <div v-if="multiSelectedSegments.size > 0" class="multi-selection-toolbar">
-              <div class="selection-info">
-                {{ multiSelectedSegments.size }} paragraph{{ multiSelectedSegments.size > 1 ? 's' : '' }} selected
+            <div v-if="multiSelectionCount > 0" class="multi-selection-toolbar">
+              <div class="selection-count">
+                <span class="selection-count-number">{{ multiSelectionCount }}</span>
+                <span class="selection-count-label">paragraph{{ multiSelectionCount > 1 ? 's' : '' }} selected</span>
               </div>
-              <v-btn
-                color="primary"
-                variant="contained"
-                size="small"
-                @click="swapSelectedParagraphs"
-                prepend-icon="mdi-swap-vertical"
-              >
-                Swap
-              </v-btn>
-              <v-btn
-                color="error"
-                variant="contained"
-                size="small"
-                @click="deleteMultipleSegments"
-                prepend-icon="mdi-delete"
-              >
-                Delete Selected
-              </v-btn>
-              <v-btn
-                variant="outlined"
-                size="small"
-                @click="clearMultiSelection"
-              >
-                Clear Selection
-              </v-btn>
+              <div class="selection-actions">
+                <v-btn
+                  v-if="multiSelectionCount === 2"
+                  color="primary"
+                  variant="flat"
+                  size="small"
+                  @click="swapSelectedParagraphs"
+                  prepend-icon="mdi-swap-vertical"
+                >
+                  Swap
+                </v-btn>
+                <v-btn
+                  color="error"
+                  variant="flat"
+                  size="small"
+                  @click="deleteMultipleSegments"
+                  prepend-icon="mdi-delete"
+                >
+                  Delete {{ multiSelectionCount }} paragraph{{ multiSelectionCount > 1 ? 's' : '' }}
+                </v-btn>
+                <v-btn
+                  variant="text"
+                  size="small"
+                  @click="clearMultiSelection"
+                  prepend-icon="mdi-close"
+                >
+                  Cancel
+                </v-btn>
+              </div>
+            </div>
+
+            <!-- Segment Title -->
+            <div v-if="useVisualScriptMode && !hasNoItem" class="segment-title-header" :class="{ 'segment-title-placeholder': !item?.title || /^Segment-\d+$/i.test(item.title) }">
+              {{ item?.title && !/^Segment-\d+$/i.test(item.title) ? item.title : 'Enter a segment title' }}
             </div>
 
             <!-- Enhanced Script Content with Visual Cue Cards -->
@@ -454,13 +451,13 @@
                       <div
                         :ref="`textareaRef-${index}`"
                         contenteditable="true"
-                        v-html="getSegmentContent(index)"
+                        v-safe-html="{ content: getSegmentContent(index), editing: activelyEditingSegment === index }"
                         @input="handleContentEditableInput(index, $event)"
                         @keydown="handleContentEditableKeydown(index, $event)"
                         @paste="handleContentEditablePaste(index, $event)"
                         @mousedown="handleContentEditableMousedown(index, $event)"
                         @focus="setEditingFlags(index); handleParagraphFocus(index)"
-                        @blur="handleParagraphBlur(index)"
+                        @blur="handleParagraphBlur(index, $event)"
                         class="speaker-textarea speaker-contenteditable"
                         :class="`speaker-${segment.speaker}`"
                         :style="getSpeakerTextStyle(segment.speaker)"
@@ -783,8 +780,7 @@
                 @click="insertCue('IMG')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">IMG</span>
-                  <span class="hotkey-display">[ALT+I]</span>
+                  <span class="cue-label">IMG</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+I</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Image/Photo</v-tooltip>
               </v-btn>
@@ -796,8 +792,7 @@
                 @click="insertCue('GFX')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">GFX</span>
-                  <span class="hotkey-display">[ALT+G]</span>
+                  <span class="cue-label">GFX</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+G</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Graphics & Lower Thirds</v-tooltip>
               </v-btn>
@@ -809,8 +804,7 @@
                 @click="insertCue('FSQ')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">FSQ</span>
-                  <span class="hotkey-display">[ALT+Q]</span>
+                  <span class="cue-label">FSQ</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+Q</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Full Screen Quote</v-tooltip>
               </v-btn>
@@ -822,8 +816,7 @@
                 @click="insertCue('SOT')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">SOT</span>
-                  <span class="hotkey-display">[ALT+S]</span>
+                  <span class="cue-label">SOT</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+S</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Sound on Tape</v-tooltip>
               </v-btn>
@@ -835,8 +828,7 @@
                 @click="insertCue('VO')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">VO</span>
-                  <span class="hotkey-display">[ALT+V]</span>
+                  <span class="cue-label">VO</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+V</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Voice Over</v-tooltip>
               </v-btn>
@@ -848,8 +840,7 @@
                 @click="insertCue('NAT')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">NAT</span>
-                  <span class="hotkey-display">[ALT+N]</span>
+                  <span class="cue-label">NAT</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+N</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Natural Sound</v-tooltip>
               </v-btn>
@@ -861,8 +852,7 @@
                 @click="insertCue('PKG')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">PKG</span>
-                  <span class="hotkey-display">[ALT+P]</span>
+                  <span class="cue-label">PKG</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+P</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Package</v-tooltip>
               </v-btn>
@@ -874,8 +864,7 @@
                 @click="insertCue('NOTE')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">NOTE</span>
-                  <span class="hotkey-display">[ALT+D]</span>
+                  <span class="cue-label">NOTE</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+D</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Note</v-tooltip>
               </v-btn>
@@ -887,8 +876,7 @@
                 @click="insertCue('BUMP')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">BUMP</span>
-                  <span class="hotkey-display">[ALT+B]</span>
+                  <span class="cue-label">BUMP</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+B</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Bumper</v-tooltip>
               </v-btn>
@@ -900,8 +888,7 @@
                 @click="insertCue('STING')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">STING</span>
-                  <span class="hotkey-display">[ALT+T]</span>
+                  <span class="cue-label">STING</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+T</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Stinger</v-tooltip>
               </v-btn>
@@ -913,27 +900,33 @@
                 @click="insertCue('RIF')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">RIF</span>
-                  <span class="hotkey-display">[ALT+R]</span>
+                  <span class="cue-label">RIF</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+R</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Riff</v-tooltip>
               </v-btn>
             </div>
           </div>
 
-          <!-- Text formatting shortcuts box below cue toolbar -->
-          <div class="text-formatting-box text-formatting-sticky d-flex align-center justify-center">
-            <span class="formatting-hotkey"><strong>CTRL+B</strong> Bold</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+S</strong> Save</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>ALT+SHIFT+A</strong> Regenerate Cue AssetID</span>
+          <!-- Text formatting styles flyout -->
+          <div class="styles-flyout-container text-formatting-sticky">
+            <v-btn
+              size="x-small"
+              variant="text"
+              class="styles-toggle-btn"
+              @click="showStylesFlyout = !showStylesFlyout"
+            >
+              <v-icon size="small" :class="{ 'rotate-90': showStylesFlyout }">mdi-chevron-right</v-icon>
+              Styles
+            </v-btn>
+            <transition name="flyout">
+              <div v-if="showStylesFlyout" class="styles-flyout-items">
+                <span class="formatting-hotkey"><strong>CTRL+B</strong> Bold</span>
+                <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
+                <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
+                <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
+                <span class="formatting-hotkey"><strong>ALT+SHIFT+A</strong> Regen AssetID</span>
+              </div>
+            </transition>
           </div>
 
           <v-textarea
@@ -1253,8 +1246,7 @@
                 @click="insertCue('IMG')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">IMG</span>
-                  <span class="hotkey-display">[ALT+I]</span>
+                  <span class="cue-label">IMG</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+I</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Image/Photo</v-tooltip>
               </v-btn>
@@ -1266,8 +1258,7 @@
                 @click="insertCue('GFX')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">GFX</span>
-                  <span class="hotkey-display">[ALT+G]</span>
+                  <span class="cue-label">GFX</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+G</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Graphics & Lower Thirds</v-tooltip>
               </v-btn>
@@ -1279,8 +1270,7 @@
                 @click="insertCue('FSQ')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">FSQ</span>
-                  <span class="hotkey-display">[ALT+Q]</span>
+                  <span class="cue-label">FSQ</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+Q</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Full Screen Quote</v-tooltip>
               </v-btn>
@@ -1292,8 +1282,7 @@
                 @click="insertCue('SOT')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">SOT</span>
-                  <span class="hotkey-display">[ALT+S]</span>
+                  <span class="cue-label">SOT</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+S</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Sound on Tape</v-tooltip>
               </v-btn>
@@ -1305,8 +1294,7 @@
                 @click="insertCue('VO')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">VO</span>
-                  <span class="hotkey-display">[ALT+V]</span>
+                  <span class="cue-label">VO</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+V</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Voice Over</v-tooltip>
               </v-btn>
@@ -1318,8 +1306,7 @@
                 @click="insertCue('NAT')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">NAT</span>
-                  <span class="hotkey-display">[ALT+N]</span>
+                  <span class="cue-label">NAT</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+N</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Natural Sound</v-tooltip>
               </v-btn>
@@ -1331,8 +1318,7 @@
                 @click="insertCue('PKG')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">PKG</span>
-                  <span class="hotkey-display">[ALT+P]</span>
+                  <span class="cue-label">PKG</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+P</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Package</v-tooltip>
               </v-btn>
@@ -1344,8 +1330,7 @@
                 @click="insertCue('NOTE')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">NOTE</span>
-                  <span class="hotkey-display">[ALT+D]</span>
+                  <span class="cue-label">NOTE</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+D</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Note</v-tooltip>
               </v-btn>
@@ -1357,8 +1342,7 @@
                 @click="insertCue('BUMP')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">BUMP</span>
-                  <span class="hotkey-display">[ALT+B]</span>
+                  <span class="cue-label">BUMP</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+B</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Bumper</v-tooltip>
               </v-btn>
@@ -1370,8 +1354,7 @@
                 @click="insertCue('STING')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">STING</span>
-                  <span class="hotkey-display">[ALT+T]</span>
+                  <span class="cue-label">STING</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+T</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Stinger</v-tooltip>
               </v-btn>
@@ -1383,27 +1366,33 @@
                 @click="insertCue('RIF')"
               >
                 <div class="cue-btn-content-flex">
-                  <span class="cue-label">RIF</span>
-                  <span class="hotkey-display">[ALT+R]</span>
+                  <span class="cue-label">RIF</span><span class="cue-pipe">|</span><span class="hotkey-display">ALT+R</span>
                 </div>
                 <v-tooltip activator="parent" location="bottom">Riff</v-tooltip>
               </v-btn>
             </div>
           </div>
 
-          <!-- Text formatting shortcuts box below cue toolbar -->
-          <div class="text-formatting-box text-formatting-sticky d-flex align-center justify-center">
-            <span class="formatting-hotkey"><strong>CTRL+B</strong> Bold</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>CTRL+S</strong> Save</span>
-            <v-divider vertical class="hotkey-divider mx-4"></v-divider>
-            <span class="formatting-hotkey"><strong>ALT+SHIFT+A</strong> Regenerate Cue AssetID</span>
+          <!-- Text formatting styles flyout -->
+          <div class="styles-flyout-container text-formatting-sticky">
+            <v-btn
+              size="x-small"
+              variant="text"
+              class="styles-toggle-btn"
+              @click="showStylesFlyout = !showStylesFlyout"
+            >
+              <v-icon size="small" :class="{ 'rotate-90': showStylesFlyout }">mdi-chevron-right</v-icon>
+              Styles
+            </v-btn>
+            <transition name="flyout">
+              <div v-if="showStylesFlyout" class="styles-flyout-items">
+                <span class="formatting-hotkey"><strong>CTRL+B</strong> Bold</span>
+                <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
+                <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
+                <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
+                <span class="formatting-hotkey"><strong>ALT+SHIFT+A</strong> Regen AssetID</span>
+              </div>
+            </transition>
           </div>
 
           <v-textarea
@@ -1467,6 +1456,18 @@
     @place-cue="handleCuePlacement"
     @cancel="cancelCuePlacement"
   /> -->
+
+  <!-- Stub View Modal -->
+  <v-dialog v-model="showStubModal" max-width="400">
+    <v-card>
+      <v-card-title class="text-h6">{{ stubViewName }}</v-card-title>
+      <v-card-text>This function is not yet available.</v-card-text>
+      <v-card-actions>
+        <v-spacer></v-spacer>
+        <v-btn variant="text" @click="showStubModal = false">OK</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script>
@@ -1485,6 +1486,32 @@ import { useRequireEpisode } from '../../composables/useRequireEpisode.js';
 
 export default {
   name: 'EditorPanel',
+  directives: {
+    /**
+     * v-safe-html: Like v-html but skips DOM updates while contenteditable is being edited.
+     * Prevents cursor jumps caused by Vue re-rendering innerHTML during typing.
+     * Usage: v-safe-html="{ content: htmlString, editing: boolean }"
+     */
+    'safe-html': {
+      mounted(el, binding) {
+        const { content } = binding.value;
+        if (content !== undefined && content !== null) {
+          el.innerHTML = content;
+        }
+      },
+      updated(el, binding) {
+        const { content, editing } = binding.value;
+        // CRITICAL: Skip innerHTML update while user is actively editing
+        // This prevents Vue from resetting the cursor position in contenteditable
+        if (editing) {
+          return;
+        }
+        if (content !== undefined && content !== null && el.innerHTML !== content) {
+          el.innerHTML = content;
+        }
+      }
+    }
+  },
   components: {
     draggable,
     // ImgCueModal - REMOVED: Now handled by ContentEditor.vue
@@ -1501,6 +1528,7 @@ export default {
   },
   data() {
     return {
+      showStylesFlyout: false,
       showImgModal: false,
       showDeleteImgModal: false,
       editingCueData: null,
@@ -1523,6 +1551,8 @@ export default {
       temporaryEpisode: null, // For episode requirement callback
       pendingCueData: null, // Store IMG cue data for post-modal placement
       useVisualScriptMode: true, // Toggle for visual cue cards vs traditional text - RE-ENABLED, fixing visibility issue
+      showStubModal: false,
+      stubViewName: '',
       hoveredParagraphIndex: null, // Track which paragraph is being hovered
       hoveredCueIndex: null, // Track which cue is being hovered (for flag button)
       activeFlagNoteIndex: null, // Track which segment's flag note panel is open
@@ -2003,8 +2033,8 @@ export default {
 
     // Watch calculated duration and emit to parent for metadata update
     calculatedItemDuration: {
+      immediate: true,
       handler(newDuration) {
-        console.log('⏱️ Calculated item duration:', newDuration);
         this.$emit('duration-calculated', newDuration);
       }
     }
@@ -2189,30 +2219,35 @@ export default {
     // eslint-disable-next-line vue/no-side-effects-in-computed-properties
     scriptSegments: {
       get() {
+        // CRITICAL FIX: Return cached segments while user is actively editing a paragraph.
+        // This guard MUST be FIRST — before accessing any reactive properties (rawScriptContent, etc.)
+        // If placed after, Vue tracks those properties as dependencies, marks this computed dirty
+        // when they change, and re-runs the getter. Even returning cached results doesn't help
+        // because draggableSegments then spreads into a new array, causing the draggable component
+        // to re-render children, which can blur the contenteditable element.
+        // By returning here FIRST, Vue only tracks isActivelyEditing and cachedScriptSegments
+        // as dependencies — the prop change won't trigger recomputation at all.
+        if (this.isActivelyEditing && this.cachedScriptSegments !== null) {
+          return this.cachedScriptSegments;
+        }
+
+        // CRITICAL FIX: Return cached segments during drag to maintain object stability
+        if (this.isDragging && this.cachedScriptSegments !== null) {
+          return this.cachedScriptSegments;
+        }
+
         // CRITICAL: Read segmentReparseKey to create a Vue dependency.
         // When this key is incremented (on item switch), Vue will invalidate this
         // computed even if the manual cache thinks nothing changed.
         // eslint-disable-next-line no-unused-vars
         const _reparseKey = this.segmentReparseKey;
 
-        console.log('🔄 scriptSegments getter called (reparseKey:', _reparseKey, ')');
-        console.log('  rawScriptContent length:', this.rawScriptContent?.length);
-        console.log('  editorMode:', this.editorMode);
-        console.log('  useVisualScriptMode:', this.useVisualScriptMode);
-
         if (!this.rawScriptContent || this.editorMode !== 'script' || !this.useVisualScriptMode) {
-          console.log('  → Returning empty array (early exit)');
           // eslint-disable-next-line vue/no-side-effects-in-computed-properties
           this.cachedScriptSegments = null;
           // eslint-disable-next-line vue/no-side-effects-in-computed-properties
           this.lastParsedContent = null;
           return [];
-        }
-
-        // CRITICAL FIX: Return cached segments during drag to maintain object stability
-        if (this.isDragging && this.cachedScriptSegments !== null) {
-          console.log('  → Returning cached segments (drag in progress)');
-          return this.cachedScriptSegments;
         }
 
         // Only re-parse if content has actually changed
@@ -2418,28 +2453,47 @@ export default {
     },
 
     // Calculate total duration of rundown item (cue durations + paragraph text durations)
+    // Calculate duration directly from rawScriptContent so it updates in real-time
+    // (not from scriptSegments which is cached during active editing)
     calculatedItemDuration() {
-      if (!this.scriptSegments || this.scriptSegments.length === 0) {
+      const content = this.rawScriptContent;
+      if (!content || !content.trim()) {
         return '00:00:00:00';
       }
 
       let totalSeconds = 0;
-      const speakerWpm = this.item?.speaker_wpm || 150; // Get speaker WPM from item
+      const speakerWpm = this.item?.speaker_wpm || 150;
 
-      this.scriptSegments.forEach(segment => {
-        if (segment.type === 'cue' && segment.data) {
-          // Add cue duration (parse from HH:MM:SS:FF format)
-          const duration = segment.data.duration || segment.data.Duration || '00:00:00:00';
-          totalSeconds += this.parseDurationToSeconds(duration);
-        } else if (segment.type === 'text' && segment.content) {
-          // Calculate paragraph duration based on word count and speaker WPM
-          const wordCount = segment.content.trim().split(/\s+/).filter(w => w.length > 0).length;
-          const paragraphSeconds = Math.ceil((wordCount / speakerWpm) * 60);
-          totalSeconds += paragraphSeconds;
+      // Strip YAML frontmatter
+      const stripped = content.replace(/^---[\s\S]*?---\s*/, '');
+
+      // Split into lines and process
+      const lines = stripped.split('\n');
+      let textBuffer = '';
+
+      for (const line of lines) {
+        // Check if line is a cue card (e.g. [GFX: ...] or ```cue blocks)
+        const cueMatch = line.match(/^\s*\[(\w+)(?:\s*[:|].*?)?\]\s*$/);
+        const cueDurationMatch = line.match(/duration[:\s]*(\d{2}:\d{2}:\d{2}(?::\d{2})?)/i);
+
+        if (cueDurationMatch) {
+          const dur = cueDurationMatch[1].includes(':') ? cueDurationMatch[1] : cueDurationMatch[1] + ':00';
+          const parts = dur.split(':');
+          if (parts.length >= 3) {
+            totalSeconds += (parseInt(parts[0]) || 0) * 3600 + (parseInt(parts[1]) || 0) * 60 + (parseInt(parts[2]) || 0);
+          }
+        } else if (!cueMatch && !line.match(/^```/) && !line.match(/^\s*\w+\s*:/)) {
+          // Regular text line — accumulate for word count
+          textBuffer += ' ' + line;
         }
-      });
+      }
 
-      // Convert total seconds back to HH:MM:SS:FF format
+      // Calculate text duration from word count
+      const words = textBuffer.trim().split(/\s+/).filter(w => w.length > 0);
+      if (words.length > 0) {
+        totalSeconds += Math.ceil((words.length / speakerWpm) * 60);
+      }
+
       return this.secondsToDuration(totalSeconds);
     },
 
@@ -2515,6 +2569,11 @@ export default {
     selectionColor() {
       const colorName = getColorValue('selection');
       return resolveVuetifyColor(colorName);
+    },
+
+    // Multi-selection count — computed to guarantee Vue reactivity for v-if
+    multiSelectionCount() {
+      return this.multiSelectedSegments.size;
     },
 
     // Get selection color with opacity for background
@@ -2647,6 +2706,16 @@ export default {
       // Open iPad scroll view in new window/tab
       const url = `/ipad-scroll/${this.currentEpisodeNumber}`
       window.open(url, '_blank')
+    },
+
+    openCallerView() {
+      this.stubViewName = 'Caller View'
+      this.showStubModal = true
+    },
+
+    openDirectorView() {
+      this.stubViewName = 'Director View'
+      this.showStubModal = true
     },
 
     /**
@@ -3390,9 +3459,32 @@ export default {
       const currentSegment = this.scriptSegments[index];
 
       if (paragraphs.length === 1) {
-        // Single paragraph - just insert at cursor
-        document.execCommand('insertText', false, paragraphs[0]);
-        this.syncContentEditableToSegment(index, element);
+        // Single paragraph - insert at cursor
+        // Try Selection API first (modern), fall back to execCommand
+        const sel = window.getSelection();
+        let inserted = false;
+        if (sel && sel.rangeCount > 0) {
+          try {
+            const range = sel.getRangeAt(0);
+            range.deleteContents();
+            const textNode = document.createTextNode(paragraphs[0]);
+            range.insertNode(textNode);
+            // Move cursor to end of inserted text
+            range.setStartAfter(textNode);
+            range.setEndAfter(textNode);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            inserted = true;
+          } catch (e) {
+            console.warn('📋 Selection API insert failed, trying execCommand:', e);
+          }
+        }
+        if (!inserted) {
+          // Fallback to execCommand (still works in some browsers)
+          document.execCommand('insertText', false, paragraphs[0]);
+        }
+        // Trigger input event so handleContentEditableInput processes the change
+        element.dispatchEvent(new Event('input', { bubbles: true }));
         this.hasLocalUnsavedChanges = true;
         console.log('📋 Single paragraph pasted');
       } else {
@@ -4764,11 +4856,36 @@ export default {
     },
 
     // Get cue button style object
+    getContrastColor(bgColor) {
+      // Parse hex or rgb color and return black or white for max contrast
+      let r, g, b
+      if (bgColor.startsWith('#')) {
+        const hex = bgColor.replace('#', '')
+        r = parseInt(hex.substr(0, 2), 16)
+        g = parseInt(hex.substr(2, 2), 16)
+        b = parseInt(hex.substr(4, 2), 16)
+      } else if (bgColor.startsWith('rgb')) {
+        const match = bgColor.match(/(\d+)/g)
+        if (match) {
+          r = parseInt(match[0]); g = parseInt(match[1]); b = parseInt(match[2])
+        } else {
+          return '#ffffff'
+        }
+      } else {
+        return '#ffffff'
+      }
+      // Relative luminance (WCAG formula)
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+      return luminance > 0.5 ? '#000000' : '#ffffff'
+    },
+
     getCueButtonStyle(cueType) {
       const backgroundColor = this.getCueColor(cueType)
+      const textColor = this.getContrastColor(backgroundColor)
       return {
         backgroundColor: backgroundColor,
-        borderColor: backgroundColor
+        borderColor: backgroundColor,
+        color: textColor
       }
     },
 
@@ -5689,8 +5806,10 @@ export default {
       } else if (cueData.type === 'DIR' || cueData.type === 'NOTE') {
         // Emit event to parent (ContentEditor) to open NOTE modal with cue data
         this.$emit('edit-dir-cue', cueData);
+      } else if (cueData.type === 'RIF') {
+        // Emit event to parent (ContentEditor) to open RIF modal with cue data
+        this.$emit('edit-rif-cue', cueData);
       }
-      // Add other cue type modals as needed
     },
 
     /**
@@ -5835,9 +5954,87 @@ export default {
     },
 
     performCueDeletion(index, deleteAssets = false) {
-      // Remove the cue segment and update script content
-      const updatedSegments = this.scriptSegments.filter((_, i) => i !== index);
-      const newRawContent = this.reconstructRawContent(updatedSegments);
+      console.log('🗑️ performCueDeletion called for segment index:', index);
+
+      // STRATEGY: Direct raw content manipulation.
+      // Instead of parse → filter → reconstruct (which has caching edge cases),
+      // identify which cue block in the raw content corresponds to this segment index,
+      // then remove it directly from the string.
+
+      // Step 1: Get the raw content
+      const rawContent = this.scriptContent || '';
+      console.log('🗑️ Raw content length before deletion:', rawContent.length);
+
+      // Step 2: Find all cue block positions in the raw content
+      const cueBlockPattern = /<!-- Begin Cue -->[\s\S]*?<!-- End Cue -->/g;
+      const cuePositions = []; // { start, end } for each cue block
+      let cueMatch;
+      while ((cueMatch = cueBlockPattern.exec(rawContent)) !== null) {
+        cuePositions.push({
+          start: cueMatch.index,
+          end: cueMatch.index + cueMatch[0].length
+        });
+      }
+
+      // Step 3: Map segment index to cue occurrence index.
+      // scriptSegments interleaves text and cue segments. We need to count
+      // how many cue segments appear before (and including) the target index.
+      // Clear caches first so scriptSegments returns fresh data.
+      this.isActivelyEditing = false;
+      this.activelyEditingSegment = null;
+      this.cachedScriptSegments = null;
+      this.lastParsedContent = null;
+
+      const segments = this.scriptSegments;
+      const targetSegment = segments[index];
+
+      if (!targetSegment || targetSegment.type !== 'cue') {
+        console.error('🗑️ Target segment is not a cue:', targetSegment);
+        return;
+      }
+
+      // Count which cue occurrence this is (0-based)
+      let cueOccurrence = 0;
+      for (let i = 0; i < index; i++) {
+        if (segments[i]?.type === 'cue') {
+          cueOccurrence++;
+        }
+      }
+
+      console.log('🗑️ Target is cue occurrence #' + cueOccurrence + ' of ' + cuePositions.length + ' total cues');
+
+      if (cueOccurrence >= cuePositions.length) {
+        console.error('🗑️ Cue occurrence index out of range');
+        return;
+      }
+
+      // Step 4: Remove the cue block from raw content (plus surrounding whitespace)
+      const { start, end } = cuePositions[cueOccurrence];
+
+      // Also trim surrounding blank lines to avoid double-spacing
+      let removeStart = start;
+      let removeEnd = end;
+
+      // Expand to consume preceding newlines
+      while (removeStart > 0 && rawContent[removeStart - 1] === '\n') {
+        removeStart--;
+      }
+      // Expand to consume following newlines
+      while (removeEnd < rawContent.length && rawContent[removeEnd] === '\n') {
+        removeEnd++;
+      }
+
+      const newRawContent = rawContent.substring(0, removeStart) +
+        (removeStart > 0 && removeEnd < rawContent.length ? '\n\n' : '') +
+        rawContent.substring(removeEnd);
+
+      console.log('🗑️ Raw content length after deletion:', newRawContent.length);
+      console.log('🗑️ Removed chars:', rawContent.length - newRawContent.length);
+
+      // Step 5: Clear all caches and emit
+      this.cachedScriptSegments = null;
+      this.lastParsedContent = null;
+      this.segmentEditBuffer = {};
       this.$emit('update:scriptContent', newRawContent);
 
       // Clear selection if the deleted cue was selected
@@ -5848,7 +6045,6 @@ export default {
       // TODO: If deleteAssets is true, also delete the media file via API
       if (deleteAssets && this.deletingCueData?.rawData?.mediaurl) {
         console.log('Would delete media file:', this.deletingCueData.rawData.mediaurl);
-        // Implement API call to delete media file
       }
     },
 
@@ -6034,24 +6230,45 @@ export default {
 
     deleteSegment(index) {
       console.log('🗑️ Delete segment called with index:', index);
-      console.log('🗑️ Total segments before:', this.scriptSegments.length);
 
-      // Mark as having unsaved changes
+      // Route cue segments through performCueDeletion (direct raw content removal)
+      // This avoids the parse→filter→reconstruct cycle which has caching edge cases
+      this.isActivelyEditing = false;
+      this.activelyEditingSegment = null;
+      this.cachedScriptSegments = null;
+      this.lastParsedContent = null;
+
+      const segments = this.scriptSegments;
+      const targetSegment = segments[index];
+
+      if (targetSegment?.type === 'cue') {
+        console.log('🗑️ Routing cue deletion through performCueDeletion');
+        this.hasLocalUnsavedChanges = true;
+        this.performCueDeletion(index, false);
+        if (this.selectedSegmentIndex === index) this.selectedSegmentIndex = null;
+        this.multiSelectedSegments.delete(index);
+        return;
+      }
+
+      console.log('🗑️ Total segments before:', segments.length);
       this.hasLocalUnsavedChanges = true;
 
-      // Remove the segment and update script content
-      const updatedSegments = this.scriptSegments.filter((_, i) => i !== index);
+      // For text segments, use the filter→reconstruct approach (works reliably for text)
+      const updatedSegments = segments.filter((_, i) => i !== index);
       console.log('🗑️ Total segments after filter:', updatedSegments.length);
       const newScriptContent = this.reconstructScriptContentWithFrontmatter(updatedSegments);
       console.log('🗑️ New script content length:', newScriptContent.length);
+
+      // Clear all caches before emitting
+      this.cachedScriptSegments = null;
+      this.lastParsedContent = null;
+      this.segmentEditBuffer = {};
       this.$emit('update:scriptContent', newScriptContent);
       console.log('🗑️ Emitted update:scriptContent');
 
-      // Clear selection if the deleted segment was selected
       if (this.selectedSegmentIndex === index) {
         this.selectedSegmentIndex = null;
       }
-      // Remove from multi-selection if it was selected
       this.multiSelectedSegments.delete(index);
     },
 
@@ -7180,7 +7397,6 @@ export default {
 
     // Get explicit text color style for speaker
     getSpeakerTextStyle(/* speaker */) {
-      // Use black text for readability - speaker is identified by background color
       return {
         color: '#000000 !important'
       };
@@ -7295,24 +7511,53 @@ export default {
     },
 
     // Handle paragraph blur
-    async handleParagraphBlur(index) {
-      console.log('📝 Paragraph blurred:', index);
+    async handleParagraphBlur(index, event) {
+      // CRITICAL: Detect whether this blur was caused by a deliberate user action
+      // (clicking another element) or by a programmatic/reactive cause (autosave, Vue re-render).
+      // relatedTarget is the element RECEIVING focus. If null, nothing is getting focus
+      // intentionally — this is a programmatic blur we should fight against.
+      const relatedTarget = event?.relatedTarget
+      const blurredElement = event?.target
+
+      // Check if focus is moving to another paragraph, a button, or any interactive element
+      const isUserAction = relatedTarget && (
+        relatedTarget.closest('.speaker-contenteditable') ||
+        relatedTarget.closest('button') ||
+        relatedTarget.closest('a') ||
+        relatedTarget.closest('input') ||
+        relatedTarget.closest('textarea') ||
+        relatedTarget.closest('[tabindex]') ||
+        relatedTarget.closest('.v-btn') ||
+        relatedTarget.closest('.v-list-item') ||
+        relatedTarget.closest('.rundown-panel') ||
+        relatedTarget.closest('.metadata-panel') ||
+        relatedTarget.closest('.v-dialog')
+      )
+
+      if (!isUserAction && this.isActivelyEditing && this.activelyEditingSegment === index) {
+        // Programmatic blur (autosave, Vue re-render) — don't give up editing state.
+        // The silent save path avoids reactive changes, but if a blur still sneaks through,
+        // preserve all editing flags so the yellow highlight and cursor stay intact.
+        // The element may have already lost DOM focus, so re-focus it synchronously.
+        if (blurredElement && document.body.contains(blurredElement)) {
+          blurredElement.focus()
+        }
+        return
+      }
+
+      console.log('📝 Paragraph blurred (user action):', index);
       this.focusedParagraphIndex = null;
-      console.log('📝 focusedParagraphIndex cleared');
 
       // Clear the actively editing segment flag to allow v-html to update again
       if (this.activelyEditingSegment === index) {
         this.activelyEditingSegment = null;
-        console.log('📝 activelyEditingSegment cleared');
       }
 
       // Clear the master editing flag to allow watchers to run again
       this.isActivelyEditing = false;
-      console.log('📝 isActivelyEditing cleared - watchers re-enabled');
 
       // Mark this paragraph as having been edited at least once
       this.paragraphEditStates[index] = true;
-      console.log('📝 Marked paragraph', index, 'as edited. Edit states:', this.paragraphEditStates);
 
       // Immediately trigger save on blur (cancel debounce timer)
       if (this.updateDebounceTimers[index]) {
@@ -7340,8 +7585,13 @@ export default {
     },
 
     // Handle save all button click
-    handleSaveAll() {
+    async handleSaveAll() {
       console.log('💾 Save All button clicked');
+
+      // CRITICAL: Flush any pending edits from the segment edit buffer BEFORE saving.
+      // Without this, clicking Save while a debounce timer is pending would save
+      // stale content (missing the user's most recent edits).
+      await this.flushPendingChanges();
 
       // Emit save event to parent
       this.$emit('save-all');
@@ -7382,9 +7632,13 @@ export default {
       // Restore cursor position and focus using the pre-saved state
       // This state was captured during typing in handleContentEditableInput
       // Note: isRestoringCursor flag was already set BEFORE emit in updateTextSegment
+      // GUARD: Only restore cursor if user is still actively editing.
+      // If they blurred (e.g., clicked another item), don't steal focus back.
       this.$nextTick(() => {
         try {
-          this.restoreCursorPosition();
+          if (this.isActivelyEditing) {
+            this.restoreCursorPosition();
+          }
         } finally {
           // Clear flag after a brief delay to ensure Vue has finished processing
           setTimeout(() => {
@@ -7505,6 +7759,9 @@ export default {
     // This prevents cursor loss during autosave by not triggering Vue re-renders
     // eslint-disable-next-line no-unused-vars
     async flashParagraph(index, type, count = 1) {
+      // TODO: All flashing effects temporarily paused - remove this early return to re-enable
+      return;
+      // eslint-disable-next-line no-unreachable
       const refName = `textareaRef-${index}`;
       let element = this.$refs[refName];
 
@@ -9517,6 +9774,7 @@ export default {
   max-height: none !important;
   min-height: 0 !important;
   overflow: visible !important; /* Required for sticky children to work */
+  background-color: white !important;
 }
 
 /* Override any Vuetify fill-height constraints */
@@ -9537,6 +9795,9 @@ export default {
   flex-direction: column;
   overflow: visible !important; /* Required for sticky children */
   min-height: calc(100vh - 180px);
+  background-color: #f7f4ef;
+  border: 1px dotted rgba(0, 0, 0, 0.2);
+  margin: 4px;
 }
 
 .editor-content .fill-height {
@@ -9551,6 +9812,7 @@ export default {
   font-size: 14px !important;
   line-height: 1.6 !important;
   padding: 16px 32px !important;
+  background: transparent !important;
   margin: 0 16px !important;
   min-height: calc(100vh - 200px) !important;
   overflow-y: auto !important;
@@ -9562,12 +9824,24 @@ export default {
   color: var(--v-medium-emphasis-opacity);
 }
 
+/* Make all Vuetify field wrappers transparent for paper effect */
+:deep(.editor-textarea .v-field),
+:deep(.editor-textarea .v-field__overlay),
+:deep(.editor-textarea .v-input__control),
+.editor-content :deep(.v-field),
+.editor-content :deep(.v-field__overlay),
+.editor-content :deep(.v-card),
+.editor-content :deep(.v-card-text) {
+  background: transparent !important;
+}
+
 /* Script Mode Header Fields */
 .script-content-container {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: calc(100vh - 180px);
+  background: transparent;
 }
 
 .slug-field-toolbar-container {
@@ -9808,10 +10082,10 @@ export default {
   position: sticky !important;
   top: 0 !important;
   z-index: 100 !important; /* High z-index to stay above cues toolbar */
-  background-color: #f5f5f5 !important;
-  border-bottom: 1px solid #e0e0e0 !important;
+  background-color: white !important;
+  border-bottom: none !important;
   padding: 6px 8px !important;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15) !important; /* Slightly stronger shadow */
+  box-shadow: none !important;
 }
 
 /* Sticky Cues Toolbar */
@@ -9819,49 +10093,77 @@ export default {
   position: sticky !important;
   top: 62px !important; /* Position below the main toolbar (48px + padding) */
   z-index: 9 !important;
-  background-color: #f5f5f5 !important;
-  border-bottom: 1px solid #e0e0e0 !important;
+  background-color: rgba(0, 0, 0, 0.03) !important;
+  border-bottom: none !important;
   padding: 6px 8px !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  box-shadow: none !important;
 }
 
 /* Sticky Text Formatting Box */
 .text-formatting-sticky {
   position: sticky !important;
-  top: 120px !important; /* Position below main toolbar (60px) + cues toolbar (60px) */
+  top: 120px !important;
   z-index: 8 !important;
-  background-color: #fafafa !important;
-  border-bottom: 1px solid #e0e0e0 !important;
+  background-color: rgba(0, 0, 0, 0.03) !important;
+}
+
+/* Button Group Wrapper */
+.btn-group-wrapper {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 4px;
+}
+
+.btn-group-label {
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #9e9e9e;
+  line-height: 1;
+  margin-bottom: 1px;
+}
+
+.btn-group-buttons {
+  display: inline-flex;
+  gap: 0;
+}
+
+.btn-group-buttons .mode-btn {
+  min-width: 60px !important;
 }
 
 /* Toolbar Mode Button Styling */
 .editor-mode-toggle {
   background: transparent !important;
   border: none !important;
+  border-radius: 0 !important;
 }
 
 .mode-btn {
-  background-color: rgb(var(--v-theme-surface-variant)) !important;
-  color: rgb(var(--v-theme-on-surface-variant)) !important;
-  border: 1px solid rgba(var(--v-theme-outline), 0.2) !important;
-  height: 48px !important;
-  min-height: 48px !important;
-  min-width: 100px !important;
-  padding: 2px 4px !important;
+  background-color: #f5f5f5 !important;
+  color: #757575 !important;
+  border: 1px solid #bdbdbd !important;
+  height: 24px !important;
+  min-height: 24px !important;
+  min-width: 80px !important;
+  padding: 2px 8px !important;
   border-radius: 0 !important;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+  box-shadow: none !important;
   transition: all 0.2s ease !important;
+  font-size: 0.75rem !important;
 }
 
 .mode-btn:hover {
-  transform: translateY(-1px) !important;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3) !important;
+  background-color: #eeeeee !important;
+  color: #424242 !important;
+  border-color: #9e9e9e !important;
 }
 
 .mode-btn.v-btn--active {
-  background-color: rgb(var(--v-theme-surface)) !important;
-  color: rgb(var(--v-theme-primary)) !important;
-  border: 1px solid rgb(var(--v-theme-primary)) !important;
+  background-color: #4CAF50 !important;
+  color: #ffffff !important;
+  border: 1px solid #388E3C !important;
 }
 
 .mode-separator {
@@ -9996,12 +10298,19 @@ export default {
   line-height: 1 !important;
   margin-top: 1px !important;
   text-align: center !important;
-  color: rgba(0, 0, 0, 0.9) !important;
+  color: inherit !important;
 }
 
 .hotkey-display strong {
   font-weight: 700 !important;
-  color: rgba(0, 0, 0, 1) !important;
+  color: inherit !important;
+}
+
+.cue-pipe {
+  font-size: 0.6rem !important;
+  opacity: 0.5;
+  margin: 0 2px;
+  color: inherit !important;
 }
 
 .cue-btn .v-icon {
@@ -10047,20 +10356,56 @@ export default {
 }
 
 /* Text formatting hotkeys box styling */
-.text-formatting-box {
-  position: relative;
-  background-color: rgba(245, 245, 245, 0.9);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
-  padding: 4px 12px;
-  margin: 2px auto;
-  width: fit-content;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+/* Styles flyout */
+.styles-flyout-container {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+}
+
+.styles-toggle-btn {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  color: rgba(80, 80, 80, 0.8) !important;
+  min-width: 0 !important;
+  padding: 0 6px !important;
+}
+
+.styles-toggle-btn .v-icon {
+  transition: transform 0.2s ease;
+}
+
+.styles-toggle-btn .rotate-90 {
+  transform: rotate(90deg);
+}
+
+.styles-flyout-items {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: 4px;
+}
+
+.flyout-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.flyout-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.flyout-enter-from {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+.flyout-leave-to {
+  opacity: 0;
+  transform: translateX(-8px);
 }
 
 .formatting-hotkey {
   font-family: 'Helvetica', 'Arial', sans-serif !important;
-  font-size: 9px !important;
+  font-size: 10px !important;
   font-weight: 500 !important;
   color: rgba(80, 80, 80, 0.9) !important;
   white-space: nowrap !important;
@@ -10071,21 +10416,16 @@ export default {
   color: rgba(60, 60, 60, 1) !important;
 }
 
-.hotkey-divider {
-  height: 12px !important;
-  opacity: 0.3 !important;
-}
-
 /* Auto-sizing Cue Toolbar inside Editor Content */
 .editor-cues-toolbar {
   position: sticky !important;
   top: 62px !important; /* Below the mode toolbar (48px + padding) */
   z-index: 9 !important;
   width: 100% !important;
-  background-color: #f5f5f5 !important;
-  border-bottom: 1px solid #e0e0e0 !important;
+  background-color: rgba(0, 0, 0, 0.03) !important;
+  border-bottom: none !important;
   padding: 6px 8px !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  box-shadow: none !important;
 }
 
 .cue-buttons-flex-container {
@@ -10111,10 +10451,9 @@ export default {
 .cue-btn-flex {
   flex: 1 !important; /* Auto-size to fit available space */
   min-width: 0 !important; /* Allow buttons to shrink */
-  height: 48px !important;
-  padding: 2px 4px !important;
+  height: 24px !important;
+  padding: 1px 3px !important;
   border-radius: 0 !important;
-  color: white !important;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
   transition: all 0.2s ease !important;
 }
@@ -10126,28 +10465,29 @@ export default {
 
 .cue-btn-content-flex {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   height: 100%;
-  gap: 1px;
+  gap: 3px;
 }
 
 .cue-btn-content-flex .cue-label {
-  font-size: 0.7rem !important;
-  font-weight: 600 !important;
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.3px !important;
   line-height: 1 !important;
+  color: inherit !important;
 }
 
 .cue-btn-content-flex .hotkey-display {
-  font-size: 0.65rem !important;
+  font-size: 0.6rem !important;
   opacity: 1 !important;
   line-height: 1 !important;
-  font-weight: 700 !important;
-  color: #000000 !important;
-  text-shadow: 0 0 3px rgba(255, 255, 255, 0.9), 0 0 1px rgba(255, 255, 255, 1) !important;
+  font-weight: 600 !important;
+  color: inherit !important;
+  text-shadow: none !important;
   letter-spacing: 0.3px !important;
 }
 
@@ -10189,36 +10529,76 @@ export default {
   height: auto !important;
   max-height: none !important;
   overflow: visible !important; /* Required for sticky children */
+  background: transparent !important;
 }
 
 /* Multi-Selection Toolbar - Fixed Overlay */
 .multi-selection-toolbar {
   position: fixed;
-  top: 120px; /* Below the main toolbar and header */
+  top: 160px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 2000;
+  z-index: 99999;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 12px 20px;
-  background-color: #e3f2fd;
-  border: 1px solid #1976d2;
-  border-radius: 4px;
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
-  max-width: calc(100% - 80px);
+  gap: 10px;
+  padding: 16px 24px;
+  background-color: rgba(30, 30, 30, 0.92);
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 280px;
 }
 
-.selection-info {
-  font-weight: 500;
-  color: #1976d2;
-  flex: 1;
+.selection-count {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.selection-count-number {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+}
+
+.selection-count-label {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Segment title at top of script area */
+.segment-title-header {
+  padding: 16px 40px 4px 40px;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #333;
+  letter-spacing: -0.3px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  margin: 0 0 0 0;
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+.segment-title-placeholder {
+  color: #bbb;
+  font-weight: 400;
+  font-style: italic;
 }
 
 /* Visual Script Mode Styling */
 .visual-script-container {
   padding: 20px 40px 20vh 40px;
-  background-color: white;
+  background-color: transparent;
   font-family: 'Times New Roman', serif;
   font-size: 14px;
   line-height: 1.5;
@@ -10231,7 +10611,7 @@ export default {
 /* Speaker Paragraph Styling */
 .speaker-paragraph {
   margin: 0 0 8px 0;
-  background-color: white;
+  background-color: transparent;
   cursor: pointer;
   position: relative;
   border: none;
@@ -10355,6 +10735,7 @@ export default {
   display: flex;
   align-items: flex-start;
   gap: 0px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 /* Invisible hover extension to reach action buttons positioned outside */
@@ -10396,14 +10777,14 @@ export default {
   flex: 1;
 }
 
-/* Speaker-specific backgrounds - all use light grey */
+/* Speaker-specific backgrounds - subtle tint on paper */
 .speaker-bg-josh,
 .speaker-bg-guest,
 .speaker-bg-caller,
 .speaker-bg-announcer,
 .speaker-bg-narrator,
 .speaker-bg-host {
-  background-color: #fafafa;
+  background-color: rgba(255, 255, 255, 0.10);
 }
 
 /* Override speaker backgrounds when focused or saved - must be after speaker-bg classes */
@@ -10640,7 +11021,7 @@ export default {
   font-size: 17pt;
   line-height: 1.5;
   padding: 0;
-  background-color: #fafafa !important; /* Even lighter gray background */
+  background-color: transparent !important;
 }
 
 /* Contenteditable div styling - renders HTML formatting */
@@ -10652,6 +11033,11 @@ export default {
   word-wrap: break-word;
   overflow-wrap: break-word;
   cursor: text;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  color: #000000 !important;
+  font-weight: normal;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   /* Match line-height with line numbers for proper alignment */
   font-size: 19px;
   line-height: 27px; /* Must match .line-number height */
@@ -10664,8 +11050,9 @@ export default {
 /* Placeholder for empty contenteditable */
 .speaker-contenteditable:empty::before {
   content: attr(data-placeholder);
-  color: #9e9e9e;
-  font-style: italic;
+  color: #555;
+  font-style: normal;
+  font-weight: 400;
   pointer-events: none;
 }
 
@@ -11030,7 +11417,7 @@ export default {
 .fluid-typing-area {
   margin: 0;
   padding: 0 40px 5em 40px;
-  background-color: white;
+  background-color: transparent;
   font-family: 'Times New Roman', serif;
   min-height: 200px;
 }

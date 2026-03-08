@@ -18,10 +18,16 @@
       <!-- Status Clock (Today's Date) -->
       <StatusClock v-if="isAuthenticated" style="margin-left: -20px;" />
 
-      <!-- Live Clock (Countdown) -->
-      <LiveClock v-if="isAuthenticated" class="ms-3" />
+      <!-- UTC Clock -->
+      <TimezoneClock v-if="isAuthenticated" label="UTC" timezone="UTC" class="ms-1" />
 
-      <!-- Episode Selector (universal - visible on all pages) -->
+      <!-- Custom Timezone Clock -->
+      <TimezoneClock v-if="isAuthenticated" label="CUSTOM" :timezone="customClockTz" editable @update:timezone="customClockTz = $event" class="ms-1" />
+
+      <!-- Live Clock (Countdown) -->
+      <LiveClock v-if="isAuthenticated" class="ms-1" />
+
+      <!-- Episode Selector -->
       <v-select
         v-if="isAuthenticated"
         v-model="selectedEpisode"
@@ -347,6 +353,7 @@ import ScreenFlash from '@/components/ScreenFlash.vue'
 import InitializationOverlay from '@/components/InitializationOverlay.vue'
 import LiveClock from '@/components/LiveClock.vue'
 import StatusClock from '@/components/StatusClock.vue'
+import TimezoneClock from '@/components/TimezoneClock.vue'
 import NfsStatusModal from '@/components/NfsStatusModal.vue'
 import NotificationCenter from '@/components/NotificationCenter.vue'
 import JobMonitor from '@/components/JobMonitor.vue'
@@ -369,6 +376,7 @@ export default {
     InitializationOverlay,
     LiveClock,
     StatusClock,
+    TimezoneClock,
     NfsStatusModal,
     NotificationCenter,
     JobMonitor
@@ -404,6 +412,7 @@ export default {
     const nfsModalRef = ref(null)
     const userGroups = ref([])
     const openGroups = ref(['scriptfactory', 'brainstorm', 'mediafactory', 'metafactory']) // Auto-expand all factory groups
+    const customClockTz = ref(localStorage.getItem('customClockTz') || 'Europe/London')
     
     const navItems = [
       { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/dashboard' },
@@ -608,6 +617,11 @@ export default {
       // If route doesn't have episode param, just update session (components will pick it up)
     }
 
+    // Persist custom clock timezone
+    watch(customClockTz, (tz) => {
+      localStorage.setItem('customClockTz', tz)
+    })
+
     // Watch route changes to sync selected episode with URL
     watch(
       () => router.currentRoute.value,
@@ -705,7 +719,8 @@ export default {
       selectedEpisode,
       loadEpisode,
       isLoadingEpisode,
-      loadingEpisodeInfo
+      loadingEpisodeInfo,
+      customClockTz
     }
   }
 }

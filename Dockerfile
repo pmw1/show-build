@@ -45,7 +45,8 @@ RUN pip install --no-cache-dir \
     "google-auth-oauthlib>=1.1.0" \
     "google-auth-httplib2>=0.1.1" \
     "google-api-python-client>=2.100.0" \
-    "openai>=1.0.0"
+    "openai>=1.0.0" \
+    "yt-dlp>=2024.0.0"
 
 # Copy application code
 COPY ./app /app/

@@ -594,9 +594,12 @@
                 v-for="pt in parentNodeTypes"
                 :key="pt.name"
                 @click="spawnFromDrop('parent', pt)"
-                :prepend-icon="pt.icon"
                 :title="pt.name"
-              ></v-list-item>
+              >
+                <template v-slot:prepend>
+                  <v-icon :color="pt.color">{{ pt.icon }}</v-icon>
+                </template>
+              </v-list-item>
             </v-list>
             <div class="pa-2 text-caption text-grey text-center">
               or <kbd>Ctrl+V</kbd> to paste
@@ -631,13 +634,15 @@
           v-if="card.type === 'text'"
           :width="card.collapsed ? 220 : (card.width || 500)"
           class="card-item text-card"
+          :class="{ 'warning-card': card.isWarning }"
+          :style="card.cardStyle || {}"
           elevation="2"
         >
           <!-- Collapsed State -->
-          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="toggleCollapse(card)" style="border-color: #FFA726; background: #fffbcc;">
-            <v-icon size="small" color="amber-darken-2" class="collapsed-pill-icon">mdi-text</v-icon>
+          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="toggleCollapse(card)" :style="card.isWarning ? 'border-color: #ff4444; background: #2d1010;' : 'border-color: #FFA726; background: #fffbcc;'">
+            <v-icon size="small" :color="card.isWarning ? 'red' : 'amber-darken-2'" class="collapsed-pill-icon">{{ card.isWarning ? 'mdi-alert' : 'mdi-text' }}</v-icon>
             <div class="collapsed-pill-body">
-              <span class="collapsed-pill-type" style="color: #FFA726;">TEXT</span>
+              <span class="collapsed-pill-type" :style="card.isWarning ? 'color: #ff4444;' : 'color: #FFA726;'">{{ card.isWarning ? 'WARNING' : 'TEXT' }}</span>
               <span class="collapsed-pill-label">{{ collapsedLabel(card) }}</span>
             </div>
           </div>
@@ -645,11 +650,11 @@
           <!-- Expanded State -->
           <template v-else>
             <v-card-title
-              class="pa-2 d-flex align-center bg-amber-lighten-4"
+              :class="card.isWarning ? 'pa-2 d-flex align-center' : 'pa-2 d-flex align-center bg-amber-lighten-4'"
+              :style="card.isWarning ? 'cursor: pointer; background-color: #4a1010; color: #ff6666;' : 'cursor: pointer;'"
               @dblclick.stop="toggleCollapse(card)"
-              style="cursor: pointer;"
             >
-              <v-icon size="small" class="me-2">mdi-text</v-icon>
+              <v-icon size="small" class="me-2" :color="card.isWarning ? 'red' : undefined">{{ card.isWarning ? 'mdi-alert-circle' : 'mdi-text' }}</v-icon>
               <v-text-field
                 v-model="card.title"
                 variant="plain"
@@ -703,9 +708,9 @@
               referrerpolicy="no-referrer"
               @error="$event.target.style.display='none'"
             />
-            <v-icon v-else size="small" :color="card.socialMetadata ? 'black' : 'blue'" class="collapsed-pill-icon">{{ card.socialMetadata ? 'mdi-twitter' : 'mdi-link' }}</v-icon>
+            <v-icon v-else size="small" :color="card.socialMetadata ? socialPlatformChip(card.socialMetadata.platform).color : 'blue'" class="collapsed-pill-icon">{{ card.socialMetadata ? socialPlatformChip(card.socialMetadata.platform).icon : 'mdi-link' }}</v-icon>
             <div class="collapsed-pill-body">
-              <span class="collapsed-pill-type" :style="{ color: card.socialMetadata ? '#000' : '#1976D2' }">{{ card.socialMetadata ? 'X POST' : 'LINK' }}</span>
+              <span class="collapsed-pill-type" :style="{ color: card.socialMetadata ? socialPlatformChip(card.socialMetadata.platform).color : '#1976D2' }">{{ card.socialMetadata ? socialPlatformChip(card.socialMetadata.platform).label.toUpperCase() : 'LINK' }}</span>
               <span class="collapsed-pill-label">{{ collapsedLabel(card) }}</span>
             </div>
           </div>
@@ -729,6 +734,12 @@
                 @click.stop
               ></v-text-field>
               <v-spacer></v-spacer>
+              <v-tooltip v-if="card.apiWarning" location="top">
+                <template v-slot:activator="{ props }">
+                  <v-icon v-bind="props" size="small" color="orange" class="me-1">mdi-alert</v-icon>
+                </template>
+                <span>API Error ({{ card.apiWarning.service }}): {{ card.apiWarning.message }}<br>Fallback data shown</span>
+              </v-tooltip>
               <v-btn
                 size="x-small"
                 icon="mdi-chevron-up"
@@ -747,7 +758,7 @@
               @focus="activeCardId = card.id"
             ></v-text-field>
 
-            <!-- Rich X/Twitter Preview -->
+            <!-- Rich Social Media Preview (Twitter, TikTok, YouTube, etc.) -->
             <div v-if="card.socialMetadata" class="twitter-preview-box mb-2">
               <div class="twitter-header pa-3 pb-2">
                 <div class="d-flex align-center">
@@ -763,7 +774,8 @@
                       {{ card.socialMetadata.author_name || 'Unknown Author' }}
                     </div>
                     <div class="text-caption text-grey">
-                      @{{ card.socialMetadata.author_handle || card.socialMetadata.username_from_url }}
+                      <span v-if="card.socialMetadata.author_handle">@{{ card.socialMetadata.author_handle }}</span>
+                      <span v-else-if="card.socialMetadata.username_from_url">@{{ card.socialMetadata.username_from_url }}</span>
                       <span v-if="card.socialMetadata.published_time" class="ms-2">
                         • {{ formatDate(card.socialMetadata.published_time) }}
                       </span>
@@ -803,20 +815,49 @@
                     </v-menu>
 
                     <v-chip
+                      v-if="card.socialMetadata._locally_cached"
                       size="x-small"
-                      color="primary"
+                      color="green-darken-1"
                       variant="tonal"
                     >
-                      <v-icon size="x-small" start>mdi-twitter</v-icon>
-                      {{ card.socialMetadata.platform === 'x' ? 'X' : 'Twitter' }}
+                      <v-icon size="x-small" start>mdi-harddisk</v-icon>
+                      Local
+                    </v-chip>
+                    <v-chip
+                      size="x-small"
+                      :color="socialPlatformChip(card.socialMetadata.platform).color"
+                      variant="tonal"
+                    >
+                      <v-icon size="x-small" start>{{ socialPlatformChip(card.socialMetadata.platform).icon }}</v-icon>
+                      {{ socialPlatformChip(card.socialMetadata.platform).label }}
                     </v-chip>
                   </div>
                 </div>
               </div>
 
-              <!-- Tweet text -->
-              <div v-if="card.socialMetadata.tweet_text" class="pa-3 pt-2">
-                <div class="text-body-2">{{ card.socialMetadata.tweet_text }}</div>
+              <!-- Post text (tweet_text for Twitter, post_text for others) -->
+              <div v-if="card.socialMetadata.tweet_text || card.socialMetadata.post_text" class="pa-3 pt-2">
+                <div class="text-body-2">{{ card.socialMetadata.tweet_text || card.socialMetadata.post_text }}</div>
+              </div>
+
+              <!-- TikTok: Sound/music info -->
+              <div v-if="card.socialMetadata.track || card.socialMetadata.artist" class="px-3 pb-2">
+                <v-chip size="x-small" variant="tonal" color="pink">
+                  <v-icon size="x-small" start>mdi-music-note</v-icon>
+                  {{ card.socialMetadata.artist ? `${card.socialMetadata.artist} - ` : '' }}{{ card.socialMetadata.track || 'Original sound' }}
+                </v-chip>
+              </div>
+
+              <!-- TikTok: Hashtags -->
+              <div v-if="card.socialMetadata.hashtags && card.socialMetadata.hashtags.length > 0" class="px-3 pb-2 d-flex flex-wrap gap-1">
+                <v-chip v-for="tag in card.socialMetadata.hashtags" :key="tag" size="x-small" variant="outlined" color="primary">
+                  #{{ tag }}
+                </v-chip>
+              </div>
+
+              <!-- Thumbnail (TikTok/YouTube - shown when no media_urls) -->
+              <div v-if="card.socialMetadata.thumbnail_url && (!card.socialMetadata.media_urls || card.socialMetadata.media_urls.length === 0)" class="twitter-media twitter-media-single">
+                <img :src="card.socialMetadata.thumbnail_url" class="twitter-media-image" style="height: 250px" loading="eager" @error="$event.target.style.display='none'" />
               </div>
 
               <!-- Media -->
@@ -838,18 +879,27 @@
                 <v-expansion-panel>
                   <v-expansion-panel-title class="py-2 px-3 text-caption">
                     <v-icon size="small" class="me-2">mdi-chart-bar</v-icon>
-                    Tweet Analytics & Author Info
+                    {{ card.socialMetadata.platform === 'tiktok' ? 'TikTok' : card.socialMetadata.platform === 'youtube' ? 'YouTube' : 'Tweet' }} Analytics & Author Info
                   </v-expansion-panel-title>
                   <v-expansion-panel-text class="pa-3">
                     <!-- Engagement Stats -->
-                    <div v-if="card.socialMetadata.likes || card.socialMetadata.retweets || card.socialMetadata.replies || card.socialMetadata.quotes" class="mb-3">
+                    <div v-if="card.socialMetadata.likes || card.socialMetadata.retweets || card.socialMetadata.replies || card.socialMetadata.quotes || card.socialMetadata.views || card.socialMetadata.comments || card.socialMetadata.reposts" class="mb-3">
                       <div class="text-caption font-weight-bold mb-2">Engagement</div>
                       <div class="d-flex flex-wrap gap-3">
+                        <v-chip v-if="card.socialMetadata.views" size="small" variant="tonal" prepend-icon="mdi-eye">
+                          {{ card.socialMetadata.views.toLocaleString() }} Views
+                        </v-chip>
                         <v-chip v-if="card.socialMetadata.likes" size="small" variant="tonal" prepend-icon="mdi-heart">
                           {{ card.socialMetadata.likes.toLocaleString() }} Likes
                         </v-chip>
                         <v-chip v-if="card.socialMetadata.retweets" size="small" variant="tonal" prepend-icon="mdi-repeat">
                           {{ card.socialMetadata.retweets.toLocaleString() }} Retweets
+                        </v-chip>
+                        <v-chip v-if="card.socialMetadata.reposts" size="small" variant="tonal" prepend-icon="mdi-repeat">
+                          {{ card.socialMetadata.reposts.toLocaleString() }} Reposts
+                        </v-chip>
+                        <v-chip v-if="card.socialMetadata.comments" size="small" variant="tonal" prepend-icon="mdi-comment">
+                          {{ card.socialMetadata.comments.toLocaleString() }} Comments
                         </v-chip>
                         <v-chip v-if="card.socialMetadata.replies" size="small" variant="tonal" prepend-icon="mdi-reply">
                           {{ card.socialMetadata.replies.toLocaleString() }} Replies
@@ -1354,7 +1404,12 @@
         <div
           v-if="card.type === 'parent'"
           class="parent-node-circle"
-          :style="{ width: (card.collapsed ? '140px' : '240px'), height: (card.collapsed ? '140px' : '240px') }"
+          :style="{
+            width: (card.collapsed ? '140px' : '240px'),
+            height: (card.collapsed ? '140px' : '240px'),
+            background: card.socialMetadata?.parentNodeColor || '#1565C0',
+            boxShadow: '0 4px 16px ' + (card.socialMetadata?.parentNodeColor || '#1565C0') + '66'
+          }"
           @dblclick.stop="toggleCollapse(card)"
         >
           <!-- Collapsed State -->
@@ -1389,7 +1444,7 @@
             <v-badge
               :content="getChildCount(card.id)"
               color="white"
-              text-color="#1565C0"
+              :text-color="card.socialMetadata?.parentNodeColor || '#1565C0'"
               inline
             ></v-badge>
             <span
@@ -1541,6 +1596,7 @@ const dragOffset = ref({ x: 0, y: 0 })
 // Card ID counter
 let nextId = 1
 let saveTimeout = null
+let boardLoaded = false
 
 // Load saved whiteboard on mount
 // Global hotkey: Ctrl+Shift+S to save
@@ -1579,16 +1635,18 @@ async function loadWhiteboardSettings() {
   }
 }
 
-// Auto-save on unmount
+// Auto-save on unmount (only if board was loaded and has content)
 onUnmounted(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
   if (saveTimeout) clearTimeout(saveTimeout)
-  saveBoard()
+  if (boardLoaded && cards.value.length > 0) {
+    saveBoard()
+  }
 })
 
-// Watch for card changes and auto-save
+// Watch for card changes and auto-save (only after initial load completes)
 watch(cards, () => {
-  if (currentEpisode.value) {
+  if (currentEpisode.value && boardLoaded) {
     debouncedSave()
   }
 }, { deep: true })
@@ -1858,6 +1916,7 @@ function collapsedLabel(card) {
 // Get thumbnail URL for collapsed card
 function collapsedThumb(card) {
   if (card.socialMetadata?.media_urls?.[0]) return card.socialMetadata.media_urls[0]
+  if (card.socialMetadata?.thumbnail_url) return card.socialMetadata.thumbnail_url
   if (card.previewImage) return card.previewImage
   if (card.imageUrl) return card.imageUrl
   return null
@@ -2060,7 +2119,7 @@ function handlePaste(event) {
             }
             cards.value.push(newCard)
 
-            // Analyze URL for smart child spawning
+            // Analyze URL for smart child spawning and local caching
             try {
               const analysis = await fetchJson(`/api/whiteboard/analyze-url?url=${encodeURIComponent(text)}`)
 
@@ -2069,6 +2128,27 @@ function handlePaste(event) {
                 const downloadResult = await fetchJson(`/api/whiteboard/${identifier.value}/download-social-media?url=${encodeURIComponent(text)}`, {
                   method: 'POST'
                 })
+
+                // Check for API error - spawn warning card
+                if (downloadResult.error) {
+                  const err = downloadResult.error
+                  const warningCard = {
+                    id: nextId++,
+                    type: 'text',
+                    title: `API Error: ${err.service || analysis.service}`,
+                    content: `**${err.message || 'Unknown error'}**\n\nStatus: ${err.status_code || 'N/A'}\nEndpoint: \`${err.endpoint || 'N/A'}\`\nFallback used: ${err.fallback_used ? 'Yes' : 'No'}${err.detail ? '\n\nDetail: ' + err.detail.substring(0, 200) : ''}`,
+                    notes: '',
+                    x: newCard.x + 550,
+                    y: newCard.y,
+                    width: 400,
+                    collapsed: false,
+                    parentId: newCard.id,
+                    isWarning: true,
+                    cardStyle: { backgroundColor: '#2d1010', borderColor: '#ff4444', borderWidth: '2px' }
+                  }
+                  cards.value.push(warningCard)
+                  notifyUserStandard(`${err.service || analysis.service} API error: ${err.message}`, NOTIFICATION_COLORS.error)
+                }
 
                 if (downloadResult.assets && downloadResult.assets.length > 0) {
                   // Spawn child nodes for each media file
@@ -2124,12 +2204,47 @@ function handlePaste(event) {
                   })
                   notifyUserStandard(`Downloaded ${downloadResult.assets.length} media file(s) from ${analysis.service}`, NOTIFICATION_COLORS.success)
                 }
+
+                // For Twitter: populate socialMetadata from API data + local URLs
+                if (analysis.service === 'twitter' && downloadResult.tweet_data) {
+                  const td = downloadResult.tweet_data
+                  newCard.socialMetadata = {
+                    ...td,
+                    media_urls: downloadResult.local_media_urls || td.media_urls || [],
+                    author_avatar: downloadResult.local_avatar_url || td.author_avatar,
+                    _locally_cached: true,
+                    _cached_at: new Date().toISOString()
+                  }
+                  newCard.previewTitle = td.author_name ? `${td.author_name} (@${td.author_handle})` : null
+                  newCard.previewDescription = td.tweet_text || null
+                  newCard.previewDomain = 'x.com'
+                  newCard.previewFavicon = 'https://abs.twimg.com/favicons/twitter.3.ico'
+                  newCard._analyzedUrl = text
+                  return
+                }
+
+                // For TikTok/YouTube/other yt-dlp services: populate socialMetadata from content_data
+                if (downloadResult.content_data) {
+                  const cd = downloadResult.content_data
+                  newCard.socialMetadata = {
+                    ...cd,
+                    media_urls: downloadResult.local_media_urls || [],
+                    thumbnail_url: downloadResult.local_thumbnail_url || cd.thumbnail_url,
+                    _locally_cached: true,
+                    _cached_at: new Date().toISOString()
+                  }
+                  newCard.previewTitle = cd.author_name || cd.title || null
+                  newCard.previewDescription = cd.post_text || cd.title || null
+                  newCard.previewDomain = analysis.service === 'tiktok' ? 'tiktok.com' : analysis.service
+                  newCard._analyzedUrl = text
+                  return
+                }
               }
             } catch (error) {
               console.error('Error analyzing URL:', error)
             }
 
-            // Also fetch link preview
+            // Fetch link preview (fallback for non-Twitter or if download failed)
             fetchLinkPreview(newCard)
           }
           // Detect Markdown
@@ -2734,6 +2849,7 @@ async function saveBoard() {
 
 // Load whiteboard
 async function loadBoard() {
+  boardLoaded = false
   if (!currentEpisode.value) {
     // No episode selected, use localStorage
     try {
@@ -2746,6 +2862,8 @@ async function loadBoard() {
       }
     } catch (error) {
       console.error('Failed to load from localStorage:', error)
+    } finally {
+      boardLoaded = true
     }
     return
   }
@@ -2784,6 +2902,8 @@ async function loadBoard() {
         // Restore cache metadata (will trigger cached badge if true)
         card._cached = item.social_metadata?._cached || false
         card._cached_at = item.social_metadata?._cached_at || null
+        // Restore local cache status (Twitter media stored on filesystem)
+        card._locallyCached = item.social_metadata?._locally_cached || false
       } else if (item.item_type === 'image') {
         card.imageUrl = item.image_data
         card.caption = item.caption || ''
@@ -2818,6 +2938,8 @@ async function loadBoard() {
   } catch (error) {
     console.error('Failed to load whiteboard:', error)
     notifyUserStandard('Failed to load whiteboard', NOTIFICATION_COLORS.ERROR, 3000)
+  } finally {
+    boardLoaded = true
   }
 }
 
@@ -2975,6 +3097,17 @@ async function fetchLinkPreview(card, bypassCache = false) {
       if (Object.keys(socialMetadata).length > 0) {
         card.socialMetadata = socialMetadata
       }
+
+      // Check for API error info passed through from link preview
+      if (response.x_error_service) {
+        card.apiWarning = {
+          service: response.x_error_service,
+          status_code: response.x_error_status_code,
+          message: response.x_error_message,
+          endpoint: response.x_error_endpoint,
+          fallback_used: response.x_error_fallback_used
+        }
+      }
     } else {
       console.warn('Failed to fetch link preview:', response?.error)
     }
@@ -2989,6 +3122,25 @@ async function fetchLinkPreview(card, bypassCache = false) {
 async function reloadFromServer(card) {
   await fetchLinkPreview(card, true)
   notifyUserStandard('Reloaded from server', NOTIFICATION_COLORS.SUCCESS, 2000)
+}
+
+// Platform chip config for social media badges
+function socialPlatformChip(platform) {
+  const platforms = {
+    'x': { icon: 'mdi-twitter', label: 'X', color: 'primary' },
+    'twitter': { icon: 'mdi-twitter', label: 'Twitter', color: 'primary' },
+    'tiktok': { icon: 'mdi-music-note-eighth', label: 'TikTok', color: 'pink' },
+    'youtube': { icon: 'mdi-youtube', label: 'YouTube', color: 'red' },
+    'instagram': { icon: 'mdi-instagram', label: 'Instagram', color: 'purple' },
+    'rumble': { icon: 'mdi-video', label: 'Rumble', color: 'green' },
+    'soundcloud': { icon: 'mdi-soundcloud', label: 'SoundCloud', color: 'orange' }
+  }
+  return platforms[platform] || { icon: 'mdi-web', label: platform || 'Social', color: 'grey' }
+}
+
+// Detect social media URLs that should trigger analyze + download
+function isSocialMediaUrl(url) {
+  return /^https?:\/\/(www\.)?(twitter\.com|x\.com|tiktok\.com|vm\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com|rumble\.com|soundcloud\.com)\//i.test(url)
 }
 
 // Watch for URL changes in link cards and auto-fetch preview
@@ -3006,7 +3158,114 @@ watch(cards, (newCards, oldCards) => {
         if (newCard._urlChangeTimeout) {
           clearTimeout(newCard._urlChangeTimeout)
         }
-        newCard._urlChangeTimeout = setTimeout(() => {
+        newCard._urlChangeTimeout = setTimeout(async () => {
+          // For social media URLs, trigger analyze + download flow
+          if (isSocialMediaUrl(newCard.url) && !newCard._analyzedUrl) {
+            newCard._analyzedUrl = newCard.url
+            try {
+              const analysis = await fetchJson(`/api/whiteboard/analyze-url?url=${encodeURIComponent(newCard.url)}`)
+              if (analysis.spawn_children && analysis.has_media) {
+                const downloadResult = await fetchJson(`/api/whiteboard/${identifier.value}/download-social-media?url=${encodeURIComponent(newCard.url)}`, {
+                  method: 'POST'
+                })
+                // Check for API error - spawn warning card
+                if (downloadResult.error) {
+                  const err = downloadResult.error
+                  const warningCard = {
+                    id: nextId++,
+                    type: 'text',
+                    title: `API Error: ${err.service || analysis.service}`,
+                    content: `**${err.message || 'Unknown error'}**\n\nStatus: ${err.status_code || 'N/A'}\nEndpoint: \`${err.endpoint || 'N/A'}\`\nFallback used: ${err.fallback_used ? 'Yes' : 'No'}${err.detail ? '\n\nDetail: ' + err.detail.substring(0, 200) : ''}`,
+                    notes: '',
+                    x: newCard.x + 550,
+                    y: newCard.y,
+                    width: 400,
+                    collapsed: false,
+                    parentId: newCard.id,
+                    isWarning: true,
+                    cardStyle: { backgroundColor: '#2d1010', borderColor: '#ff4444', borderWidth: '2px' }
+                  }
+                  cards.value.push(warningCard)
+                  notifyUserStandard(`${err.service || analysis.service} API error: ${err.message}`, NOTIFICATION_COLORS.error)
+                }
+
+                if (downloadResult.assets && downloadResult.assets.length > 0) {
+                  downloadResult.assets.forEach((asset, idx) => {
+                    let childCard
+                    if (asset.media_category === 'video') {
+                      childCard = {
+                        id: nextId++,
+                        type: 'video',
+                        videoUrl: asset.file_url,
+                        assetId: asset.asset_id,
+                        title: asset.source_context?.title || 'Video',
+                        notes: '',
+                        x: newCard.x + 550 + (idx * 20),
+                        y: newCard.y + (idx * 20),
+                        width: 640,
+                        collapsed: false,
+                        parentId: newCard.id
+                      }
+                    } else if (asset.media_category === 'image') {
+                      childCard = {
+                        id: nextId++,
+                        type: 'image',
+                        imageUrl: asset.file_url,
+                        assetId: asset.asset_id,
+                        caption: asset.source_context?.title || '',
+                        notes: '',
+                        title: '',
+                        x: newCard.x + 550 + (idx * 20),
+                        y: newCard.y + (idx * 20),
+                        width: 600,
+                        collapsed: false,
+                        parentId: newCard.id
+                      }
+                    }
+                    if (childCard) {
+                      cards.value.push(childCard)
+                    }
+                  })
+                  notifyUserStandard(`Downloaded ${downloadResult.assets.length} media file(s) from ${downloadResult.service || analysis.service}`, NOTIFICATION_COLORS.success)
+                }
+
+                // Populate socialMetadata from Twitter API data + local URLs
+                if (downloadResult.tweet_data) {
+                  const td = downloadResult.tweet_data
+                  newCard.socialMetadata = {
+                    ...td,
+                    media_urls: downloadResult.local_media_urls || td.media_urls || [],
+                    author_avatar: downloadResult.local_avatar_url || td.author_avatar,
+                    _locally_cached: true,
+                    _cached_at: new Date().toISOString()
+                  }
+                  newCard.previewTitle = td.author_name ? `${td.author_name} (@${td.author_handle})` : null
+                  newCard.previewDescription = td.tweet_text || null
+                  newCard.previewDomain = 'x.com'
+                  newCard.previewFavicon = 'https://abs.twimg.com/favicons/twitter.3.ico'
+                  return // Skip fetchLinkPreview
+                }
+
+                // Populate socialMetadata from yt-dlp content_data (TikTok, YouTube, etc.)
+                if (downloadResult.content_data) {
+                  const cd = downloadResult.content_data
+                  newCard.socialMetadata = {
+                    ...cd,
+                    media_urls: downloadResult.local_media_urls || [],
+                    thumbnail_url: downloadResult.local_thumbnail_url || cd.thumbnail_url,
+                    _locally_cached: true,
+                    _cached_at: new Date().toISOString()
+                  }
+                  newCard.previewTitle = cd.author_name || cd.title || null
+                  newCard.previewDescription = cd.post_text || cd.title || null
+                  newCard.previewDomain = cd.platform || analysis.service
+                  return // Skip fetchLinkPreview
+                }
+              }
+            } catch (error) {
+              console.error('Error analyzing social media URL:', error)
+            }
+          }
           fetchLinkPreview(newCard)
         }, 1000)
       }
@@ -3143,6 +3402,23 @@ watch(cards, (newCards, oldCards) => {
 .card-item {
   cursor: move;
   transition: box-shadow 0.2s;
+  position: relative;
+}
+
+/* Inner dotted border marking drag zone boundary (inside = drag, outside = link zone) */
+.card-item::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 1.5px dashed rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.card-item:hover::after {
+  opacity: 1;
 }
 
 .card-item:hover {
@@ -3563,12 +3839,28 @@ watch(cards, (newCards, oldCards) => {
   border-radius: 50%;
   background: #1565C0;
   color: white;
-  cursor: pointer;
+  cursor: grab;
   box-shadow: 0 4px 16px rgba(21, 101, 192, 0.4);
   transition: box-shadow 0.15s ease, transform 0.15s ease;
   text-align: center;
   padding: 16px;
   user-select: none;
+  position: relative;
+}
+
+/* Inner dotted ring marking the drag/link boundary */
+.parent-node-circle::before {
+  content: '';
+  position: absolute;
+  inset: 10px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  transition: border-color 0.2s ease;
+}
+
+.parent-node-circle:hover::before {
+  border-color: rgba(255, 255, 255, 0.55);
 }
 
 .parent-node-circle:hover {
@@ -3599,10 +3891,10 @@ watch(cards, (newCards, oldCards) => {
   border: 1px solid rgba(255, 255, 255, 0.4);
   border-radius: 4px;
   color: white;
-  font-size: 0.75rem;
-  text-align: center;
-  padding: 3px 6px;
-  width: 130px;
+  font-size: 0.85rem;
+  text-align: left;
+  padding: 4px 8px;
+  width: 180px;
   margin-top: 4px;
   outline: none;
 }
@@ -3617,14 +3909,14 @@ watch(cards, (newCards, oldCards) => {
 }
 
 .parent-node-desc {
-  background: rgba(255, 255, 255, 0.1);
+  background: white;
   border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 4px;
-  color: white;
+  color: #1565C0;
   font-size: 0.8rem;
-  text-align: center;
-  padding: 4px 6px;
-  width: 170px;
+  text-align: left;
+  padding: 4px 8px;
+  width: 180px;
   margin-top: 3px;
   outline: none;
   resize: none;
@@ -3632,12 +3924,12 @@ watch(cards, (newCards, oldCards) => {
 }
 
 .parent-node-desc::placeholder {
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(21, 101, 192, 0.4);
 }
 
 .parent-node-desc:focus {
-  border-color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.2);
+  border-color: #1565C0;
+  background: white;
 }
 
 .parent-node-delete {

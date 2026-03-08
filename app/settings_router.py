@@ -97,6 +97,14 @@ class GenerationSettings(BaseModel):
     fsq_allow_mid_sentence_split: bool = Field(False, description="Allow splitting at commas/clauses if needed")
     fsq_overflow_handling: str = Field("multi_segment", description="Overflow handling: multi_segment, compress, truncate")
 
+class AutosaveHistorySettings(BaseModel):
+    """Autosave file history configuration"""
+    enabled: bool = Field(True, description="Enable filesystem autosave snapshots")
+    segment_interval_seconds: int = Field(30, description="Seconds between segment snapshots")
+    episode_interval_seconds: int = Field(300, description="Seconds between episode snapshots")
+    segment_retention_count: int = Field(20, description="Max segment snapshots to keep per item")
+    episode_retention_count: int = Field(12, description="Max episode snapshots to keep")
+
 class SettingsUpdate(BaseModel):
     """Complete settings update model"""
     media_paths: Optional[MediaPathSettings] = None
@@ -104,6 +112,7 @@ class SettingsUpdate(BaseModel):
     rundown: Optional[RundownSettings] = None
     system: Optional[SystemSettings] = None
     generation: Optional[GenerationSettings] = None
+    autosave_history: Optional[AutosaveHistorySettings] = None
 
 def load_settings() -> Dict[str, Any]:
     """Load settings from DATABASE"""
@@ -155,7 +164,8 @@ def load_settings() -> Dict[str, Any]:
             },
             "interface": InterfaceSettings().dict(),
             "rundown": RundownSettings().dict(),
-            "system": SystemSettings().dict()
+            "system": SystemSettings().dict(),
+            "autosave_history": AutosaveHistorySettings().dict()
         }
 
 def camel_to_snake(camel_str: str) -> str:
@@ -413,6 +423,24 @@ async def update_system_settings(
             "success": True,
             "message": "System settings updated successfully",
             "settings": system.dict()
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save settings")
+
+@router.put("/autosave-history")
+async def update_autosave_history_settings(
+    autosave: AutosaveHistorySettings,
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Update autosave history settings"""
+    settings = load_settings()
+    settings["autosave_history"] = autosave.dict()
+
+    if save_settings(settings):
+        return {
+            "success": True,
+            "message": "Autosave history settings updated successfully",
+            "settings": autosave.dict()
         }
     else:
         raise HTTPException(status_code=500, detail="Failed to save settings")

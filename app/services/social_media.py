@@ -207,9 +207,111 @@ def extract_twitter_metadata(soup, url: str) -> dict:
     return {k: v for k, v in twitter_data.items() if v}
 
 
+def fetch_tweet_via_syndication(tweet_id: str) -> Optional[dict]:
+    """
+    Fetch tweet data via X's syndication API (used by embed widgets).
+    Free, no authentication required, returns rich metadata.
+
+    Returns:
+        dict: Tweet metadata matching our standard format, or None on failure
+    """
+    try:
+        logger.info(f"🔄 Fetching tweet {tweet_id} via syndication API")
+        response = requests.get(
+            'https://cdn.syndication.twimg.com/tweet-result',
+            params={'id': tweet_id, 'token': 'x'},
+            timeout=10
+        )
+
+        if response.status_code != 200:
+            logger.warning(f"Syndication API returned {response.status_code} for tweet {tweet_id}")
+            return None
+
+        data = response.json()
+
+        if data.get('__typename') == 'TweetTombstone':
+            logger.warning(f"Tweet {tweet_id} is tombstoned (deleted/suspended)")
+            return None
+
+        user = data.get('user', {})
+        metadata = {
+            'tweet_id': data.get('id_str', tweet_id),
+            'tweet_text': data.get('text', ''),
+            'published_time': data.get('created_at', ''),
+            'platform': 'x',
+            'likes': data.get('favorite_count', 0),
+            'retweets': data.get('retweet_count', 0),
+            'author_name': user.get('name', ''),
+            'author_handle': user.get('screen_name', ''),
+            'author_avatar': user.get('profile_image_url_https', ''),
+            'author_verified': user.get('verified', False) or user.get('is_blue_verified', False),
+        }
+
+        # Extract media
+        media_details = data.get('mediaDetails', [])
+        media_urls = []
+        media_objects = []
+
+        for m in media_details:
+            media_type = m.get('type', 'photo')
+            if media_type == 'photo':
+                photo_url = m.get('media_url_https', '')
+                if photo_url:
+                    media_urls.append(photo_url)
+                    orig = m.get('original_info', {})
+                    media_objects.append({
+                        'type': 'photo',
+                        'url': photo_url,
+                        'width': orig.get('width'),
+                        'height': orig.get('height'),
+                    })
+            elif media_type in ('video', 'animated_gif'):
+                preview = m.get('media_url_https', '')
+                if preview:
+                    media_urls.append(preview)
+                video_info = m.get('video_info', {})
+                variants = video_info.get('variants', [])
+                mp4_variants = [v for v in variants if v.get('content_type') == 'video/mp4']
+                if mp4_variants:
+                    best = max(mp4_variants, key=lambda v: v.get('bitrate', 0))
+                    media_objects.append({
+                        'type': media_type,
+                        'url': best['url'],
+                        'preview_url': preview,
+                        'width': m.get('original_info', {}).get('width'),
+                        'height': m.get('original_info', {}).get('height'),
+                        'duration_ms': video_info.get('duration_millis'),
+                        'bit_rate': best.get('bitrate'),
+                    })
+                elif preview:
+                    media_objects.append({
+                        'type': media_type,
+                        'url': preview,
+                        'preview_url': preview,
+                    })
+
+        if media_urls:
+            metadata['media_urls'] = media_urls
+        if media_objects:
+            metadata['media_objects'] = media_objects
+
+        # Entities
+        entities = data.get('entities', {})
+        if entities:
+            metadata['entities'] = entities
+
+        logger.info(f"✅ Fetched tweet {tweet_id} via syndication: @{metadata['author_handle']}, {len(media_objects)} media")
+        return metadata
+
+    except Exception as e:
+        logger.error(f"Syndication API error for tweet {tweet_id}: {e}")
+        return None
+
+
 def fetch_tweet_from_api(tweet_id: str, bearer_token: str = None, oauth_creds: Dict[str, str] = None) -> Optional[dict]:
     """
     Fetch comprehensive tweet data from Twitter API v2
+    NOTE: Falls back to syndication API first (free, no auth). V2 API is attempted only if syndication fails.
 
     Args:
         tweet_id: Tweet ID to fetch
@@ -219,10 +321,10 @@ def fetch_tweet_from_api(tweet_id: str, bearer_token: str = None, oauth_creds: D
 
     Returns:
         dict: Enhanced tweet metadata including author, text, media, metrics
-        None: If API request fails
+        None/error dict: If API request fails
     """
     try:
-        logger.info(f"🔄 Attempting to fetch tweet {tweet_id} from Twitter API")
+        logger.info(f"🔄 Attempting to fetch tweet {tweet_id} from X API v2")
 
         # Tweet fields we want to retrieve
         tweet_fields = [
@@ -239,11 +341,12 @@ def fetch_tweet_from_api(tweet_id: str, bearer_token: str = None, oauth_creds: D
         # Media fields for images/videos
         media_fields = [
             'media_key', 'type', 'url', 'preview_image_url',
-            'width', 'height', 'duration_ms', 'public_metrics'
+            'width', 'height', 'duration_ms', 'public_metrics',
+            'variants', 'alt_text'
         ]
 
         # Build API request
-        url = f'https://api.twitter.com/2/tweets/{tweet_id}'
+        url = f'https://api.x.com/2/tweets/{tweet_id}'
         params = {
             'tweet.fields': ','.join(tweet_fields),
             'expansions': 'author_id,attachments.media_keys,referenced_tweets.id',
@@ -329,23 +432,57 @@ def fetch_tweet_from_api(tweet_id: str, bearer_token: str = None, oauth_creds: D
                 metadata['author_followers'] = author['public_metrics'].get('followers_count', 0)
                 metadata['author_following'] = author['public_metrics'].get('following_count', 0)
 
-        # Add media URLs
+        # Add media URLs and structured media objects
         media = {m['media_key']: m for m in includes.get('media', [])}
         if 'attachments' in tweet and 'media_keys' in tweet['attachments']:
             media_urls = []
+            media_objects = []  # Structured media info for download
             for media_key in tweet['attachments']['media_keys']:
                 if media_key in media:
                     media_obj = media[media_key]
                     if media_obj['type'] == 'photo':
-                        media_urls.append(media_obj.get('url', ''))
-                    elif media_obj['type'] == 'video':
-                        # Use preview image for videos
+                        photo_url = media_obj.get('url', '')
+                        if photo_url:
+                            media_urls.append(photo_url)
+                            media_objects.append({
+                                'type': 'photo',
+                                'url': photo_url,
+                                'width': media_obj.get('width'),
+                                'height': media_obj.get('height'),
+                                'alt_text': media_obj.get('alt_text')
+                            })
+                    elif media_obj['type'] in ('video', 'animated_gif'):
                         preview = media_obj.get('preview_image_url', '')
                         if preview:
                             media_urls.append(preview)
+                        # Extract best video variant (highest bitrate mp4)
+                        variants = media_obj.get('variants', [])
+                        mp4_variants = [v for v in variants if v.get('content_type') == 'video/mp4']
+                        if mp4_variants:
+                            best = max(mp4_variants, key=lambda v: v.get('bit_rate', 0))
+                            media_objects.append({
+                                'type': media_obj['type'],
+                                'url': best['url'],
+                                'preview_url': preview,
+                                'width': media_obj.get('width'),
+                                'height': media_obj.get('height'),
+                                'duration_ms': media_obj.get('duration_ms'),
+                                'bit_rate': best.get('bit_rate')
+                            })
+                        elif preview:
+                            media_objects.append({
+                                'type': media_obj['type'],
+                                'url': preview,
+                                'preview_url': preview,
+                                'width': media_obj.get('width'),
+                                'height': media_obj.get('height'),
+                                'duration_ms': media_obj.get('duration_ms')
+                            })
 
             if media_urls:
                 metadata['media_urls'] = media_urls
+            if media_objects:
+                metadata['media_objects'] = media_objects
 
         # Add referenced tweets (quote tweets, replies)
         if 'referenced_tweets' in tweet:
@@ -359,30 +496,55 @@ def fetch_tweet_from_api(tweet_id: str, bearer_token: str = None, oauth_creds: D
         return metadata
 
     except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 401:
+        status_code = e.response.status_code if e.response is not None else 0
+        response_text = e.response.text if e.response is not None else str(e)
+        error_info = {
+            '_error': True,
+            'service': 'twitter',
+            'status_code': status_code,
+            'endpoint': f'https://api.x.com/2/tweets/{tweet_id}',
+            'detail': response_text[:500],
+        }
+        if status_code == 401:
+            error_info['message'] = 'Authentication failed - invalid credentials'
             logger.error(f"❌ Twitter API authentication failed: Invalid bearer token")
-        elif e.response.status_code == 404:
+        elif status_code == 404:
+            error_info['message'] = 'Tweet not found or not accessible'
             logger.warning(f"⚠️ Tweet {tweet_id} not found or not accessible")
-        elif e.response.status_code == 429:
-            logger.error(f"🚫 Twitter API rate limit: {e.response.status_code}")
+        elif status_code == 429:
+            error_info['message'] = 'Rate limit exceeded'
+            logger.error(f"🚫 Twitter API rate limit: {status_code}")
             logger.error(f"📋 Response headers: {dict(e.response.headers)}")
-            logger.error(f"📄 Response body: {e.response.text}")
-            # Check if we have rate limit reset info
+            logger.error(f"📄 Response body: {response_text}")
             if 'x-rate-limit-reset' in e.response.headers:
                 import datetime
                 reset_time = datetime.datetime.fromtimestamp(int(e.response.headers['x-rate-limit-reset']))
                 logger.error(f"⏰ Rate limit resets at: {reset_time}")
-            if 'x-rate-limit-remaining' in e.response.headers:
-                logger.error(f"🔢 Remaining requests: {e.response.headers['x-rate-limit-remaining']}")
+                error_info['rate_limit_reset'] = reset_time.isoformat()
         else:
-            logger.error(f"❌ Twitter API error: {e.response.status_code} - {e.response.text}")
-        return None
+            error_info['message'] = f'HTTP {status_code} - {response_text[:200]}'
+            logger.error(f"❌ Twitter API error: {status_code} - {response_text}")
+        return error_info
     except requests.exceptions.RequestException as e:
         logger.error(f"Twitter API request failed: {e}")
-        return None
+        return {
+            '_error': True,
+            'service': 'twitter',
+            'status_code': 0,
+            'message': f'Connection error: {str(e)}',
+            'endpoint': f'https://api.x.com/2/tweets/{tweet_id}',
+            'detail': str(e),
+        }
     except Exception as e:
         logger.error(f"Unexpected error fetching tweet from API: {e}")
-        return None
+        return {
+            '_error': True,
+            'service': 'twitter',
+            'status_code': 0,
+            'message': f'Unexpected error: {str(e)}',
+            'endpoint': f'https://api.x.com/2/tweets/{tweet_id}',
+            'detail': str(e),
+        }
 
 
 def extract_facebook_metadata(soup, url: str) -> dict:
@@ -411,7 +573,44 @@ def extract_linkedin_metadata(soup, url: str) -> dict:
 
 def extract_tiktok_metadata(soup, url: str) -> dict:
     """
-    Extract TikTok post metadata (future implementation)
+    Extract TikTok post metadata from HTML meta tags and oEmbed.
     """
-    # Placeholder for future TikTok support
-    return {}
+    tiktok_data = {'platform': 'tiktok'}
+
+    # OG metadata
+    og_title = soup.find('meta', property='og:title')
+    if og_title:
+        tiktok_data['title'] = og_title.get('content', '')
+
+    og_desc = soup.find('meta', property='og:description')
+    if og_desc:
+        tiktok_data['post_text'] = og_desc.get('content', '')
+
+    og_image = soup.find('meta', property='og:image')
+    if og_image:
+        tiktok_data['thumbnail_url'] = og_image.get('content', '')
+
+    # Author from URL pattern (tiktok.com/@username/video/id)
+    url_match = re.match(r'https?://(?:www\.)?tiktok\.com/@([^/]+)/video/(\d+)', url)
+    if url_match:
+        tiktok_data['author_handle'] = url_match.group(1)
+        tiktok_data['post_id'] = url_match.group(2)
+
+    # Try oEmbed (fast, no auth)
+    try:
+        oembed_resp = requests.get(
+            f'https://www.tiktok.com/oembed?url={url}',
+            timeout=5
+        )
+        if oembed_resp.status_code == 200:
+            oembed = oembed_resp.json()
+            tiktok_data['author_name'] = oembed.get('author_name', tiktok_data.get('author_handle'))
+            tiktok_data['author_url'] = oembed.get('author_url')
+            if oembed.get('thumbnail_url'):
+                tiktok_data['thumbnail_url'] = oembed['thumbnail_url']
+            if oembed.get('title'):
+                tiktok_data['post_text'] = oembed['title']
+    except Exception as e:
+        logger.debug(f"TikTok oEmbed failed: {e}")
+
+    return {k: v for k, v in tiktok_data.items() if v}

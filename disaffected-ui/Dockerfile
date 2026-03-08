@@ -27,7 +27,7 @@ RUN echo '#!/bin/sh' > /start.sh && \
     echo 'mkdir -p /app/ssl' >> /start.sh && \
     echo 'if [ ! -f "/app/ssl/key.pem" ] || [ ! -f "/app/ssl/cert.pem" ]; then' >> /start.sh && \
     echo '  echo "Generating SSL certificates for HTTPS development server..."' >> /start.sh && \
-    echo '  openssl req -x509 -newkey rsa:2048 -keyout /app/ssl/key.pem -out /app/ssl/cert.pem -days 365 -nodes -subj "/C=US/ST=Dev/L=Local/O=ShowBuild/OU=Development/CN=192.168.51.210" -addext "subjectAltName=DNS:localhost,DNS:192.168.51.210,IP:127.0.0.1,IP:192.168.51.210,IP:0.0.0.0"' >> /start.sh && \
+    echo '  openssl req -x509 -newkey rsa:2048 -keyout /app/ssl/key.pem -out /app/ssl/cert.pem -days 365 -nodes -subj "/C=US/ST=Dev/L=Local/O=ShowBuild/OU=Development/CN=192.168.51.207" -addext "subjectAltName=DNS:localhost,DNS:192.168.51.207,IP:127.0.0.1,IP:192.168.51.207,IP:0.0.0.0"' >> /start.sh && \
     echo '  echo "SSL certificates generated successfully!"' >> /start.sh && \
     echo 'fi' >> /start.sh && \
     echo 'export HTTPS=true' >> /start.sh && \

@@ -569,6 +569,85 @@ def generate_gfx_png(
         self.retry(countdown=30, max_retries=2, exc=e)
 
 
+@shared_task(bind=True, name='services.asset_processing.convert_thumbnail_to_png')
+def convert_thumbnail_to_png(self, source_path: str, episode_id: str):
+    """
+    Convert a non-PNG thumbnail image to PNG format.
+
+    Converts the source file to PNG and removes the original.
+
+    Args:
+        source_path: Absolute path to the source image file
+        episode_id: Episode identifier for logging
+
+    Returns:
+        dict: Conversion result with new path and URL
+    """
+    from PIL import Image
+
+    try:
+        source = Path(source_path)
+        if not source.exists():
+            raise FileNotFoundError(f"Source thumbnail not found: {source_path}")
+
+        logger.info(f"Converting thumbnail to PNG: {source.name} (episode {episode_id})")
+
+        self.update_state(
+            state='PROGRESS',
+            meta={
+                'status': 'Converting to PNG...',
+                'progress': 30,
+                'episode_id': episode_id,
+                'source': source.name
+            }
+        )
+
+        # Build output path: same name but .png extension
+        png_path = source.with_suffix('.png')
+
+        # Convert using Pillow
+        with Image.open(source) as img:
+            # Convert to RGBA if needed for PNG transparency support
+            if img.mode not in ('RGB', 'RGBA'):
+                img = img.convert('RGBA')
+            img.save(png_path, 'PNG', optimize=True)
+
+        if not png_path.exists():
+            raise FileNotFoundError(f"PNG conversion failed - output not found: {png_path}")
+
+        # Remove original non-PNG file
+        if source.suffix.lower() != '.png':
+            source.unlink()
+            logger.info(f"Removed original: {source.name}")
+
+        # Build URL
+        from core.paths import ShowBuildPaths
+        path_manager = ShowBuildPaths()
+        relative_path = png_path.relative_to(path_manager.episodes_root)
+        new_url = f"/episodes/{relative_path}"
+
+        file_size = png_path.stat().st_size
+
+        logger.info(f"Thumbnail converted to PNG: {png_path.name} ({file_size:,} bytes)")
+
+        return {
+            "success": True,
+            "source_path": source_path,
+            "png_path": str(png_path),
+            "png_url": new_url,
+            "filename": png_path.name,
+            "file_size": file_size,
+            "episode_id": episode_id,
+            "task_id": self.request.id
+        }
+
+    except Exception as e:
+        logger.error(f"Thumbnail PNG conversion failed: {e}")
+        import traceback
+        traceback.print_exc()
+        self.retry(countdown=10, max_retries=2, exc=e)
+
+
 def _wrap_text(text: str, font, max_width: int, draw) -> list:
     """
     Wrap text to fit within max_width.

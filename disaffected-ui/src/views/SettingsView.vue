@@ -189,6 +189,11 @@ export default {
           apiSecret: '',
           enabled: false
         },
+        tiktok: {
+          clientKey: '',
+          clientSecret: '',
+          enabled: false
+        },
         aws: {
           accessKeyId: '',
           secretAccessKey: '',

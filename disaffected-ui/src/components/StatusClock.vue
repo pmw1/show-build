@@ -102,7 +102,10 @@ onUnmounted(() => {
   font-weight: bold;
   text-align: center;
   text-transform: uppercase;
-  padding: 0 8px 0 8px;
-  margin-top: -4px;
+  padding: 0 8px 1px 8px;
+  margin-top: -6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

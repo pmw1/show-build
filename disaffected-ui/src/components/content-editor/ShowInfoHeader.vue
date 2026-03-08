@@ -1,104 +1,70 @@
 <template>
   <v-card class="show-info-header full-width-bg" flat>
-    <v-card-text class="pa-1">
+    <v-card-text class="pa-0">
       <div v-if="loadingRundown" style="margin-bottom: 8px;">
         <v-progress-linear indeterminate color="primary" height="4" rounded></v-progress-linear>
       </div>
       <div class="header-container">
-        <!-- Section 1: Episode Title and Description -->
+        <!-- Section 1: Episode Info — split left/right -->
         <div class="header-section section-1">
-          <div class="field-with-label">
-            <label class="field-label">Episode Title</label>
-            <v-text-field
-              :model-value="episodeTitle"
-              @update:model-value="$emit('update:episodeTitle', $event)"
-              variant="outlined"
-              density="compact"
-              class="episode-title-input"
-              hide-details
-              single-line
-              placeholder="Enter episode title..."
-            />
-          </div>
-          <div class="field-with-label">
-            <label class="field-label">Description</label>
-            <v-textarea
-              :model-value="description"
-              @update:model-value="$emit('update:description', $event)"
-              variant="outlined"
-              density="compact"
-              class="episode-description-input"
-              hide-details
-              rows="2"
-              no-resize
-              placeholder="Enter episode description..."
-            />
-          </div>
-          <!-- Air Date and Air Time Row -->
-          <div class="air-datetime-row">
-            <div class="field-with-label air-date-field">
-              <label class="field-label">Air Date</label>
-              <v-menu
-                v-model="showDatePicker"
-                :close-on-content-click="false"
-                location="bottom"
-              >
-                <template v-slot:activator="{ props }">
-                  <input
-                    type="text"
-                    :value="formattedAirDate"
-                    readonly
-                    v-bind="props"
-                    class="air-date-native-input"
-                    placeholder="Select date"
-                  />
-                </template>
-                <v-date-picker
-                  :model-value="airDateForPicker"
-                  @update:model-value="handleDateSelect"
-                  color="primary"
-                ></v-date-picker>
-              </v-menu>
-            </div>
-            <div class="field-with-label air-time-et-field">
-              <label class="field-label">Air Time ({{ timezoneAbbreviation }})</label>
-              <v-menu
-                v-model="showTimePicker"
-                :close-on-content-click="false"
-                location="bottom"
-              >
-                <template v-slot:activator="{ props }">
-                  <input
-                    type="text"
-                    :value="airTime"
-                    readonly
-                    v-bind="props"
-                    class="air-time-native-input"
-                    placeholder="HH:MM"
-                  />
-                </template>
-                <v-time-picker
-                  :model-value="airTime"
-                  @update:model-value="handleTimeSelect"
-                  format="24hr"
-                  scrollable
-                ></v-time-picker>
-              </v-menu>
-            </div>
-            <div class="field-with-label air-utc-field">
-              <label class="field-label">UTC</label>
-              <input
-                type="text"
-                :value="utcDateTime"
-                readonly
-                class="air-utc-display"
-                placeholder="--"
+          <div class="section-1-split">
+            <!-- Left: Title & Description -->
+            <div class="section-1-left">
+              <div class="title-ep-badge" v-if="episodeNumber">EP {{ episodeNumber }}</div>
+              <v-text-field
+                :model-value="episodeTitle"
+                @update:model-value="$emit('update:episodeTitle', $event)"
+                variant="plain"
+                density="compact"
+                class="episode-title-input"
+                hide-details
+                single-line
+                placeholder="Untitled Episode"
               />
+              <v-text-field
+                :model-value="description || ''"
+                @update:model-value="$emit('update:description', $event)"
+                variant="plain"
+                density="compact"
+                class="episode-description-input"
+                hide-details
+                single-line
+                placeholder="Type a description of this episode"
+                persistent-placeholder
+              />
+            </div>
+            <!-- Right: Air Schedule -->
+            <div class="section-1-right">
+              <div class="air-schedule-block">
+                <div class="air-field">
+                  <span class="air-label">AIR DATE</span>
+                  <v-menu v-model="showDatePicker" :close-on-content-click="false" location="bottom">
+                    <template v-slot:activator="{ props }">
+                      <span class="air-value clickable" v-bind="props">{{ formattedAirDate || 'Set date' }}</span>
+                    </template>
+                    <v-date-picker :model-value="airDateForPicker" @update:model-value="handleDateSelect" color="primary"></v-date-picker>
+                  </v-menu>
+                </div>
+                <div class="air-field">
+                  <span class="air-label">AIR TIME ({{ timezoneAbbreviation }})</span>
+                  <v-menu v-model="showTimePicker" :close-on-content-click="false" location="bottom">
+                    <template v-slot:activator="{ props }">
+                      <span class="air-value clickable" v-bind="props">{{ airTime || 'Set time' }}</span>
+                    </template>
+                    <v-time-picker :model-value="airTime" @update:model-value="handleTimeSelect" format="24hr" scrollable></v-time-picker>
+                  </v-menu>
+                </div>
+                <div class="air-divider"></div>
+                <div class="air-field">
+                  <span class="air-label">UTC</span>
+                  <span class="air-value air-utc-val">{{ utcDateTime || '--' }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Section 2: Split into 2.1 (Thumbnail) and 2.2 (Reserved) -->
+        <!-- Section 2: Thumbnail -->
         <div class="header-section section-2">
           <div class="section-2-split">
             <!-- Section 2.1: Thumbnail Carousel (left) -->
@@ -107,7 +73,7 @@
               <div class="thumbnail-container" v-if="thumbnails && thumbnails.length > 0">
                 <div
                   class="thumbnail-viewport"
-                  :class="{ 'confirmed': isCurrentThumbnailConfirmed }"
+                  :class="thumbnailViewportClasses"
                   @click="showThumbnailPreview = true"
                   style="cursor: pointer;"
                 >
@@ -166,20 +132,13 @@
                   </v-btn>
                 </div>
               </div>
-              <!-- No Thumbnail Placeholder -->
-              <div v-else class="thumbnail-placeholder">
-                <v-icon size="x-large" color="grey-lighten-1">mdi-image-off</v-icon>
-                <span class="placeholder-label">No Poster Found</span>
-                <v-btn
-                  size="x-small"
-                  variant="text"
-                  color="grey"
-                  class="mt-2 select-thumbnail-btn"
-                  @click="$emit('select-thumbnail')"
-                >
-                  <v-icon size="x-small" class="mr-1">mdi-folder-open</v-icon>
-                  Select
-                </v-btn>
+              <!-- No Thumbnail — Show generic logo placeholder -->
+              <div v-else class="thumbnail-placeholder" @click="$emit('select-thumbnail')" style="cursor: pointer;">
+                <img
+                  src="/media_assets/generic/hot-logo.jpg"
+                  alt="Show logo placeholder"
+                  class="episode-thumbnail placeholder-logo"
+                />
               </div>
             </div>
             <!-- Section 2.2: Reserved -->
@@ -191,26 +150,19 @@
           </div>
         </div>
 
-        <!-- Section 3: Reserved for future use -->
-        <div class="header-section section-3">
-          <div class="section-placeholder">
-            <span class="placeholder-text">Section 3</span>
-          </div>
-        </div>
-
-        <!-- Section 4: Action Buttons -->
-        <div class="header-section section-4 d-flex align-center justify-end gap-1">
+        <!-- Section 3: Action Buttons (stacked, full height) -->
+        <div class="header-section section-3 section-3-stacked">
           <!-- More Options Dropdown -->
           <v-menu>
             <template v-slot:activator="{ props }">
               <v-btn
-                size="x-small"
-                color="grey"
-                variant="outlined"
-                class="header-action-btn"
+                variant="flat"
+                rounded="0"
+                class="episode-action-btn"
+                color="grey-darken-1"
                 v-bind="props"
               >
-                <v-icon size="x-small" class="mr-1">mdi-dots-horizontal</v-icon>
+                <v-icon size="small" class="mr-1">mdi-dots-horizontal</v-icon>
                 More
               </v-btn>
             </template>
@@ -279,17 +231,18 @@
             </v-list>
           </v-menu>
 
-          <!-- Save All Button (rightmost) - Always clickable for manual save -->
+          <!-- Save Button -->
           <v-btn
-            size="x-small"
-            :color="saveState?.hasChanges ? 'primary' : 'success'"
-            variant="elevated"
-            @click="$emit('save-all')"
-            class="header-action-btn"
+            variant="flat"
+            rounded="0"
+            class="episode-action-btn"
+            color="primary"
+            :loading="saving"
+            :disabled="!hasUnsavedChanges"
+            @click="$emit('save-episode')"
           >
-            <v-icon size="x-small" class="mr-1">{{ saveState?.hasChanges ? 'mdi-content-save' : 'mdi-check-circle' }}</v-icon>
-            {{ saveState?.hasChanges ? 'Save' : 'Saved' }}
-            <v-tooltip activator="parent" location="bottom">{{ saveState?.hasChanges ? 'Save all changes now' : 'Click to force save (already synchronized)' }}</v-tooltip>
+            <v-icon size="small" class="mr-1">mdi-content-save</v-icon>
+            Save
           </v-btn>
         </div>
       </div>
@@ -342,11 +295,14 @@ import { getColorValue, resolveVuetifyColor } from '../../utils/themeColorMap';
 
 export default {
   name: 'ShowInfoHeader',
-  emits: ['update:airDate', 'update:airTime', 'update:airTimezone', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description', 'save-all', 'toggle-metadata-panel', 'toggle-script-reading', 'request-new-episode-assetid', 'show-assetid-info', 'generate-script', 'thumbnail-selected', 'take-thumbnail', 'select-thumbnail'],
+  emits: ['update:airDate', 'update:airTime', 'update:airTimezone', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description', 'save-all', 'save-episode', 'toggle-metadata-panel', 'toggle-script-reading', 'request-new-episode-assetid', 'show-assetid-info', 'generate-script', 'thumbnail-selected', 'take-thumbnail', 'select-thumbnail', 'update-segment-field', 'convert-thumbnail-to-png'],
   data() {
     return {
       currentThumbnailIndex: 0,
+      assetIdCopied: false,
       thumbnailError: false,
+      thumbnailConverting: false,
+      thumbnailConvertSuccess: false,
       showThumbnailPreview: false,
       showDatePicker: false,
       showTimePicker: false,
@@ -356,7 +312,8 @@ export default {
         { label: 'MT', value: 'America/Denver' },
         { label: 'PT', value: 'America/Los_Angeles' },
         { label: 'UTC', value: 'UTC' }
-      ]
+      ],
+      priorityOptions: ['low', 'normal', 'high', 'urgent']
     };
   },
   props: {
@@ -471,6 +428,18 @@ export default {
     takenSourceUrl: {
       type: String,
       default: null
+    },
+    selectedItem: {
+      type: Object,
+      default: null
+    },
+    saving: {
+      type: Boolean,
+      default: false
+    },
+    hasUnsavedChanges: {
+      type: Boolean,
+      default: false
     }
   },
   watch: {
@@ -487,6 +456,23 @@ export default {
       handler() {
         // When confirmed thumbnail URL changes, navigate to it
         this.navigateToConfirmedThumbnail();
+      }
+    },
+    currentThumbnailUrl: {
+      handler(url) {
+        // Reset conversion states when thumbnail changes
+        this.thumbnailConverting = false;
+        this.thumbnailConvertSuccess = false;
+        // Auto-trigger conversion for non-PNG thumbnails
+        if (url && this.isCurrentThumbnailNonPng) {
+          this.$nextTick(() => {
+            this.$emit('convert-thumbnail-to-png', {
+              url: url,
+              thumbnail: this.thumbnails[this.currentThumbnailIndex]
+            });
+            this.thumbnailConverting = true;
+          });
+        }
       }
     }
   },
@@ -567,6 +553,20 @@ export default {
       }
       return this.thumbnails[this.currentThumbnailIndex]?.url || null;
     },
+    isCurrentThumbnailNonPng() {
+      const url = this.currentThumbnailUrl;
+      if (!url) return false;
+      const ext = url.split('.').pop().toLowerCase();
+      return ext !== 'png';
+    },
+    thumbnailViewportClasses() {
+      return {
+        'confirmed': this.isCurrentThumbnailConfirmed,
+        'non-png': this.isCurrentThumbnailNonPng && !this.thumbnailConverting && !this.thumbnailConvertSuccess,
+        'converting': this.thumbnailConverting,
+        'convert-success': this.thumbnailConvertSuccess
+      };
+    },
     isCurrentThumbnailConfirmed() {
       // Check if the current thumbnail matches the one that was taken/confirmed
       if (!this.currentThumbnailUrl) {
@@ -621,6 +621,14 @@ export default {
     }
   },
   methods: {
+    copyAssetId() {
+      const id = this.selectedItem?.asset_id || this.selectedItem?.id
+      if (id) {
+        navigator.clipboard.writeText(String(id))
+        this.assetIdCopied = true
+        setTimeout(() => { this.assetIdCopied = false }, 2000)
+      }
+    },
     navigateToConfirmedThumbnail() {
       // Navigate to the confirmed thumbnail if it exists in the list
       if (!this.thumbnails || this.thumbnails.length === 0) {
@@ -669,6 +677,14 @@ export default {
     handleThumbnailError(event) {
       console.warn('Thumbnail failed to load:', event.target.src);
       this.thumbnailError = true;
+    },
+    onThumbnailConverted() {
+      this.thumbnailConverting = false;
+      this.thumbnailConvertSuccess = true;
+      // Blue outline fades out after 10 seconds
+      setTimeout(() => {
+        this.thumbnailConvertSuccess = false;
+      }, 10000);
     },
     takeThumbnail() {
       if (this.currentThumbnailUrl) {
@@ -737,7 +753,7 @@ export default {
 
 <style scoped>
 .show-info-header {
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 2.25px dotted rgba(25, 118, 210, 0.75) !important;
   min-height: 0;
   height: auto;
   max-height: none;
@@ -750,6 +766,8 @@ export default {
   margin-top: 20px; /* Push down to avoid overlap with app navigation */
   padding-top: 0;
   position: relative !important; /* Override any Vuetify position: sticky */
+  max-height: 100px;
+  overflow: hidden;
 }
 
 .full-width-bg {
@@ -759,8 +777,8 @@ export default {
 
 .header-container {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  grid-template-columns: 2fr 1fr auto;
+  gap: 0;
   width: 100%;
   align-items: stretch;
 }
@@ -768,14 +786,87 @@ export default {
 .header-section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px;
+  gap: 2px;
+  padding: 2px 8px;
 }
 
 .section-1,
-.section-2,
-.section-3 {
-  border-right: 1px dotted #ccc;
+.section-2 {
+  border-right: 1px dotted rgba(0, 0, 0, 0.15);
+}
+
+/* Section 1 — Split layout */
+.section-1-split {
+  display: flex;
+  gap: 12px;
+  height: 100%;
+}
+
+.section-1-left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.section-1-right {
+  flex: 0 0 140px;
+  display: flex;
+  align-items: flex-start;
+  border-left: 1px dotted rgba(0, 0, 0, 0.1);
+  padding-left: 12px;
+}
+
+/* Air schedule block */
+.air-schedule-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.air-field {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.air-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #9e9e9e;
+  text-transform: uppercase;
+}
+
+.air-value {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'Roboto Mono', monospace;
+  color: #212121;
+  letter-spacing: 0.3px;
+}
+
+.air-value.clickable {
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.air-value.clickable:hover {
+  color: #1976D2;
+}
+
+.air-utc-val {
+  color: #757575;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.air-divider {
+  height: 1px;
+  background: rgba(0, 0, 0, 0.08);
+  margin: 2px 0;
 }
 
 /* Section 2 - Split into 2.1 and 2.2 */
@@ -800,7 +891,8 @@ export default {
   justify-content: center;
   position: relative;
   border-right: 1px dotted #ddd;
-  padding: 8px;
+  padding: 4px;
+  max-height: 90px;
 }
 
 .section-2-2 {
@@ -828,9 +920,15 @@ export default {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+.section-2-1 .thumbnail-placeholder .placeholder-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .section-2-1 .thumbnail-placeholder {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -868,6 +966,34 @@ export default {
 /* Green border when thumbnail is confirmed/taken */
 .thumbnail-viewport.confirmed {
   border: 5px solid #4CAF50;
+}
+
+/* Red border for non-PNG thumbnails */
+.thumbnail-viewport.non-png {
+  border: 5px solid #F44336;
+}
+
+/* Pulsing border during conversion */
+.thumbnail-viewport.converting {
+  border: 5px solid #F44336;
+  animation: pulse-border 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: #F44336; }
+  50% { border-color: #FF8A80; }
+}
+
+/* Blue border on successful conversion, fades out over 10s */
+.thumbnail-viewport.convert-success {
+  border: 5px solid #2196F3;
+  animation: fade-blue-border 10s ease-out forwards;
+}
+
+@keyframes fade-blue-border {
+  0% { border-color: #2196F3; }
+  70% { border-color: #2196F3; }
+  100% { border-color: #ccc; }
 }
 
 /* Track holds all thumbnails in a row and slides */
@@ -938,9 +1064,84 @@ export default {
   /* Episode title and description */
 }
 
-.section-2,
+.section-2 {
+  /* Thumbnail section */
+}
+
+/* Section 3: Action buttons */
 .section-3 {
-  /* Reserved for future use */
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 4px 8px !important;
+}
+
+.asset-id-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  font-size: 0.75rem;
+}
+
+.asset-id-label {
+  color: #666;
+  font-weight: 500;
+}
+
+.asset-id-value {
+  font-family: monospace;
+  color: #1565C0;
+  font-weight: 600;
+}
+
+.copy-btn {
+  opacity: 0.5;
+}
+
+.copy-btn:hover {
+  opacity: 1;
+}
+
+.copied-indicator {
+  color: #4CAF50;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.segment-dur-pri-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.segment-meta-input {
+  font-size: 0.8rem;
+}
+
+:deep(.segment-meta-input .v-field) {
+  border-radius: 4px !important;
+  background-color: rgba(0, 0, 0, 0.03) !important;
+}
+
+:deep(.segment-meta-input .v-field__input) {
+  font-size: 0.8rem !important;
+  padding: 2px 6px !important;
+  min-height: 24px !important;
+}
+
+:deep(.segment-meta-input textarea) {
+  font-size: 0.8rem !important;
+  padding: 2px 6px !important;
+  line-height: 1.3 !important;
+}
+
+:deep(.segment-meta-input .v-field__outline) {
+  --v-field-border-opacity: 0.15;
+}
+
+:deep(.segment-meta-input .v-select__selection) {
+  font-size: 0.8rem !important;
 }
 
 .section-placeholder {
@@ -958,19 +1159,51 @@ export default {
   font-style: italic;
 }
 
-.section-4 {
-  /* Action buttons - align to top right */
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: flex-end;
+/* section-4 removed — merged into section-3 */
+
+/* Section 3 — stacked buttons filling full height */
+.section-3-stacked {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  padding: 0 !important;
+}
+
+.episode-action-btn {
+  flex: 1 !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  font-size: 0.65rem !important;
+  text-transform: none !important;
+  letter-spacing: 0.2px !important;
+  font-weight: 600 !important;
+  white-space: nowrap;
+  border-radius: 0 !important;
+  padding: 0 10px !important;
+}
+
+.episode-save-btn {
+  flex: 1 !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  font-size: 0.65rem !important;
+  text-transform: none !important;
+  letter-spacing: 0.2px !important;
+  font-weight: 600 !important;
+  white-space: nowrap;
+  border-radius: 0 !important;
+  padding: 0 10px !important;
 }
 
 .header-action-btn {
-  min-width: 70px !important;
-  height: 24px !important;
+  flex: 1 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
   font-size: 0.7rem !important;
   text-transform: none !important;
   letter-spacing: 0 !important;
+  border-radius: 0 !important;
 }
 
 .field-with-label {
@@ -988,146 +1221,68 @@ export default {
   letter-spacing: 0.5px;
 }
 
+/* Episode badge */
+.title-ep-badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: #1976D2;
+  text-transform: uppercase;
+  line-height: 1;
+  margin-bottom: -2px;
+  opacity: 0.7;
+}
+
 .episode-title-input {
   width: 100%;
 }
 
 .episode-description-input {
   width: 100%;
+  margin-top: -6px !important;
 }
 
-/* Styling for the episode fields */
+/* Title — bold, editorial headline */
 :deep(.episode-title-input .v-field__input) {
-  font-size: 0.875rem !important;
-  font-weight: bold !important;
-  padding: 4px 8px !important;
-  min-height: 28px !important;
+  font-size: 1.15rem !important;
+  font-weight: 800 !important;
+  padding: 0 !important;
+  min-height: 26px !important;
+  color: #111 !important;
+  letter-spacing: -0.4px;
+  font-family: 'Roboto', 'Segoe UI', sans-serif;
 }
 
+:deep(.episode-title-input .v-field__input::placeholder) {
+  color: #888 !important;
+  font-weight: 400 !important;
+  font-style: normal;
+  letter-spacing: 0;
+}
+
+/* Description — subdued, secondary text */
 :deep(.episode-description-input .v-field__input) {
-  font-size: 0.875rem !important;
-  padding: 4px 8px !important;
+  font-size: 0.78rem !important;
+  padding: 0 !important;
+  min-height: 20px !important;
   line-height: 1.3 !important;
+  color: #555 !important;
+  letter-spacing: 0.1px;
 }
 
-/* Remove borders and style backgrounds */
-:deep(.episode-title-input .v-field__outline),
-:deep(.episode-description-input .v-field__outline) {
-  display: none !important;
+:deep(.episode-description-input .v-field__input::placeholder) {
+  color: #777 !important;
+  font-style: normal;
+  font-weight: 300 !important;
 }
 
-:deep(.episode-title-input .v-field) {
-  background-color: #f5f5f5 !important;
-  border-radius: 4px;
-}
-
+/* Plain variant — no background, no border */
+:deep(.episode-title-input .v-field),
 :deep(.episode-description-input .v-field) {
-  background-color: #f5f5f5 !important;
-  border-radius: 4px;
+  background: transparent !important;
 }
 
-/* Air Date/Time Row - side by side, condensed */
-.air-datetime-row {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-}
-
-.air-datetime-row .air-date-field {
-  flex: 0 0 50%;
-}
-
-.air-datetime-row .air-time-et-field {
-  flex: 0 0 25%;
-}
-
-.air-datetime-row .air-utc-field {
-  flex: 0 0 calc(25% - 16px);
-}
-
-.air-datetime-row .field-label {
-  font-size: 0.65rem;
-}
-
-.air-utc-display {
-  width: 100%;
-  font-size: 0.875rem;
-  padding: 6px 8px;
-  min-height: 28px;
-  background-color: #e8e8e8;
-  border: none;
-  border-radius: 4px;
-  color: rgba(0, 0, 0, 0.6);
-  font-family: inherit;
-  cursor: default;
-}
-
-/* Air Date/Time input styling to match other fields */
-:deep(.air-date-input .v-field__input),
-:deep(.air-time-input .v-field__input) {
-  font-size: 0.875rem !important;
-  padding: 4px 8px !important;
-  min-height: 28px !important;
-}
-
-:deep(.air-date-input .v-field__outline),
-:deep(.air-time-input .v-field__outline) {
-  display: none !important;
-}
-
-:deep(.air-date-input .v-field),
-:deep(.air-time-input .v-field) {
-  background-color: #f5f5f5 !important;
-  border-radius: 4px;
-}
-
-/* Native time input for 24-hour format */
-.air-date-native-input,
-.air-time-native-input {
-  width: 100%;
-  font-size: 0.875rem;
-  padding: 6px 8px;
-  min-height: 28px;
-  background-color: #f5f5f5;
-  border: none;
-  border-radius: 4px;
-  color: rgba(0, 0, 0, 0.87);
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.air-date-native-input:focus,
-.air-time-native-input:focus {
-  outline: 2px solid var(--v-theme-primary, #1976d2);
-  outline-offset: -2px;
-}
-
-/* Air time with timezone layout */
-.air-time-with-tz {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.air-time-with-tz .air-time-native-input {
-  flex: 1;
-  min-width: 60px;
-}
-
-.timezone-select {
-  flex: 0 0 auto;
-  max-width: 55px;
-}
-
-:deep(.timezone-select .v-field__input) {
-  font-size: 0.75rem !important;
-  padding: 4px !important;
-  min-height: 28px !important;
-}
-
-:deep(.timezone-select .v-select__selection-text) {
-  font-size: 0.75rem !important;
-}
+/* Air date/time — old row styles removed, now in section-1-right */
 
 .show-title-fit {
   width: 100%;

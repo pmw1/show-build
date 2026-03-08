@@ -1,0 +1,2321 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                       REHYDRATE.NOW — Migration Audit Trail                ║
+║                       Show-Build: Whisper → Prefect                        ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+══════════════════════════════════════════════════════════════
+(c) Migration Objective
+══════════════════════════════════════════════════════════════
+
+DATE:   2026-03-04 10:01:59 UTC
+FROM:   kevin@whisper (192.168.51.210) /mnt/process/show-build
+TO:     kevin@prefect (192.168.51.207) /srv/show-build
+REASON: Whisper's GPU (RTX 3060 Ti) causes hard system crashes during
+        inference workloads, killing active Claude Code sessions. Prefect
+        has 64 cores, 125GB RAM, 3.4TB free NVMe — stable and powerful.
+PLAN:   Both instances run concurrently until prefect is verified, then
+        whisper show-build instance is decommissioned.
+
+══════════════════════════════════════════════════════════════
+(a) Source Directory Listings (Whisper, pre-migration)
+══════════════════════════════════════════════════════════════
+
+--- ls_root.txt ---
+total 3.8M
+drwxrwxr-x+  26 kevin kevin  12K Mar  4 05:01 .
+drwxrwxr-x+  12 kevin   911 4.0K Jan  4 12:10 ..
+drwxrwxr-x+   3 kevin kevin 4.0K Aug  9  2025 ~
+-rwxrwx---+   1 kevin kevin 137K Oct  4 10:03 192.168.51.210-1759586608250.log
+-rwxrwx---+   1 kevin kevin  68K Oct  4 10:05 192.168.51.210-1759586753918.log
+-rwxrwx---+   1 kevin kevin 173K Oct  4 10:08 192.168.51.210-1759586878451.log
+-rw-------+   1 kevin kevin  23K Jan 18 21:15 ACTIVE_WORK_QUEUE.md
+-rw-rw-r--+   1 kevin kevin 5.6K Oct  3 10:07 analyze_ollama_models.md
+drwxrwxr-x+  17 kevin kevin 4.0K Mar  4 04:06 app
+-rw-rw-r--+   1 kevin kevin  19K Oct  4 10:25 ARCHITECTURAL_ANALYSIS.md
+-rw-rw-r--+   1 kevin kevin 2.9K Oct  9 15:45 asterisk_conference_dialplan.conf
+-rw-rw-r--+   1 kevin kevin 1.6K Oct  9 15:45 asterisk_pin_validator.py
+-rw-rw-r--+   1 kevin kevin 142K Mar  4 04:00 backup.log
+drwxrwxr-x+   5 kevin kevin 4.0K Jul  8  2025 backup_md_20250708_112337
+drwxrwxr-x+   2 kevin kevin 4.0K Jul  8  2025 backup_md_20250708_114505
+drwxrwxr-x+   2 kevin kevin 4.0K Jul  9  2025 backup_md_20250709
+drwxrwxr-x+   3 kevin kevin 4.0K Mar  4 04:00 backups
+-rw-------+   1 kevin kevin 1.2K Dec 14 07:06 BOOKMARK_quote_generation_fixes.md
+-rw-rw-r--+   1 kevin kevin  501 Oct 24 14:58 celeryconfig_windows.py
+-rw-rw-r--+   1 kevin kevin 4.9K Jan 20 03:50 check-for-updates.ps1
+drwxrwxr-x+   3 kevin kevin 4.0K Feb 25 09:39 .claude
+-rw-rw-r--+   1 kevin kevin  83K Sep  6 15:25 claude-9-6-2025.txt
+-rw-rw-r--+   1 kevin kevin  30K Feb 25 10:12 CLAUDE.md
+-rw-rw-r--+   1 kevin kevin 3.5K Sep 16 14:38 claude_protocol_response.json
+-rw-rw-r--+   1 kevin kevin 9.4K Aug 23  2025 cleaner-0237.log
+-rw-rw-r--+   1 kevin kevin 3.4K Aug 13  2025 CONVERSATION_CONTEXT.md
+drwxrwx---+   5 kevin kevin 4.0K Jul  8  2025 .copilot
+-rwxrwx---+   1 kevin kevin 1.5K Jul  1  2025 create_users.py
+-rwxrwx---+   1 kevin kevin 2.6K Jul  2  2025 debug_bcrypt.py
+-rw-rw-r--+   1 kevin kevin 2.4K Aug 30  2025 DEBUG_FIRST.md
+-rw-rw-r--+   1 kevin kevin 2.0K Oct  2 09:57 DEBUGGING_CHEAT_SHEET.md
+-rw-rw-r--+   1 kevin kevin 1003 Sep 14 15:36 decarlos_brown_newsweek_quote.json
+-rwxrwxr-x+   1 kevin kevin 5.2K Oct  9 17:40 deploy_asterisk_conference.sh
+-rw-rw-r--+   1 kevin kevin 8.8K Oct  9 19:28 DIARIZATION_SERVICE_REQUEST.md
+drwxrwxr-x+  11 kevin kevin 4.0K Jan 24 20:55 disaffected-ui
+drwxrwxr-x+   2 kevin kevin 4.0K Oct  6 11:11 dist
+-rw-rw-r--+   1 kevin kevin 3.6K Aug 12  2025 docker-compose.enhanced.yml
+-rw-rw-r--+   1 kevin kevin 1.7K Aug 12  2025 docker-compose.postgres-primary.yml
+-rw-rw-r--+   1 kevin kevin 1.4K Aug 12  2025 docker-compose.postgres-replica.yml
+-rwxr-xr-x+   1 kevin kevin 3.5K Jan 20 09:21 docker-compose.yml
+-rwxrwxr-x+   1 kevin kevin 2.5K Jan  5 11:40 Dockerfile
+-rw-rw-r--+   1 kevin kevin 1.4K Aug  9  2025 Dockerfile.enhanced
+drwxrwxr-x+   8 kevin kevin 4.0K Mar  4 03:04 docs
+-rwxrwx---+   1 kevin kevin 279K Oct 16 01:33 download.jpg
+-rw-rw-r--+   1 kevin kevin 1.4K Aug  9  2025 enhanced_main_patch.py
+-rw-rw-r--+   1 kevin kevin   97 Jan  5 12:02 .env
+-rw-rw-r--+   1 kevin kevin  807 Jan  5 11:38 .env.example
+-rw-rw-r--+   1 kevin kevin 8.8K Sep  6 15:07 EPISODE_DELETION_STRATEGY.md
+drwxrwxr-x+   5 kevin kevin 4.0K Aug 13  2025 eternal_memory
+-rw-rw-r--+   1 kevin kevin 3.6K Aug  9  2025 file_watcher_minimal.py
+-rwxrwxr-x+   1 kevin kevin  333 Jun  7  2025 find-asset-id-refs.sh
+-rwxrwx---+   1 kevin kevin 3.4K Jul  2  2025 fix_auth.py
+-rwxrwx---+   1 kevin kevin 2.4K Jul  2  2025 fix_bcrypt_hashes.py
+-rwxrwx--x+   1 kevin kevin  226 Jul  2  2025 force_restart.sh
+-rw-rw-r--+   1 kevin kevin  16K Oct  3 19:58 FSQ_NESTED_QUOTE_PROCESSING_UFDP.md
+-rwxrwx---+   1 kevin kevin    0 Jun 13  2025 .gather
+-rw-rw-r--+   1 kevin kevin  138 Jul  1  2025 .gatherignore
+-rwxrwxr-x+   1 kevin kevin 4.6K Aug  9  2025 generate_dev_docs.sh
+-rwxrwx---+   1 kevin kevin 1.4K Jul  2  2025 generate_hashes.py
+-rwxrwx--x+   1 kevin kevin 9.8K Aug  9  2025 generate_rehydrate.sh
+drwxrwxr-x+   8 kevin kevin 4.0K Mar  4 05:01 .git
+drwxrwx---+   5 kevin kevin 4.0K Oct 22 21:01 .github
+-rw-rw-r--+   1 kevin kevin 1.1K Oct 22 22:02 .gitignore
+-rwxrwx---+   1 kevin kevin 2.8K Jul  9  2025 grok.sh
+-rw-rw-r--+   1 kevin kevin 8.8K Oct  3 04:10 IMG_CUE_INSERTION_WORKFLOW_UFDP.md
+-rw-rw-r--+   1 kevin kevin 2.8K Aug 16  2025 IMPLEMENTATION_NOTES.md
+-rw-rw-r--+   1 kevin kevin 4.9K Sep 20 23:02 import_episode_0241.py
+-rw-rw-r--+   1 kevin kevin 275K Oct 22 19:06 logfile.log
+drwxrwxr-x+   2 kevin kevin 4.0K Feb 25 00:40 logs
+-rw-rw-r--+   1 kevin kevin  44K Oct  3 06:10 MEDIA_ASSET_VERSIONING_UFDP.md
+-rw-rw-r--+   1 kevin kevin  36K Oct  6 05:16 MEDIA_PROCESSING_WORKFLOW_UFDP.md
+-rw-rw-r--+   1 kevin kevin 4.6K Mar  4 05:00 migration_20260304_045953.log
+-rw-rw-r--+   1 kevin kevin  11K Mar  4 05:01 migration_20260304_050102.log
+-rw-rw-r--+   1 kevin kevin 8.9K Mar  4 05:01 migration_20260304_050152.log
+drwxrwxr-x+   2 kevin kevin 4.0K Mar  4 05:01 migration_db_20260304_050152
+drwxrwxr-x+   2 kevin kevin 4.0K Mar  4 05:01 migration_env_20260304_050152
+-rw-rw-r--+   1 kevin kevin 2.4K Aug  9  2025 minimal_api.py
+-rw-rw-r--+   1 kevin kevin 2.3K Aug  9  2025 minimal_celery.py
+-rw-rw-r--+   1 kevin kevin 1.5K Aug  9  2025 minimal_docker-compose.yml
+-rw-rw-r--+   1 kevin kevin 2.3K Aug  9  2025 minimal_integration.py
+-rw-rw-r--+   1 kevin kevin 1.6K Aug  9  2025 minimal_models.py
+-rw-rw-r--+   1 kevin kevin  11K Sep 16 07:20 mirror_all_episodes.py
+-rw-rw-r--+   1 kevin kevin  11K Oct  4 10:50 MODAL_OVERHAUL_COMPLETE.md
+-rw-rw-r--+   1 kevin kevin  25K Oct  6 05:13 NFS_INFRASTRUCTURE_UFDP.md
+drwxrwxr-x+ 593 kevin kevin  20K Jul  5  2025 node_modules
+-rwxrwx---+   1 kevin kevin 1.1K Jul  3  2025 package.json
+-rw-rw-r--+   1 kevin kevin 441K Jul  4  2025 package-lock.json
+-rw-rw-r--+   1 kevin kevin 4.0K Oct  3 18:01 PARAGRAPH_HEIGHT_FIX_REPORT.md
+-rw-rw-r--+   1 kevin kevin 3.9K Aug 11  2025 populate_blueprints.py
+drwxrwxr-x+   4 kevin kevin 4.0K Aug 12  2025 postgres-config
+-rw-rw-r--+   1 kevin kevin 6.9K Aug 30  2025 process_quotes.py
+-rw-rw-r--+   1 kevin kevin  215 Jan 18 13:34 pytest.ini
+-rw-rw-r--+   1 kevin kevin 1.7K Aug 30  2025 quotes_input.json
+-rw-rw-r--+   1 kevin kevin  19K Jan  5 11:40 README.md
+-rw-rw-r--+   1 kevin kevin  685 Aug 13  2025 remote_comm.txt
+-rw-rw-r--+   1 kevin kevin 3.5K Sep 16 12:39 remote_protocol.json
+-rwxr-xr-x+   1 kevin kevin  415 Oct 16 00:12 requirements.txt
+-rwxrwxr-x+   1 kevin kevin 2.8K Oct 19 11:09 reset_password.py
+-rwxrwx---+   1 kevin kevin 2.3K Jul  1  2025 reset_users.py
+-rw-rw-r--+   1 kevin kevin   78 Sep 16 12:39 response.txt
+-rwxrwxr-x+   1 kevin kevin   85 Jun 13  2025 restart-dockers.sh
+-rwxrwxr-x+   1 kevin kevin 1.2K Aug 11  2025 restart-servers.sh
+-rwxrwx---+   1 kevin kevin 2.6K Jul  2  2025 restore_working_hashes.py
+-rw-rw-r--+   1 kevin kevin 278K Jul  9  2025 review_files.txt
+-rw-rw-r--+   1 kevin kevin 2.6K Oct  4 03:25 RUNDOWN_AUTO_SCAFFOLD_BEHAVIOR.md
+-rw-rw-r--+   1 kevin kevin  18K Oct  2 06:45 SCRIPT_MODE_AS_VIEWER_ARCHITECTURE_UFDP.md
+-rw-rw-r--+   1 kevin kevin  16K Oct  3 19:40 SCRIPT_MODE_PARAGRAPH_RESIZE_UDFP.md
+drwxrwxr-x+   3 kevin kevin 4.0K Mar  4 05:01 scripts
+-rw-rw-r--+   1 kevin kevin   45 Jun 13  2025 secret.key
+-rw-rw-r--+   1 kevin kevin 5.1K Aug 11  2025 setup_episode_scaffolding.py
+-rwxrwxr-x+   1 kevin kevin 3.0K Oct  9 17:40 setup_nfs_mount.sh
+-rw-rw-r--+   1 kevin kevin  13K Oct 22 15:33 setup_windows_worker.ps1
+-rw-rw-r--+   1 kevin kevin   87 Aug 10  2025 show-build.code-workspace
+-rw-rw-r--+   1 kevin kevin  12K Oct  8 14:25 SHOW_BUILD_STATUS_UFDP.md
+-rw-rw-r--+   1 kevin kevin  41K Oct  6 03:17 SOT_DISTRIBUTED_PROCESSING_UFDP.md
+-rw-rw-r--+   1 kevin kevin  845 Oct 25 14:54 start_worker_FINAL.bat
+-rw-rw-r--+   1 kevin kevin  658 Oct 25 14:53 start_worker_FIXED.bat
+-rw-rw-r--+   1 kevin kevin  487 Oct 25 14:54 start_worker_windows.bat
+-rw-rw-r--+   1 kevin kevin 3.0K Oct 22 19:28 sync-from-linux.ps1
+-rw-rw-r--+   1 kevin kevin 1.2K Mar  4 05:01 table_counts_source.txt
+-rwxrwx---+   1 kevin kevin  589 Jul  2  2025 temp_hash_gen.py
+-rw-rw-r--+   1 kevin kevin  868 Sep 14 15:38 teresa_stokes_newsweek_quote.json
+-rwxrwx---+   1 kevin kevin    0 Jun 13  2025 test_api_auth.ps1
+-rwxrwx--x+   1 kevin kevin    0 Jun 13  2025 test_api_auth.sh
+-rw-rw-r--+   1 kevin kevin 2.5K Oct  9 13:51 test_asterisk_ami.py
+-rwxrwx---+   1 kevin kevin 2.4K Jul  2  2025 test_auth_direct.py
+-rwxrwx---+   1 kevin kevin    0 Jun 13  2025 test_auth.py
+-rwxrwx---+   1 kevin kevin 5.5K Jul  2  2025 test_auth_system.py
+-rw-rw-r--+   1 kevin kevin 2.9K Aug 10  2025 test-drag-drop.html
+-rw-rw-r--+   1 kevin kevin 5.9K Aug 11  2025 test-drag-drop-status.html
+-rwxrwxr-x+   1 kevin kevin 8.7K Oct  3 10:05 test_llm_backend.py
+-rw-rw-r--+   1 kevin kevin 7.8K Oct  3 10:00 test_llm_connectivity.js
+-rwxrwx---+   1 kevin kevin 1.8K Jul  2  2025 test_login.py
+-rw-rw-r--+   1 kevin kevin 8.8K Oct  3 15:04 test_paragraph_height_fix.html
+-rwxrwxr-x+   1 kevin kevin 1.7K Aug 12  2025 test_reorder.sh
+-rw-rw-r--+   1 kevin kevin 196K Oct  2 03:28 test_speed_0.5.wav
+-rw-rw-r--+   1 kevin kevin 151K Oct  2 03:28 test_speed_1.0.wav
+-rw-rw-r--+   1 kevin kevin 168K Oct  2 03:28 test_speed_2.0.wav
+-rwxrwx---+   1 kevin kevin 2.0K Jul  2  2025 test_storage.py
+-rw-rw-r--+   1 kevin kevin 3.3K Oct  3 19:18 test_textarea_resize.html
+-rw-rw-r--+   1 kevin kevin 135K Oct  2 03:28 test_very_fast.wav
+-rw-rw-r--+   1 kevin kevin 181K Oct  2 03:28 test_very_slow.wav
+drwxrwxr-x+   5 kevin kevin 4.0K Jan 20 07:45 tools
+-rw-rw-r--+   1 kevin kevin  41K Jul  8  2025 tree_output.txt
+-rw-rw-r--+   1 kevin kevin  16K Oct  6 05:17 UFDP_INDEX.md
+-rw-rw-r--+   1 kevin kevin  54K Jan  5 11:40 UNIVERSAL_LLM_FRAMEWORK_UFDP.md
+-rw-rw-r--+   1 kevin kevin 3.5K Oct 14 21:47 update_blueprint.sql
+-rwxrwxr-x+   1 kevin kevin 5.4K Oct 14 21:47 update_episode_blueprint.py
+-rwxrwx--x+   1 kevin kevin  19K Jul  9  2025 update.py
+-rw-rw-r--+   1 kevin kevin 2.8K Jul  9  2025 update.sh
+drwxrwx---+   5 kevin kevin 4.0K Jul  2  2025 .venv
+-rwxrwx---+   1 kevin kevin 3.3K Jul  2  2025 verify_auth.py
+-rwxrwx---+   1 kevin kevin    0 Jun 13  2025 verify_setup.py
+drwxrwxr-x+   2 kevin kevin 4.0K Aug 25  2025 voice-integration
+drwxrwx---+   3 kevin kevin 4.0K Jun 16  2025 .vscode
+-rw-rw-r--+   1 kevin kevin  12K Oct  2 14:48 VUETIFY_TEXTAREA_AUTOGROW_ISSUE.md
+-rw-rw-r--+   1 kevin kevin 5.2K Oct 22 23:00 WINDOWS_DEPLOYMENT_INSTRUCTIONS.md
+-rwxrwx---+   1 kevin kevin 6.7K Jul  1  2025 workload.json
+-rw-rw-r--+   1 kevin kevin 8.0K Oct  3 14:42 XTTS_STATUS_MONITORING_UFDP.md
+
+--- ls_app.txt ---
+total 1.7M
+drwxrwxr-x+ 17 kevin kevin       4.0K Mar  4 04:06 .
+drwxrwxr-x+ 26 kevin kevin        12K Mar  4 05:01 ..
+drwxrwxr-x+  3 kevin kevin       4.0K Aug 13  2025 alembic
+-rw-rw-r--+  1 kevin kevin       2.9K Aug  9  2025 alembic.ini
+-rw-rw-r--+  1 kevin kevin       2.3K Oct 14 22:58 announcements_router.py
+-rw-rw-r--+  1 kevin kevin       9.7K Oct  8 01:05 api_config.py
+-rw-rw-r--+  1 kevin kevin        33K Feb  3 09:13 api_config_router.py
+drwxrwxr-x+  3 kevin kevin       4.0K Aug  8  2025 app
+-rw-rw-r--+  1 kevin kevin        15K Sep 30 07:50 assetid_router.py
+-rw-rw-r--+  1 kevin kevin       7.0K Jul  9  2025 assets_router.py
+-rw-rw-r--+  1 kevin kevin        14K Oct  9 15:28 asterisk_service.py
+drwxr-xr-x+  3 kevin disaffected 4.0K Oct 16 03:25 auth
+drwxrwxr-x+  3 kevin kevin       4.0K Jan  1 03:08 backup
+-rw-rw-r--+  1 kevin kevin       5.8K Feb 24 10:49 blueprint_config_router.py
+-rwxr-xr-x+  1 kevin kevin       5.0K Jan 21 23:50 celery_app.py
+-rw-rw-r--+  1 kevin kevin       4.3K Oct 25 18:57 celery_cleanup.py
+-rw-rw-r--+  1 kevin kevin       9.8K Feb 24 22:05 celery_jobs_router.py
+drwxrwxr-x+  2 kevin disaffected 4.0K Aug 12  2025 config
+-rw-rw-r--+  1 kevin kevin        15K Oct 15 17:10 consolidation_router.py
+-rw-rw-r--+  1 kevin kevin        26K Jan 15 08:34 content_library_router.py
+-rw-rw-r--+  1 kevin kevin        35K Aug 16  2025 convert_assetid_router.py
+drwxrwxr-x+  3 kevin kevin       4.0K Jan  5 11:40 core
+-rw-rw-r--+  1 kevin kevin       1.4K Aug 10  2025 create_admin_user.py
+-rw-rw-r--+  1 kevin kevin       3.4K Aug 10  2025 create_organization.py
+-rw-rw-r--+  1 kevin kevin       1.1K Aug 13  2025 create_test_api_key.py
+-rw-rw-r--+  1 kevin kevin       7.5K Jan 15 08:50 customer_router.py
+-rw-rw-r--+  1 kevin kevin       1.1K Aug 10  2025 database.py
+-rw-rw-r--+  1 kevin kevin       1003 Sep 14 15:36 decarlos_brown_newsweek_quote.json
+-rw-rw-r--+  1 kevin kevin       2.6K Sep 20 18:50 delete_episode_0241.py
+drwxrwxr-x+  4 kevin disaffected 4.0K Oct 16 01:49 docs
+-rw-rw-r--+  1 kevin kevin        27K Aug  9  2025 docs_router.py
+-rw-rw-r--+  1 kevin kevin        14K Aug 16  2025 duration_analysis_router.py
+-rw-rw-r--+  1 kevin kevin        32K Aug 16  2025 duration_estimation_router.py
+-rw-rw-r--+  1 kevin kevin       6.5K Aug 12  2025 enhanced_reorder.py
+-rw-rw-r--+  1 kevin kevin       5.0K Feb 24 12:47 episode_scaffold_router.py
+-rw-rw-r--+  1 kevin kevin       185K Mar  4 03:02 episodes_router.py
+-rw-rw-r--+  1 kevin kevin       4.9K Oct 18 17:38 extract_all_cues_from_script.py
+-rw-rw-r--+  1 kevin kevin       5.1K Oct 18 16:58 extract_fsq_quotes.py
+-rw-rw-r--+  1 kevin kevin       4.9K Oct 18 17:21 extract_fs_quotes_from_script.py
+-rw-rw-r--+  1 kevin kevin        25K Oct 15 22:51 file_inventory_router.py
+-rw-rw-r--+  1 kevin kevin        28K Feb 28 21:59 fsq_asset_router.py
+-rw-rw-r--+  1 kevin kevin       7.8K Feb 24 09:01 gfx_asset_router.py
+-rw-rw-r--+  1 kevin kevin        11K Oct 13 05:20 google_drive_router.py
+srw-------+  1 kevin disaffected    0 Mar  4 04:06 gunicorn.ctl
+-rw-rw-r--+  1 kevin kevin       4.9K Oct  4 07:16 housekeeping_router.py
+-rw-rw-r--+  1 kevin kevin        13K Oct  4 07:15 housekeeping_service.py
+-rw-rw-r--+  1 kevin kevin       7.3K Oct 18 14:44 import_josh_script.py
+-rw-rw-r--+  1 kevin kevin       8.7K Oct 18 14:47 import_josh_script_v2.py
+-rw-rw-r--+  1 kevin kevin       7.3K Oct 18 14:57 import_josh_script_v3.py
+-rw-rw-r--+  1 kevin kevin       8.8K Oct 18 15:04 import_josh_script_v4.py
+-rwxrwx---+  1 kevin kevin         44 Jun 13  2025 __init__.py
+-rw-rw-r--+  1 kevin kevin        12K Oct 21 05:41 link_preview_service.py
+-rw-rw-r--+  1 kevin kevin       5.7K Oct 21 19:37 llm_proxy_router.py
+-rw-rw-r--+  1 kevin kevin        12K Oct  9 04:54 llm_state_router.py
+drwxrwxr-x+  2 kevin kevin       4.0K Jul  2  2025 logs
+-rwxrwxr-x+  1 kevin kevin        78K Feb 24 10:49 main.py
+-rw-rw-r--+  1 kevin kevin       5.0K Oct  4 07:17 media_analysis_router.py
+-rw-rw-r--+  1 kevin kevin       6.2K Aug 10  2025 media_router.py
+-rw-rw-r--+  1 kevin kevin       9.8K Sep 16 07:40 migrate_content_safe.py
+-rw-rw-r--+  1 kevin kevin       7.4K Aug 10  2025 migrate_users_to_db.py
+-rw-rw-r--+  1 kevin kevin       6.4K Oct 26 06:24 models_assetid.py
+-rw-rw-r--+  1 kevin kevin       6.2K Jan 15 07:53 models_content_library.py
+-rw-rw-r--+  1 kevin kevin        15K Feb 24 10:48 models_episode.py
+-rw-rw-r--+  1 kevin kevin       8.9K Aug 13  2025 models_rbac.py
+-rw-rw-r--+  1 kevin kevin       3.0K Oct 16 00:51 models_scratchpad.py
+-rw-rw-r--+  1 kevin kevin       6.9K Jan 26 12:49 models_segment_llm.py
+-rw-rw-r--+  1 kevin kevin        647 Oct 22 19:26 models_speakers.py
+-rw-rw-r--+  1 kevin kevin       1.2K Oct 16 01:55 models_twitter.py
+-rw-rw-r--+  1 kevin kevin       4.9K Nov 30 11:08 models_user.py
+-rw-rw-r--+  1 kevin kevin        36K Feb 24 08:54 models_v2.py
+-rw-rw-r--+  1 kevin kevin       6.1K Oct 18 09:38 models_whiteboard.py
+-rw-rw-r--+  1 kevin kevin       7.4K Feb 24 03:23 mp3_profiles_router.py
+-rw-rw-r--+  1 kevin kevin        20K Sep 30 07:23 new_assetid_router.py
+-rwxrwxr-x+  1 kevin kevin        12K Oct 15 16:35 normalize_episode_names.py
+-rw-rw-r--+  1 kevin kevin       8.9K Jan 29 13:11 organization_router.py
+-rw-rw-r--+  1 kevin kevin       9.3K Oct 25 22:05 platform_utils.py
+-rw-rw-r--+  1 kevin kevin       6.3K Oct 18 16:06 populate_0245_content.py
+-rw-rw-r--+  1 kevin kevin       4.3K Oct 18 18:43 populate_media_list.py
+-rw-r--r--+  1 kevin kevin       1.8K Jun  6  2025 preproc_delegate.py
+-rw-r--r--+  1 kevin kevin       1.9K Jun  6  2025 preproc-queue-sots.json
+-rw-rw-r--+  1 kevin kevin       6.9K Sep 16 05:38 process_quotes.py
+-rw-rw-r--+  1 kevin kevin       5.2K Feb 21 14:32 production_roles_router.py
+-rw-rw-r--+  1 kevin kevin        15K Oct 15 02:20 prompts_router.py
+drwxrwxr-x+  2 kevin kevin       4.0K Jan 21 23:50 __pycache__
+-rw-rw-r--+  1 kevin kevin       1.7K Aug 30  2025 quotes_input.json
+-rw-rw-r--+  1 kevin kevin        19K Aug 13  2025 rbac_router.py
+-rw-rw-r--+  1 kevin kevin        21K Aug 13  2025 rbac_service.py
+-rw-rw-r--+  1 kevin kevin       6.8K Oct 22 16:53 repo_router.py
+-rwxrwxr-x+  1 kevin kevin        838 Jan  5 11:40 requirements.txt
+-rwxrwxr-x+  1 kevin kevin       2.8K Oct 19 11:09 reset_password.py
+-rw-rw-r--+  1 kevin kevin       3.4K Sep 16 05:38 restore_colors.py
+-rw-------+  1 kevin kevin        19K Feb  3 18:58 rundown_templates_router.py
+-rw-rw-r--+  1 kevin kevin       9.2K Oct 16 01:17 scratchpad_router.py
+-rw-------+  1 kevin kevin        34K Jan 31 21:27 script_generation_router.py
+drwxrwxr-x+  2 kevin kevin       4.0K Jan 18 19:53 scripts
+-rw-rw-r--+  1 kevin kevin        985 Aug 13  2025 seed_rbac.py
+-rw-rw-r--+  1 kevin kevin        14K Jan 26 12:51 segment_llm_router.py
+-rw-rw-r--+  1 kevin kevin        11K Jan 18 10:26 segment_locks_router.py
+drwxr-xr-x+  3 kevin kevin       4.0K Feb 24 21:51 services
+-rw-rw-r--+  1 kevin kevin        19K Sep 27 07:41 settings_colors_router.py
+-rw-rw-r--+  1 kevin kevin        44K Jan 26 20:06 settings_router.py
+-rw-rw-r--+  1 kevin kevin       5.2K Aug 30  2025 setup_episode_scaffolding.py
+-rw-rw-r--+  1 kevin kevin        19K Aug 12  2025 setup_router.py
+-rw-rw-r--+  1 kevin kevin        18K Aug 10  2025 show_router.py
+-rw-rw-r--+  1 kevin kevin        45K Feb 24 21:51 sot_router.py
+-rw-rw-r--+  1 kevin kevin       8.7K Oct  7 02:25 speakers_router.py
+drwxrwxr-x+  2 kevin kevin       4.0K Oct  7 09:56 ssl
+drwxrwxrwx+  3 kevin kevin       4.0K Oct  6 12:41 storage
+-rw-rw-r--+  1 kevin kevin       5.7K Jul  9  2025 templates_router.py
+-rw-rw-r--+  1 kevin kevin        868 Sep 14 15:38 teresa_stokes_newsweek_quote.json
+drwxrwxr-x+  3 kevin kevin       4.0K Jan 18 13:37 tests
+-rwxrwxr-x+  1 kevin kevin        204 Jun  6  2025 testup.sh
+-rw-rw-r--+  1 kevin kevin       6.2K Feb 25 06:05 todos_router.py
+-rw-rw-r--+  1 kevin kevin        17K Feb 24 08:56 tools_router.py
+-rw-rw-r--+  1 kevin kevin        27K Oct 16 12:42 twitter_oauth_router.py
+-rwxrwxr-x+  1 kevin kevin        11K Jan 29 12:58 update_episode_blueprint_canonical.py
+-rwxrwxr-x+  1 kevin kevin       5.4K Oct 14 21:47 update_episode_blueprint.py
+-rw-rw-r--+  1 kevin kevin       3.5K Aug 10  2025 update_polaris.py
+-rw-rw-r--+  1 kevin kevin       4.8K Oct 18 18:06 update_script_with_cues.py
+drwxrwxr-x+  3 kevin kevin       4.0K Aug 12  2025 utils
+-rw-rw-r--+  1 kevin kevin        12K Oct 10 11:42 voice_conference_router.py
+-rw-rw-r--+  1 kevin kevin        11K Oct  7 02:43 voice_model_router.py
+-rw-rw-r--+  1 kevin kevin       6.3K Oct  3 11:16 voice_sample_router.py
+-rw-rw-r--+  1 kevin kevin        15K Feb 24 09:01 vo_router.py
+-rw-rw-r--+  1 kevin kevin       7.0K Sep 16 05:38 websocket.py
+-rw-rw-r--+  1 kevin kevin        30K Feb 25 10:28 whiteboard_router.py
+-rw-rw-r--+  1 kevin kevin       8.1K Oct 22 06:59 workers_router.py
+-rw-rw-r--+  1 kevin kevin        11K Oct  7 02:40 wpm_audio_router.py
+-rw-rw-r--+  1 kevin kevin       7.0K Oct  3 14:41 xtts_router.py
+
+--- ls_ui.txt ---
+total 932K
+drwxrwxr-x+  11 kevin kevin 4.0K Jan 24 20:55 .
+drwxrwxr-x+  26 kevin kevin  12K Mar  4 05:01 ..
+-rw-rw-r--+   1 kevin kevin   73 Jun  6  2025 babel.config.js
+-rwxrwxr-x+   1 kevin kevin 2.0K Jul  8  2025 cat_stuff.sh
+-rw-rw-r--+   1 kevin kevin 3.4K Aug 13  2025 COMPONENT_MAP.md
+drwxrwxr-x+   3 kevin kevin 4.0K Sep 29 19:37 disaffected-ui
+drwxrwxr-x+   6 kevin kevin 4.0K Feb 23 21:05 dist
+-rw-rw-r--+   1 kevin kevin 2.2K Sep 29 19:38 Dockerfile
+-rw-rw-r--+   1 kevin kevin   46 Sep 29 19:38 .dockerignore
+drwxrwxr-x+   2 kevin kevin 4.0K Jul  8  2025 docs
+-rw-rw-r--+   1 kevin kevin 5.2K Oct 25 08:26 EPISODE_REQUIREMENT_SYSTEM.md
+-rwxrwxr-x+   1 kevin kevin  545 Sep 16 22:14 generate-ssl.sh
+-rw-rw-r--+   1 kevin kevin    5 Oct  6 12:29 .gitignore
+-rw-rw-r--+   1 kevin kevin  737 Jul  8  2025 jest.config.js
+-rw-rw-r--+   1 kevin kevin  279 Jun  6  2025 jsconfig.json
+-rw-rw-r--+   1 kevin kevin 3.7K Jan  5 11:40 nginx.conf
+drwxrwxr-x+ 939 kevin kevin  32K Jan 26 13:38 node_modules
+-rw-rw-r--+   1 kevin kevin 2.2K Jan 13 18:23 package.json
+-rw-rw-r--+   1 kevin kevin 766K Jan 24 20:55 package-lock.json
+drwxrwxr-x+   6 kevin kevin 4.0K Jan 18 12:49 public
+drwxrwxr-x+   2 kevin kevin 4.0K Sep 25 17:33 scripts
+-rw-rw-r--+   1 kevin kevin  835 Jul  3  2025 simple-server.js
+drwxrwxr-x+  16 kevin kevin 4.0K Jan 31 21:18 src
+drw-r--r--+   2 kevin kevin 4.0K Sep 16 22:44 ssl
+drwxrwxr-x+   4 kevin kevin 4.0K Jul  8  2025 tests
+-rw-rw-r--+   1 kevin kevin  756 Aug  9  2025 tsconfig.json
+-rw-rw-r--+   1 kevin kevin 8.2K Aug 11  2025 update-component-map.js
+-rwxrwx---+   1 kevin kevin  198 Jun 13  2025 vite.config.js.backup
+-rw-rw-r--+   1 kevin kevin 3.2K Jan  5 11:40 vue.config.js
+
+--- ls_scripts.txt ---
+total 244K
+drwxrwxr-x+  3 kevin kevin 4.0K Mar  4 05:01 .
+drwxrwxr-x+ 26 kevin kevin  12K Mar  4 05:01 ..
+-rwxrwxr-x+  1 kevin kevin 5.6K Aug 13  2025 backup_before_migration.sh
+-rwxrwxr-x+  1 kevin kevin  11K Aug 12  2025 backup-database.sh
+-rwxrwxr-x+  1 kevin kevin 2.4K Aug 13  2025 backup_database.sh
+-rwxrwxr-x+  1 kevin kevin  12K Nov 15 21:27 celery_monitor.py
+-rwxrwxr-x+  1 kevin kevin 1.7K Aug 30  2025 check-duplicate-components.sh
+-rwxrwxr-x+  1 kevin kevin 2.3K Aug 13  2025 claudespawn.sh
+-rwxrwxr-x+  1 kevin kevin 1.1K Oct  7 03:34 clean-npm-servers.sh
+-rw-rw-r--+  1 kevin kevin 6.6K Jan  5 11:38 collect_disaffected_training_data.py
+-rwxrwxr-x+  1 kevin kevin  14K Aug 13  2025 command_center.sh
+-rwxrwxr-x+  1 kevin kevin 4.3K Aug 30  2025 debug-frontend.sh
+-rwxrwxr-x+  1 kevin kevin  12K Jan  5 23:21 deploy_celery_worker.sh
+-rwxrwxr-x+  1 kevin kevin 6.1K Oct 22 21:01 deploy-to-windows-worker.sh
+-rwxrwxr-x+  1 kevin kevin 3.3K Aug 13  2025 eternal_memory.sh
+-rwxrwxr-x+  1 kevin kevin 2.6K Sep 27 13:43 fix_syncthing_permissions.sh
+-rwxrwxr-x+  1 kevin kevin  51K Mar  4 05:01 migrate_to_prefect.sh
+-rwxrwxr-x+  1 kevin kevin 2.4K Oct 16 00:43 monitor-relay.sh
+-rwxrwxr-x+  1 kevin kevin 1.8K Oct 16 00:43 post-to-relay.sh
+drwxrwxr-x+  2 kevin kevin 4.0K Nov 15 21:27 __pycache__
+-rwxrwxr-x+  1 kevin kevin 1.2K Aug 13  2025 setup_backup_cron.sh
+-rwxrwxr-x+  1 kevin kevin  19K Oct  6 05:35 setup_nfs_infrastructure.sh
+-rwxrwxr-x+  1 kevin kevin  513 Aug 13  2025 start_persistent_claude.sh
+-rwxrwxr-x+  1 kevin kevin 4.1K Oct 22 19:27 sync-windows-worker.sh
+-rwxrwxr-x+  1 kevin kevin  764 Aug 13  2025 system_monitor.sh
+-rwxrwxr-x+  1 kevin kevin 1.9K Feb 25 00:41 thermal-log.sh
+-rwxrwxr-x+  1 kevin kevin 5.3K Aug 13  2025 tiered_memory.sh
+-rwxrwxr-x+  1 kevin kevin   34 Feb 25 00:46 watch-gpu.sh
+
+--- ls_tools.txt ---
+total 476K
+drwxrwxr-x+  5 kevin kevin 4.0K Jan 20 07:45 .
+drwxrwxr-x+ 26 kevin kevin  12K Mar  4 05:01 ..
+-rwxrwxr-x+  1 kevin kevin  12K Sep 15 21:39 assetid_decoder.py
+-rwxrwxr-x+  1 kevin kevin 7.4K Sep 14 15:30 assetid_generator.py
+drwxrwxr-x+  4 kevin kevin 4.0K Jan 20 09:50 blueprints
+-rw-rw-r--+  1 kevin kevin 2.5K Aug 16  2025 cleaner-0236.log
+-rw-rw-r--+  1 kevin kevin 1.7K Jul 13  2025 convert-vmix-drive-letter.py
+drwxrwx---+  2 kevin kevin 4.0K Jul 13  2025 datafiles
+-rwxrwxr-x+  1 kevin kevin  31K Aug 23  2025 duration_calculator.py
+-rw-rw-r--+  1 kevin kevin  13K Sep 20 22:50 enumerate_and_manage_cues.py
+-rw-rw-r--+  1 kevin kevin 6.4K Sep 14 15:57 enumerate_media_files.py
+-rwxrwxr-x+  1 kevin kevin  50K Aug 16  2025 episode-cleanup.py
+-rw-rw-r--+  1 kevin kevin  14K Sep 20 21:58 extract_fsq_quotes.py
+-rwxrwxr-x+  1 kevin kevin  12K Aug 23  2025 extract_sots.py
+-rwxrwxr-x+  1 kevin kevin  14K Aug 16  2025 fsq_duration_scanner.py
+-rw-rw-r--+  1 kevin kevin  20K Jan  5 11:40 media-collect.py
+-rw-rw-r--+  1 kevin kevin 1.9K Jul  2  2025 media_job_queue.py
+-rw-rw-r--+  1 kevin kevin  193 Jul  4  2025 mosquitto.conf
+-rw-rw-r--+  1 kevin kevin 8.4K Aug 16  2025 order-from-file-pref.py
+-rwxrwx---+  1 kevin kevin  616 Aug 16  2025 paths.py
+-rw-rw-r--+  1 kevin kevin 2.7K Sep 14 15:53 production_assetid_converter.py
+drwxrwxr-x+  2 kevin kevin 4.0K Aug 16  2025 __pycache__
+-rwxrwx---+  1 kevin kevin 2.4K Jul  1  2025 README.md
+-rw-rw-r--+  1 kevin kevin 9.8K Sep 20 22:46 rename_files_by_slug.py
+-rw-rw-r--+  1 kevin kevin  24K Jan  5 11:40 render_fsq_png.py
+-rwxrwxr-x+  1 kevin kevin 5.9K Sep 14 15:39 render_quotes_pdf.py
+-rw-rw-r--+  1 kevin kevin  49K Sep 20 17:28 render-script-host.py
+-rw-rw-r--+  1 kevin kevin  23K Sep 21 00:23 render-script-production.py
+-rw-rw-r--+  1 kevin kevin  17K Aug 16  2025 status-set.py
+-rwxrwx---+  1 kevin kevin  59K Jul  9  2025 update.py
+-rw-rw-r--+  1 kevin kevin  16K Sep 20 21:48 update_sot_durations.py
+
+
+══════════════════════════════════════════════════════════════
+(b) Project Tree (Whisper, pre-migration)
+══════════════════════════════════════════════════════════════
+
+/mnt/process/show-build
+├── ~
+│   └── .claude
+│       └── settings.json
+├── 192.168.51.210-1759586608250.log
+├── 192.168.51.210-1759586753918.log
+├── 192.168.51.210-1759586878451.log
+├── ACTIVE_WORK_QUEUE.md
+├── analyze_ollama_models.md
+├── app
+│   ├── alembic
+│   │   ├── env.py
+│   │   ├── script.py.mako
+│   │   └── versions
+│   │       ├── 001_create_user_authentication_tables.py
+│   │       ├── 002_create_organization_tables.py
+│   │       ├── 003_remove_organization_slug.py
+│   │       ├── 004_add_organization_fields.py
+│   │       ├── 005_create_blueprint_templates.py
+│   │       ├── 006_rename_metadata_columns.py
+│   │       ├── 007_create_auth_tables.py
+│   │       ├── 008_rename_scaffold_to_episode_templates.py
+│   │       ├── 0e73074190a2_add_rbac_system.py
+│   │       ├── 1001_add_is_dummy_to_episodes.py
+│   │       ├── 1001_add_regions_to_rundown.py
+│   │       ├── 1002_add_speakers_table.py
+│   │       ├── 1003_add_prompt_overrides_table.py
+│   │       ├── 1004_add_sot_processing_jobs_table.py
+│   │       ├── 1005_add_job_type_to_sot_processing_jobs.py
+│   │       ├── 1006_add_user_todos_table.py
+│   │       ├── 1007_add_scratchpad_tables.py
+│   │       ├── 1008_add_link_preview_fields.py
+│   │       ├── 1009_add_social_metadata_to_scratchpad.py
+│   │       ├── 1010_add_title_to_scratchpad_items.py
+│   │       ├── 1011_add_twitter_oauth_tokens.py
+│   │       ├── 1012_add_asset_pool_tables.py
+│   │       ├── 1013_add_sot_processing_enhancements.py
+│   │       ├── 1014_add_content_library_tables.py
+│   │       ├── 1015_add_is_core_to_content_type_settings.py
+│   │       ├── 1016_add_scratch_content_to_content_library.py
+│   │       ├── 1017_add_customers_table.py
+│   │       ├── 1018_add_segment_locks_table.py
+│   │       ├── 1019_fix_segment_locks_cascade.py
+│   │       ├── 1020_add_timezone_to_shows.py
+│   │       ├── 1021_add_segment_llm_data.py
+│   │       ├── 1dadb9179087_add_organization_relationship_to_users.py
+│   │       ├── 1f2eb28593f6_add_show_poster_field.py
+│   │       ├── 2d649d0b5e01_add_content_versions_table.py
+│   │       ├── 2eb1d08987c1_add_website_field_to_shows.py
+│   │       ├── 2f98a11019e6_add_link_preview_cache.py
+│   │       ├── 3f192a2fc30b_add_api_keys_field_to_shows.py
+│   │       ├── 3f52b5bd2d92_restore_settings_table.py
+│   │       ├── 5765d66b2c1f_rename_scratchpad_to_whiteboard.py
+│   │       ├── 64f7a59415be_add_show_category_field.py
+│   │       ├── 926ecaa2d8a7_add_settings_table.py
+│   │       ├── 999_add_script_content_field.py
+│   │       ├── 999_consolidate_episode_tables.py
+│   │       ├── a3c8f4e91b2d_add_mp3_encoding_profiles_table.py
+│   │       ├── adad7cc69302_add_poster_field_to_episodes.py
+│   │       ├── ae4cfb4408a1_merge_heads.py
+│   │       ├── aff61354534c_add_rundown_templates.py
+│   │       ├── b1a2c3d4e5f6_add_blueprint_node_description.py
+│   │       ├── b3e162fbdbed_add_test_data_flags.py
+│   │       ├── c28bb4c36419_add_parent_child_asset_architecture.py
+│   │       ├── d6bc47d3a7a8_add_template_inheritance_support.py
+│   │       ├── daf031ec47e1_add_contact_fields_to_shows.py
+│   │       ├── f05ce8ada5b1_add_show_fields_format_logo_host_.py
+│   │       ├── f2b765213d1a_add_production_roles_table.py
+│   │       └── fa9e1164b041_add_rundown_item_metadata_to_blueprint_.py
+│   ├── alembic.ini
+│   ├── announcements_router.py
+│   ├── api_config.py
+│   ├── api_config_router.py
+│   ├── app
+│   │   └── storage
+│   │       └── encryption.key
+│   ├── assetid_router.py
+│   ├── assets_router.py
+│   ├── asterisk_service.py
+│   ├── auth
+│   │   ├── db_service.py
+│   │   ├── __init__.py
+│   │   ├── models_db.py
+│   │   ├── models.py
+│   │   ├── router.py
+│   │   └── utils.py
+│   ├── backup
+│   │   └── mqtt_archived_2026-01-01
+│   │       ├── mqttcurl.sh
+│   │       ├── preproc_mqtt_listen.py
+│   │       ├── preproc_mqtt_pub.py
+│   │       ├── README.md
+│   │       └── testboot.mqtt.py
+│   ├── blueprint_config_router.py
+│   ├── celery_app.py
+│   ├── celery_cleanup.py
+│   ├── celery_jobs_router.py
+│   ├── config
+│   │   ├── database.json
+│   │   ├── network.json
+│   │   ├── sites.json
+│   │   └── .wireguard_private
+│   ├── consolidation_router.py
+│   ├── content_library_router.py
+│   ├── convert_assetid_router.py
+│   ├── core
+│   │   ├── config.py
+│   │   ├── __init__.py
+│   │   ├── media_paths.py
+│   │   └── paths.py
+│   ├── create_admin_user.py
+│   ├── create_organization.py
+│   ├── create_test_api_key.py
+│   ├── customer_router.py
+│   ├── database.py
+│   ├── decarlos_brown_newsweek_quote.json
+│   ├── delete_episode_0241.py
+│   ├── docs
+│   │   ├── announcements
+│   │   │   ├── 2025-10-14-episode-structure-update.html
+│   │   │   └── 2025-11-22-modifications.html
+│   │   └── branding
+│   │       ├── 0819b6bc-960a-44ce-ab2f-1d57bfe41aa7.png
+│   │       ├── 3d186d51-8eb3-46b1-bc86-36601814711e.png
+│   │       ├── 51062ede-44fa-47c1-8cc0-6dc92b0ccebc.png
+│   │       ├── a2ce323f-53b9-4697-99a2-56a92fa5d7e5.png
+│   │       ├── aec44b15-eb1b-4e1e-996d-24e86b80002f.png
+│   │       ├── b1380554-5926-4e45-b400-b18fc66489ca.png
+│   │       ├── c89c3bce-382b-40eb-914f-60f88548cccb.png
+│   │       ├── download (10).jpg
+│   │       ├── download (1).jpg
+│   │       ├── download (2).jpg
+│   │       ├── download (3).jpg
+│   │       ├── download (4).jpg
+│   │       ├── download (5).jpg
+│   │       ├── download (6).jpg
+│   │       ├── download (7).jpg
+│   │       ├── download (8).jpg
+│   │       ├── download (9).jpg
+│   │       ├── download.jpg
+│   │       ├── element1.jpg
+│   │       ├── element1.png
+│   │       ├── logo10.jpg
+│   │       ├── logo2.jpg
+│   │       ├── logo3.jpg
+│   │       ├── logo4.jpg
+│   │       ├── logo5.jpg
+│   │       ├── logo6.jpg
+│   │       ├── logo7.jpg
+│   │       ├── logo9.jpg
+│   │       └── logo.jpg
+│   ├── docs_router.py
+│   ├── duration_analysis_router.py
+│   ├── duration_estimation_router.py
+│   ├── enhanced_reorder.py
+│   ├── episode_scaffold_router.py
+│   ├── episodes_router.py
+│   ├── extract_all_cues_from_script.py
+│   ├── extract_fsq_quotes.py
+│   ├── extract_fs_quotes_from_script.py
+│   ├── file_inventory_router.py
+│   ├── fsq_asset_router.py
+│   ├── gfx_asset_router.py
+│   ├── google_drive_router.py
+│   ├── gunicorn.ctl
+│   ├── housekeeping_router.py
+│   ├── housekeeping_service.py
+│   ├── import_josh_script.py
+│   ├── import_josh_script_v2.py
+│   ├── import_josh_script_v3.py
+│   ├── import_josh_script_v4.py
+│   ├── __init__.py
+│   ├── link_preview_service.py
+│   ├── llm_proxy_router.py
+│   ├── llm_state_router.py
+│   ├── logs
+│   │   └── last.id
+│   ├── main.py
+│   ├── media_analysis_router.py
+│   ├── media_router.py
+│   ├── migrate_content_safe.py
+│   ├── migrate_users_to_db.py
+│   ├── models_assetid.py
+│   ├── models_content_library.py
+│   ├── models_episode.py
+│   ├── models_rbac.py
+│   ├── models_scratchpad.py
+│   ├── models_segment_llm.py
+│   ├── models_speakers.py
+│   ├── models_twitter.py
+│   ├── models_user.py
+│   ├── models_v2.py
+│   ├── models_whiteboard.py
+│   ├── mp3_profiles_router.py
+│   ├── new_assetid_router.py
+│   ├── normalize_episode_names.py
+│   ├── organization_router.py
+│   ├── platform_utils.py
+│   ├── populate_0245_content.py
+│   ├── populate_media_list.py
+│   ├── preproc_delegate.py
+│   ├── preproc-queue-sots.json
+│   ├── process_quotes.py
+│   ├── production_roles_router.py
+│   ├── prompts_router.py
+│   ├── quotes_input.json
+│   ├── rbac_router.py
+│   ├── rbac_service.py
+│   ├── repo_router.py
+│   ├── requirements.txt
+│   ├── reset_password.py
+│   ├── restore_colors.py
+│   ├── rundown_templates_router.py
+│   ├── scratchpad_router.py
+│   ├── script_generation_router.py
+│   ├── scripts
+│   │   └── backfill_sot_transcriptions.py
+│   ├── seed_rbac.py
+│   ├── segment_llm_router.py
+│   ├── segment_locks_router.py
+│   ├── services
+│   │   ├── agentIO.py
+│   │   ├── asset_id.py
+│   │   ├── asset_processing.py
+│   │   ├── blueprint_renderer.py
+│   │   ├── canonical_structure_parser.py
+│   │   ├── episode_scaffold.py
+│   │   ├── ffmpeg_tasks.py
+│   │   ├── file_inventory_batched.py
+│   │   ├── file_inventory_llm.py
+│   │   ├── file_inventory_llm_v2.py
+│   │   ├── file_inventory_scanner.py
+│   │   ├── file_inventory_scanner_v2.py
+│   │   ├── google_drive_service.py
+│   │   ├── host_script_generator.py
+│   │   ├── __init__.py
+│   │   ├── quote_extraction.py
+│   │   ├── script_compilation.py
+│   │   ├── segment_llm_extractor.py
+│   │   ├── social_media.py
+│   │   ├── sot_processor.py
+│   │   ├── tools_service.py
+│   │   └── tools_tasks.py
+│   ├── settings_colors_router.py
+│   ├── settings_router.py
+│   ├── setup_episode_scaffolding.py
+│   ├── setup_router.py
+│   ├── show_router.py
+│   ├── sot_router.py
+│   ├── speakers_router.py
+│   ├── ssl
+│   │   ├── cert.pem
+│   │   └── key.pem
+│   ├── storage
+│   │   ├── api_keys.json.backup_20250810_044226
+│   │   ├── encryption.key
+│   │   ├── templates
+│   │   ├── users.json
+│   │   └── users.json.backup_20250810_044226
+│   ├── templates_router.py
+│   ├── teresa_stokes_newsweek_quote.json
+│   ├── tests
+│   │   ├── conftest.py
+│   │   ├── __init__.py
+│   │   ├── test_sot_individual_clips.py
+│   │   └── test_sot_montage.py
+│   ├── testup.sh
+│   ├── todos_router.py
+│   ├── tools_router.py
+│   ├── twitter_oauth_router.py
+│   ├── update_episode_blueprint_canonical.py
+│   ├── update_episode_blueprint.py
+│   ├── update_polaris.py
+│   ├── update_script_with_cues.py
+│   ├── utils
+│   │   ├── curl-test.sh
+│   │   ├── frontmatter_parser.py
+│   │   ├── id.py
+│   │   ├── __init__.py
+│   │   ├── json_helpers.py
+│   │   └── validator.py
+│   ├── voice_conference_router.py
+│   ├── voice_model_router.py
+│   ├── voice_sample_router.py
+│   ├── vo_router.py
+│   ├── websocket.py
+│   ├── whiteboard_router.py
+│   ├── workers_router.py
+│   ├── wpm_audio_router.py
+│   └── xtts_router.py
+├── ARCHITECTURAL_ANALYSIS.md
+├── asterisk_conference_dialplan.conf
+├── asterisk_pin_validator.py
+├── backup.log
+├── backup_md_20250708_112337
+│   ├── copilot
+│   │   ├── docs
+│   │   │   ├── chat.log
+│   │   │   ├── definitions.txt
+│   │   │   ├── jobs.txt
+│   │   │   ├── notes.txt
+│   │   │   ├── read-me-first.txt
+│   │   │   └── read-me-first.txt.DELETE.ME
+│   │   ├── imported
+│   │   │   └── README.md
+│   │   └── workload.md
+│   ├── disaffected-ui
+│   │   ├── docs
+│   │   │   └── COLOR_SYSTEM_GUIDE.md
+│   │   ├── STUBS_TODO.md
+│   │   └── stuff to do.md
+│   └── docs
+│       ├── copilot_color_transition_instructions.markdown
+│       ├── copilot_instructions.markdown
+│       └── rundown_item_types.markdown
+├── backup_md_20250708_114505
+├── backup_md_20250709
+│   ├── grok.sh.20250709_021309
+│   ├── NatModal.vue.20250709_031517
+│   ├── NatModal.vue.20250709_071457
+│   ├── NatModal.vue.20250709_125141
+│   ├── NatModal.vue.20250709_131345
+│   ├── PkgModal.vue.20250709_031517
+│   ├── PkgModal.vue.20250709_071457
+│   ├── PkgModal.vue.20250709_125141
+│   ├── PkgModal.vue.20250709_131345
+│   ├── RundownManager.vue.20250709_031517
+│   ├── RundownManager.vue.20250709_071457
+│   ├── RundownManager.vue.20250709_125141
+│   ├── VoModal.vue.20250709_012726
+│   ├── VoModal.vue.20250709_013528
+│   ├── VoModal.vue.20250709_013547
+│   ├── VoModal.vue.20250709_013708
+│   ├── VoModal.vue.20250709_015204
+│   ├── VoModal.vue.20250709_015342
+│   ├── VoModal.vue.20250709_015835
+│   ├── VoModal.vue.20250709_020319
+│   ├── VoModal.vue.20250709_021029
+│   ├── VoModal.vue.20250709_021312
+│   ├── VoModal.vue.20250709_031517
+│   ├── VoModal.vue.20250709_071457
+│   ├── VoModal.vue.20250709_125141
+│   └── VoModal.vue.20250709_131345
+├── BOOKMARK_quote_generation_fixes.md
+├── celeryconfig_windows.py
+├── check-for-updates.ps1
+├── .claude
+│   ├── agents
+│   │   ├── content-editor-paragraph-height-fixer.md
+│   │   └── fullstack-integration-engineer.md
+│   ├── settings.json
+│   └── settings.local.json
+├── claude-9-6-2025.txt
+├── CLAUDE.md
+├── claude_protocol_response.json
+├── cleaner-0237.log
+├── CONVERSATION_CONTEXT.md
+├── .copilot
+│   ├── docs
+│   │   ├── instantiate.md
+│   │   └── policy.sh
+│   ├── imported
+│   │   └── DELETE.ME.txt
+│   ├── memory.py
+│   ├── notify.py
+│   ├── policy.py
+│   ├── policy.sh
+│   ├── status
+│   │   ├── active.json
+│   │   ├── STATUS.IDLE
+│   │   └── toggle_status.sh
+│   ├── tick.py
+│   ├── ticky.py
+│   ├── workload.py
+│   └── workload.sh
+├── create_users.py
+├── debug_bcrypt.py
+├── DEBUG_FIRST.md
+├── DEBUGGING_CHEAT_SHEET.md
+├── decarlos_brown_newsweek_quote.json
+├── deploy_asterisk_conference.sh
+├── DIARIZATION_SERVICE_REQUEST.md
+├── disaffected-ui
+│   ├── babel.config.js
+│   ├── cat_stuff.sh
+│   ├── COMPONENT_MAP.md
+│   ├── disaffected-ui
+│   │   ├── .dockerignore
+│   │   └── ssl
+│   ├── dist
+│   │   ├── 0249-HOST-SCRIPT-20260118.html
+│   │   ├── 0249-HOST-SCRIPT-20260118.pdf
+│   │   ├── assets
+│   │   │   └── preview-background.mp4
+│   │   ├── css
+│   │   │   ├── 142.b5d18351.css
+│   │   │   ├── 156.d6dfdfdc.css
+│   │   │   ├── 164.7aa07204.css
+│   │   │   ├── 170.7b51866b.css
+│   │   │   ├── 238.32224c72.css
+│   │   │   ├── 24.c60dc4bc.css
+│   │   │   ├── 29.68db9b5c.css
+│   │   │   ├── 297.39a2ef2c.css
+│   │   │   ├── 309.ecdb8843.css
+│   │   │   ├── 315.1e1d12b8.css
+│   │   │   ├── 399.ac478bac.css
+│   │   │   ├── 40.0daa1b65.css
+│   │   │   ├── 51.b0c8c3a8.css
+│   │   │   ├── 596.11972f41.css
+│   │   │   ├── 599.badf5406.css
+│   │   │   ├── 652.ceb1db51.css
+│   │   │   ├── 725.337c8269.css
+│   │   │   ├── 729.91220016.css
+│   │   │   ├── 798.708b536d.css
+│   │   │   ├── 847.6c0e6a9d.css
+│   │   │   ├── 867.db50dd30.css
+│   │   │   ├── 935.b7aa34b3.css
+│   │   │   ├── 991.317b69c3.css
+│   │   │   ├── app.00add3e4.css
+│   │   │   ├── app.9268b0df.css
+│   │   │   ├── chunk-vendors.a4ba9586.css
+│   │   │   └── chunk-vendors.cb820e62.css
+│   │   ├── debug-clear-rundown.html
+│   │   ├── favicon.ico
+│   │   ├── fonts
+│   │   │   ├── materialdesignicons-webfont.21f691f0.ttf
+│   │   │   ├── materialdesignicons-webfont.54b0f60d.woff2
+│   │   │   ├── materialdesignicons-webfont.5d875350.eot
+│   │   │   └── materialdesignicons-webfont.d671cbf6.woff
+│   │   ├── index.html
+│   │   ├── js
+│   │   │   ├── 142.9aa4ec31.js
+│   │   │   ├── 142.9aa4ec31.js.map
+│   │   │   ├── 156.2bdd8022.js
+│   │   │   ├── 156.2bdd8022.js.map
+│   │   │   ├── 164.54fa0a84.js
+│   │   │   ├── 164.54fa0a84.js.map
+│   │   │   ├── 170.2a5264bd.js
+│   │   │   ├── 170.2a5264bd.js.map
+│   │   │   ├── 238.e197a533.js
+│   │   │   ├── 238.e197a533.js.map
+│   │   │   ├── 24.d6534293.js
+│   │   │   ├── 24.d6534293.js.map
+│   │   │   ├── 29.4bc8350c.js
+│   │   │   ├── 29.4bc8350c.js.map
+│   │   │   ├── 297.b9928a72.js
+│   │   │   ├── 297.b9928a72.js.map
+│   │   │   ├── 309.1c60a5d7.js
+│   │   │   ├── 309.1c60a5d7.js.map
+│   │   │   ├── 315.7400a73d.js
+│   │   │   ├── 315.7400a73d.js.map
+│   │   │   ├── 399.8abbdc07.js
+│   │   │   ├── 399.8abbdc07.js.map
+│   │   │   ├── 40.40d5f2ae.js
+│   │   │   ├── 40.40d5f2ae.js.map
+│   │   │   ├── 485.4ab32b5e.js
+│   │   │   ├── 485.4ab32b5e.js.map
+│   │   │   ├── 51.39c55df2.js
+│   │   │   ├── 51.39c55df2.js.map
+│   │   │   ├── 596.ddc44fc2.js
+│   │   │   ├── 596.ddc44fc2.js.map
+│   │   │   ├── 599.88b1aeee.js
+│   │   │   ├── 599.88b1aeee.js.map
+│   │   │   ├── 652.01d89bdd.js
+│   │   │   ├── 652.01d89bdd.js.map
+│   │   │   ├── 725.2fa11118.js
+│   │   │   ├── 725.2fa11118.js.map
+│   │   │   ├── 729.4c00f189.js
+│   │   │   ├── 729.4c00f189.js.map
+│   │   │   ├── 759.3c35ef7f.js
+│   │   │   ├── 759.3c35ef7f.js.map
+│   │   │   ├── 798.0c0204e4.js
+│   │   │   ├── 798.0c0204e4.js.map
+│   │   │   ├── 847.18f88e85.js
+│   │   │   ├── 847.18f88e85.js.map
+│   │   │   ├── 867.ecb6c051.js
+│   │   │   ├── 867.ecb6c051.js.map
+│   │   │   ├── 874.3913b607.js
+│   │   │   ├── 874.3913b607.js.map
+│   │   │   ├── 935.dd6ef1cf.js
+│   │   │   ├── 935.dd6ef1cf.js.map
+│   │   │   ├── 991.6493d6b4.js
+│   │   │   ├── 991.6493d6b4.js.map
+│   │   │   ├── app.1f9693f6.js
+│   │   │   ├── app.1f9693f6.js.map
+│   │   │   ├── app.cd2924ca.js
+│   │   │   ├── app.cd2924ca.js.map
+│   │   │   ├── chunk-vendors.9835a565.js
+│   │   │   ├── chunk-vendors.9835a565.js.map
+│   │   │   ├── chunk-vendors.b84947db.js
+│   │   │   ├── chunk-vendors.b84947db.js.map
+│   │   │   ├── webfontloader.743c1579.js
+│   │   │   ├── webfontloader.743c1579.js.map
+│   │   │   ├── webfontloader.aa358af7.js
+│   │   │   └── webfontloader.aa358af7.js.map
+│   │   └── login-background.jpg
+│   ├── Dockerfile
+│   ├── .dockerignore
+│   ├── docs
+│   ├── EPISODE_REQUIREMENT_SYSTEM.md
+│   ├── generate-ssl.sh
+│   ├── .gitignore
+│   ├── jest.config.js
+│   ├── jsconfig.json
+│   ├── nginx.conf
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── public
+│   │   ├── 0249-HOST-SCRIPT-20260118.html
+│   │   ├── 0249-HOST-SCRIPT-20260118.pdf
+│   │   ├── assets
+│   │   │   └── preview-background.mp4
+│   │   ├── css
+│   │   │   ├── 142.b5d18351.css
+│   │   │   ├── 297.39a2ef2c.css
+│   │   │   ├── 867.db50dd30.css
+│   │   │   ├── app.9268b0df.css
+│   │   │   └── chunk-vendors.cb820e62.css
+│   │   ├── debug-clear-rundown.html
+│   │   ├── favicon.ico
+│   │   ├── fonts
+│   │   │   ├── materialdesignicons-webfont.21f691f0.ttf
+│   │   │   ├── materialdesignicons-webfont.54b0f60d.woff2
+│   │   │   ├── materialdesignicons-webfont.5d875350.eot
+│   │   │   └── materialdesignicons-webfont.d671cbf6.woff
+│   │   ├── index.html
+│   │   ├── js
+│   │   │   ├── 142.9aa4ec31.js
+│   │   │   ├── 142.9aa4ec31.js.map
+│   │   │   ├── 297.b9928a72.js
+│   │   │   ├── 297.b9928a72.js.map
+│   │   │   ├── 867.ecb6c051.js
+│   │   │   ├── 867.ecb6c051.js.map
+│   │   │   ├── 874.3913b607.js
+│   │   │   ├── 874.3913b607.js.map
+│   │   │   ├── app.cd2924ca.js
+│   │   │   ├── app.cd2924ca.js.map
+│   │   │   ├── chunk-vendors.b84947db.js
+│   │   │   ├── chunk-vendors.b84947db.js.map
+│   │   │   ├── webfontloader.aa358af7.js
+│   │   │   └── webfontloader.aa358af7.js.map
+│   │   └── login-background.jpg
+│   ├── scripts
+│   │   └── clean-npm-servers.sh
+│   ├── simple-server.js
+│   ├── src
+│   │   ├── App.vue
+│   │   ├── assets
+│   │   │   ├── config
+│   │   │   ├── logo.png
+│   │   │   ├── logo.svg
+│   │   │   └── styles
+│   │   │       └── llm-visual-feedback.css
+│   │   ├── components
+│   │   │   ├── AnnouncementsPanel.vue
+│   │   │   ├── AudioWaveform.vue
+│   │   │   ├── ColorSelector.vue
+│   │   │   ├── content-editor
+│   │   │   │   ├── AssetPoolPanel.vue
+│   │   │   │   ├── cards
+│   │   │   │   │   ├── ImageCueCard.vue
+│   │   │   │   │   └── PlaceholderCueCard.vue
+│   │   │   │   ├── CuePlacementOverlay.vue
+│   │   │   │   ├── CueToolbar.vue
+│   │   │   │   ├── EditorPanel.vue
+│   │   │   │   ├── MetadataPanel.vue
+│   │   │   │   ├── modals
+│   │   │   │   │   ├── CueModal.vue
+│   │   │   │   │   ├── DeleteCueModal.vue
+│   │   │   │   │   ├── DeleteImgCueModal.vue
+│   │   │   │   │   ├── ImgCueModal.vue
+│   │   │   │   │   └── SpeakerSelectorModal.vue
+│   │   │   │   ├── RundownPanel_new_template.vue
+│   │   │   │   ├── RundownPanel.vue
+│   │   │   │   └── ShowInfoHeader.vue
+│   │   │   ├── ContentEditor.vue
+│   │   │   ├── ContentEditor.vue.backup
+│   │   │   ├── EditorPanel.vue.backup
+│   │   │   ├── EpisodeListTest.vue
+│   │   │   ├── EpisodeNameNormalizerModal.vue
+│   │   │   ├── EpisodeScaffoldModal.vue
+│   │   │   ├── EpisodeSelector.vue
+│   │   │   ├── InitializationOverlay.vue
+│   │   │   ├── JobMonitor.vue
+│   │   │   ├── LEDMeter.vue
+│   │   │   ├── LiveClock.vue
+│   │   │   ├── LoginModal.vue
+│   │   │   ├── metafactory
+│   │   │   │   └── MetaExtraction.vue
+│   │   │   ├── modals
+│   │   │   │   ├── AssetBrowserModal.vue
+│   │   │   │   ├── BumpModal.vue
+│   │   │   │   ├── ContentLibraryPickerModal.vue
+│   │   │   │   ├── DirModal.vue
+│   │   │   │   ├── FsqModal.vue
+│   │   │   │   ├── GfxModal.vue
+│   │   │   │   ├── LiveModal.vue
+│   │   │   │   ├── MusModal.vue
+│   │   │   │   ├── NatModal.vue
+│   │   │   │   ├── NewGFXModal.vue
+│   │   │   │   ├── NewItemModal.vue
+│   │   │   │   ├── NewSOTModal.vue
+│   │   │   │   ├── PkgModal.vue
+│   │   │   │   ├── RequireEpisodeModal.vue
+│   │   │   │   ├── RifModal.vue
+│   │   │   │   ├── SotModal.vue
+│   │   │   │   ├── StingModal.vue
+│   │   │   │   ├── TemplateManagerModal.vue
+│   │   │   │   ├── VoModal.vue
+│   │   │   │   └── VoxModal.vue
+│   │   │   ├── NextShowPanel.vue
+│   │   │   ├── NfsStatusModal.vue
+│   │   │   ├── NotificationCenter.vue
+│   │   │   ├── OllamaStatus.vue
+│   │   │   ├── OrganizationEdit.vue
+│   │   │   ├── PromptManager.vue
+│   │   │   ├── RundownManagerBACKUP.vue
+│   │   │   ├── ScreenFlash.vue
+│   │   │   ├── ScriptCompiler.vue
+│   │   │   ├── ScriptEditor.vue
+│   │   │   ├── settings
+│   │   │   │   ├── ApiAccessSettings.vue
+│   │   │   │   ├── ContentLibraryManager.vue
+│   │   │   │   ├── CustomerManager.vue
+│   │   │   │   ├── DeploymentSettings.vue
+│   │   │   │   ├── EpisodeBlueprintSettings.vue
+│   │   │   │   ├── GenerationSettings.vue
+│   │   │   │   ├── InterfaceSettings.vue
+│   │   │   │   ├── LLMRoutingSettings.vue
+│   │   │   │   ├── MetaExtractionSettings.vue
+│   │   │   │   ├── Mp3EncodingSettings.vue
+│   │   │   │   ├── ReusablesStudioEditor.vue
+│   │   │   │   ├── RundownSettings.vue
+│   │   │   │   ├── RundownTemplateManager.vue
+│   │   │   │   ├── SystemSettings.vue
+│   │   │   │   ├── VoiceSettings.vue
+│   │   │   │   └── WhiteboardSettings.vue
+│   │   │   ├── ShowEdit.vue
+│   │   │   ├── StackManager.vue
+│   │   │   ├── StandardNotification.vue
+│   │   │   ├── StatusClock.vue
+│   │   │   ├── SystemHealthStatus.vue
+│   │   │   ├── TodoPanel.vue
+│   │   │   ├── tools
+│   │   │   │   ├── AssetValidatorModal.vue
+│   │   │   │   ├── DurationReconcileModal.vue
+│   │   │   │   ├── HealthCheckModal.vue
+│   │   │   │   ├── ProductionReportModal.vue
+│   │   │   │   ├── RundownDiffModal.vue
+│   │   │   │   └── WPMMeasurementTool.vue
+│   │   │   ├── UrgentFlash.vue
+│   │   │   ├── VoicePrintRecorder.vue
+│   │   │   └── VUMeter.vue
+│   │   ├── composables
+│   │   │   ├── useAsyncAnalysis.js
+│   │   │   ├── useAuth.js
+│   │   │   ├── useClipboardImageDetection.js
+│   │   │   ├── useContentEditor.js
+│   │   │   ├── useEditorUtils.js
+│   │   │   ├── useJobMonitor.js
+│   │   │   ├── useLLM.js
+│   │   │   ├── useLLMPrompts.js
+│   │   │   ├── useLLMState.js
+│   │   │   ├── useRegions.js
+│   │   │   ├── useRequireEpisode.js
+│   │   │   ├── useScreenFlash.js
+│   │   │   ├── useSegmentLLMData.js
+│   │   │   ├── useSegmentLock.js
+│   │   │   ├── useSOTProcessing.js
+│   │   │   ├── useStandardNotification.js
+│   │   │   ├── useSystemHealth.js
+│   │   │   ├── useToolsRunner.js
+│   │   │   ├── useUrgentFlash.js
+│   │   │   ├── useWaveform.js
+│   │   │   ├── useWhiteboardConnections.js
+│   │   │   └── useXtts.js
+│   │   ├── config
+│   │   │   └── itemTypes.js
+│   │   ├── config.js
+│   │   ├── main.js
+│   │   ├── mixins
+│   │   │   ├── aiFieldMixin.js
+│   │   │   └── cueModalMixin.js
+│   │   ├── modules
+│   │   │   └── auth
+│   │   │       ├── auth.service.ts
+│   │   │       └── types.ts
+│   │   ├── modulesauth
+│   │   ├── plugins
+│   │   │   ├── vuetify.js
+│   │   │   └── webfontloader.js
+│   │   ├── router
+│   │   │   └── index.js
+│   │   ├── shims-vue.d.ts
+│   │   ├── stores
+│   │   │   ├── auth.js
+│   │   │   └── cueAnalysisStore.js
+│   │   ├── styles
+│   │   │   └── vuetify-fixes.css
+│   │   ├── types
+│   │   │   ├── api.ts
+│   │   │   ├── components.ts
+│   │   │   └── index.ts
+│   │   ├── utils
+│   │   │   ├── apiHelpers.js
+│   │   │   ├── cueParser.js
+│   │   │   ├── themeColorMap.js
+│   │   │   └── xttsHelpers.js
+│   │   └── views
+│   │       ├── AssetsView.vue
+│   │       ├── ConsolidationView.vue
+│   │       ├── DashboardView.vue
+│   │       ├── DevToolsView.vue
+│   │       ├── EpisodesView.vue
+│   │       ├── GeneratorView.vue
+│   │       ├── IpadScrollView.vue
+│   │       ├── ItemTypesView.vue
+│   │       ├── LoginView.vue
+│   │       ├── MediaFactoryView.vue
+│   │       ├── MetaFactoryView.vue
+│   │       ├── MoneyFactoryView.vue
+│   │       ├── ProfileView.vue
+│   │       ├── ReusablesStudioView.vue
+│   │       ├── ScratchpadView.vue
+│   │       ├── SettingsView.vue
+│   │       ├── SetupView.vue
+│   │       ├── TemplatesView.vue
+│   │       ├── ToolsView.vue
+│   │       ├── UserManagement.vue
+│   │       └── VoiceMeetingView.vue
+│   ├── ssl
+│   ├── tests
+│   │   ├── mocks
+│   │   │   ├── axios.js
+│   │   │   └── vuetify.js
+│   │   ├── setup.js
+│   │   └── unit
+│   │       ├── ColorSelector.spec.js
+│   │       ├── ContentEditor.spec.js
+│   │       └── StackOrganizer.spec.js
+│   ├── tsconfig.json
+│   ├── update-component-map.js
+│   ├── vite.config.js.backup
+│   └── vue.config.js
+├── dist
+├── docker-compose.enhanced.yml
+├── docker-compose.postgres-primary.yml
+├── docker-compose.postgres-replica.yml
+├── docker-compose.yml
+├── Dockerfile
+├── Dockerfile.enhanced
+├── docs
+│   ├── 00_rehydration_main.markdown
+│   ├── 01_architecture.markdown
+│   ├── 02_setup_and_deployment.markdown
+│   ├── 03_features_and_integrations.markdown
+│   ├── 04_migration_and_workflow.markdown
+│   ├── 05_style_guide.markdown
+│   ├── 06_todo_and_issues.markdown
+│   ├── 19_documentation_updates.markdown
+│   ├── 20_changelog.markdown
+│   ├── announcements
+│   │   └── 2026-02-25-hotkeys-modal-coming-soon.html
+│   ├── API_ENDPOINTS.md
+│   ├── ARCHITECTURE_DECISIONS.md
+│   ├── ASSETID_CONVENTION.md
+│   ├── ASSETID_SYSTEM_GUIDE.md
+│   ├── AUTHENTICATION_GUIDE.md
+│   ├── branding
+│   │   ├── 0819b6bc-960a-44ce-ab2f-1d57bfe41aa7.png
+│   │   ├── 3d186d51-8eb3-46b1-bc86-36601814711e.png
+│   │   ├── 51062ede-44fa-47c1-8cc0-6dc92b0ccebc.png
+│   │   ├── a2ce323f-53b9-4697-99a2-56a92fa5d7e5.png
+│   │   ├── aec44b15-eb1b-4e1e-996d-24e86b80002f.png
+│   │   ├── b1380554-5926-4e45-b400-b18fc66489ca.png
+│   │   ├── c89c3bce-382b-40eb-914f-60f88548cccb.png
+│   │   ├── download (10).jpg
+│   │   ├── download (1).jpg
+│   │   ├── download (2).jpg
+│   │   ├── download (3).jpg
+│   │   ├── download (4).jpg
+│   │   ├── download (5).jpg
+│   │   ├── download (6).jpg
+│   │   ├── download (8).jpg
+│   │   ├── download (9).jpg
+│   │   ├── download.jpg
+│   │   ├── element1.jpg
+│   │   ├── element1.png
+│   │   ├── logo10.jpg
+│   │   ├── logo2.jpg
+│   │   ├── logo3.jpg
+│   │   ├── logo4.jpg
+│   │   ├── logo5.jpg
+│   │   ├── logo6.jpg
+│   │   ├── logo7.jpg
+│   │   ├── logo9.jpg
+│   │   ├── logo.jpg
+│   │   └── tower.jpg
+│   ├── CANONICAL_FILE_EXPECTATIONS.md
+│   ├── CLIPBOARD_IMAGE_DETECTION_USAGE_GUIDE.md
+│   ├── CLIPBOARD_PASTE_METHODS.md
+│   ├── color-selector-improvements.md
+│   ├── ColorSelector.md
+│   ├── CONTRAST_LOGIC_IMPLEMENTATION.md
+│   ├── CROSS_PLATFORM_WORKERS.md
+│   ├── CUE_BLOCK_INSERTION_PROTOCOL.md
+│   ├── CUE_INSERTION_CURSOR_SNAPSHOT_PATTERN.md
+│   ├── DASHBOARD_ANNOUNCEMENTS.md
+│   ├── DATABASE_MIGRATION_PLAN.md
+│   ├── DATABASE_SETUP_INSTRUCTIONS.md
+│   ├── DEBUGGING_STANDARDS.md
+│   ├── dev_api.md
+│   ├── dev_architecture.md
+│   ├── dev_auth.md
+│   ├── DEVELOPMENT_HISTORY.md
+│   ├── dev_features.md
+│   ├── dev_issues.md
+│   ├── dev_workflow.md
+│   ├── drag-drop-color-improvements.md
+│   ├── DUAL_RUNDOWN_ARCHITECTURE.md
+│   ├── DUPLICATE_COMPONENT_FILES.md
+│   ├── EDITOR_PANEL_ARCHITECTURE.md
+│   ├── ENHANCED_ARCHITECTURE.md
+│   ├── EPISODE_DATA_ARCHITECTURE.md
+│   ├── EPISODE_DIRECTORY_STANDARD.md
+│   ├── EPISODE_PRODUCTION_WORKFLOW.md
+│   ├── EPISODE_STRUCTURE_UPDATE_ANNOUNCEMENT.md
+│   ├── FINE_TUNE_GROK_SASS_GUIDE.md
+│   ├── FSQ_AUTO_ASSET_GENERATION.md
+│   ├── FSQ_PNG_GENERATION_INTEGRATION.md
+│   ├── FSQ_SYSTEM_GUIDE.md
+│   ├── GROK_QUANTIZATION_QUALITY_COMPARISON.md
+│   ├── HEALTH_CHECK_PROGRESSIVE_LOADING.md
+│   ├── INCOMING_DIRECTORY_STRUCTURE.md
+│   ├── INDEX.md
+│   ├── INDIVIDUAL_CLIPS_SOT_PROCESSING.md
+│   ├── init-procedures
+│   │   └── info.md
+│   ├── INTER_CLAUDE_RELAY_GUIDE.md
+│   ├── IQ_QUANTIZATION_RESEARCH.md
+│   ├── llm
+│   ├── LLM_GENERATOR_TROUBLESHOOTING.md
+│   ├── LLM_JSON_RESPONSE_CONSULTATION.md
+│   ├── LLM_PREPROCESSING_LAYER.md
+│   ├── LLM_PROMPT_MANAGEMENT.md
+│   ├── LLM_SCANNER_IMPLEMENTATION_SUMMARY.md
+│   ├── logo-maybe.png
+│   ├── MEDIA_ASSET_VERSIONING_FEATURE.md
+│   ├── MIGRATION_OF_PYTHON_TOOLS.md
+│   ├── MODAL_USAGE.md
+│   ├── MULTI_SITE_SETUP.md
+│   ├── PRODUCTION_HIERARCHY.md
+│   ├── PROJECT_ARCHITECTURE_REPORT.md
+│   ├── PROMPT_OVERRIDE_INTEGRATION_GUIDE.md
+│   ├── PROMPT_OVERRIDE_SYSTEM.md
+│   ├── RBAC_AUTHENTICATION_GUIDE.md
+│   ├── rehydrate.md
+│   ├── RUNDOWN_REGIONS_ARCHITECTURE.md
+│   ├── RUNDOWN_REORDER_BEHAVIOR.md
+│   ├── SCRIPT_AND_CUE_ARCHITECTURE.md
+│   ├── SCRIPT_MODE_KEYBOARD_HANDLING.md
+│   ├── show-build
+│   │   ├── .obsidian
+│   │   │   ├── appearance.json
+│   │   │   ├── app.json
+│   │   │   ├── core-plugins.json
+│   │   │   ├── graph.json
+│   │   │   └── workspace.json
+│   │   └── Welcome.md
+│   ├── STAGE_VS_STATUS_ARCHITECTURE.md
+│   ├── Stuff to do.md
+│   ├── STYLE_GUIDE.md
+│   ├── TEST_DATA_MANAGEMENT.md
+│   ├── THUMBNAIL_GENERATION_RESEARCH.md
+│   ├── TIKTOK_API_COMPLETE_REFERENCE.md
+│   ├── TODO.md
+│   ├── TOOLS_DOCUMENTATION.md
+│   ├── TOOLS_RECOMMENDATIONS.md
+│   ├── tree_on_mnt-sync-dysaffected.txt
+│   ├── VOICE_CONFERENCE_SYSTEM_UFDP.md
+│   ├── VOICE_MODEL_TRAINING_GUIDE.md
+│   ├── VUE_APP_MOUNTING_WARNING.md
+│   ├── VUE_DRAGGABLE_IMPLEMENTATION.md
+│   ├── VUE_TEMPLATE_REF_CONFLICTS.md
+│   ├── WPM_AUDIO_ANALYSIS_TODO.md
+│   ├── X_API_COMPLETE_REFERENCE.md
+│   └── x-api-reference
+│       ├── 01-authentication.md
+│       ├── 02-tweets-lookup.md
+│       ├── 03-tweets-search.md
+│       ├── 04-tweets-manage.md
+│       ├── 05-tweets-timelines.md
+│       ├── 06-tweets-engagement.md
+│       ├── 07-tweets-stream.md
+│       ├── 08-tweets-misc.md
+│       ├── 09-users.md
+│       ├── 10-spaces.md
+│       ├── 11-direct-messages.md
+│       ├── 12-lists.md
+│       ├── 13-media-upload.md
+│       ├── 14-trends.md
+│       ├── 15-data-dictionary.md
+│       ├── 16-rate-limits.md
+│       ├── 17-compliance.md
+│       └── README.md
+├── download.jpg
+├── enhanced_main_patch.py
+├── .env
+├── .env.example
+├── EPISODE_DELETION_STRATEGY.md
+├── eternal_memory
+│   ├── L1_immediate
+│   │   └── L1_20250813.log
+│   ├── L2_working
+│   │   └── L2_20250813.log
+│   └── L3_longterm
+│       └── L3_principles.log
+├── file_watcher_minimal.py
+├── find-asset-id-refs.sh
+├── fix_auth.py
+├── fix_bcrypt_hashes.py
+├── force_restart.sh
+├── FSQ_NESTED_QUOTE_PROCESSING_UFDP.md
+├── .gather
+├── .gatherignore
+├── generate_dev_docs.sh
+├── generate_hashes.py
+├── generate_rehydrate.sh
+├── .github
+│   ├── chatmodes
+│   │   └── free-for-all.chatmode.md
+│   ├── prompts
+│   │   └── rundown-rows.prompt.md
+│   └── workflows
+│       └── deploy-windows-worker.yml
+├── .gitignore
+├── grok.sh
+├── IMG_CUE_INSERTION_WORKFLOW_UFDP.md
+├── IMPLEMENTATION_NOTES.md
+├── import_episode_0241.py
+├── logfile.log
+├── logs
+│   └── thermal.log
+├── MEDIA_ASSET_VERSIONING_UFDP.md
+├── MEDIA_PROCESSING_WORKFLOW_UFDP.md
+├── migration_20260304_045953.log
+├── migration_20260304_050102.log
+├── migration_20260304_050152.log
+├── migration_db_20260304_050152
+│   ├── roles.sql
+│   ├── showbuild_full.dump
+│   ├── showbuild_full.sql
+│   └── table_counts.txt
+├── migration_env_20260304_050152
+│   ├── compose_resolved.yml
+│   ├── crontab.txt
+│   ├── docker_networks.txt
+│   ├── docker_volumes.txt
+│   ├── dot_env_backup
+│   ├── git_state.txt
+│   ├── ls_app.txt
+│   ├── ls_root.txt
+│   ├── ls_scripts.txt
+│   ├── ls_tools.txt
+│   ├── ls_ui.txt
+│   ├── project_tree.txt
+│   └── server_env.txt
+├── minimal_api.py
+├── minimal_celery.py
+├── minimal_docker-compose.yml
+├── minimal_integration.py
+├── minimal_models.py
+├── mirror_all_episodes.py
+├── MODAL_OVERHAUL_COMPLETE.md
+├── NFS_INFRASTRUCTURE_UFDP.md
+├── package.json
+├── package-lock.json
+├── PARAGRAPH_HEIGHT_FIX_REPORT.md
+├── populate_blueprints.py
+├── postgres-config
+│   ├── primary
+│   │   ├── init-replication.sql
+│   │   ├── pg_hba.conf
+│   │   └── postgresql.conf
+│   └── replica
+│       ├── pg_hba.conf
+│       └── postgresql.conf
+├── process_quotes.py
+├── pytest.ini
+├── quotes_input.json
+├── README.md
+├── remote_comm.txt
+├── remote_protocol.json
+├── requirements.txt
+├── reset_password.py
+├── reset_users.py
+├── response.txt
+├── restart-dockers.sh
+├── restart-servers.sh
+├── restore_working_hashes.py
+├── review_files.txt
+├── RUNDOWN_AUTO_SCAFFOLD_BEHAVIOR.md
+├── SCRIPT_MODE_AS_VIEWER_ARCHITECTURE_UFDP.md
+├── SCRIPT_MODE_PARAGRAPH_RESIZE_UDFP.md
+├── scripts
+│   ├── backup_before_migration.sh
+│   ├── backup-database.sh
+│   ├── backup_database.sh
+│   ├── celery_monitor.py
+│   ├── check-duplicate-components.sh
+│   ├── claudespawn.sh
+│   ├── clean-npm-servers.sh
+│   ├── collect_disaffected_training_data.py
+│   ├── command_center.sh
+│   ├── debug-frontend.sh
+│   ├── deploy_celery_worker.sh
+│   ├── deploy-to-windows-worker.sh
+│   ├── eternal_memory.sh
+│   ├── fix_syncthing_permissions.sh
+│   ├── migrate_to_prefect.sh
+│   ├── monitor-relay.sh
+│   ├── post-to-relay.sh
+│   ├── setup_backup_cron.sh
+│   ├── setup_nfs_infrastructure.sh
+│   ├── start_persistent_claude.sh
+│   ├── sync-windows-worker.sh
+│   ├── system_monitor.sh
+│   ├── thermal-log.sh
+│   ├── tiered_memory.sh
+│   └── watch-gpu.sh
+├── secret.key
+├── setup_episode_scaffolding.py
+├── setup_nfs_mount.sh
+├── setup_windows_worker.ps1
+├── show-build.code-workspace
+├── SHOW_BUILD_STATUS_UFDP.md
+├── SOT_DISTRIBUTED_PROCESSING_UFDP.md
+├── start_worker_FINAL.bat
+├── start_worker_FIXED.bat
+├── start_worker_windows.bat
+├── sync-from-linux.ps1
+├── table_counts_source.txt
+├── temp_hash_gen.py
+├── teresa_stokes_newsweek_quote.json
+├── test_api_auth.ps1
+├── test_api_auth.sh
+├── test_asterisk_ami.py
+├── test_auth_direct.py
+├── test_auth.py
+├── test_auth_system.py
+├── test-drag-drop.html
+├── test-drag-drop-status.html
+├── test_llm_backend.py
+├── test_llm_connectivity.js
+├── test_login.py
+├── test_paragraph_height_fix.html
+├── test_reorder.sh
+├── test_speed_0.5.wav
+├── test_speed_1.0.wav
+├── test_speed_2.0.wav
+├── test_storage.py
+├── test_textarea_resize.html
+├── test_very_fast.wav
+├── test_very_slow.wav
+├── tools
+│   ├── assetid_decoder.py
+│   ├── assetid_generator.py
+│   ├── blueprints
+│   │   ├── fonts
+│   │   │   ├── Montserrat-Medium.ttf
+│   │   │   └── Montserrat-Regular.ttf
+│   │   └── scripts
+│   │       ├── host-clean
+│   │       ├── host-full
+│   │       │   ├── blueprint.yaml
+│   │       │   ├── partials
+│   │       │   │   ├── block.html
+│   │       │   │   ├── cover.html
+│   │       │   │   ├── cues
+│   │       │   │   │   ├── fsq.html
+│   │       │   │   │   ├── img.html
+│   │       │   │   │   └── sot.html
+│   │       │   │   └── segment.html
+│   │       │   ├── styles.css
+│   │       │   └── template.html
+│   │       └── production
+│   ├── cleaner-0236.log
+│   ├── convert-vmix-drive-letter.py
+│   ├── datafiles
+│   │   ├── disaffected-montpelier_converted.vmix
+│   │   └── disaffected-montpelier.vmix
+│   ├── duration_calculator.py
+│   ├── enumerate_and_manage_cues.py
+│   ├── enumerate_media_files.py
+│   ├── episode-cleanup.py
+│   ├── extract_fsq_quotes.py
+│   ├── extract_sots.py
+│   ├── fsq_duration_scanner.py
+│   ├── media-collect.py
+│   ├── media_job_queue.py
+│   ├── mosquitto.conf
+│   ├── order-from-file-pref.py
+│   ├── paths.py
+│   ├── production_assetid_converter.py
+│   ├── README.md
+│   ├── rename_files_by_slug.py
+│   ├── render_fsq_png.py
+│   ├── render_quotes_pdf.py
+│   ├── render-script-host.py
+│   ├── render-script-production.py
+│   ├── status-set.py
+│   ├── update.py
+│   └── update_sot_durations.py
+├── tree_output.txt
+├── UFDP_INDEX.md
+├── UNIVERSAL_LLM_FRAMEWORK_UFDP.md
+├── update_blueprint.sql
+├── update_episode_blueprint.py
+├── update.py
+├── update.sh
+├── .venv
+│   ├── .gitignore
+│   ├── Include
+│   ├── Lib
+│   │   └── site-packages
+│   │       ├── pip
+│   │       │   ├── __init__.py
+│   │       │   ├── _internal
+│   │       │   │   ├── build_env.py
+│   │       │   │   ├── cache.py
+│   │       │   │   ├── cli
+│   │       │   │   │   ├── autocompletion.py
+│   │       │   │   │   ├── base_command.py
+│   │       │   │   │   ├── cmdoptions.py
+│   │       │   │   │   ├── command_context.py
+│   │       │   │   │   ├── index_command.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── main_parser.py
+│   │       │   │   │   ├── main.py
+│   │       │   │   │   ├── parser.py
+│   │       │   │   │   ├── progress_bars.py
+│   │       │   │   │   ├── req_command.py
+│   │       │   │   │   ├── spinners.py
+│   │       │   │   │   └── status_codes.py
+│   │       │   │   ├── commands
+│   │       │   │   │   ├── cache.py
+│   │       │   │   │   ├── check.py
+│   │       │   │   │   ├── completion.py
+│   │       │   │   │   ├── configuration.py
+│   │       │   │   │   ├── debug.py
+│   │       │   │   │   ├── download.py
+│   │       │   │   │   ├── freeze.py
+│   │       │   │   │   ├── hash.py
+│   │       │   │   │   ├── help.py
+│   │       │   │   │   ├── index.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── inspect.py
+│   │       │   │   │   ├── install.py
+│   │       │   │   │   ├── list.py
+│   │       │   │   │   ├── lock.py
+│   │       │   │   │   ├── search.py
+│   │       │   │   │   ├── show.py
+│   │       │   │   │   ├── uninstall.py
+│   │       │   │   │   └── wheel.py
+│   │       │   │   ├── configuration.py
+│   │       │   │   ├── distributions
+│   │       │   │   │   ├── base.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── installed.py
+│   │       │   │   │   ├── sdist.py
+│   │       │   │   │   └── wheel.py
+│   │       │   │   ├── exceptions.py
+│   │       │   │   ├── index
+│   │       │   │   │   ├── collector.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── package_finder.py
+│   │       │   │   │   └── sources.py
+│   │       │   │   ├── __init__.py
+│   │       │   │   ├── locations
+│   │       │   │   │   ├── base.py
+│   │       │   │   │   ├── _distutils.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   └── _sysconfig.py
+│   │       │   │   ├── main.py
+│   │       │   │   ├── metadata
+│   │       │   │   │   ├── base.py
+│   │       │   │   │   ├── importlib
+│   │       │   │   │   │   ├── _compat.py
+│   │       │   │   │   │   ├── _dists.py
+│   │       │   │   │   │   ├── _envs.py
+│   │       │   │   │   │   └── __init__.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── _json.py
+│   │       │   │   │   └── pkg_resources.py
+│   │       │   │   ├── models
+│   │       │   │   │   ├── candidate.py
+│   │       │   │   │   ├── direct_url.py
+│   │       │   │   │   ├── format_control.py
+│   │       │   │   │   ├── index.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── installation_report.py
+│   │       │   │   │   ├── link.py
+│   │       │   │   │   ├── pylock.py
+│   │       │   │   │   ├── scheme.py
+│   │       │   │   │   ├── search_scope.py
+│   │       │   │   │   ├── selection_prefs.py
+│   │       │   │   │   ├── target_python.py
+│   │       │   │   │   └── wheel.py
+│   │       │   │   ├── network
+│   │       │   │   │   ├── auth.py
+│   │       │   │   │   ├── cache.py
+│   │       │   │   │   ├── download.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── lazy_wheel.py
+│   │       │   │   │   ├── session.py
+│   │       │   │   │   ├── utils.py
+│   │       │   │   │   └── xmlrpc.py
+│   │       │   │   ├── operations
+│   │       │   │   │   ├── build
+│   │       │   │   │   │   ├── build_tracker.py
+│   │       │   │   │   │   ├── __init__.py
+│   │       │   │   │   │   ├── metadata_editable.py
+│   │       │   │   │   │   ├── metadata_legacy.py
+│   │       │   │   │   │   ├── metadata.py
+│   │       │   │   │   │   ├── wheel_editable.py
+│   │       │   │   │   │   ├── wheel_legacy.py
+│   │       │   │   │   │   └── wheel.py
+│   │       │   │   │   ├── check.py
+│   │       │   │   │   ├── freeze.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── install
+│   │       │   │   │   │   ├── editable_legacy.py
+│   │       │   │   │   │   ├── __init__.py
+│   │       │   │   │   │   └── wheel.py
+│   │       │   │   │   └── prepare.py
+│   │       │   │   ├── pyproject.py
+│   │       │   │   ├── req
+│   │       │   │   │   ├── constructors.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── req_dependency_group.py
+│   │       │   │   │   ├── req_file.py
+│   │       │   │   │   ├── req_install.py
+│   │       │   │   │   ├── req_set.py
+│   │       │   │   │   └── req_uninstall.py
+│   │       │   │   ├── resolution
+│   │       │   │   │   ├── base.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── legacy
+│   │       │   │   │   │   ├── __init__.py
+│   │       │   │   │   │   └── resolver.py
+│   │       │   │   │   └── resolvelib
+│   │       │   │   │       ├── base.py
+│   │       │   │   │       ├── candidates.py
+│   │       │   │   │       ├── factory.py
+│   │       │   │   │       ├── found_candidates.py
+│   │       │   │   │       ├── __init__.py
+│   │       │   │   │       ├── provider.py
+│   │       │   │   │       ├── reporter.py
+│   │       │   │   │       ├── requirements.py
+│   │       │   │   │       └── resolver.py
+│   │       │   │   ├── self_outdated_check.py
+│   │       │   │   ├── utils
+│   │       │   │   │   ├── appdirs.py
+│   │       │   │   │   ├── compatibility_tags.py
+│   │       │   │   │   ├── compat.py
+│   │       │   │   │   ├── datetime.py
+│   │       │   │   │   ├── deprecation.py
+│   │       │   │   │   ├── direct_url_helpers.py
+│   │       │   │   │   ├── egg_link.py
+│   │       │   │   │   ├── entrypoints.py
+│   │       │   │   │   ├── filesystem.py
+│   │       │   │   │   ├── filetypes.py
+│   │       │   │   │   ├── glibc.py
+│   │       │   │   │   ├── hashes.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── _jaraco_text.py
+│   │       │   │   │   ├── logging.py
+│   │       │   │   │   ├── _log.py
+│   │       │   │   │   ├── misc.py
+│   │       │   │   │   ├── packaging.py
+│   │       │   │   │   ├── retry.py
+│   │       │   │   │   ├── setuptools_build.py
+│   │       │   │   │   ├── subprocess.py
+│   │       │   │   │   ├── temp_dir.py
+│   │       │   │   │   ├── unpacking.py
+│   │       │   │   │   ├── urls.py
+│   │       │   │   │   ├── virtualenv.py
+│   │       │   │   │   └── wheel.py
+│   │       │   │   ├── vcs
+│   │       │   │   │   ├── bazaar.py
+│   │       │   │   │   ├── git.py
+│   │       │   │   │   ├── __init__.py
+│   │       │   │   │   ├── mercurial.py
+│   │       │   │   │   ├── subversion.py
+│   │       │   │   │   └── versioncontrol.py
+│   │       │   │   └── wheel_builder.py
+│   │       │   ├── __main__.py
+│   │       │   ├── __pip-runner__.py
+│   │       │   ├── py.typed
+│   │       │   └── _vendor
+│   │       │       ├── cachecontrol
+│   │       │       │   ├── adapter.py
+│   │       │       │   ├── cache.py
+│   │       │       │   ├── caches
+│   │       │       │   │   ├── file_cache.py
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── redis_cache.py
+│   │       │       │   ├── _cmd.py
+│   │       │       │   ├── controller.py
+│   │       │       │   ├── filewrapper.py
+│   │       │       │   ├── heuristics.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── serialize.py
+│   │       │       │   └── wrapper.py
+│   │       │       ├── certifi
+│   │       │       │   ├── cacert.pem
+│   │       │       │   ├── core.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   └── py.typed
+│   │       │       ├── dependency_groups
+│   │       │       │   ├── _implementation.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _lint_dependency_groups.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   ├── _pip_wrapper.py
+│   │       │       │   ├── py.typed
+│   │       │       │   └── _toml_compat.py
+│   │       │       ├── distlib
+│   │       │       │   ├── compat.py
+│   │       │       │   ├── database.py
+│   │       │       │   ├── index.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── locators.py
+│   │       │       │   ├── manifest.py
+│   │       │       │   ├── markers.py
+│   │       │       │   ├── metadata.py
+│   │       │       │   ├── resources.py
+│   │       │       │   ├── scripts.py
+│   │       │       │   ├── t32.exe
+│   │       │       │   ├── t64-arm.exe
+│   │       │       │   ├── t64.exe
+│   │       │       │   ├── util.py
+│   │       │       │   ├── version.py
+│   │       │       │   ├── w32.exe
+│   │       │       │   ├── w64-arm.exe
+│   │       │       │   ├── w64.exe
+│   │       │       │   └── wheel.py
+│   │       │       ├── distro
+│   │       │       │   ├── distro.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   └── py.typed
+│   │       │       ├── idna
+│   │       │       │   ├── codec.py
+│   │       │       │   ├── compat.py
+│   │       │       │   ├── core.py
+│   │       │       │   ├── idnadata.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── intranges.py
+│   │       │       │   ├── package_data.py
+│   │       │       │   ├── py.typed
+│   │       │       │   └── uts46data.py
+│   │       │       ├── __init__.py
+│   │       │       ├── msgpack
+│   │       │       │   ├── exceptions.py
+│   │       │       │   ├── ext.py
+│   │       │       │   ├── fallback.py
+│   │       │       │   └── __init__.py
+│   │       │       ├── packaging
+│   │       │       │   ├── _elffile.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── licenses
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── _spdx.py
+│   │       │       │   ├── _manylinux.py
+│   │       │       │   ├── markers.py
+│   │       │       │   ├── metadata.py
+│   │       │       │   ├── _musllinux.py
+│   │       │       │   ├── _parser.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── requirements.py
+│   │       │       │   ├── specifiers.py
+│   │       │       │   ├── _structures.py
+│   │       │       │   ├── tags.py
+│   │       │       │   ├── _tokenizer.py
+│   │       │       │   ├── utils.py
+│   │       │       │   └── version.py
+│   │       │       ├── pkg_resources
+│   │       │       │   └── __init__.py
+│   │       │       ├── platformdirs
+│   │       │       │   ├── android.py
+│   │       │       │   ├── api.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── macos.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── unix.py
+│   │       │       │   ├── version.py
+│   │       │       │   └── windows.py
+│   │       │       ├── pygments
+│   │       │       │   ├── console.py
+│   │       │       │   ├── filter.py
+│   │       │       │   ├── filters
+│   │       │       │   │   └── __init__.py
+│   │       │       │   ├── formatter.py
+│   │       │       │   ├── formatters
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── _mapping.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── lexer.py
+│   │       │       │   ├── lexers
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   ├── _mapping.py
+│   │       │       │   │   └── python.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   ├── modeline.py
+│   │       │       │   ├── plugin.py
+│   │       │       │   ├── regexopt.py
+│   │       │       │   ├── scanner.py
+│   │       │       │   ├── sphinxext.py
+│   │       │       │   ├── style.py
+│   │       │       │   ├── styles
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── _mapping.py
+│   │       │       │   ├── token.py
+│   │       │       │   ├── unistring.py
+│   │       │       │   └── util.py
+│   │       │       ├── pyproject_hooks
+│   │       │       │   ├── _impl.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _in_process
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── _in_process.py
+│   │       │       │   └── py.typed
+│   │       │       ├── requests
+│   │       │       │   ├── adapters.py
+│   │       │       │   ├── api.py
+│   │       │       │   ├── auth.py
+│   │       │       │   ├── certs.py
+│   │       │       │   ├── compat.py
+│   │       │       │   ├── cookies.py
+│   │       │       │   ├── exceptions.py
+│   │       │       │   ├── help.py
+│   │       │       │   ├── hooks.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _internal_utils.py
+│   │       │       │   ├── models.py
+│   │       │       │   ├── packages.py
+│   │       │       │   ├── sessions.py
+│   │       │       │   ├── status_codes.py
+│   │       │       │   ├── structures.py
+│   │       │       │   ├── utils.py
+│   │       │       │   └── __version__.py
+│   │       │       ├── resolvelib
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── providers.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── reporters.py
+│   │       │       │   ├── resolvers
+│   │       │       │   │   ├── abstract.py
+│   │       │       │   │   ├── criterion.py
+│   │       │       │   │   ├── exceptions.py
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── resolution.py
+│   │       │       │   └── structs.py
+│   │       │       ├── rich
+│   │       │       │   ├── abc.py
+│   │       │       │   ├── align.py
+│   │       │       │   ├── ansi.py
+│   │       │       │   ├── bar.py
+│   │       │       │   ├── box.py
+│   │       │       │   ├── cells.py
+│   │       │       │   ├── _cell_widths.py
+│   │       │       │   ├── color.py
+│   │       │       │   ├── color_triplet.py
+│   │       │       │   ├── columns.py
+│   │       │       │   ├── console.py
+│   │       │       │   ├── constrain.py
+│   │       │       │   ├── containers.py
+│   │       │       │   ├── control.py
+│   │       │       │   ├── default_styles.py
+│   │       │       │   ├── diagnose.py
+│   │       │       │   ├── _emoji_codes.py
+│   │       │       │   ├── emoji.py
+│   │       │       │   ├── _emoji_replace.py
+│   │       │       │   ├── errors.py
+│   │       │       │   ├── _export_format.py
+│   │       │       │   ├── _extension.py
+│   │       │       │   ├── _fileno.py
+│   │       │       │   ├── file_proxy.py
+│   │       │       │   ├── filesize.py
+│   │       │       │   ├── highlighter.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _inspect.py
+│   │       │       │   ├── json.py
+│   │       │       │   ├── jupyter.py
+│   │       │       │   ├── layout.py
+│   │       │       │   ├── live.py
+│   │       │       │   ├── live_render.py
+│   │       │       │   ├── logging.py
+│   │       │       │   ├── _log_render.py
+│   │       │       │   ├── _loop.py
+│   │       │       │   ├── __main__.py
+│   │       │       │   ├── markup.py
+│   │       │       │   ├── measure.py
+│   │       │       │   ├── _null_file.py
+│   │       │       │   ├── padding.py
+│   │       │       │   ├── pager.py
+│   │       │       │   ├── palette.py
+│   │       │       │   ├── _palettes.py
+│   │       │       │   ├── panel.py
+│   │       │       │   ├── _pick.py
+│   │       │       │   ├── pretty.py
+│   │       │       │   ├── progress_bar.py
+│   │       │       │   ├── progress.py
+│   │       │       │   ├── prompt.py
+│   │       │       │   ├── protocol.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── _ratio.py
+│   │       │       │   ├── region.py
+│   │       │       │   ├── repr.py
+│   │       │       │   ├── rule.py
+│   │       │       │   ├── scope.py
+│   │       │       │   ├── screen.py
+│   │       │       │   ├── segment.py
+│   │       │       │   ├── spinner.py
+│   │       │       │   ├── _spinners.py
+│   │       │       │   ├── _stack.py
+│   │       │       │   ├── status.py
+│   │       │       │   ├── styled.py
+│   │       │       │   ├── style.py
+│   │       │       │   ├── syntax.py
+│   │       │       │   ├── table.py
+│   │       │       │   ├── terminal_theme.py
+│   │       │       │   ├── text.py
+│   │       │       │   ├── theme.py
+│   │       │       │   ├── themes.py
+│   │       │       │   ├── _timer.py
+│   │       │       │   ├── traceback.py
+│   │       │       │   ├── tree.py
+│   │       │       │   ├── _win32_console.py
+│   │       │       │   ├── _windows.py
+│   │       │       │   ├── _windows_renderer.py
+│   │       │       │   └── _wrap.py
+│   │       │       ├── tomli
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _parser.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── _re.py
+│   │       │       │   └── _types.py
+│   │       │       ├── tomli_w
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── py.typed
+│   │       │       │   └── _writer.py
+│   │       │       ├── truststore
+│   │       │       │   ├── _api.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── _macos.py
+│   │       │       │   ├── _openssl.py
+│   │       │       │   ├── py.typed
+│   │       │       │   ├── _ssl_constants.py
+│   │       │       │   └── _windows.py
+│   │       │       ├── typing_extensions.py
+│   │       │       ├── urllib3
+│   │       │       │   ├── _collections.py
+│   │       │       │   ├── connectionpool.py
+│   │       │       │   ├── connection.py
+│   │       │       │   ├── contrib
+│   │       │       │   │   ├── _appengine_environ.py
+│   │       │       │   │   ├── appengine.py
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   ├── ntlmpool.py
+│   │       │       │   │   ├── pyopenssl.py
+│   │       │       │   │   ├── _securetransport
+│   │       │       │   │   │   ├── bindings.py
+│   │       │       │   │   │   ├── __init__.py
+│   │       │       │   │   │   └── low_level.py
+│   │       │       │   │   ├── securetransport.py
+│   │       │       │   │   └── socks.py
+│   │       │       │   ├── exceptions.py
+│   │       │       │   ├── fields.py
+│   │       │       │   ├── filepost.py
+│   │       │       │   ├── __init__.py
+│   │       │       │   ├── packages
+│   │       │       │   │   ├── backports
+│   │       │       │   │   │   ├── __init__.py
+│   │       │       │   │   │   ├── makefile.py
+│   │       │       │   │   │   └── weakref_finalize.py
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   └── six.py
+│   │       │       │   ├── poolmanager.py
+│   │       │       │   ├── request.py
+│   │       │       │   ├── response.py
+│   │       │       │   ├── util
+│   │       │       │   │   ├── connection.py
+│   │       │       │   │   ├── __init__.py
+│   │       │       │   │   ├── proxy.py
+│   │       │       │   │   ├── queue.py
+│   │       │       │   │   ├── request.py
+│   │       │       │   │   ├── response.py
+│   │       │       │   │   ├── retry.py
+│   │       │       │   │   ├── ssl_match_hostname.py
+│   │       │       │   │   ├── ssl_.py
+│   │       │       │   │   ├── ssltransport.py
+│   │       │       │   │   ├── timeout.py
+│   │       │       │   │   ├── url.py
+│   │       │       │   │   └── wait.py
+│   │       │       │   └── _version.py
+│   │       │       └── vendor.txt
+│   │       └── pip-25.1.1.dist-info
+│   │           └── licenses
+│   │               ├── AUTHORS.txt
+│   │               └── LICENSE.txt
+│   ├── pip.pyz
+│   ├── pyvenv.cfg
+│   └── Scripts
+│       ├── activate
+│       ├── activate.bat
+│       ├── activate.fish
+│       ├── Activate.ps1
+│       ├── deactivate.bat
+│       ├── python.exe
+│       └── pythonw.exe
+├── verify_auth.py
+├── verify_setup.py
+├── voice-integration
+│   ├── README.md
+│   ├── voice_claude.sh
+│   └── voice_claude_simple.sh
+├── .vscode
+│   ├── extensions
+│   │   └── tick-extension
+│   │       ├── copilot-tick-extension-0.0.1.vsix
+│   │       ├── out
+│   │       │   ├── extension.js
+│   │       │   └── extension.js.map
+│   │       ├── package.json
+│   │       ├── package-lock.json
+│   │       ├── README.md
+│   │       ├── src
+│   │       │   └── extension.ts
+│   │       └── tsconfig.json
+│   ├── setting.json
+│   ├── settings.json
+│   └── tasks.json
+├── VUETIFY_TEXTAREA_AUTOGROW_ISSUE.md
+├── WINDOWS_DEPLOYMENT_INSTRUCTIONS.md
+├── workload.json
+└── XTTS_STATUS_MONITORING_UFDP.md
+
+182 directories, 1468 files
+
+══════════════════════════════════════════════════════════════
+(e) Database Table Counts — SOURCE (Whisper)
+══════════════════════════════════════════════════════════════
+
+alembic_version                               0 rows
+api_configs                                   0 rows
+api_keys                                      17 rows
+asset_files                                   0 rows
+asset_id_pending_messages                     0 rows
+asset_id_registry                             44 rows
+asset_id_relationships                        16 rows
+asset_links                                   0 rows
+asset_messages                                0 rows
+asset_pool_files                              0 rows
+asset_relationships                           3 rows
+asset_tags                                    0 rows
+assets                                        0 rows
+blueprint_nodes                               0 rows
+blueprint_templates                           0 rows
+blueprints                                    0 rows
+breaks                                        0 rows
+celery_job_log                                3 rows
+content_library                               0 rows
+content_placements                            0 rows
+content_type_settings                         0 rows
+content_versions                              39 rows
+cue_blocks                                    0 rows
+cues                                          0 rows
+customers                                     0 rows
+elements                                      0 rows
+episode_templates                             0 rows
+episodes                                      27 rows
+extracted_quotes                              0 rows
+group_roles                                   0 rows
+groups                                        0 rows
+link_preview_cache                            14 rows
+llm_notifications                             25 rows
+llm_operations                                0 rows
+mp3_encoding_profiles                         0 rows
+organizations                                 0 rows
+permissions                                   0 rows
+processing_jobs                               0 rows
+production_roles                              0 rows
+prompt_overrides                              0 rows
+rbac_audit_log                                0 rows
+regions                                       0 rows
+repo_items                                    0 rows
+role_permissions                              0 rows
+roles                                         0 rows
+rundown_items                                 219 rows
+rundown_items_legacy                          0 rows
+rundown_template_items                        0 rows
+rundown_templates                             0 rows
+rundowns                                      1 rows
+scripts                                       0 rows
+seasons                                       0 rows
+segment_llm_data                              0 rows
+segment_locks                                 1 rows
+segments                                      0 rows
+settings                                      0 rows
+shows                                         0 rows
+sot_processing_jobs                           91 rows
+speakers                                      0 rows
+twitter_oauth_tokens                          0 rows
+user_groups                                   0 rows
+user_permission_overrides                     0 rows
+user_roles                                    0 rows
+user_sessions                                 0 rows
+user_todos                                    1 rows
+users                                         0 rows
+whiteboard_items                              33 rows
+whiteboard_node_links                         15 rows
+whiteboards                                   3 rows
+
+══════════════════════════════════════════════════════════════
+(f) Docker Container Status — SOURCE (Whisper)
+══════════════════════════════════════════════════════════════
+
+NAMES                    STATUS                    PORTS
+syncthing                Up 3 hours (healthy)      0.0.0.0:8384->8384/tcp, 0.0.0.0:21027->21027/udp, [::]:8384->8384/tcp, [::]:21027->21027/udp, 0.0.0.0:22000->22000/tcp, [::]:22000->22000/tcp, 0.0.0.0:22000->22000/udp, [::]:22000->22000/udp
+show-build-frontend      Up 6 days (healthy)       0.0.0.0:8091->8080/tcp
+show-build-server        Up 55 minutes (healthy)   0.0.0.0:8888->80/tcp
+whisper-medium           Up 7 days (healthy)       0.0.0.0:8885->5000/tcp, [::]:8885->5000/tcp
+whisper-worker           Up 7 days                 
+vmix-conversion-worker   Up 7 days                 
+show-build-postgres      Up 7 days (healthy)       0.0.0.0:5433->5432/tcp
+ffmpeg-worker            Up 7 days                 
+portainer                Up 7 days                 8000/tcp, 9443/tcp, 0.0.0.0:9000->9000/tcp, [::]:9000->9000/tcp
+
+══════════════════════════════════════════════════════════════
+Git State — SOURCE (Whisper)
+══════════════════════════════════════════════════════════════
+
+=== Branch ===
+experiment/metadata-asset-pool
+
+=== Status ===
+ M disaffected-ui/src/components/ContentEditor.vue
+ M disaffected-ui/src/components/content-editor/MetadataPanel.vue
+ M disaffected-ui/src/components/content-editor/ShowInfoHeader.vue
+?? backups/showbuild_backup_20260215_040001.sql.gz
+?? backups/showbuild_backup_20260216_040001.sql.gz
+?? backups/showbuild_backup_20260218_040001.sql.gz
+?? backups/showbuild_backup_20260221_060001.sql.gz
+?? backups/showbuild_backup_20260222_040001.sql.gz
+?? backups/showbuild_backup_20260223_040001.sql.gz
+?? backups/showbuild_backup_20260228_060001.sql.gz
+?? backups/showbuild_backup_20260301_040001.sql.gz
+?? backups/showbuild_backup_20260302_040001.sql.gz
+?? backups/showbuild_backup_20260304_040001.sql.gz
+?? check-for-updates.ps1
+?? disaffected-ui/public/0249-HOST-SCRIPT-20260118.pdf
+?? disaffected-ui/src/components/content-editor/AssetPoolPanel.vue
+?? migration_db_20260304_050152/
+?? migration_env_20260304_050152/
+?? scripts/migrate_to_prefect.sh
+?? table_counts_source.txt
+
+=== Recent Log (10 commits) ===
+efee88c feat: graphics package download, FSQ bracket fix, whiteboard mindmap, Celery job tracking, and UI overhaul
+1e70875 feat: MP3 generation tool, encoding profiles, production roles, and UI enhancements
+df81dda feat: major sprint checkpoint - tools system, segment LLM, GFX assets, UI enhancements
+6659333 feat: sprint checkpoint - script generation, segment locks, content library, UI improvements
+c5b5b00 feat: sprint checkpoint - MQTT removal, rundown templates, UI improvements
+c01027f security: migrate xAI API key to environment variable
+c849d33 fix: SOT processing robustness - 6 critical fixes
+dc315e3 fix: frontend health check using process check instead of HTTP
+1f71caa fix: critical bug fixes and documentation updates
+5a963fe chore: checkpoint commit - WIP audio waveform and SOT enhancements
+
+=== Remotes ===
+origin	git@github.com:pmw1/show-build.git (fetch)
+origin	git@github.com:pmw1/show-build.git (push)
+
+
+══════════════════════════════════════════════════════════════
+(d) Migration Log Output (stdout/stderr)
+══════════════════════════════════════════════════════════════
+
+See full log: /mnt/process/show-build/migration_20260304_050152.log
+
+Summary of steps executed:
+  Step 0: Pre-flight Checks — PASSED
+  Step 1: Database Export — 62M dump, 88M SQL
+  Step 2: Environment Capture — completed
+  Step 3: REHYDRATE.NOW — started
+  Step 4: Redeploy Script — generated
+  Step 5: Archive — 269M, MD5: 078b95f7a4527d201416ba7fe5e84332
+  Step 6: Proxima Backup — checksum verified
+  Step 7: Prefect Unpack — /srv/show-build
+  Step 8: Remote Setup — DB restored, services started
+  Step 9: Finalize — this document
+
+══════════════════════════════════════════════════════════════
+(e) Database Table Counts — TARGET (Prefect)
+══════════════════════════════════════════════════════════════
+
+Not captured — run ANALYZE and check manually
+
+══════════════════════════════════════════════════════════════
+(f) Docker Container Status — TARGET (Prefect)
+══════════════════════════════════════════════════════════════
+
+NAMES                   STATUS                    PORTS
+show-build-frontend     Up 47 seconds (healthy)   0.0.0.0:8091->8080/tcp
+show-build-server       Up 33 seconds (healthy)   0.0.0.0:8888->80/tcp
+show-build-postgres     Up 48 seconds (healthy)   0.0.0.0:5433->5432/tcp
+syncthing               Up 3 hours (healthy)      
+ollama                  Up 3 hours                0.0.0.0:11434->11434/tcp, [::]:11434->11434/tcp
+prefect-assets_worker   Up 3 hours                
+
+══════════════════════════════════════════════════════════════
+(g) Verification URLs
+══════════════════════════════════════════════════════════════
+
+Frontend: https://192.168.51.207:8091
+Backend:  https://192.168.51.207:8888/health
+Postgres: 192.168.51.207:5433
+
+══════════════════════════════════════════════════════════════
+(i) Pre-Migration Fixes Applied
+══════════════════════════════════════════════════════════════
+
+The following issues were identified during pre-flight audit and fixed
+in the migration script before execution:
+
+1. NPM NOT INSTALLED ON PREFECT
+   - Node 18.19.1 is installed via Ubuntu repos but npm is not included
+   - Impact: Host-level npm ci / linting commands fail
+   - Fix: Script installs npm via apt during pre-flight checks on prefect
+   - Fallback: If install fails, Docker frontend Dockerfile still handles
+     its own npm install internally during container build
+
+2. SSL CERTIFICATES HARDCODED TO WHISPERBOX IP (192.168.51.210)
+   - Frontend Dockerfile start.sh generates self-signed certs with
+     CN=192.168.51.210 and SAN=IP:192.168.51.210
+   - Impact: SSL cert IP mismatch on prefect (192.168.51.207)
+   - Fix: Script deletes stale certs from archive and sed-replaces the
+     IP in the Dockerfile so regenerated certs match 192.168.51.207
+
+3. GID 1001 (disaffected group) MISSING ON PREFECT
+   - Whisper: kevin in group 1001 (disaffected)
+   - Prefect: no group 1001 exists
+   - docker-compose runs server as user 1000:1001
+   - Impact: Container works (Dockerfile creates group internally), but
+     host-level access to NFS files with gid 1001 would fail
+   - Fix: Script creates group 1001 (disaffected) on prefect and adds
+     kevin to it during pre-flight
+
+4. GIT HISTORY WOULD BE LOST (.git/objects excluded)
+   - Original plan excluded .git/objects from archive to save space
+   - Impact: git log, git diff, git status all broken on prefect
+   - Fix: Removed .git/objects exclusion — full git history preserved
+     in archive. GitHub remote (git@github.com:pmw1/show-build.git)
+     also available for fetch/pull.
+
+5. HOST npm ci UNNECESSARY FOR DOCKER MIGRATION
+   - Frontend Dockerfile does its own npm install --legacy-peer-deps
+   - docker-compose volume mounts only source dirs, not node_modules
+   - Impact: Script would fail at npm ci step if npm not installed
+   - Fix: Made host npm ci conditional on npm availability
+
+══════════════════════════════════════════════════════════════
+(h) Rollback Instructions
+══════════════════════════════════════════════════════════════
+
+If prefect deployment fails or has issues:
+
+1. WHISPER IS STILL RUNNING — no changes were made to the source
+   - Frontend: https://192.168.51.210:8091
+   - Backend:  https://192.168.51.210:8888/health
+
+2. To stop prefect instance:
+   ssh kevin@192.168.51.207 "cd /srv/show-build && docker compose down"
+
+3. To fully remove prefect instance:
+   ssh kevin@192.168.51.207 "cd /srv/show-build && docker compose down -v"
+   ssh kevin@192.168.51.207 "sudo rm -rf /srv/show-build"
+
+4. Backup archive on proxima:
+   ssh kevin@proxima "ls -la ~/backup/showbuild/"
+
+5. Database dump (local copy):
+   ls -la /mnt/process/show-build/migration_db_20260304_050152/
+
+══════════════════════════════════════════════════════════════
+Migration Completed: 2026-03-04 10:07:46 UTC
+══════════════════════════════════════════════════════════════
+

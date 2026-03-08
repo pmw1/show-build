@@ -36,16 +36,11 @@ def create_content_version(db: Session, rundown_item, change_type: str = "manual
         username: Username making the change
 
     Returns:
-        ContentVersion object or None if content unchanged or autosave
+        ContentVersion object or None if content unchanged
     """
     import hashlib
     import re
     from models_v2 import ContentVersion
-
-    # Skip version creation for autosaves - only create versions on manual save
-    if change_type == 'autosave':
-        logger.debug(f"Skipping version creation for autosave on {rundown_item.asset_id}")
-        return None
 
     # Get content and calculate hash
     content = rundown_item.script_content or ''
@@ -1163,7 +1158,8 @@ async def get_episode_info(episode_number: str, db: Session = Depends(get_db)) -
 async def get_episode_thumbnails(episode_number: str) -> Dict[str, Any]:
     """Get available thumbnail/poster images for an episode.
 
-    Searches the exports directory for poster images matching patterns like:
+    Searches the thumbnails directory (and one level of subdirectories) and
+    the exports directory for poster images matching patterns like:
     - poster_16x9.jpg, poster16x9.jpg, Poster_16x9.jpg
     - poster_16x9_2.png (versioned)
     - poster16x9-monday.jpg (suffixed variants)
@@ -1173,36 +1169,59 @@ async def get_episode_thumbnails(episode_number: str) -> Dict[str, Any]:
     from core.paths import paths as path_manager
 
     try:
-        # Use path manager to get exports directory
-        exports_dir = path_manager.get_exports_dir(episode_number)
         episode_num = path_manager._normalize_episode_id(episode_number)
-
-        if not exports_dir.exists():
-            return {"thumbnails": [], "selected": None, "message": "Exports directory not found"}
+        episode_dir = path_manager.get_episode_dir(episode_number)
+        exports_dir = path_manager.get_exports_dir(episode_number)
+        thumbnails_dir = episode_dir / "thumbnails"
 
         # Pattern to match poster files (case-insensitive)
-        # Matches: poster.jpg, poster_16x9.jpg, poster16x9.png, Poster_16x9_2.jpg, poster16x9-monday.jpg, etc.
+        # Matches any file starting with "poster" and an image extension.
+        # Files with "16x9" in the name get higher confidence.
         poster_pattern = re.compile(
-            r'^poster[_-]?(16x9)?[_-]?.*\.(jpg|jpeg|png|webp)$',
+            r'^poster[_-]?.*\.(jpg|jpeg|png|webp)$',
+            re.IGNORECASE
+        )
+        high_confidence_pattern = re.compile(
+            r'^poster[_-]?16x9',
             re.IGNORECASE
         )
 
         thumbnails = []
-        for file in exports_dir.iterdir():
-            if file.is_file() and poster_pattern.match(file.name):
-                # Build URL path (served via /episodes static mount)
-                url = f"/episodes/{episode_num}/exports/{file.name}"
-                # Get file modification time for sorting
-                mtime = file.stat().st_mtime
-                thumbnails.append({
-                    "filename": file.name,
-                    "url": url,
-                    "modified": mtime,
-                    "size": file.stat().st_size
-                })
+        seen_paths = set()
 
-        # Sort by modification time (newest first)
-        thumbnails.sort(key=lambda x: x["modified"], reverse=True)
+        def scan_directory(directory, url_prefix):
+            """Scan a directory for matching poster files."""
+            if not directory.exists():
+                return
+            for file in directory.iterdir():
+                if file.is_file() and poster_pattern.match(file.name):
+                    real_path = file.resolve()
+                    if real_path in seen_paths:
+                        continue
+                    seen_paths.add(real_path)
+                    url = f"{url_prefix}/{file.name}"
+                    mtime = file.stat().st_mtime
+                    confidence = "high" if high_confidence_pattern.match(file.name) else "normal"
+                    thumbnails.append({
+                        "filename": file.name,
+                        "url": url,
+                        "modified": mtime,
+                        "size": file.stat().st_size,
+                        "confidence": confidence
+                    })
+
+        # Search thumbnails/ directory and one level of subdirectories
+        if thumbnails_dir.exists():
+            scan_directory(thumbnails_dir, f"/episodes/{episode_num}/thumbnails")
+            for subdir in thumbnails_dir.iterdir():
+                if subdir.is_dir():
+                    scan_directory(subdir, f"/episodes/{episode_num}/thumbnails/{subdir.name}")
+
+        # Also search exports/ directory (legacy location)
+        scan_directory(exports_dir, f"/episodes/{episode_num}/exports")
+
+        # Sort by confidence (high first), then modification time (newest first)
+        thumbnails.sort(key=lambda x: (0 if x["confidence"] == "high" else 1, -x["modified"]))
 
         # Determine selected thumbnail (first one by default, or from database if stored)
         selected = thumbnails[0]["url"] if thumbnails else None
@@ -1217,6 +1236,91 @@ async def get_episode_thumbnails(episode_number: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error finding thumbnails for episode {episode_number}: {e}")
         return {"thumbnails": [], "selected": None, "error": str(e)}
+
+
+class ConvertThumbnailRequest(BaseModel):
+    """Request body for converting a thumbnail to PNG."""
+    url: str = Field(..., description="The URL path of the non-PNG thumbnail (e.g., /episodes/0257/thumbnails/poster16x9.jpg)")
+
+
+@router.post("/{episode_number}/thumbnail/convert-to-png")
+async def convert_thumbnail_to_png(
+    episode_number: str,
+    request: ConvertThumbnailRequest
+) -> Dict[str, Any]:
+    """Dispatch a Celery task to convert a non-PNG thumbnail to PNG format.
+
+    Returns the task_id for polling completion status.
+    """
+    from core.paths import paths as path_manager
+    from celery_app import celery_app
+
+    try:
+        episode_num = path_manager._normalize_episode_id(episode_number)
+        episode_dir = path_manager.get_episode_dir(episode_number)
+
+        # Resolve URL to filesystem path
+        # URL format: /episodes/0257/thumbnails/subdir/file.jpg or /episodes/0257/exports/file.jpg
+        url_path = request.url
+        if url_path.startswith('/episodes/'):
+            relative = url_path[len('/episodes/'):]  # e.g. "0257/thumbnails/poster.jpg"
+            source_path = path_manager.episodes_root / relative
+        else:
+            return {"success": False, "error": "Invalid thumbnail URL format"}
+
+        if not source_path.exists():
+            return {"success": False, "error": f"File not found: {source_path.name}"}
+
+        if source_path.suffix.lower() == '.png':
+            return {"success": False, "error": "File is already PNG"}
+
+        # Dispatch Celery task on assets queue
+        task = celery_app.send_task(
+            'services.asset_processing.convert_thumbnail_to_png',
+            args=[str(source_path), episode_num],
+            queue='assets'
+        )
+
+        logger.info(f"Dispatched thumbnail PNG conversion: {source_path.name} -> task {task.id}")
+
+        return {
+            "success": True,
+            "task_id": task.id,
+            "source_url": request.url,
+            "message": f"Conversion started for {source_path.name}"
+        }
+
+    except Exception as e:
+        logger.error(f"Error dispatching thumbnail conversion: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/{episode_number}/thumbnail/convert-status/{task_id}")
+async def get_thumbnail_convert_status(episode_number: str, task_id: str) -> Dict[str, Any]:
+    """Poll the status of a thumbnail PNG conversion task."""
+    from celery_app import celery_app
+
+    try:
+        result = celery_app.AsyncResult(task_id)
+        response = {
+            "task_id": task_id,
+            "state": result.state,
+            "ready": result.ready(),
+            "successful": result.successful() if result.ready() else None
+        }
+
+        if result.ready():
+            if result.successful():
+                response["result"] = result.result
+            else:
+                response["error"] = str(result.info)
+        elif result.state == 'PROGRESS':
+            response["progress"] = result.info
+
+        return response
+
+    except Exception as e:
+        return {"task_id": task_id, "state": "ERROR", "error": str(e)}
 
 
 class TakeThumbnailRequest(BaseModel):
@@ -3194,6 +3298,21 @@ async def save_rundown_items(
                             create_content_version(db, rundown_item, change_type=save_type, username=username)
                         except Exception as e:
                             logger.error(f"Failed to create content version for {asset_id}: {e}")
+
+                        # 📁 Write segment snapshot to filesystem
+                        try:
+                            from services.autosave_history import write_segment_snapshot
+                            write_segment_snapshot(
+                                episode_number=episode_number,
+                                item_id=rundown_item.id,
+                                asset_id=rundown_item.asset_id,
+                                title=rundown_item.title,
+                                item_type=rundown_item.item_type,
+                                script_content=new_script,
+                                order_in_rundown=rundown_item.order_in_rundown or 0,
+                            )
+                        except Exception as e:
+                            logger.warning(f"Autosave history segment snapshot failed: {e}")
                     else:
                         logger.info(f"⚠️ No 'script' key in item_data for {asset_id}, not updating script_content")
 
@@ -3321,6 +3440,17 @@ async def save_rundown_items(
         episode.duration_formatted = f"{h:02d}:{m:02d}:{s:02d}"
 
         db.commit()
+
+        # 📁 Write episode snapshot to filesystem (throttled by interval setting)
+        try:
+            from services.autosave_history import write_episode_snapshot
+            write_episode_snapshot(
+                episode_number=episode_number,
+                episode_title=episode.title or "",
+                rundown_items=all_items,
+            )
+        except Exception as e:
+            logger.warning(f"Autosave history episode snapshot failed: {e}")
 
         logger.info(f"Saved {saved_count} rundown items for episode {episode_number} with order synchronization")
         logger.info(f"Updated episode total duration: {episode.duration_formatted} ({total_duration_seconds}s)")
@@ -3908,6 +4038,92 @@ async def restore_content_version(
         "restored_version": version_number,
         "content_length": version.content_length
     }
+
+
+# ============================================================================
+# AUTOSAVE FILE HISTORY ENDPOINTS
+# ============================================================================
+
+@router.get("/{episode_number}/history/segments/{item_id}")
+async def list_segment_history(
+    episode_number: str,
+    item_id: int,
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """List available segment snapshots for a rundown item."""
+    from services.autosave_history import list_segment_snapshots
+    snapshots = list_segment_snapshots(episode_number, item_id)
+    return {"item_id": item_id, "episode": episode_number, "snapshots": snapshots}
+
+
+@router.get("/{episode_number}/history/segments/{item_id}/{filename}")
+async def read_segment_history(
+    episode_number: str,
+    item_id: int,
+    filename: str,
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Read a specific segment snapshot file."""
+    from services.autosave_history import read_segment_snapshot
+    snapshot = read_segment_snapshot(episode_number, filename)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail=f"Snapshot {filename} not found")
+    return snapshot
+
+
+@router.get("/{episode_number}/history/episode")
+async def list_episode_history(
+    episode_number: str,
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """List available episode snapshots."""
+    from services.autosave_history import list_episode_snapshots
+    snapshots = list_episode_snapshots(episode_number)
+    return {"episode": episode_number, "snapshots": snapshots}
+
+
+@router.get("/{episode_number}/history/episode/{filename}")
+async def read_episode_history(
+    episode_number: str,
+    filename: str,
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Read a specific episode snapshot file."""
+    from services.autosave_history import read_episode_snapshot
+    snapshot = read_episode_snapshot(episode_number, filename)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail=f"Snapshot {filename} not found")
+    return snapshot
+
+
+@router.post("/{episode_number}/history/segments/restore/{filename}")
+async def restore_segment_history(
+    episode_number: str,
+    filename: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Restore a segment from a filesystem snapshot (matched by item_id, index-agnostic)."""
+    from services.autosave_history import restore_segment_from_snapshot
+    result = restore_segment_from_snapshot(db, episode_number, filename)
+    if not result:
+        raise HTTPException(status_code=404, detail="Snapshot not found or item no longer exists")
+    return {"success": True, **result}
+
+
+@router.post("/{episode_number}/history/episode/restore/{filename}")
+async def restore_episode_history(
+    episode_number: str,
+    filename: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_or_key)
+) -> Dict[str, Any]:
+    """Restore all segments from an episode snapshot (restores content and order)."""
+    from services.autosave_history import restore_episode_from_snapshot
+    result = restore_episode_from_snapshot(db, episode_number, filename)
+    if not result:
+        raise HTTPException(status_code=404, detail="Snapshot not found or no items to restore")
+    return {"success": True, **result}
 
 
 @router.post("/{episode_number}/gather-media")

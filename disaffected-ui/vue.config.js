@@ -103,6 +103,11 @@ module.exports = defineConfig({
         changeOrigin: true,
         secure: false
       },
+      '/media_assets': {
+        target: 'http://server:80',
+        changeOrigin: true,
+        secure: false
+      },
       '/asterisk-ws': {
         target: 'ws://192.168.51.223:8088/ws',
         changeOrigin: true,

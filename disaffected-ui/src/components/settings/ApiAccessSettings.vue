@@ -555,6 +555,37 @@
                 </v-card>
               </v-col>
 
+              <!-- TikTok API -->
+              <v-col cols="12" md="6">
+                <v-card variant="outlined" class="pa-4">
+                  <v-card-title class="text-subtitle-1 d-flex align-center">
+                    <v-icon left size="small" class="me-2">mdi-music-note-eighth</v-icon>
+                    TikTok API
+                  </v-card-title>
+                  <v-text-field
+                    v-model="configs.tiktok.clientKey"
+                    label="Client Key"
+                    density="compact"
+                    placeholder="Your TikTok API Client Key"
+                  />
+                  <v-text-field
+                    v-model="configs.tiktok.clientSecret"
+                    label="Client Secret"
+                    density="compact"
+                    :type="showTiktokSecret ? 'text' : 'password'"
+                    placeholder="Your TikTok API Client Secret"
+                    :append-inner-icon="showTiktokSecret ? 'mdi-eye-off' : 'mdi-eye'"
+                    @click:append-inner="showTiktokSecret = !showTiktokSecret"
+                  />
+                  <v-switch
+                    v-model="configs.tiktok.enabled"
+                    label="Enable TikTok integration"
+                    color="primary"
+                    class="mt-3"
+                  />
+                </v-card>
+              </v-col>
+
               <!-- AWS S3 -->
               <v-col cols="12" md="6">
                 <v-card variant="outlined" class="pa-4">
@@ -888,6 +919,9 @@ const showSnackbar = (message, color = 'success') => {
   snackbar.value.show = true
 }
 
+// TikTok secret visibility
+const showTiktokSecret = ref(false)
+
 // Twitter OAuth state
 const twitterOAuthStatus = ref({
   connected: false,
@@ -1138,7 +1172,8 @@ async function saveSettings() {
         social_media: {
           youtube: configs.value.youtube,
           vimeo: configs.value.vimeo,
-          twitter: configs.value.twitter
+          twitter: configs.value.twitter,
+          tiktok: configs.value.tiktok
         }
       },
       development: {

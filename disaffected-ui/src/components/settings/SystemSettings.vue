@@ -496,6 +496,99 @@
               <v-icon left>mdi-content-save</v-icon>
               Save Backup Settings
             </v-btn>
+
+            <v-divider class="my-6" />
+
+            <h3 class="text-h6 mb-2">
+              <v-icon left>mdi-history</v-icon>
+              Autosave &amp; Version History
+            </h3>
+            <p class="text-body-2 mb-4">
+              Filesystem snapshots of your content, stored in each episode's <code>.history/</code> directory.
+              These provide a safety net beyond database autosave.
+            </p>
+
+            <v-switch
+              v-model="autosaveHistory.enabled"
+              label="Enable filesystem autosave snapshots"
+              color="primary"
+              class="mb-4"
+            />
+
+            <v-expand-transition>
+              <div v-if="autosaveHistory.enabled">
+                <v-row>
+                  <v-col cols="12" md="6">
+                    <v-text-field
+                      v-model.number="autosaveHistory.segment_interval_seconds"
+                      label="Segment Snapshot Interval"
+                      type="number"
+                      suffix="seconds"
+                      prepend-icon="mdi-file-document-outline"
+                      hint="How often to snapshot individual segments"
+                      persistent-hint
+                      :min="10"
+                      :max="300"
+                    />
+                  </v-col>
+                  <v-col cols="12" md="6">
+                    <v-text-field
+                      v-model.number="autosaveHistory.episode_interval_seconds"
+                      label="Episode Snapshot Interval"
+                      type="number"
+                      suffix="seconds"
+                      prepend-icon="mdi-book-open-variant"
+                      hint="How often to snapshot entire episodes"
+                      persistent-hint
+                      :min="60"
+                      :max="1800"
+                    />
+                  </v-col>
+                </v-row>
+
+                <v-row class="mt-2">
+                  <v-col cols="12" md="6">
+                    <v-text-field
+                      v-model.number="autosaveHistory.segment_retention_count"
+                      label="Segment Snapshots to Keep"
+                      type="number"
+                      prepend-icon="mdi-counter"
+                      hint="Per segment (oldest pruned automatically)"
+                      persistent-hint
+                      :min="5"
+                      :max="100"
+                    />
+                  </v-col>
+                  <v-col cols="12" md="6">
+                    <v-text-field
+                      v-model.number="autosaveHistory.episode_retention_count"
+                      label="Episode Snapshots to Keep"
+                      type="number"
+                      prepend-icon="mdi-counter"
+                      hint="Per episode (oldest pruned automatically)"
+                      persistent-hint
+                      :min="3"
+                      :max="50"
+                    />
+                  </v-col>
+                </v-row>
+
+                <p class="text-caption text-grey mt-3 mb-4">
+                  Storage: ~{{ Math.round(autosaveHistory.segment_retention_count * 3.5) }} KB per segment,
+                  ~{{ Math.round(autosaveHistory.episode_retention_count * 40) }} KB per episode
+                </p>
+              </div>
+            </v-expand-transition>
+
+            <v-btn
+              color="primary"
+              @click="saveAutosaveSettings"
+              :loading="savingAutosave"
+              class="mt-2"
+            >
+              <v-icon left>mdi-content-save</v-icon>
+              Save Autosave Settings
+            </v-btn>
           </v-tabs-window-item>
 
           <!-- Maintenance -->
@@ -1020,6 +1113,16 @@ const systemSettings = ref({
   archiveCompression: false
 })
 
+// Autosave History settings
+const autosaveHistory = ref({
+  enabled: true,
+  segment_interval_seconds: 30,
+  episode_interval_seconds: 300,
+  segment_retention_count: 20,
+  episode_retention_count: 12
+})
+const savingAutosave = ref(false)
+
 // Voice configurations
 const voiceConfigs = ref({
   whisper: {
@@ -1137,6 +1240,30 @@ const handleSave = () => {
   // Manually emit update since watcher is disabled
   emit('update:modelValue', { ...systemSettings.value })
   emit('save', { ...systemSettings.value })
+}
+
+const saveAutosaveSettings = async () => {
+  savingAutosave.value = true
+  try {
+    const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+    const response = await fetch('/api/settings/autosave-history', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(autosaveHistory.value)
+    })
+    if (response.ok) {
+      console.log('Autosave history settings saved')
+    } else {
+      console.error('Failed to save autosave settings:', await response.text())
+    }
+  } catch (e) {
+    console.error('Error saving autosave settings:', e)
+  } finally {
+    savingAutosave.value = false
+  }
 }
 
 const handleVoiceSave = async (configs) => {
@@ -1455,9 +1582,27 @@ const loadVoiceConfigs = async () => {
 }
 
 // Initialize component
+const loadAutosaveSettings = async () => {
+  try {
+    const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+    const response = await fetch('/api/settings', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (response.ok) {
+      const data = await response.json()
+      if (data.autosave_history) {
+        autosaveHistory.value = { ...autosaveHistory.value, ...data.autosave_history }
+      }
+    }
+  } catch (e) {
+    console.warn('Could not load autosave settings:', e)
+  }
+}
+
 onMounted(() => {
   updateDerivedPaths()
   loadVoiceConfigs()
+  loadAutosaveSettings()
   if (systemSubTab.value === 'maintenance') {
     loadSystemInfo()
   }

@@ -255,6 +255,90 @@
                   :hint="urlInputHint"
                   persistent-hint
                 ></v-text-field>
+
+                <!-- Whiteboard X Posts Selector (Twitter/X only) -->
+                <div v-if="socialPlatform === 'twitter'" class="mt-4">
+                  <div class="xpost-divider">
+                    <v-divider></v-divider>
+                    <span class="xpost-divider-text">OR select from X posts you've already categorized for this episode</span>
+                    <v-divider></v-divider>
+                  </div>
+
+                  <v-select
+                    v-model="selectedWhiteboardXPost"
+                    :items="whiteboardXPosts"
+                    item-title="displayLabel"
+                    item-value="id"
+                    return-object
+                    variant="outlined"
+                    density="compact"
+                    placeholder="Select a cached X post..."
+                    :loading="loadingWhiteboardPosts"
+                    :no-data-text="currentEpisode ? 'No X posts found on this episode\'s whiteboard' : 'No episode selected'"
+                    class="mt-3"
+                    clearable
+                    @update:model-value="handleXPostSelected"
+                  >
+                    <template v-slot:item="{ props: itemProps, item }">
+                      <v-list-item v-bind="itemProps" :subtitle="item.raw.subtitle" class="xpost-list-item">
+                        <template v-slot:prepend>
+                          <v-avatar size="32" class="mr-2">
+                            <v-img v-if="item.raw.authorAvatar" :src="item.raw.authorAvatar" />
+                            <v-icon v-else>mdi-twitter</v-icon>
+                          </v-avatar>
+                        </template>
+                      </v-list-item>
+                    </template>
+                    <template v-slot:selection="{ item }">
+                      <div class="d-flex align-center">
+                        <v-avatar size="24" class="mr-2">
+                          <v-img v-if="item.raw.authorAvatar" :src="item.raw.authorAvatar" />
+                          <v-icon v-else size="16">mdi-twitter</v-icon>
+                        </v-avatar>
+                        <span class="text-truncate" style="max-width: 500px;">{{ item.raw.displayLabel }}</span>
+                      </div>
+                    </template>
+                  </v-select>
+
+                  <!-- Selected X Post Preview -->
+                  <v-card v-if="selectedXPostData" variant="outlined" class="mt-3 xpost-preview-card">
+                    <v-card-text class="pa-3">
+                      <div class="d-flex align-start">
+                        <v-avatar size="40" class="mr-3 flex-shrink-0">
+                          <v-img v-if="selectedXPostData.author_avatar" :src="selectedXPostData.author_avatar" />
+                          <v-icon v-else>mdi-twitter</v-icon>
+                        </v-avatar>
+                        <div class="flex-grow-1" style="min-width: 0;">
+                          <div class="d-flex align-center mb-1">
+                            <strong class="mr-1">{{ selectedXPostData.author_name }}</strong>
+                            <v-icon v-if="selectedXPostData.author_verified" size="14" color="blue">mdi-check-decagram</v-icon>
+                            <span class="text-grey ml-1" style="font-size: 0.85em;">@{{ selectedXPostData.author_handle }}</span>
+                          </div>
+                          <p class="mb-2" style="font-size: 0.9em; white-space: pre-wrap; word-break: break-word;">{{ selectedXPostData.tweet_text }}</p>
+                          <!-- Media preview -->
+                          <div v-if="selectedXPostData.media_urls && selectedXPostData.media_urls.length" class="mb-2">
+                            <v-img
+                              :src="selectedXPostData.media_urls[0]"
+                              max-height="150"
+                              class="rounded"
+                              cover
+                            />
+                            <span v-if="selectedXPostData.media_urls.length > 1" class="text-caption text-grey">
+                              +{{ selectedXPostData.media_urls.length - 1 }} more media
+                            </span>
+                          </div>
+                          <!-- Engagement metrics -->
+                          <div class="d-flex" style="gap: 16px; font-size: 0.8em; color: #666;">
+                            <span v-if="selectedXPostData.replies"><v-icon size="14" class="mr-1">mdi-comment-outline</v-icon>{{ selectedXPostData.replies }}</span>
+                            <span v-if="selectedXPostData.retweets"><v-icon size="14" class="mr-1">mdi-repeat</v-icon>{{ selectedXPostData.retweets }}</span>
+                            <span v-if="selectedXPostData.likes"><v-icon size="14" class="mr-1">mdi-heart-outline</v-icon>{{ selectedXPostData.likes }}</span>
+                            <span v-if="selectedXPostData.quotes"><v-icon size="14" class="mr-1">mdi-format-quote-close</v-icon>{{ selectedXPostData.quotes }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </v-card-text>
+                  </v-card>
+                </div>
               </div>
 
               <!-- Aspect Ratio -->
@@ -268,7 +352,7 @@
                 </v-btn-toggle>
               </div>
 
-              <!-- Content Fields (only show if no URL input) -->
+              <!-- Content Fields (only show if no URL input and no X post selected) -->
               <div v-if="!shouldShowUrlInput" class="mb-4">
                 <label class="d-block mb-2" style="font-size: 14px; font-weight: 500; color: #555;">Headline:</label>
                 <v-text-field
@@ -431,25 +515,43 @@
       <v-card-actions style="padding: 20px; border-top: 1px solid #e0e0e0;">
         <v-spacer></v-spacer>
         <v-btn color="error" variant="outlined" @click="$emit('update:show', false)">Cancel</v-btn>
-        <v-btn
-          color="primary"
-          variant="outlined"
-          @click="handleInsertOnly"
-          :disabled="activeTab !== 'gfx' || (gfxType === 'fullscreen-text' && (!gfxBody || gfxBody.length < 5))"
-        >
-          <v-icon size="small" class="mr-1">mdi-text-box-plus</v-icon>
-          Insert Cue Only
-        </v-btn>
-        <v-btn
-          color="success"
-          variant="flat"
-          @click="handleSubmit"
-          :disabled="activeTab !== 'gfx' || (gfxType === 'fullscreen-text' && (!gfxBody || gfxBody.length < 5))"
-          :loading="loading"
-        >
-          <v-icon size="small" class="mr-1">mdi-creation</v-icon>
-          Generate & Insert
-        </v-btn>
+
+        <!-- GFX tab buttons -->
+        <template v-if="activeTab === 'gfx'">
+          <v-btn
+            color="primary"
+            variant="outlined"
+            @click="handleInsertOnly"
+            :disabled="gfxType === 'fullscreen-text' && (!gfxBody || gfxBody.length < 5)"
+          >
+            <v-icon size="small" class="mr-1">mdi-text-box-plus</v-icon>
+            Insert Cue Only
+          </v-btn>
+          <v-btn
+            color="success"
+            variant="flat"
+            @click="handleSubmit"
+            :disabled="gfxType === 'fullscreen-text' && (!gfxBody || gfxBody.length < 5)"
+            :loading="loading"
+          >
+            <v-icon size="small" class="mr-1">mdi-creation</v-icon>
+            Generate & Insert
+          </v-btn>
+        </template>
+
+        <!-- Social/XPOST tab buttons -->
+        <template v-if="activeTab === 'social'">
+          <v-btn
+            color="primary"
+            variant="flat"
+            @click="handleSocialInsert"
+            :disabled="!canInsertSocial"
+            :loading="loading"
+          >
+            <v-icon size="small" class="mr-1">mdi-twitter</v-icon>
+            Insert X Post Cue
+          </v-btn>
+        </template>
       </v-card-actions>
     </v-card>
 
@@ -657,6 +759,189 @@ export default {
     const aspectRatio = ref('16:9')
     const socialHeadline = ref('')
     const socialSubtext = ref('')
+
+    // Whiteboard X Post selection
+    const whiteboardXPosts = ref([])
+    const loadingWhiteboardPosts = ref(false)
+    const selectedWhiteboardXPost = ref(null)
+    const selectedXPostData = ref(null)
+
+    // Fetch whiteboard X posts when social tab opens with Twitter selected
+    const fetchWhiteboardXPosts = async () => {
+      if (!props.currentEpisode) return
+      loadingWhiteboardPosts.value = true
+      try {
+        const response = await axios.get(`/api/whiteboard/${props.currentEpisode}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
+            'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
+          }
+        })
+        const items = response.data?.items || []
+        // Filter for items with social_metadata that are X/Twitter posts
+        const xPosts = items.filter(item => {
+          const sm = item.social_metadata
+          if (!sm) return false
+          return sm.platform === 'x' || sm.tweet_id || (item.url && (item.url.includes('x.com') || item.url.includes('twitter.com')))
+        })
+        whiteboardXPosts.value = xPosts.map(item => {
+          const sm = item.social_metadata || {}
+          const text = sm.tweet_text || item.preview_description || ''
+          const truncated = text.length > 80 ? text.substring(0, 80) + '...' : text
+          return {
+            id: item.id,
+            displayLabel: `@${sm.author_handle || '?'}: ${truncated}`,
+            subtitle: `${sm.likes ? sm.likes + ' likes' : ''} ${sm.retweets ? sm.retweets + ' RTs' : ''} ${sm.published_time ? '- ' + new Date(sm.published_time).toLocaleDateString() : ''}`.trim(),
+            authorAvatar: sm.author_avatar || null,
+            socialMetadata: sm,
+            url: item.url,
+            mediaAssetId: item.media_asset_id,
+            mediaPath: item.media_path,
+            assetId: item.asset_id
+          }
+        })
+      } catch (error) {
+        console.error('Failed to fetch whiteboard X posts:', error)
+        whiteboardXPosts.value = []
+      } finally {
+        loadingWhiteboardPosts.value = false
+      }
+    }
+
+    // Handle X post selection from dropdown
+    const handleXPostSelected = (item) => {
+      if (!item) {
+        selectedXPostData.value = null
+        socialPostUrl.value = ''
+        return
+      }
+      selectedXPostData.value = item.socialMetadata
+      socialPostUrl.value = item.url || ''
+    }
+
+    // Can insert social cue check
+    const canInsertSocial = computed(() => {
+      if (socialPlatform.value === 'twitter') {
+        return !!(selectedXPostData.value || socialPostUrl.value)
+      }
+      return !!socialPostUrl.value
+    })
+
+    // Handle social/xpost cue insertion
+    const handleSocialInsert = async () => {
+      if (socialPlatform.value !== 'twitter') {
+        showNotImplementedDialog.value = true
+        return
+      }
+
+      loading.value = true
+      try {
+        let xPostData = selectedXPostData.value
+        let postUrl = socialPostUrl.value
+
+        // If URL provided but no selected post, fetch the data
+        if (!xPostData && postUrl) {
+          try {
+            const previewResp = await axios.get(`/api/whiteboard/fetch-link-preview?url=${encodeURIComponent(postUrl)}`, {
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
+                'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
+              }
+            })
+            const preview = previewResp.data
+            // Extract x_ prefixed fields into social metadata
+            xPostData = {}
+            for (const [key, val] of Object.entries(preview)) {
+              if (key.startsWith('x_')) {
+                xPostData[key.substring(2)] = val
+              }
+            }
+            if (!xPostData.tweet_id) {
+              // Try to extract tweet_id from URL
+              const tweetIdMatch = postUrl.match(/status\/(\d+)/)
+              if (tweetIdMatch) xPostData.tweet_id = tweetIdMatch[1]
+            }
+          } catch (err) {
+            console.error('Failed to fetch X post data:', err)
+          }
+        }
+
+        if (!xPostData || (!xPostData.tweet_id && !xPostData.tweet_text)) {
+          alert('Could not retrieve X post data. Please try again or select a cached post.')
+          return
+        }
+
+        const assetId = await generateAssetId()
+        const slug = (xPostData.author_handle || 'xpost') + '-' + (xPostData.tweet_id || Date.now()).toString().slice(-8)
+
+        // Build XPOST cue data with all Twitter metadata
+        const cueData = {
+          type: 'GFX',
+          gfxType: 'xpost',
+          assetId: assetId,
+          slug: slug,
+          // Core tweet data
+          tweetId: xPostData.tweet_id,
+          tweetText: xPostData.tweet_text,
+          authorName: xPostData.author_name,
+          authorHandle: xPostData.author_handle,
+          authorAvatar: xPostData.author_avatar,
+          authorVerified: xPostData.author_verified || false,
+          authorBio: xPostData.author_bio,
+          authorFollowers: xPostData.author_followers,
+          authorFollowing: xPostData.author_following,
+          publishedTime: xPostData.published_time,
+          conversationId: xPostData.conversation_id,
+          // Engagement
+          likes: xPostData.likes,
+          retweets: xPostData.retweets,
+          replies: xPostData.replies,
+          quotes: xPostData.quotes,
+          // Media
+          mediaUrls: xPostData.media_urls || [],
+          mediaObjects: xPostData.media_objects || [],
+          // Entities
+          entities: xPostData.entities || {},
+          referencedTweets: xPostData.referenced_tweets || [],
+          // Source
+          sourceUrl: postUrl,
+          platform: 'x',
+          aspectRatio: aspectRatio.value,
+          // Full original metadata for archival
+          fullMetadata: xPostData
+        }
+
+        emit('submit', cueData)
+        resetSocialForm()
+        emit('update:show', false)
+      } catch (error) {
+        console.error('Error inserting X post cue:', error)
+      } finally {
+        loading.value = false
+      }
+    }
+
+    const resetSocialForm = () => {
+      socialPostUrl.value = ''
+      selectedWhiteboardXPost.value = null
+      selectedXPostData.value = null
+      socialHeadline.value = ''
+      socialSubtext.value = ''
+    }
+
+    // Watch for Social tab + Twitter platform to auto-fetch
+    watch([activeTab, socialPlatform], ([tab, platform]) => {
+      if (tab === 'social' && platform === 'twitter' && props.currentEpisode) {
+        fetchWhiteboardXPosts()
+      }
+    })
+
+    // Also fetch when modal opens on social tab
+    watch(() => props.show, (newVal) => {
+      if (newVal && activeTab.value === 'social' && socialPlatform.value === 'twitter') {
+        fetchWhiteboardXPosts()
+      }
+    })
 
     // Computed properties for URL input
     const shouldShowUrlInput = computed(() => {
@@ -948,6 +1233,14 @@ export default {
       urlInputLabel,
       urlInputPlaceholder,
       urlInputHint,
+      // X Post selection
+      whiteboardXPosts,
+      loadingWhiteboardPosts,
+      selectedWhiteboardXPost,
+      selectedXPostData,
+      handleXPostSelected,
+      canInsertSocial,
+      handleSocialInsert,
       // Info and Chart
       chartType,
       chartData,
@@ -1054,5 +1347,29 @@ export default {
 /* Full screen text interface */
 .fullscreen-text-interface {
   margin-top: 8px;
+}
+
+/* X Post selector styles */
+.xpost-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.xpost-divider-text {
+  font-size: 0.8rem;
+  color: #888;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.xpost-list-item {
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.xpost-preview-card {
+  border-color: #1da1f2 !important;
+  background: #f8fcff;
 }
 </style>

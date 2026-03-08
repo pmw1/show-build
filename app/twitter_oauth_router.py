@@ -169,7 +169,7 @@ async def manual_oauth_callback(
         config = get_twitter_config(db)
 
         # Exchange code for access token
-        token_url = "https://api.twitter.com/2/oauth2/token"
+        token_url = "https://api.x.com/2/oauth2/token"
         # Use out-of-band redirect for manual flow
         redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
 
@@ -282,7 +282,7 @@ async def oauth_callback(
         config = get_twitter_config(db)
 
         # Exchange code for access token
-        token_url = "https://api.twitter.com/2/oauth2/token"
+        token_url = "https://api.x.com/2/oauth2/token"
         redirect_uri = "https://192.168.51.210:8091/api/twitter/callback"
 
         # Prepare client credentials
@@ -370,7 +370,7 @@ def get_twitter_user_info(access_token: str) -> Dict[str, Any]:
         }
 
         response = requests.get(
-            'https://api.twitter.com/2/users/me',
+            'https://api.x.com/2/users/me',
             headers=headers,
             params={'user.fields': 'id,name,username'},
             timeout=10
@@ -426,7 +426,7 @@ def refresh_access_token(token: TwitterOAuthToken, db: Session) -> Optional[Twit
         }
 
         response = requests.post(
-            'https://api.twitter.com/2/oauth2/token',
+            'https://api.x.com/2/oauth2/token',
             headers=headers,
             data=data,
             timeout=10
@@ -517,7 +517,7 @@ async def post_tweet(
             payload['reply'] = {'in_reply_to_tweet_id': tweet.reply_to_tweet_id}
 
         response = requests.post(
-            'https://api.twitter.com/2/tweets',
+            'https://api.x.com/2/tweets',
             headers=headers,
             json=payload,
             timeout=10
@@ -575,7 +575,7 @@ async def get_user_timeline(
         }
 
         response = requests.get(
-            f'https://api.twitter.com/2/users/{token.twitter_user_id}/tweets',
+            f'https://api.x.com/2/users/{token.twitter_user_id}/tweets',
             headers=headers,
             params=params,
             timeout=10
@@ -619,7 +619,7 @@ async def delete_tweet(
         }
 
         response = requests.delete(
-            f'https://api.twitter.com/2/tweets/{tweet_id}',
+            f'https://api.x.com/2/tweets/{tweet_id}',
             headers=headers,
             timeout=10
         )
@@ -666,7 +666,7 @@ async def get_user_info(
         }
 
         response = requests.get(
-            f'https://api.twitter.com/2/users/by/username/{username}',
+            f'https://api.x.com/2/users/by/username/{username}',
             headers=headers,
             params=params,
             timeout=10
@@ -718,7 +718,7 @@ async def download_tweet_media(
         }
 
         response = requests.get(
-            f'https://api.twitter.com/2/tweets/{tweet_id}',
+            f'https://api.x.com/2/tweets/{tweet_id}',
             headers=headers,
             params=params,
             timeout=10

@@ -386,7 +386,7 @@ export class CueParser {
       outcue: cueData.outcue, // SOT outcue (last 5 words of transcription)
       imageSrc: cueData.imageSrc,
       imageTag: cueData.imageTag,
-      duration: cueData.duration,
+      duration: cueData.duration || (['IMG', 'GFX'].includes((cueData.type || '').toUpperCase()) ? '00:00:15:00' : undefined),
       quote: cueData.quote,
       attribution: cueData.attribution,
       // FSQ style fields

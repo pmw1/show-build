@@ -139,6 +139,22 @@ app.add_middleware(
 # Mount static files for episode assets (images, etc.)
 app.mount("/episodes", StaticFiles(directory="/home/episodes"), name="episodes")
 
+# Mount static files for repo assets (whiteboard media, content library)
+repo_dir = Path("/home/repo")
+try:
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/repo", StaticFiles(directory="/home/repo"), name="repo")
+except (PermissionError, OSError) as e:
+    logger.warning(f"Could not mount /repo static files: {e}")
+
+# Mount static files for media assets
+media_assets_dir = Path("/home/media_assets")
+try:
+    media_assets_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/media_assets", StaticFiles(directory="/home/media_assets"), name="media_assets")
+except (PermissionError, OSError) as e:
+    logger.warning(f"Could not mount /media_assets static files: {e}")
+
 # Mount static files for profile pictures
 profile_pics_dir = Path("/home/profile_pictures")
 try:

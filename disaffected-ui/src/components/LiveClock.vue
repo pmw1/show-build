@@ -150,24 +150,27 @@ onUnmounted(() => {
   font-weight: bold;
   text-align: center;
   text-transform: uppercase;
-  padding: 0 8px 0 8px;
-  margin-top: -4px;
+  padding: 0 8px 1px 8px;
+  margin-top: -6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .countdown-green {
-  color: white;
+  color: #4caf50;
 }
 
 .countdown-yellow {
-  color: white;
+  color: #ff9800;
 }
 
 .countdown-red {
-  color: white;
+  color: #f44336;
 }
 
 .countdown-live {
-  color: white;
+  color: #f44336;
   animation: pulse 1s infinite;
 }
 

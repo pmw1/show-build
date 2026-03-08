@@ -12,6 +12,12 @@ import axios from 'axios'
 const HEARTBEAT_INTERVAL_MS = 15000
 
 export function useSegmentLock() {
+  // ============================================================
+  // SEGMENT LOCKING DISABLED — all calls are no-ops that succeed
+  // Remove this flag (and restore original code below) to re-enable
+  // ============================================================
+  const LOCKING_DISABLED = true
+
   // Lock state
   const isLocked = ref(false)
   const lockInfo = ref({
@@ -51,6 +57,8 @@ export function useSegmentLock() {
    * Check lock status for a rundown item
    */
   const checkLockStatus = async (assetId) => {
+    if (LOCKING_DISABLED) return { locked: false }
+
     if (!assetId) {
       error.value = 'No asset ID provided'
       return { locked: false }
@@ -92,6 +100,11 @@ export function useSegmentLock() {
    * Acquire a lock on a rundown item
    */
   const acquireLock = async (assetId) => {
+    if (LOCKING_DISABLED) {
+      currentAssetId.value = assetId
+      return { success: true }
+    }
+
     if (!assetId) {
       error.value = 'No asset ID provided'
       return { success: false, error: 'No asset ID provided' }
@@ -159,6 +172,11 @@ export function useSegmentLock() {
    * Release the current lock
    */
   const releaseLock = async () => {
+    if (LOCKING_DISABLED) {
+      currentAssetId.value = null
+      return { success: true }
+    }
+
     // Stop heartbeat first
     stopHeartbeat()
 

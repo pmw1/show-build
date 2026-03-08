@@ -4,6 +4,7 @@
     <div class="scrollable-content-wrapper">
       <!-- Show Info Header (full width, scrolls off) -->
       <ShowInfoHeader
+        ref="showInfoHeaderRef"
         :title="currentShowTitle"
         :episode-info="currentEpisodeInfoText"
         :episode-number="currentEpisodeNumber"
@@ -32,6 +33,7 @@
         @update:airTime="handleAirTimeChange"
         @update:airTimezone="handleAirTimezoneChange"
         @take-thumbnail="handleTakeThumbnail"
+        @convert-thumbnail-to-png="handleConvertThumbnailToPng"
         @update:productionStatus="handleProductionStatusChange"
         @update:title="handleTitleChange"
         @update:slug="handleSlugChange"
@@ -45,6 +47,11 @@
         @request-new-episode-assetid="handleRequestNewEpisodeAssetID"
         @show-assetid-info="handleShowAssetIDInfo"
         @generate-script="handleGenerateScript"
+        :selected-item="currentRundownItem"
+        :saving="saving"
+        :has-unsaved-changes="hasUnsavedChanges"
+        @update-segment-field="handleMetadataFieldUpdate"
+        @save-episode="saveEverything"
       />
 
       <!-- Main Content Area -->
@@ -79,19 +86,20 @@
         @restore-revision="handleRestoreRevision"
       />
 
+      <!-- Collapse Rundown toggle (inner border, visible when panel is open) -->
+      <div
+        v-if="showRundownPanel"
+        class="sidebar-collapse-toggle sidebar-collapse-left"
+        @click="showRundownPanel = false"
+      >
+        <v-icon size="14">mdi-chevron-left</v-icon>
+        <v-tooltip activator="parent" location="right">Hide Rundown</v-tooltip>
+      </div>
+
       <!-- Reopen Rundown Button (when panel is closed) -->
-      <div v-else class="rundown-tab-controls-closed">
-        <v-btn
-          icon
-          size="small"
-          @click="showRundownPanel = true"
-          class="rundown-tab-btn"
-        >
-          <v-icon>mdi-arrow-expand-horizontal</v-icon>
-          <v-tooltip activator="parent" location="right">
-            Show Rundown Panel
-          </v-tooltip>
-        </v-btn>
+      <div v-else class="sidebar-collapse-toggle sidebar-expand-left" @click="showRundownPanel = true">
+        <v-icon size="14">mdi-chevron-right</v-icon>
+        <v-tooltip activator="parent" location="right">Show Rundown</v-tooltip>
       </div>
 
       <!-- Editor Panel (scrollable center column) -->
@@ -115,7 +123,7 @@
           :lock-info="segmentLockState?.lockInfo?.value || { lockedBy: '', lockedAt: null }"
           @save="() => saveCurrentItem(true)"
           @save-all="saveEverything"
-          @save-current="() => saveCurrentItem(true)"
+          @save-current="handleEditorSaveCurrent"
           @toggle-rundown-panel="showRundownPanel = !showRundownPanel"
           @toggle-metadata-panel="showMetadataPanel = !showMetadataPanel"
           @show-asset-browser-modal="showAssetBrowserModal = true"
@@ -131,6 +139,7 @@
           @edit-gfx-cue="handleEditGfxCue"
           @edit-img-cue="handleEditImgCue"
           @edit-dir-cue="handleEditDirCue"
+          @edit-rif-cue="handleEditRifCue"
           @show-vo-modal="handleShowVoModal"
           @show-nat-modal="handleShowNatModal"
           @show-rif-modal="handleShowRifModal"
@@ -163,7 +172,9 @@
         :save-state="episodeSaveState"
         :version-history="versionHistory"
         :loading-versions="loadingVersions"
+        :rundown-items="rundownItems"
         @update-field="handleMetadataFieldUpdate"
+        @update-segment-field="handleMetadataFieldUpdate"
         @toggle-width="toggleMetadataWidth"
         @close="showMetadataPanel = false"
         @reset-fields="resetMetadataFields"
@@ -173,21 +184,29 @@
         @generate-media-list="handleGenerateMediaList"
         @generate-prompter-files="handleGeneratePrompterFiles"
         @restore-version="restoreToVersion"
+        @place-library-item="handleLibraryItemSelected"
+        @create-new-library-item="handleCreateNewLibraryItem"
+        @save-all="saveEverything"
       />
-      
-      <!-- Reopen Metadata Buttons (when panel is closed) - Tab style -->
-      <div v-else-if="currentRundownItem" class="metadata-tab-controls-closed">
-        <v-btn
-          icon
-          size="small"
-          @click="showMetadataPanel = true"
-          class="metadata-tab-btn"
-        >
-          <v-icon>mdi-arrow-expand-horizontal</v-icon>
-          <v-tooltip activator="parent" location="left">
-            Show Metadata Panel
-          </v-tooltip>
-        </v-btn>
+
+      <!-- Collapse Metadata toggle (inner border, visible when panel is open) -->
+      <div
+        v-if="showMetadataPanel"
+        class="sidebar-collapse-toggle sidebar-collapse-right"
+        @click="showMetadataPanel = false"
+      >
+        <v-icon size="14">mdi-chevron-right</v-icon>
+        <v-tooltip activator="parent" location="left">Hide Metadata</v-tooltip>
+      </div>
+
+      <!-- Reopen Metadata Button (when panel is closed) -->
+      <div
+        v-else-if="currentRundownItem"
+        class="sidebar-collapse-toggle sidebar-expand-right"
+        @click="showMetadataPanel = true"
+      >
+        <v-icon size="14">mdi-chevron-left</v-icon>
+        <v-tooltip activator="parent" location="left">Show Metadata</v-tooltip>
       </div>
     </div>
     </div><!-- End scrollable-content-wrapper -->
@@ -210,6 +229,7 @@
       v-model:slug="gfxSlug"
       v-model:description="gfxDescription"
       :graphic-preview="graphicPreview"
+      :current-episode="currentEpisodeNumber"
       @paste-from-clipboard="pasteFromClipboard"
       @select-file="selectFile"
       @paste-url="pasteUrl"
@@ -240,7 +260,7 @@
       @submit="submitVo"
     />
     <NatModal v-model:show="showNatModal" @submit="submitNat" />
-    <RifModal v-model:show="showRifModal" @submit="submitRif" />
+    <RifModal v-model:show="showRifModal" :edit-cue-data="editingRifCueData" @submit="submitRif" />
     <PkgModal v-model:show="showPkgModal" @submit="submitPkg" />
     <DirModal v-model:show="showDirModal" :editing-cue-data="editingDirCueData" @submit="submitDir" />
     <BumpModal v-model:show="showBumpModal" @submit="submitBump" />
@@ -573,7 +593,17 @@ export default {
     // CRITICAL: Flush any pending edits before component unmounts
     if (this.$refs.editorPanel?.flushPendingChanges) {
       console.log('💾 Flushing pending changes before unmount...');
+      // Clear editing flags FIRST so the watcher autosave isn't skipped
+      if (this.$refs.editorPanel) {
+        this.$refs.editorPanel.isActivelyEditing = false;
+        this.$refs.editorPanel.activelyEditingSegment = null;
+      }
       this.$refs.editorPanel.flushPendingChanges();
+    }
+    // Ensure any pending content gets saved to DB before teardown
+    if (this.hasUnsavedChanges && this.selectedItemIndex >= 0) {
+      console.log('💾 Saving unsaved changes before unmount...');
+      this.saveCurrentItem(false);
     }
     // Clean up beforeunload handler
     if (this.handleBeforeUnload) {
@@ -585,6 +615,10 @@ export default {
     if (this._scrollWrapper) {
       this._scrollWrapper.removeEventListener('scroll', this.updateSidePanelHeight);
       window.removeEventListener('resize', this.updateSidePanelHeight);
+    }
+    // Clean up remote sync timer
+    if (this._remoteSyncTimer) {
+      clearTimeout(this._remoteSyncTimer);
     }
     // Clean up episode check interval
     if (this.checkEpisodeInterval) {
@@ -617,6 +651,12 @@ export default {
     this.debouncedCaptureUndoState = debounce(() => {
       this.captureUndoState();
     }, 300);
+
+    // Remote content sync — reload from DB after 15 seconds of inactivity
+    // Picks up changes made by other users without disrupting the current user
+    this._remoteSyncTimer = null;
+    this._remoteSyncEnabled = true;
+    this._pendingRemoteContent = null;
   },
 
   watch: {
@@ -632,10 +672,19 @@ export default {
             console.log('📝 Content changed during item load - skipping autosave');
             return;
           }
+          // CRITICAL FIX: Skip redundant autosave when EditorPanel is actively editing.
+          // EditorPanel's updateTextSegment already saves via persistCurrentItemToDatabase -> save-current emit.
+          // This watcher-based autosave would trigger a SECOND save that causes a reactivity cascade,
+          // which can re-render v-html in contenteditable elements and reset the cursor position.
+          const editorPanel = this.$refs.editorPanel;
+          if (editorPanel?.isActivelyEditing) {
+            console.log('📝 Content changed during active editing - skipping redundant watcher autosave (EditorPanel handles save)');
+            this.hasUnsavedChanges = true;
+            return;
+          }
           console.log('📝 Content changed, triggering autosave...');
           this.hasUnsavedChanges = true;
           // Capture which paragraph is being edited NOW, before debounce delay
-          const editorPanel = this.$refs.editorPanel;
           this.paragraphBeingEdited = editorPanel?.focusedParagraphIndex ?? editorPanel?.activelyEditingSegment ?? null;
           console.log('📝 Captured paragraph being edited:', this.paragraphBeingEdited);
           this.debouncedAutoSave();
@@ -1094,6 +1143,7 @@ Good night!
       showVoModal: false,
       showNatModal: false,
       showRifModal: false,
+      editingRifCueData: null,
       showDirModal: false,
       showBumpModal: false,
       showStingModal: false,
@@ -1895,9 +1945,14 @@ Try dropping an image or video file here!`
     },
     handleShowRifModal() {
       if (!this.requireRundownItemSelected('RIF cue')) return;
+      this.editingRifCueData = null;
       if (!this.showRifModal) {
         this.showRifModal = true;
       }
+    },
+    handleEditRifCue(cueData) {
+      this.editingRifCueData = cueData;
+      this.showRifModal = true;
     },
     handleShowPkgModal() {
       if (!this.requireRundownItemSelected('PKG cue')) return;
@@ -1954,6 +2009,10 @@ Try dropping an image or video file here!`
 
       // CRITICAL: Mark that we have unsaved changes when content is updated
       this.hasUnsavedChanges = true;
+
+      // Reset remote sync timer — user is actively making changes,
+      // so suspend remote reloads until 15s of inactivity
+      this.resetRemoteSyncTimer();
     },
 
     // SINGLE SOURCE HELPER: Append to script content
@@ -2731,6 +2790,132 @@ Try dropping an image or video file here!`
         this.loadingRundown = false;
       }
     },
+    // Reset the 15-second inactivity timer for remote content sync
+    resetRemoteSyncTimer() {
+      if (this._remoteSyncTimer) {
+        clearTimeout(this._remoteSyncTimer);
+      }
+      if (!this._remoteSyncEnabled || this.selectedItemIndex < 0) return;
+
+      this._remoteSyncTimer = setTimeout(() => {
+        this.silentRemoteSync();
+      }, 15000);
+    },
+
+    // Silently fetch the current item from the database and update if changed
+    // Does NOT touch reactive state while user is actively editing a paragraph
+    async silentRemoteSync() {
+      const editorPanel = this.$refs.editorPanel;
+      const currentItem = this.currentRundownItem;
+      if (!currentItem || !currentItem.db_id) return;
+
+      try {
+        const token = localStorage.getItem('auth-token');
+        const response = await fetch(`/api/episodes/rundown-item-by-id/${currentItem.db_id}`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (!response.ok) return;
+
+        const remoteItem = await response.json();
+        const remoteScript = remoteItem.script_content || remoteItem.script || '';
+        const localScript = this.rawMarkdownContent || '';
+
+        // No changes — nothing to do
+        if (remoteScript === localScript) {
+          // Restart timer for next check
+          this.resetRemoteSyncTimer();
+          return;
+        }
+
+        console.log('🔄 Remote content differs from local — syncing');
+
+        if (editorPanel?.isActivelyEditing) {
+          // User is still in a paragraph — stash remote content, apply on blur
+          this._pendingRemoteContent = remoteScript;
+          console.log('🔄 Stashed remote content (will apply on blur)');
+        } else {
+          // User is not actively editing — safe to update
+          this.rawMarkdownContent = remoteScript;
+          this.hasUnsavedChanges = false;
+          console.log('🔄 Remote content applied silently');
+        }
+      } catch (error) {
+        console.error('🔄 Remote sync failed:', error);
+      }
+
+      // Restart timer for next check
+      this.resetRemoteSyncTimer();
+    },
+
+    // Apply any stashed remote content (called when user leaves a paragraph)
+    applyPendingRemoteContent() {
+      if (this._pendingRemoteContent) {
+        console.log('🔄 Applying stashed remote content after blur');
+        this.rawMarkdownContent = this._pendingRemoteContent;
+        this._pendingRemoteContent = null;
+        this.hasUnsavedChanges = false;
+      }
+    },
+
+    // Handle save-current from EditorPanel — silent save when actively editing
+    async handleEditorSaveCurrent() {
+      const editorPanel = this.$refs.editorPanel
+      if (editorPanel?.isActivelyEditing) {
+        // Silent save: persist to DB without touching any reactive state
+        // This prevents UI changes (save button flash, prop updates) that cause
+        // the contenteditable to lose focus during active editing
+        await this.saveCurrentItemSilent()
+      } else {
+        // Normal save — editing has ended
+        await this.saveCurrentItem(false)
+        // Apply any stashed remote content now that editing is done
+        this.applyPendingRemoteContent()
+        // Restart the remote sync timer for the next 15s check
+        this.resetRemoteSyncTimer()
+      }
+    },
+
+    // Silent save — persists to DB but does NOT change hasUnsavedChanges, saving, or any
+    // reactive state. This prevents Vue re-renders that steal focus from contenteditable.
+    async saveCurrentItemSilent() {
+      if (this.selectedItemIndex < 0 || !this.currentRundownItem) return
+
+      try {
+        const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber)
+        const headers = this.getAuthHeaders()
+        const currentItem = { ...this.rundownItems[this.selectedItemIndex] }
+        const contentToSave = this.rawMarkdownContent || this.parsedContent.scriptContent || ''
+
+        // Same corruption guards as saveCurrentItem
+        const existingScript = this.rundownItems[this.selectedItemIndex]?.script || ''
+        if (contentToSave.length < 50 && existingScript.length > 100) {
+          console.error('🚨 BLOCKED silent save: would destroy existing content')
+          return
+        }
+
+        const frontmatterBlockPattern = /^(?:---|(?:-\s){2}-)\s*\n\s*(id|slug|type|title):/gm
+        const frontmatterBlockMatches = contentToSave.match(frontmatterBlockPattern)
+        if (frontmatterBlockMatches && frontmatterBlockMatches.length > 1) {
+          console.error('🚨 BLOCKED silent save: multiple segments detected')
+          return
+        }
+
+        currentItem.script = contentToSave
+        currentItem.scratch = this.scratchContent
+        const assetId = currentItem.asset_id || currentItem.AssetID || currentItem.id
+
+        // Fire-and-forget API call — no reactive state changes
+        await axios.put(
+          `/api/episodes/${paddedId}/save-rundown`,
+          { item: currentItem, asset_id: assetId, save_type: 'autosave' },
+          { headers }
+        )
+        console.log('✅ Silent autosave completed (no reactive state touched)')
+      } catch (error) {
+        console.error('❌ Silent autosave failed:', error)
+      }
+    },
+
     // Save just the current item (autosave - content only, no order changes)
     // isManualSave: true for manual saves (creates version history), false for autosave
     // paragraphToFlash: specific paragraph index to flash on success (captured when typing started)
@@ -2764,9 +2949,10 @@ Try dropping an image or video file here!`
         // NOTE: API returns items with field "script" (not "script_content"), so check .script
         const existingScript = this.rundownItems[this.selectedItemIndex]?.script || '';
         if (contentToSave.length < 50 && existingScript.length > 100) {
-          console.error('🚨 BLOCKED: Attempted to save minimal content over substantial existing content');
-          console.error(`   New content: ${contentToSave.length} chars, Existing: ${existingScript.length} chars`);
-          throw new Error('Blocked save: would destroy existing content');
+          console.warn('Blocked save: would destroy existing content',
+            `(new: ${contentToSave.length} chars, existing: ${existingScript.length} chars)`);
+          this.saving = false;
+          return;
         }
 
         currentItem.script = contentToSave;
@@ -2857,11 +3043,19 @@ Try dropping an image or video file here!`
           // which may have changed during the async axios call if the user switched items.
           // Using the live selectedItemIndex here was Bug #5 - it could write the wrong content
           // to the wrong item's local state during concurrent saves.
-          const savedItem = this.rundownItems[saveTargetIndex];
-          if (savedItem) {
-            savedItem.script = contentToSave;
-            savedItem.scratch = this.scratchContent;
-            savedItem.rawMarkdown = null;  // Clear to prevent stale frontmatter-included content
+          // CURSOR FIX: Skip reactive mutation while EditorPanel is actively editing the same item.
+          // This mutation triggers Vue reactivity on rundownItems which can cascade into
+          // v-html re-renders that reset the cursor position in contenteditable elements.
+          // The content is already saved to the DB; local state will sync on blur/item switch.
+          const editorPanelRef = this.$refs.editorPanel;
+          const isStillEditingSameItem = editorPanelRef?.isActivelyEditing && saveTargetIndex === this.selectedItemIndex;
+          if (!isStillEditingSameItem) {
+            const savedItem = this.rundownItems[saveTargetIndex];
+            if (savedItem) {
+              savedItem.script = contentToSave;
+              savedItem.scratch = this.scratchContent;
+              savedItem.rawMarkdown = null;  // Clear to prevent stale frontmatter-included content
+            }
           }
         }
 
@@ -3204,6 +3398,11 @@ Try dropping an image or video file here!`
       this.saving = true;
       try {
         console.log('🚀 SAVING EVERYTHING - Episode + Rundown');
+
+        // CRITICAL: Wait for Vue reactivity to settle before reading rawMarkdownContent.
+        // EditorPanel.handleSaveAll flushes pending edits and emits update:scriptContent,
+        // but the parent's rawMarkdownContent may not reflect it until the next tick.
+        await this.$nextTick();
 
         // 1. Save episode metadata first
         await this.saveEpisodeMetadata();
@@ -3607,7 +3806,16 @@ Try dropping an image or video file here!`
 
       // CRITICAL: Save current item before switching to prevent data loss
       if (this.selectedItemIndex >= 0 && this.selectedItemIndex !== index) {
-        // STEP 1: Flush any pending edits from EditorPanel's debounce buffer
+        // STEP 1: Clear editing flags BEFORE flush/save so the save can update
+        // rundownItems[].script (the post-save mutation checks isActivelyEditing).
+        // Without this, the mutation is skipped and the item's local .script stays stale,
+        // causing data loss when switching back to this item later.
+        if (this.$refs.editorPanel) {
+          this.$refs.editorPanel.isActivelyEditing = false;
+          this.$refs.editorPanel.activelyEditingSegment = null;
+        }
+
+        // STEP 2: Flush any pending edits from EditorPanel's debounce buffer
         // This ensures typed content that hasn't been emitted yet is captured
         if (this.$refs.editorPanel?.flushPendingChanges) {
           console.log('💾 Flushing pending editor changes before switch...');
@@ -3618,7 +3826,7 @@ Try dropping an image or video file here!`
           console.log('💾 Flush complete, hasUnsavedChanges:', this.hasUnsavedChanges);
         }
 
-        // STEP 2: Now save if there are unsaved changes (including freshly flushed ones)
+        // STEP 3: Now save if there are unsaved changes (including freshly flushed ones)
         if (this.hasUnsavedChanges) {
           console.log('💾 Saving current item before switching...');
           try {
@@ -3740,6 +3948,10 @@ Try dropping an image or video file here!`
       } else {
         this.loadItemContent(null);
       }
+
+      // Start remote sync timer — will check for other users' changes after 15s of inactivity
+      this._pendingRemoteContent = null;
+      this.resetRemoteSyncTimer();
     },
 
     // Navigate to next rundown item (arrow down)
@@ -3876,6 +4088,20 @@ Try dropping an image or video file here!`
         event.preventDefault();
         event.stopPropagation();
         this.redo();
+        return;
+      }
+
+      // TOGGLE LEFT SIDEBAR (Ctrl+Shift+[)
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === 'BracketLeft') {
+        event.preventDefault();
+        this.showRundownPanel = !this.showRundownPanel;
+        return;
+      }
+
+      // TOGGLE RIGHT SIDEBAR (Ctrl+Shift+])
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === 'BracketRight') {
+        event.preventDefault();
+        this.showMetadataPanel = !this.showMetadataPanel;
         return;
       }
 
@@ -4637,28 +4863,64 @@ Try dropping an image or video file here!`
       gfxCueBlock += `[AssetID: ${gfxCueData.assetId}]\n`;
       gfxCueBlock += `[Slug: ${gfxCueData.slug}]\n`;
       gfxCueBlock += `[GfxType: ${gfxCueData.gfxType || 'fullscreen-text'}]\n`;
+      gfxCueBlock += `[Duration: ${gfxCueData.duration || '00:00:15:00'}]\n`;
 
-      if (gfxCueData.title) {
-        gfxCueBlock += `[Title: ${gfxCueData.title}]\n`;
-      }
-      if (gfxCueData.body) {
-        // Escape newlines in body for single-line storage
-        const escapedBody = gfxCueData.body.replace(/\n/g, '\\n');
-        gfxCueBlock += `[Body: ${escapedBody}]\n`;
-      }
-      if (gfxCueData.style) {
-        gfxCueBlock += `[FontSize: ${gfxCueData.style.fontSize}px]\n`;
-        gfxCueBlock += `[FontFamily: ${gfxCueData.style.fontFamily}]\n`;
-        gfxCueBlock += `[TextAlign: ${gfxCueData.style.textAlign}]\n`;
-      }
-      if (gfxCueData.renderMode) {
-        gfxCueBlock += `[RenderMode: ${gfxCueData.renderMode}]\n`;
-      }
-      if (gfxCueData.assetUrl) {
-        gfxCueBlock += `[AssetURL: ${gfxCueData.assetUrl}]\n`;
-      }
-      if (gfxCueData.status) {
-        gfxCueBlock += `[Status: ${gfxCueData.status}]\n`;
+      // XPOST subtype - store all Twitter/X metadata
+      if (gfxCueData.gfxType === 'xpost') {
+        gfxCueBlock += `[Platform: x]\n`;
+        if (gfxCueData.tweetId) gfxCueBlock += `[TweetID: ${gfxCueData.tweetId}]\n`;
+        if (gfxCueData.authorName) gfxCueBlock += `[AuthorName: ${gfxCueData.authorName}]\n`;
+        if (gfxCueData.authorHandle) gfxCueBlock += `[AuthorHandle: ${gfxCueData.authorHandle}]\n`;
+        if (gfxCueData.authorAvatar) gfxCueBlock += `[AuthorAvatar: ${gfxCueData.authorAvatar}]\n`;
+        if (gfxCueData.authorVerified) gfxCueBlock += `[AuthorVerified: true]\n`;
+        if (gfxCueData.authorBio) gfxCueBlock += `[AuthorBio: ${gfxCueData.authorBio.replace(/\n/g, '\\n')}]\n`;
+        if (gfxCueData.authorFollowers) gfxCueBlock += `[AuthorFollowers: ${gfxCueData.authorFollowers}]\n`;
+        if (gfxCueData.authorFollowing) gfxCueBlock += `[AuthorFollowing: ${gfxCueData.authorFollowing}]\n`;
+        if (gfxCueData.tweetText) gfxCueBlock += `[TweetText: ${gfxCueData.tweetText.replace(/\n/g, '\\n')}]\n`;
+        if (gfxCueData.publishedTime) gfxCueBlock += `[PublishedTime: ${gfxCueData.publishedTime}]\n`;
+        if (gfxCueData.conversationId) gfxCueBlock += `[ConversationID: ${gfxCueData.conversationId}]\n`;
+        if (gfxCueData.likes) gfxCueBlock += `[Likes: ${gfxCueData.likes}]\n`;
+        if (gfxCueData.retweets) gfxCueBlock += `[Retweets: ${gfxCueData.retweets}]\n`;
+        if (gfxCueData.replies) gfxCueBlock += `[Replies: ${gfxCueData.replies}]\n`;
+        if (gfxCueData.quotes) gfxCueBlock += `[Quotes: ${gfxCueData.quotes}]\n`;
+        if (gfxCueData.mediaUrls && gfxCueData.mediaUrls.length) {
+          gfxCueBlock += `[MediaURLs: ${JSON.stringify(gfxCueData.mediaUrls)}]\n`;
+        }
+        if (gfxCueData.mediaObjects && gfxCueData.mediaObjects.length) {
+          gfxCueBlock += `[MediaObjects: ${JSON.stringify(gfxCueData.mediaObjects)}]\n`;
+        }
+        if (gfxCueData.entities && Object.keys(gfxCueData.entities).length) {
+          gfxCueBlock += `[Entities: ${JSON.stringify(gfxCueData.entities)}]\n`;
+        }
+        if (gfxCueData.referencedTweets && gfxCueData.referencedTweets.length) {
+          gfxCueBlock += `[ReferencedTweets: ${JSON.stringify(gfxCueData.referencedTweets)}]\n`;
+        }
+        if (gfxCueData.sourceUrl) gfxCueBlock += `[SourceURL: ${gfxCueData.sourceUrl}]\n`;
+        if (gfxCueData.aspectRatio) gfxCueBlock += `[AspectRatio: ${gfxCueData.aspectRatio}]\n`;
+        gfxCueBlock += `[Status: pending]\n`;
+      } else {
+        // Standard GFX fields
+        if (gfxCueData.title) {
+          gfxCueBlock += `[Title: ${gfxCueData.title}]\n`;
+        }
+        if (gfxCueData.body) {
+          const escapedBody = gfxCueData.body.replace(/\n/g, '\\n');
+          gfxCueBlock += `[Body: ${escapedBody}]\n`;
+        }
+        if (gfxCueData.style) {
+          gfxCueBlock += `[FontSize: ${gfxCueData.style.fontSize}px]\n`;
+          gfxCueBlock += `[FontFamily: ${gfxCueData.style.fontFamily}]\n`;
+          gfxCueBlock += `[TextAlign: ${gfxCueData.style.textAlign}]\n`;
+        }
+        if (gfxCueData.renderMode) {
+          gfxCueBlock += `[RenderMode: ${gfxCueData.renderMode}]\n`;
+        }
+        if (gfxCueData.assetUrl) {
+          gfxCueBlock += `[AssetURL: ${gfxCueData.assetUrl}]\n`;
+        }
+        if (gfxCueData.status) {
+          gfxCueBlock += `[Status: ${gfxCueData.status}]\n`;
+        }
       }
       gfxCueBlock += `<!-- End Cue -->`;
 
@@ -4687,8 +4949,9 @@ Try dropping an image or video file here!`
       this.hasUnsavedChanges = true;
       this.checkForUnsavedRundownChanges();
 
-      this.$toast?.success('GFX cue inserted successfully!');
-      console.log('✅ GFX cue inserted');
+      const cueLabel = gfxCueData.gfxType === 'xpost' ? 'X Post' : 'GFX';
+      this.$toast?.success(`${cueLabel} cue inserted successfully!`);
+      console.log(`✅ ${cueLabel} cue inserted`);
     },
     
     submitFsq(fsqCueData) {
@@ -5977,6 +6240,7 @@ Try dropping an image or video file here!`
         imgCueBlock += `[Type: IMG]\n`;
         imgCueBlock += `[AssetID: ${assetId}]\n`;
         imgCueBlock += `[Slug: ${imgCueData.slug}]\n`;
+        imgCueBlock += `[Duration: ${imgCueData.duration || '00:00:15:00'}]\n`;
         if (imgCueData.description) {
           imgCueBlock += `[Description: ${imgCueData.description}]\n`;
         }
@@ -6383,6 +6647,73 @@ Try dropping an image or video file here!`
       } catch (error) {
         console.error('Failed to take thumbnail:', error);
         this.$emit('show-snackbar', 'Failed to confirm thumbnail', 'error');
+      }
+    },
+
+    async handleConvertThumbnailToPng({ url }) {
+      console.log('Converting thumbnail to PNG:', url);
+      this.$emit('show-snackbar', 'Thumbnail detected as non-PNG media. Automatically converting now...', 'warning');
+
+      try {
+        const response = await axios.post(`/api/episodes/${this.currentEpisodeNumber}/thumbnail/convert-to-png`, {
+          url: url
+        });
+
+        if (!response.data.success) {
+          console.warn('Thumbnail conversion rejected:', response.data.error);
+          return;
+        }
+
+        const taskId = response.data.task_id;
+
+        // Poll for completion
+        const pollInterval = setInterval(async () => {
+          try {
+            const status = await axios.get(`/api/episodes/${this.currentEpisodeNumber}/thumbnail/convert-status/${taskId}`);
+
+            if (status.data.ready) {
+              clearInterval(pollInterval);
+
+              if (status.data.successful && status.data.result?.success) {
+                const newUrl = status.data.result.png_url;
+                const newFilename = status.data.result.filename;
+
+                // Replace the thumbnail in-place in the array
+                const idx = this.episodeThumbnails.findIndex(t => t.url === url);
+                if (idx !== -1) {
+                  this.episodeThumbnails[idx] = {
+                    ...this.episodeThumbnails[idx],
+                    url: newUrl + '?t=' + Date.now(), // cache-bust
+                    filename: newFilename
+                  };
+                  // Trigger reactivity
+                  this.episodeThumbnails = [...this.episodeThumbnails];
+                }
+
+                // Notify ShowInfoHeader of success
+                if (this.$refs.showInfoHeaderRef) {
+                  this.$refs.showInfoHeaderRef.onThumbnailConverted();
+                }
+
+                this.$emit('show-snackbar', 'Thumbnail is now in PNG format.', 'success');
+                console.log('Thumbnail converted to PNG:', newUrl);
+              } else {
+                console.error('Thumbnail conversion failed:', status.data.error);
+                this.$emit('show-snackbar', 'Thumbnail PNG conversion failed', 'error');
+              }
+            }
+          } catch (pollError) {
+            console.error('Error polling conversion status:', pollError);
+            clearInterval(pollInterval);
+          }
+        }, 1500);
+
+        // Safety timeout: stop polling after 60 seconds
+        setTimeout(() => clearInterval(pollInterval), 60000);
+
+      } catch (error) {
+        console.error('Failed to start thumbnail conversion:', error);
+        this.$emit('show-snackbar', 'Failed to start thumbnail conversion', 'error');
       }
     },
 
@@ -6893,6 +7224,16 @@ Try dropping an image or video file here!`
   overflow: hidden;
 }
 
+/* Hide all scrollbars in content editor while preserving scroll functionality */
+.content-editor-wrapper *::-webkit-scrollbar {
+  display: none;
+}
+
+.content-editor-wrapper * {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Content Editor Loading Overlay */
 .content-editor-loading-overlay :deep(.v-overlay__scrim) {
   opacity: 0 !important;
@@ -7307,6 +7648,7 @@ Try dropping an image or video file here!`
 
 .editor-panel {
   flex: 1;
+  min-width: 0; /* CRITICAL: prevents flex item from expanding beyond its share, which pushes sidebars off-screen */
   display: flex;
   flex-direction: column;
   height: auto; /* Grow with content */
@@ -7341,7 +7683,9 @@ Try dropping an image or video file here!`
   flex-shrink: 0; /* Don't compress the header */
   position: relative !important; /* NOT sticky - scrolls off */
   z-index: 1; /* Keep it above content but below modals */
-  border-bottom: 1px solid var(--v-divider-color, #E0E0E0);
+  border-bottom: 2.25px dotted rgba(25, 118, 210, 0.75);
+  margin-bottom: 0.4em;
+  padding-bottom: 0.4em;
 }
 
 .rundown-table-header {
@@ -7549,68 +7893,57 @@ Try dropping an image or video file here!`
 
 /* Rundown Panel Reopen Button */
 /* Rundown tab controls when panel is closed - positioned on left side */
-.rundown-tab-controls-closed {
-  position: fixed;
-  left: 0;
+/* Sidebar collapse/expand toggles — discreet chevron on the inner border at 50% height */
+.sidebar-collapse-toggle {
+  position: sticky;
   top: 50vh;
-  transform: translateY(-50%);
+  align-self: center;
+  width: 16px;
+  height: 40px;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  z-index: 100;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(200, 200, 200, 0.5);
+  border: 1px solid rgba(180, 180, 180, 0.4);
+  cursor: pointer;
+  z-index: 10;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+  opacity: 0.4;
+  flex-shrink: 0;
 }
 
-.rundown-tab-btn {
-  border-radius: 0 8px 8px 0 !important;
-  background-color: rgba(25, 118, 210, 0.9) !important;
-  color: white !important;
-  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3) !important;
-  transition: all 0.2s ease !important;
-  width: 32px !important;
-  height: 40px !important;
+.sidebar-collapse-toggle:hover {
+  background-color: rgba(25, 118, 210, 0.25);
+  border-color: rgba(25, 118, 210, 0.5);
+  opacity: 1;
 }
 
-.rundown-tab-btn:hover {
-  background-color: rgba(25, 118, 210, 1) !important;
-  transform: translateX(4px) !important;
-  box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.4) !important;
+.sidebar-collapse-toggle .v-icon {
+  color: rgba(100, 100, 100, 0.8) !important;
 }
 
-.rundown-tab-btn .v-icon {
-  color: white !important;
+.sidebar-collapse-toggle:hover .v-icon {
+  color: #1976d2 !important;
 }
 
-/* Metadata Panel Reopen Button */
-/* Metadata tab controls when panel is closed - positioned on right side */
-.metadata-tab-controls-closed {
-  position: fixed;
-  right: 0;
-  top: 50vh;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  z-index: 100;
+/* Left side (rundown) — collapse points left, expand points right */
+.sidebar-collapse-left {
+  border-radius: 0 4px 4px 0;
+  margin-left: -1px;
 }
 
-.metadata-tab-btn {
-  border-radius: 8px 0 0 8px !important;
-  background-color: rgba(25, 118, 210, 0.9) !important;
-  color: white !important;
-  box-shadow: -2px 2px 8px rgba(0, 0, 0, 0.3) !important;
-  transition: all 0.2s ease !important;
-  width: 32px !important;
-  height: 40px !important;
+.sidebar-expand-left {
+  border-radius: 0 4px 4px 0;
 }
 
-.metadata-tab-btn:hover {
-  background-color: rgba(25, 118, 210, 1) !important;
-  transform: translateX(-4px) !important;
-  box-shadow: -4px 4px 12px rgba(0, 0, 0, 0.4) !important;
+/* Right side (metadata) — collapse points right, expand points left */
+.sidebar-collapse-right {
+  border-radius: 4px 0 0 4px;
+  margin-right: -1px;
 }
 
-.metadata-tab-btn .v-icon {
-  color: white !important;
+.sidebar-expand-right {
+  border-radius: 4px 0 0 4px;
 }
 
 </style>

@@ -178,24 +178,22 @@ export function useWhiteboardConnections(cards) {
           break
         }
       } else {
-        // Not dragging: show hover state
-        if (isParent) {
-          // Parent: entire card area triggers hover, dot at center
-          if (isOverCard(rect, canvasX, canvasY)) {
+        // Not dragging: show hover state only when mouse is near the border.
+        // This ensures clicking inside any card (including parent) drags it,
+        // while clicking on the border activates linking mode.
+        if (isNearBorder(rect, canvasX, canvasY)) {
+          if (isParent) {
+            // Parent: dot locks to center (hub-and-spoke anchoring)
             hoverCardId.value = card.id
             hoverDot.value = { x: centerX, y: centerY, side: 'center' }
-            foundHover = true
-            break
-          }
-        } else {
-          // Others: only near the border
-          if (isNearBorder(rect, canvasX, canvasY)) {
+          } else {
+            // Others: dot clings to nearest border point
             const bp = nearestBorderPoint(rect, canvasX, canvasY)
             hoverCardId.value = card.id
             hoverDot.value = { x: bp.x, y: bp.y, side: bp.side }
-            foundHover = true
-            break
           }
+          foundHover = true
+          break
         }
       }
     }
