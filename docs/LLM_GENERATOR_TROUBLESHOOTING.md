@@ -87,13 +87,13 @@ async with httpx.AsyncClient(timeout=180.0) as client:  # 3 minutes
 - No error logs on backend
 
 **Root Cause:**
-- Frontend accessed via HTTPS (`https://192.168.51.210:8091`)
+- Frontend accessed via HTTPS (`https://192.168.51.207:8091`)
 - Frontend tries to call Ollama directly via HTTP
 - Browser blocks HTTPS → HTTP requests (security policy)
 
 **Solution:**
 
-✅ **Always use HTTPS URL**: `https://192.168.51.210:8091`
+✅ **Always use HTTPS URL**: `https://192.168.51.207:8091`
 
 ✅ **Backend proxy endpoint** (already implemented):
 ```javascript
@@ -389,7 +389,7 @@ contentExpansion: 'llama3:latest',  // NOT llama2:13b-chat
 ### "Mixed content blocked"
 ```bash
 # Access via HTTPS only
-https://192.168.51.210:8091
+https://192.168.51.207:8091
 ```
 
 ### "Text generated but not showing"
@@ -407,7 +407,7 @@ https://192.168.51.210:8091
 
 ## Testing the Generator
 
-1. **Access via HTTPS**: `https://192.168.51.210:8091`
+1. **Access via HTTPS**: `https://192.168.51.207:8091`
 2. **Accept self-signed cert** (if prompted)
 3. **Log in**: kevin / test123
 4. **Open any episode** in ContentEditor

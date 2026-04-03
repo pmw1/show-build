@@ -144,17 +144,14 @@ Active Tasks:
 **Migration Path:**
 
 1. ✅ **Verify no active MQTT usage** (DONE - only health checks)
-2. ⬜ Remove MQTT imports from `app/main.py`
-3. ⬜ Remove `/publish/` endpoint from `app/main.py`
-4. ⬜ Delete legacy MQTT files:
-   - `app/preproc_mqtt_listen.py`
-   - `app/preproc_mqtt_pub.py`
-   - `app/services/testboot.mqtt.py`
-5. ⬜ Remove `paho-mqtt>=1.6.1` from `app/requirements.txt`
-6. ⬜ Remove `mqtt-broker` service from `docker-compose.yml`
-7. ⬜ Remove MQTT dependency from server in `docker-compose.yml` (`depends_on`)
-8. ⬜ Stop and remove MQTT container: `docker stop mqtt-broker && docker rm mqtt-broker`
-9. ⬜ Update documentation to reflect Celery-only architecture
+2. ✅ Remove MQTT imports from `app/main.py` (DONE - refactor phase)
+3. ✅ Remove `/publish/` endpoint from `app/main.py` (DONE - refactor phase)
+4. ✅ Delete legacy MQTT files (DONE - archived to `scripts/archived/`)
+5. ✅ Remove `paho-mqtt>=1.6.1` from `app/requirements.txt` (DONE)
+6. ✅ Remove `mqtt-broker` service from `docker-compose.yml` (DONE)
+7. ✅ Remove MQTT dependency from server in `docker-compose.yml` (DONE)
+8. ✅ Stop and remove MQTT container (DONE)
+9. ✅ Update documentation to reflect Celery-only architecture (DONE)
 
 **Potential Future Needs:**
 - If pub/sub to external systems needed: Use Redis pub/sub (already have Redis)
@@ -231,7 +228,7 @@ The Whiteboard system provides a visual canvas for content creators to:
 
 ### **Frontend Component:**
 
-**File**: `/disaffected-ui/src/views/ScratchpadView.vue` (2134 lines)
+**File**: `/disaffected-ui/src/views/ScratchpadView.vue`
 **Route**: `/whiteboard` (requires authentication)
 
 **UI Features:**
@@ -245,7 +242,7 @@ The Whiteboard system provides a visual canvas for content creators to:
 
 ### **Backend API:**
 
-**Router**: `/app/whiteboard_router.py`
+**Router**: `app/routers/whiteboard/` package (crud, media, social_media, node_links sub-routers; `app/whiteboard_router.py` is a backward-compat shim)
 **Endpoints** (under `/api/whiteboard/`):
 - `POST /generate-workspace-id` - Create new workspace ID
 - `GET /{workspace_identifier}` - Load whiteboard by episode or workspace ID
@@ -259,7 +256,7 @@ The Whiteboard system provides a visual canvas for content creators to:
 - `DELETE /node-links/{link_id}` - Remove connection
 
 **External Service Integration:**
-- `link_preview_service.py` - Fetches metadata from URLs
+- `app/services/link_preview_service.py` - Fetches metadata from URLs
 - AssetID service integration for unique file identifiers
 
 ### **Use Cases:**
@@ -322,20 +319,18 @@ The Whiteboard system provides a visual canvas for content creators to:
 - [ ] Update README.md - Reflect database-first architecture
 - [ ] Create ACTIVE_WORK_QUEUE.md - Track ongoing implementation tasks
 
-### Phase 2: MQTT Removal (Week 1)
-- [ ] Remove MQTT imports from app/main.py
-- [ ] Remove /publish/ endpoint
-- [ ] Delete preproc_mqtt_listen.py
-- [ ] Delete preproc_mqtt_pub.py
-- [ ] Delete testboot.mqtt.py
-- [ ] Remove paho-mqtt from requirements.txt
-- [ ] Remove mqtt-broker from docker-compose.yml
-- [ ] Test all async operations still work via Celery
-- [ ] Stop and remove mqtt-broker container
+### Phase 2: MQTT Removal (Week 1) -- COMPLETED
+- [x] Remove MQTT imports from app/main.py
+- [x] Remove /publish/ endpoint
+- [x] Delete preproc_mqtt_listen.py, preproc_mqtt_pub.py, testboot.mqtt.py (archived)
+- [x] Remove paho-mqtt from requirements.txt
+- [x] Remove mqtt-broker from docker-compose.yml
+- [x] Test all async operations still work via Celery
+- [x] Stop and remove mqtt-broker container
 
-### Phase 3: Code Cleanup (Week 2)
-- [ ] Remove any remaining MQTT references in comments
-- [ ] Update health check to remove MQTT monitoring
+### Phase 3: Code Cleanup (Week 2) -- COMPLETED
+- [x] Remove any remaining MQTT references in comments
+- [x] Update health check to remove MQTT monitoring
 - [ ] Verify Celery handles all async tasks
 - [ ] Test FSQ generation pipeline
 - [ ] Test SOT processing pipeline

@@ -133,7 +133,7 @@ scp app/platform_utils.py kevin@windows-pc:C:/show-build/
 scp app/services/ffmpeg_tasks.py kevin@windows-pc:C:/show-build/
 scp app/celery_app.py kevin@windows-pc:C:/show-build/
 scp app/database.py kevin@windows-pc:C:/show-build/
-scp app/models_v2.py kevin@windows-pc:C:/show-build/
+scp app/models_v2.py kevin@windows-pc:C:/show-build/  # Note: models_v2.py is now a shim; also copy app/models/ package
 ```
 
 4. **Start Worker**

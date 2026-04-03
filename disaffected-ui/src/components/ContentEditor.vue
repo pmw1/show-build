@@ -1,5 +1,27 @@
 <template>
-  <div class="content-editor-wrapper">
+  <div :class="['content-editor-wrapper', { 'join-mode-active': joinMode.active, 'join-mode-previewing': joinMode.phase === 'previewing' }]">
+    <!-- Join Preview Banner (covers top controls during preview phase) -->
+    <JoinPreviewBanner
+      :visible="joinMode.phase === 'previewing'"
+      :snapshot-name="joinMode.snapshotName"
+      @accept="acceptJoin"
+      @reject="rejectJoin"
+    />
+
+    <!-- Join Mode Overlay (desaturates/blurs everything except rundown, not during preview) -->
+    <div v-if="joinMode.active && joinMode.phase !== 'previewing'" class="join-mode-overlay"></div>
+
+    <!-- Join Instruction Tooltip (during selecting phase) -->
+    <Transition name="fade">
+      <div v-if="joinMode.phase === 'selecting'" class="join-instruction-tooltip">
+        <v-icon color="deep-purple-lighten-2" class="mr-2">mdi-set-merge</v-icon>
+        <span>Select 2 or more rundown items to join, then click <strong>Continue</strong></span>
+        <v-btn size="x-small" variant="text" class="ml-3" @click="rejectJoin">
+          <v-icon size="small">mdi-close</v-icon>
+        </v-btn>
+      </div>
+    </Transition>
+
     <!-- Scrollable Content Area (contains header + columns) -->
     <div class="scrollable-content-wrapper">
       <!-- Show Info Header (full width, scrolls off) -->
@@ -29,6 +51,39 @@
         :thumbnails="episodeThumbnails"
         :confirmed-thumbnail-url="confirmedThumbnailUrl"
         :taken-source-url="takenSourceUrl"
+        :episode-metadata="{
+          description: currentEpisodeDescription,
+          subtitle: currentEpisodeSubtitle,
+          tags: currentEpisodeTags,
+          notes: currentEpisodeNotes,
+          explicit: currentEpisodeExplicit,
+          contentWarnings: currentEpisodeContentWarnings,
+          recordingDate: currentEpisodeRecordingDate,
+          producer: currentEpisodeProducer,
+          editor: currentEpisodeEditor,
+          publishStatus: currentEpisodePublishStatus,
+          scheduleDatetime: currentEpisodeScheduleDatetime,
+          visibility: currentEpisodeVisibility,
+          omnyDescription: currentEpisodeOmnyDescription,
+          omnyVisibility: currentEpisodeOmnyVisibility,
+          omnyPublishStatus: currentEpisodeOmnyPublishStatus,
+          omnyScheduleDatetime: currentEpisodeOmnyScheduleDatetime,
+          ytTitle: currentEpisodeYtTitle,
+          ytDescription: currentEpisodeYtDescription,
+          ytTags: currentEpisodeYtTags,
+          ytPrivacyStatus: currentEpisodeYtPrivacyStatus,
+          ytScheduleDatetime: currentEpisodeYtScheduleDatetime,
+          socialHashtags: currentEpisodeSocialHashtags,
+          twitterPostText: currentEpisodeTwitterPostText,
+          twitterScheduleDatetime: currentEpisodeTwitterScheduleDatetime,
+          instagramCaption: currentEpisodeInstagramCaption,
+          instagramScheduleDatetime: currentEpisodeInstagramScheduleDatetime,
+          facebookPostText: currentEpisodeFacebookPostText,
+          facebookScheduleDatetime: currentEpisodeFacebookScheduleDatetime,
+          tiktokCaption: currentEpisodeTiktokCaption,
+          tiktokScheduleDatetime: currentEpisodeTiktokScheduleDatetime,
+        }"
+        @update-episode-field="handleEpisodeFieldUpdate"
         @update:airDate="handleAirDateChange"
         @update:airTime="handleAirTimeChange"
         @update:airTimezone="handleAirTimezoneChange"
@@ -69,6 +124,9 @@
         :panel-height="sidePanelHeight"
         :collapse-break-regions="interfaceSettings.collapseBreakRegions"
         :save-state="episodeSaveState"
+        :join-select-mode="joinMode.phase === 'selecting'"
+        :join-placement-mode="joinMode.phase === 'placing'"
+        :join-merged-item="joinMode.mergedItem"
         @select-item="selectRundownItem"
         @new-item="handleNewItemClick"
         @delete-selected="deleteSelectedItem"
@@ -81,9 +139,15 @@
         @sync-order="syncRundownOrder"
         @create-region="handleCreateRegion"
         @select-region="handleRegionSelection"
+        @initiate-join="initiateJoinMode"
+        @join-items-selected="handleJoinItemsSelected"
+        @cancel-join="rejectJoin"
+        @join-place="handleJoinPlacement"
         @save="saveEverything"
         @refresh-rundown="handleRefreshRundown"
         @restore-revision="handleRestoreRevision"
+        @recalculate-durations="handleRecalculateDurations"
+        @show-script-compare-modal="showScriptCompareModal = true"
       />
 
       <!-- Collapse Rundown toggle (inner border, visible when panel is open) -->
@@ -150,11 +214,14 @@
           @show-vox-modal="handleShowVoxModal"
           @show-mus-modal="handleShowMusModal"
           @show-live-modal="handleShowLiveModal"
+          @show-script-compare-modal="showScriptCompareModal = true"
+          @autoscrub-all-items="autoscrubAllItems"
           @metadata-change="onMetadataChange"
           @update:slug="handleSlugChangeFromEditor"
           @update:duration="handleDurationChangeFromEditor"
           @duration-calculated="handleDurationCalculated"
           @insert-cue="handleInsertCue"
+          @relocate-cue="handleRelocateCue"
         />
       </div>
 
@@ -163,10 +230,13 @@
         v-if="showMetadataPanel"
         ref="metadataPanel"
         :item="currentRundownItem"
+        :live-script-content="rawMarkdownContent"
         :panel-width="metadataPanelWidth"
         :panel-height="sidePanelHeight"
         :item-types="rundownItemTypes"
         :episode-number="currentEpisodeNumber"
+        :episode-title="currentEpisodeTitle"
+        :air-date="currentAirDate"
         :media-list-loading="generatingMediaList"
         :host-script-loading="generatingHostScript"
         :save-state="episodeSaveState"
@@ -187,6 +257,7 @@
         @place-library-item="handleLibraryItemSelected"
         @create-new-library-item="handleCreateNewLibraryItem"
         @save-all="saveEverything"
+        @insert-whiteboard-cue="handleInsertWhiteboardCue"
       />
 
       <!-- Collapse Metadata toggle (inner border, visible when panel is open) -->
@@ -230,6 +301,8 @@
       v-model:description="gfxDescription"
       :graphic-preview="graphicPreview"
       :current-episode="currentEpisodeNumber"
+      :edit-data="editingGfxCueData"
+      :prefill-data="whiteboardPrefillData"
       @paste-from-clipboard="pasteFromClipboard"
       @select-file="selectFile"
       @paste-url="pasteUrl"
@@ -268,6 +341,20 @@
     <VoxModal v-model:show="showVoxModal" @submit="submitVox" />
     <MusModal v-model:show="showMusModal" @submit="submitMus" />
     <LiveModal v-model:show="showLiveModal" @submit="submitLive" />
+    <ScriptCompareModal
+      v-model:show="showScriptCompareModal"
+      :rundown-items="rundownItems"
+      @apply-changes="handleScriptCompareApply"
+    />
+
+    <!-- Join Config Modal -->
+    <JoinConfigModal
+      :visible="showJoinConfigModal"
+      :selected-items="joinMode.selectedItems"
+      @update:visible="showJoinConfigModal = $event"
+      @confirm="handleJoinConfigConfirmed"
+      @cancel="rejectJoin"
+    />
 
     <NewItemModal
       v-if="showNewItemModal"
@@ -325,6 +412,44 @@
       @speaker-saved="handleSpeakerSaved"
       @show-message="showMessage"
     />
+
+    <!-- Unresolved Revisions Blocker Modal -->
+    <v-dialog v-model="showRevisionBlockerModal" max-width="620" persistent>
+      <v-card class="revision-blocker-card">
+        <v-card-title class="revision-blocker-header d-flex align-center">
+          <v-icon color="amber" class="me-2">mdi-alert-circle</v-icon>
+          <span>Unresolved Revisions</span>
+        </v-card-title>
+        <v-card-text class="revision-blocker-body">
+          <p class="mb-3">Cannot generate host script until all proposed revisions are resolved.</p>
+          <div class="revision-blocker-list">
+            <div
+              v-for="item in revisionBlockerItems"
+              :key="item.slug"
+              class="revision-blocker-item"
+            >
+              <v-icon size="small" color="amber" class="me-2">mdi-file-document-edit</v-icon>
+              <span class="revision-item-title">{{ item.title || item.slug }}</span>
+              <v-chip size="x-small" color="amber" variant="tonal" class="ms-2">
+                {{ item.count }} revision{{ item.count > 1 ? 's' : '' }}
+              </v-chip>
+            </div>
+          </div>
+        </v-card-text>
+        <v-card-actions class="revision-blocker-actions">
+          <v-btn variant="text" color="grey" @click="showRevisionBlockerModal = false">
+            Cancel
+          </v-btn>
+          <v-spacer />
+          <v-btn variant="outlined" color="error" @click="resolveAllRevisions('reject')">
+            Reject All &amp; Continue
+          </v-btn>
+          <v-btn variant="elevated" color="success" @click="resolveAllRevisions('accept')">
+            Accept All &amp; Continue
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- Loading Overlay -->
     <v-overlay
@@ -414,39 +539,89 @@
         </div>
       </div>
     </v-overlay>
+
+    <!-- Relocate Cue Picker Dialog -->
+    <v-dialog v-model="showRelocatePicker" max-width="400" scrollable>
+      <v-card>
+        <v-card-title class="text-subtitle-1 d-flex align-center" style="background: #333; color: white;">
+          <v-icon class="mr-2" size="small">mdi-truck-delivery</v-icon>
+          Where would you like to move this {{ pendingRelocate?.type || 'cue' }} to?
+        </v-card-title>
+        <v-card-text class="pa-0" style="max-height: 400px;">
+          <v-list density="compact" class="pa-0">
+            <v-list-item
+              v-for="(item, idx) in relocateTargetItems"
+              :key="item.id"
+              @click="confirmRelocate(item, idx)"
+              class="relocate-list-item"
+              :class="{ 'relocate-current': idx === selectedItemIndex }"
+            >
+              <template #prepend>
+                <span class="relocate-index">{{ (idx + 1) * 10 }}</span>
+              </template>
+              <v-list-item-title class="text-body-2">
+                {{ item.slug || item.title || 'Unnamed' }}
+              </v-list-item-title>
+              <v-list-item-subtitle v-if="idx === selectedItemIndex" class="text-caption" style="color: #888;">
+                current segment
+              </v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+        </v-card-text>
+        <v-card-actions style="background: #333;">
+          <v-spacer />
+          <v-btn variant="text" color="white" @click="showRelocatePicker = false; pendingRelocate = null;">Cancel</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
   </div>
 </template>
 
 <script>
+import { defineAsyncComponent } from 'vue';
 import axios from 'axios';
 // import { API_BASE_URL } from '@/config.js'; // Temporarily remove to simplify
+
+// Core panels - always visible, load eagerly
 import EditorPanel from './content-editor/EditorPanel.vue';
 import RundownPanel from './content-editor/RundownPanel.vue';
 import MetadataPanel from './content-editor/MetadataPanel.vue';
-import AssetBrowserModal from './modals/AssetBrowserModal.vue';
-import TemplateManagerModal from './modals/TemplateManagerModal.vue';
-import GfxModal from './modals/GfxModal.vue';
-import FsqModal from './modals/FsqModal.vue';
-import SotModal from './modals/SotModal.vue';
-import VoModal from './modals/VoModal.vue';
-import NatModal from './modals/NatModal.vue';
-import RifModal from './modals/RifModal.vue';
-import PkgModal from './modals/PkgModal.vue';
-import DirModal from './modals/DirModal.vue';
-import BumpModal from './modals/BumpModal.vue';
-import StingModal from './modals/StingModal.vue';
-import VoxModal from './modals/VoxModal.vue';
-import MusModal from './modals/MusModal.vue';
-import LiveModal from './modals/LiveModal.vue';
-import NewItemModal from './modals/NewItemModal.vue';
-import ContentLibraryPickerModal from './modals/ContentLibraryPickerModal.vue';
-import NewGFXModal from './modals/NewGFXModal.vue';
-import NewSOTModal from './modals/NewSOTModal.vue';
-import DeleteCueModal from './content-editor/modals/DeleteCueModal.vue';
-import ImgCueModal from './content-editor/modals/ImgCueModal.vue';
-import RequireEpisodeModal from './modals/RequireEpisodeModal.vue';
 import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
-import WPMMeasurementTool from './tools/WPMMeasurementTool.vue';
+import JoinPreviewBanner from './content-editor/JoinPreviewBanner.vue';
+import JoinConfigModal from './content-editor/JoinConfigModal.vue';
+
+import { buildModalPrefill } from '@/composables/useCueTranslation';
+
+// Modals - loaded on demand
+const AssetBrowserModal = defineAsyncComponent(() => import('./modals/AssetBrowserModal.vue'));
+const TemplateManagerModal = defineAsyncComponent(() => import('./modals/TemplateManagerModal.vue'));
+const GfxModal = defineAsyncComponent(() => import('./modals/GfxModal.vue'));
+const FsqModal = defineAsyncComponent(() => import('./modals/FsqModal.vue'));
+const SotModal = defineAsyncComponent(() => import('./modals/SotModal.vue'));
+const VoModal = defineAsyncComponent(() => import('./modals/VoModal.vue'));
+const NatModal = defineAsyncComponent(() => import('./modals/NatModal.vue'));
+const RifModal = defineAsyncComponent(() => import('./modals/RifModal.vue'));
+const PkgModal = defineAsyncComponent(() => import('./modals/PkgModal.vue'));
+const DirModal = defineAsyncComponent(() => import('./modals/DirModal.vue'));
+const BumpModal = defineAsyncComponent(() => import('./modals/BumpModal.vue'));
+const StingModal = defineAsyncComponent(() => import('./modals/StingModal.vue'));
+const VoxModal = defineAsyncComponent(() => import('./modals/VoxModal.vue'));
+const MusModal = defineAsyncComponent(() => import('./modals/MusModal.vue'));
+const LiveModal = defineAsyncComponent(() => import('./modals/LiveModal.vue'));
+const ScriptCompareModal = defineAsyncComponent(() => import('./modals/ScriptCompareModal.vue'));
+const NewItemModal = defineAsyncComponent(() => import('./modals/NewItemModal.vue'));
+const ContentLibraryPickerModal = defineAsyncComponent(() => import('./modals/ContentLibraryPickerModal.vue'));
+const NewGFXModal = defineAsyncComponent(() => import('./modals/NewGFXModal.vue'));
+const NewSOTModal = defineAsyncComponent(() => import('./modals/NewSOTModal.vue'));
+const RequireEpisodeModal = defineAsyncComponent(() => import('./modals/RequireEpisodeModal.vue'));
+
+// Content-editor modals - loaded on demand
+const DeleteCueModal = defineAsyncComponent(() => import('./content-editor/modals/DeleteCueModal.vue'));
+const ImgCueModal = defineAsyncComponent(() => import('./content-editor/modals/ImgCueModal.vue'));
+
+// Tools - loaded on demand
+const WPMMeasurementTool = defineAsyncComponent(() => import('./tools/WPMMeasurementTool.vue'));
 import { getColorValue, resolveVuetifyColor, loadColorsFromDatabase } from '../utils/themeColorMap';
 import { debounce } from 'lodash-es';
 import { getItemTypesForDropdown } from '../config/itemTypes';
@@ -456,6 +631,7 @@ import { useLLMState } from '../composables/useLLMState';
 import { useSOTProcessing } from '../composables/useSOTProcessing';
 import { useRequireEpisode } from '../composables/useRequireEpisode';
 import { useSegmentLock } from '../composables/useSegmentLock';
+import { useEpisodeMetadata } from '../composables/useEpisodeMetadata';
 
 export default {
   name: 'ContentEditor',
@@ -476,6 +652,7 @@ export default {
     BumpModal,
     StingModal,
     LiveModal,
+    ScriptCompareModal,
     MusModal,
     VoxModal,
     PkgModal,
@@ -487,7 +664,9 @@ export default {
     DeleteCueModal,
     ImgCueModal,
     RequireEpisodeModal,
-    WPMMeasurementTool
+    WPMMeasurementTool,
+    JoinPreviewBanner,
+    JoinConfigModal
   },
 
   setup() {
@@ -502,13 +681,18 @@ export default {
     // Segment locking system
     const segmentLock = useSegmentLock();
 
+    // Episode metadata (refs auto-unwrapped on `this` in Options API)
+    const episodeMetadata = useEpisodeMetadata();
+
     return {
       showEpisodeModal,
       episodeModalAction,
       handleEpisodeSelected,
       handleModalCancelled,
       // Segment lock state and methods
-      segmentLockState: segmentLock
+      segmentLockState: segmentLock,
+      // Episode metadata refs + helpers
+      ...episodeMetadata
     };
   },
 
@@ -658,9 +842,10 @@ export default {
   },
 
   watch: {
-    // Dirty tracking + Code Mode autosave.
-    // Script Mode autosave is owned by EditorPanel (its own debounce + persistCurrentItemToDatabase).
-    // Code Mode edits bypass EditorPanel's buffer, so we handle them here.
+    // Dirty tracking + autosave for all rawMarkdownContent changes.
+    // Paragraph typing in Script Mode is owned by EditorPanel (its own debounce +
+    // persistCurrentItemToDatabase), guarded by isActivelyEditing.
+    // Everything else — Code Mode typing, cue insert/delete/reorder, paste — saves here.
     rawMarkdownContent: {
       handler(newVal, oldVal) {
         if (newVal !== oldVal && this.selectedItemIndex >= 0) {
@@ -671,12 +856,11 @@ export default {
           this._hasUnsavedChanges = true;
           this.hasUnsavedChanges = true;
 
-          // Code Mode autosave: if the change came from Code Mode (not from EditorPanel's
-          // Script Mode buffer), trigger a debounced save. EditorPanel's isActivelyEditing
-          // is only true during Script Mode paragraph editing.
+          // Autosave: trigger debounced save for any content change NOT from active
+          // paragraph typing (which EditorPanel owns via its own 1.5s debounce).
           const editorPanel = this.$refs.editorPanel;
-          if (!editorPanel?.isActivelyEditing && this.editorMode === 'code') {
-            this.debouncedScratchSave(); // Reuse the 2s debounce for Code Mode too
+          if (!editorPanel?.isActivelyEditing) {
+            this.debouncedScratchSave(); // 2s debounce
           }
 
           // Capture undo state
@@ -702,6 +886,7 @@ export default {
 
     showNewItemModal: {
       handler(newVal, oldVal) {
+        if (oldVal && !newVal) this.lastModalCloseTime = Date.now();
         console.log('showNewItemModal changed from', oldVal, 'to', newVal);
         if (newVal) {
           console.log('Modal is opening, rundownItemTypes:', this.rundownItemTypes);
@@ -723,9 +908,33 @@ export default {
       deep: true
     },
 
+    // Track when ANY modal closes so ESC key handler can guard against
+    // Vuetify closing the dialog before our document-level handler fires
+    showGfxModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showFsqModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showImgCueModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showVoModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showNatModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showPkgModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showVoxModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showMusModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showLiveModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showBumpModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showStingModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showDirModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showRifModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showNewGFXModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showNewSOTModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showAssetBrowserModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showTemplateManagerModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showScriptCompareModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showDeleteCueModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showRevisionBlockerModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+
     // Clean up placeholder when SOT modal closes without submitting
     showSotModal(newVal, oldVal) {
       if (oldVal === true && newVal === false) {
+        this.lastModalCloseTime = Date.now();
         // Modal was closed
         console.log('🚪 SOT modal closed - checking for placeholder cleanup');
         // Clean up placeholder after a short delay to allow submitSot to finish if it was triggered
@@ -750,6 +959,10 @@ export default {
 
       // SOT processing tracking
       sotProcessing: useSOTProcessing(),
+
+      // Relocate cue state
+      showRelocatePicker: false,
+      pendingRelocate: null, // { segmentIndex, markdown, type }
 
       // Layout state
       showRundownPanel: true,
@@ -777,26 +990,8 @@ export default {
       rundownError: null,
       checkEpisodeInterval: null, // Interval for checking episode changes from toolbar
       
-      // Show Information
+      // Show Information (episode metadata fields are in useEpisodeMetadata composable)
       showInfo: {},
-      currentEpisodeNumber: '', // This will be updated from session
-      currentEpisodeSlug: '',
-      currentEpisodeTitle: '',
-      currentEpisodeSubtitle: '',
-      currentEpisodeGuest: '',
-      currentEpisodeDescription: '',
-      currentEpisodeIsDummy: false,
-      currentAirDate: '',
-      currentAirTime: '',
-      currentAirTimezone: 'America/New_York',
-      currentShowTimezone: 'America/New_York', // Show-level timezone setting
-      currentProductionStatus: 'draft',
-      productionStatuses: [
-        { title: 'Draft', value: 'draft' },
-        { title: 'Approved', value: 'approved' },
-        { title: 'Production', value: 'production' },
-        { title: 'Completed', value: 'completed' }
-      ],
       
       // Episode management
       selectedEpisode: null,
@@ -1121,6 +1316,8 @@ Good night!
       ],
       
       // Graphic attachment state
+      whiteboardPrefillData: null,
+      lastModalCloseTime: 0,
       showGfxModal: false,
       showFsqModal: false,
       showSotModal: false,
@@ -1140,6 +1337,7 @@ Good night!
       showVoxModal: false,
       showMusModal: false,
       showLiveModal: false,
+      showScriptCompareModal: false,
 
       // FSQ insertion snapshot (captured when hotkey pressed)
       fsqInsertionIndex: null,
@@ -1154,6 +1352,20 @@ Good night!
       sotInsertionIndex: null,
       cuePlaceholderId: null, // Placeholder div ID for precise cue insertion
 
+      // Join Items state
+      joinMode: {
+        active: false,
+        phase: null,        // 'selecting' | 'configuring' | 'placing' | 'previewing'
+        originalItems: null,
+        originalSelectedIndex: -1,
+        originalRawMarkdown: '',
+        selectedItems: [],
+        mergedItem: null,
+        snapshotName: '',
+        snapshotFilename: '',
+      },
+      showJoinConfigModal: false,
+
       // Rundown management state
       showNewItemModal: false,
       showNewGFXModal: false,
@@ -1167,6 +1379,11 @@ Good night!
 
       // Delete Cue Modal
       showDeleteCueModal: false,
+
+      // Unresolved Revisions Blocker Modal
+      showRevisionBlockerModal: false,
+      revisionBlockerItems: [],       // [{ slug, title, count }]
+      revisionBlockerPreset: null,    // stashed preset for retry after resolve
 
       // WPM Tool
       showWpmTool: false,
@@ -1206,6 +1423,9 @@ Good night!
     }
   },
    computed: {
+    relocateTargetItems() {
+      return this.rundownItems.filter(item => !item.isPlaceholder);
+    },
     dragLightColor() {
       // Get the DragLight color from settings
       const color = getColorValue('draglight-interface');
@@ -1746,8 +1966,10 @@ Try dropping an image or video file here!`
         console.log('🎨 focusedParagraphIndex:', editorPanel?.focusedParagraphIndex);
         console.log('🎨 lastKnownParagraphIndex:', editorPanel?.lastKnownParagraphIndex);
 
+        this.editingGfxCueData = null;  // Clear edit data for new cue
+        this.whiteboardPrefillData = null;  // Clear whiteboard prefill for fresh modal
         this.showGfxModal = true;
-        console.log('🎨 GFX modal opened');
+        console.log('🎨 GFX modal opened (new cue)');
       }
     },
     async handleShowFsqModal() {
@@ -2667,19 +2889,11 @@ Try dropping an image or video file here!`
         if (infoResponse.status === 'fulfilled') {
           const info = infoResponse.value.data.info || {};
           console.log('API Response - Episode Info:', info);
-          this.currentAirDate = info.airdate || '';
-          this.currentAirTime = info.airtime || '';
-          this.currentAirTimezone = info.airtimezone || 'America/New_York';
-          this.currentShowTimezone = info.show_timezone || 'America/New_York';
-          this.currentProductionStatus = info.status || 'draft';
+          // Populate metadata refs via composable helper
+          this.populateFromApiResponse(info);
+          // Non-metadata fields that live in data()
           this.duration = info.duration || '01:00:00';
           this.showTitle = info.title || 'Untitled';
-          this.currentEpisodeSlug = info.slug || '';
-          this.currentEpisodeTitle = info.title || '';
-          this.currentEpisodeSubtitle = info.subtitle || '';
-          this.currentEpisodeGuest = info.guest || '';
-          this.currentEpisodeDescription = info.description || '';
-          this.currentEpisodeIsDummy = info.is_dummy || false;
           console.log('After setting - Air Date:', this.currentAirDate, 'Status:', this.currentProductionStatus, 'Duration:', this.duration);
         }
 
@@ -2798,12 +3012,27 @@ Try dropping an image or video file here!`
       const currentItem = this.currentRundownItem;
       if (!currentItem || !currentItem.db_id) return;
 
+      // Capture identity at call time — if user switches items during the fetch,
+      // we must NOT apply the response (it belongs to a different item)
+      const syncDbId = currentItem.db_id;
+      const syncItemIndex = this.selectedItemIndex;
+
       try {
+        // Create an AbortController so selectRundownItem can cancel in-flight syncs
+        this._remoteSyncAbort = new AbortController();
+
         const token = localStorage.getItem('auth-token');
-        const response = await fetch(`/api/episodes/rundown-item-by-id/${currentItem.db_id}`, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        const response = await fetch(`/api/episodes/rundown-item-by-id/${syncDbId}`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+          signal: this._remoteSyncAbort.signal
         });
         if (!response.ok) return;
+
+        // CRITICAL: Verify the user hasn't switched items while we were fetching
+        if (this.selectedItemIndex !== syncItemIndex || this.currentRundownItem?.db_id !== syncDbId) {
+          console.log('🔄 Remote sync response arrived for stale item (db_id:', syncDbId, ') — discarding');
+          return;
+        }
 
         const remoteItem = await response.json();
         const remoteScript = remoteItem.script_content || remoteItem.script || '';
@@ -2813,6 +3042,12 @@ Try dropping an image or video file here!`
         if (remoteScript === localScript) {
           // Restart timer for next check
           this.resetRemoteSyncTimer();
+          return;
+        }
+
+        // Double-check again after JSON parsing (another async boundary)
+        if (this.selectedItemIndex !== syncItemIndex || this.currentRundownItem?.db_id !== syncDbId) {
+          console.log('🔄 Remote sync — item changed during parse, discarding');
           return;
         }
 
@@ -2829,7 +3064,13 @@ Try dropping an image or video file here!`
           console.log('🔄 Remote content applied silently');
         }
       } catch (error) {
+        if (error.name === 'AbortError') {
+          console.log('🔄 Remote sync aborted (item switch)');
+          return;
+        }
         console.error('🔄 Remote sync failed:', error);
+      } finally {
+        this._remoteSyncAbort = null;
       }
 
       // Restart timer for next check
@@ -2868,7 +3109,12 @@ Try dropping an image or video file here!`
     // skips ALL reactive state mutations (saving, hasUnsavedChanges) to prevent Vue re-renders
     // that would steal cursor focus from contenteditable elements. The API call still fires —
     // only the reactive bookkeeping is deferred until the user blurs.
-    async saveCurrentItem(isManualSave = false, paragraphToFlash = null) {
+    async saveCurrentItem(isManualSave = false) {
+      // Block saves during join preview/placement
+      if (this.joinMode.phase === 'previewing' || this.joinMode.phase === 'placing') {
+        console.log('Save blocked during join preview');
+        return;
+      }
       if (this.selectedItemIndex < 0 || !this.currentRundownItem) {
         console.log('Cannot save - no valid item selected');
         return;
@@ -2890,14 +3136,7 @@ Try dropping an image or video file here!`
         const currentItem = { ...this.rundownItems[this.selectedItemIndex] };
         const contentToSave = this.rawMarkdownContent || this.parsedContent.scriptContent || '';
 
-        // Corruption guard: prevent saving empty content that would destroy existing content
-        const existingScript = this.rundownItems[this.selectedItemIndex]?.script || '';
-        if (contentToSave.length < 50 && existingScript.length > 100) {
-          console.warn('Blocked save: would destroy existing content',
-            `(new: ${contentToSave.length} chars, existing: ${existingScript.length} chars)`);
-          if (!isEditing) this.saving = false;
-          return;
-        }
+
 
         currentItem.script = contentToSave;
         currentItem.scratch = this.scratchContent;
@@ -2926,19 +3165,6 @@ Try dropping an image or video file here!`
         );
 
         if (response.data) {
-          // Check if backend blocked a destructive save
-          if (response.data.blocked_saves && response.data.blocked_saves.length > 0) {
-            console.error('Backend BLOCKED a destructive save:', response.data.blocked_saves);
-            if (!isEditing && editorPanel?.flashParagraph && paragraphToFlash !== null) {
-              editorPanel.flashParagraph(paragraphToFlash, 'error', 5);
-            }
-            if (window.flashUrgent) {
-              window.flashUrgent('Save blocked: content too short to overwrite existing', window.FLASH_COLORS?.RED || '#f44336', 5000);
-            }
-            this._hasUnsavedChanges = true;
-            if (!isEditing) this.hasUnsavedChanges = true;
-            return;
-          }
 
           // Save succeeded
           this._hasUnsavedChanges = false;
@@ -2949,13 +3175,15 @@ Try dropping an image or video file here!`
             console.log('Autosaved successfully (reactive state deferred — user still editing)');
           }
 
-          // Update local rundown state — but only when user isn't editing the same item
-          // (reactive mutation on rundownItems cascades into v-html re-renders)
-          const isStillEditingSameItem = isEditing && saveTargetIndex === this.selectedItemIndex;
-          if (!isStillEditingSameItem) {
-            const savedItem = this.rundownItems[saveTargetIndex];
-            if (savedItem) {
-              savedItem.script = contentToSave;
+          // Update local rundown state
+          // Always update script (needed for RundownPanel flag detection).
+          // Only update scratch/rawMarkdown when user isn't editing the same item
+          // (reactive mutation on those fields cascades into v-html re-renders).
+          const savedItem = this.rundownItems[saveTargetIndex];
+          if (savedItem) {
+            savedItem.script = contentToSave;
+            const isStillEditingSameItem = isEditing && saveTargetIndex === this.selectedItemIndex;
+            if (!isStillEditingSameItem) {
               savedItem.scratch = this.scratchContent;
               savedItem.rawMarkdown = null;
             }
@@ -3179,6 +3407,11 @@ Try dropping an image or video file here!`
         recalculateOrder = false  // Only recalculate on drag-drop or new item creation
       } = options;
 
+      // Block saves during join preview/placement
+      if (this.joinMode.phase === 'previewing' || this.joinMode.phase === 'placing') {
+        console.log('Rundown save blocked during join preview');
+        return { success: false, reason: 'join_preview_active' };
+      }
       const paddedId = this.padEpisodeNumber(this.currentEpisodeNumber);
       if (!paddedId || !this.rundownItems || this.rundownItems.length === 0) {
         console.log('Cannot save rundown - no valid episode or rundown items');
@@ -3354,11 +3587,45 @@ Try dropping an image or video file here!`
           slug: this.currentEpisodeSlug,
           subtitle: this.currentEpisodeSubtitle,
           description: this.currentEpisodeDescription,
+          tags: this.currentEpisodeTags,
+          notes: this.currentEpisodeNotes,
           air_date: this.currentAirDate,
           air_time: this.currentAirTime,
           air_timezone: this.currentAirTimezone,
           duration_formatted: this.duration,
-          status: this.currentProductionStatus
+          status: this.currentProductionStatus,
+          // Content rating
+          explicit: this.currentEpisodeExplicit,
+          content_warnings: this.currentEpisodeContentWarnings,
+          // Production crew
+          recording_date: this.currentEpisodeRecordingDate,
+          producer: this.currentEpisodeProducer,
+          editor: this.currentEpisodeEditor,
+          // Master publishing control
+          publish_status: this.currentEpisodePublishStatus,
+          schedule_datetime: this.currentEpisodeScheduleDatetime,
+          visibility: this.currentEpisodeVisibility,
+          // OmnyStudio
+          omny_description: this.currentEpisodeOmnyDescription,
+          omny_visibility: this.currentEpisodeOmnyVisibility,
+          omny_publish_status: this.currentEpisodeOmnyPublishStatus,
+          omny_schedule_datetime: this.currentEpisodeOmnyScheduleDatetime,
+          // YouTube
+          yt_title: this.currentEpisodeYtTitle,
+          yt_description: this.currentEpisodeYtDescription,
+          yt_tags: this.currentEpisodeYtTags,
+          yt_privacy_status: this.currentEpisodeYtPrivacyStatus,
+          yt_schedule_datetime: this.currentEpisodeYtScheduleDatetime,
+          // Social media
+          social_hashtags: this.currentEpisodeSocialHashtags,
+          twitter_post_text: this.currentEpisodeTwitterPostText,
+          twitter_schedule_datetime: this.currentEpisodeTwitterScheduleDatetime,
+          instagram_caption: this.currentEpisodeInstagramCaption,
+          instagram_schedule_datetime: this.currentEpisodeInstagramScheduleDatetime,
+          facebook_post_text: this.currentEpisodeFacebookPostText,
+          facebook_schedule_datetime: this.currentEpisodeFacebookScheduleDatetime,
+          tiktok_caption: this.currentEpisodeTiktokCaption,
+          tiktok_schedule_datetime: this.currentEpisodeTiktokScheduleDatetime,
         };
 
         console.log('💾 Saving episode metadata to database...', episodeData);
@@ -3704,6 +3971,14 @@ Try dropping an image or video file here!`
     },
     
     async selectRundownItem(index) {
+      // Concurrency guard: reject if another switch is already in progress
+      if (this._itemSwitchInProgress) {
+        console.warn('⚠️ Item switch already in progress, ignoring click for index:', index);
+        return;
+      }
+      this._itemSwitchInProgress = true;
+
+      try {
       console.log('🎯 Selecting rundown item at index:', index);
       console.log('Current selectedItemIndex before update:', this.selectedItemIndex);
       console.log('Total rundown items:', this.rundownItems.length);
@@ -3853,9 +4128,25 @@ Try dropping an image or video file here!`
         this.loadItemContent(null);
       }
 
+      // Cancel any in-flight remote sync — it was started for the PREVIOUS item
+      // and would overwrite the editor with stale content if it resolves now
+      if (this._remoteSyncTimer) {
+        clearTimeout(this._remoteSyncTimer);
+        this._remoteSyncTimer = null;
+      }
+      if (this._remoteSyncAbort) {
+        this._remoteSyncAbort.abort();
+        this._remoteSyncAbort = null;
+      }
+
       // Start remote sync timer — will check for other users' changes after 15s of inactivity
       this._pendingRemoteContent = null;
       this.resetRemoteSyncTimer();
+
+      } finally {
+        // Release concurrency guard — MUST run even if an error occurs
+        this._itemSwitchInProgress = false;
+      }
     },
 
     // Navigate to next rundown item (arrow down)
@@ -3951,6 +4242,47 @@ Try dropping an image or video file here!`
       }
     },
 
+    handleEpisodeFieldUpdate({ field, value }) {
+      // Map camelCase field names to the currentEpisode* data properties
+      const fieldMap = {
+        description: 'currentEpisodeDescription',
+        subtitle: 'currentEpisodeSubtitle',
+        tags: 'currentEpisodeTags',
+        notes: 'currentEpisodeNotes',
+        explicit: 'currentEpisodeExplicit',
+        contentWarnings: 'currentEpisodeContentWarnings',
+        recordingDate: 'currentEpisodeRecordingDate',
+        producer: 'currentEpisodeProducer',
+        editor: 'currentEpisodeEditor',
+        publishStatus: 'currentEpisodePublishStatus',
+        scheduleDatetime: 'currentEpisodeScheduleDatetime',
+        visibility: 'currentEpisodeVisibility',
+        omnyDescription: 'currentEpisodeOmnyDescription',
+        omnyVisibility: 'currentEpisodeOmnyVisibility',
+        omnyPublishStatus: 'currentEpisodeOmnyPublishStatus',
+        omnyScheduleDatetime: 'currentEpisodeOmnyScheduleDatetime',
+        ytTitle: 'currentEpisodeYtTitle',
+        ytDescription: 'currentEpisodeYtDescription',
+        ytTags: 'currentEpisodeYtTags',
+        ytPrivacyStatus: 'currentEpisodeYtPrivacyStatus',
+        ytScheduleDatetime: 'currentEpisodeYtScheduleDatetime',
+        socialHashtags: 'currentEpisodeSocialHashtags',
+        twitterPostText: 'currentEpisodeTwitterPostText',
+        twitterScheduleDatetime: 'currentEpisodeTwitterScheduleDatetime',
+        instagramCaption: 'currentEpisodeInstagramCaption',
+        instagramScheduleDatetime: 'currentEpisodeInstagramScheduleDatetime',
+        facebookPostText: 'currentEpisodeFacebookPostText',
+        facebookScheduleDatetime: 'currentEpisodeFacebookScheduleDatetime',
+        tiktokCaption: 'currentEpisodeTiktokCaption',
+        tiktokScheduleDatetime: 'currentEpisodeTiktokScheduleDatetime',
+      };
+      const prop = fieldMap[field];
+      if (prop) {
+        this[prop] = value;
+        this.hasUnsavedChanges = true;
+      }
+    },
+
     resetMetadataFields() {
       // Reload the current item from the server or reset to last saved state
       if (this.selectedItemIndex >= 0) {
@@ -3969,15 +4301,26 @@ Try dropping an image or video file here!`
       const isInTextField = ['INPUT', 'TEXTAREA'].includes(event.target.tagName) ||
                             event.target.isContentEditable;
 
-      // Check if any modal is open
+      // Check if any modal is open — includes reactive flags, DOM fallbacks, AND
+      // a timestamp guard. Vuetify's v-dialog handles ESC internally and may set our
+      // v-model to false BEFORE this document-level handler runs, making all reactive
+      // flags false even though a dialog was just dismissed in the same event loop tick.
       const hasModalOpen = this.showImgCueModal || this.showGfxModal || this.showFsqModal ||
                            this.showSotModal || this.showVoModal || this.showNatModal ||
                            this.showPkgModal || this.showVoxModal || this.showMusModal ||
                            this.showLiveModal || this.showNewItemModal || this.showNewGFXModal ||
-                           this.showNewSOTModal || this.showDeleteCueModal ||
+                           this.showNewSOTModal || this.showDeleteCueModal || this.showRevisionBlockerModal ||
                            this.showAssetBrowserModal || this.showTemplateManagerModal ||
                            this.showBumpModal || this.showStingModal || this.showDirModal ||
-                           this.showRifModal;
+                           this.showRifModal || this.showScriptCompareModal ||
+                           this.showJoinConfigModal || this.showLibraryPickerModal ||
+                           this.showEpisodeModal || this.showRelocatePicker ||
+                           // DOM fallback: catch Vuetify dialogs that already toggled their v-model
+                           !!document.querySelector('.v-overlay--active.v-dialog') ||
+                           // Target fallback: ESC was pressed while focused inside a dialog
+                           !!event.target.closest('.v-dialog') ||
+                           // Timestamp fallback: a modal closed within the last 300ms (same ESC press)
+                           (Date.now() - this.lastModalCloseTime < 300);
 
       // UNDO (Ctrl+Z / Cmd+Z) - Works in all modes, including text fields
       if ((event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey) {
@@ -4011,15 +4354,25 @@ Try dropping an image or video file here!`
 
       // ESCAPE KEY - Close modal if one is open, otherwise exit editing mode
       if (event.key === 'Escape') {
+        // Cancel join mode on ESC
+        if (this.joinMode.active) {
+          event.preventDefault();
+          this.rejectJoin();
+          return;
+        }
         if (hasModalOpen) {
           event.preventDefault();
           event.stopPropagation();
           event.stopImmediatePropagation();  // Prevent other handlers from also processing ESC
           console.log('🚨 ESC pressed with modal open - closing modal only (not leaving segment)');
 
+          // Record close timestamp so subsequent ESC in same tick is blocked
+          this.lastModalCloseTime = Date.now();
+
           // Close whichever modal is open
           this.showImgCueModal = false;
           this.showGfxModal = false;
+          this.whiteboardPrefillData = null;
           this.showFsqModal = false;
           this.showSotModal = false;
           this.showVoModal = false;
@@ -4032,12 +4385,18 @@ Try dropping an image or video file here!`
           this.showNewGFXModal = false;
           this.showNewSOTModal = false;
           this.showDeleteCueModal = false;
+          this.showRevisionBlockerModal = false;
           this.showAssetBrowserModal = false;
           this.showTemplateManagerModal = false;
           this.showBumpModal = false;
           this.showStingModal = false;
           this.showDirModal = false;
           this.showRifModal = false;
+          this.showScriptCompareModal = false;
+          this.showJoinConfigModal = false;
+          this.showLibraryPickerModal = false;
+          this.showEpisodeModal = false;
+          this.showRelocatePicker = false;
 
           return;
         }
@@ -4113,6 +4472,12 @@ Try dropping an image or video file here!`
         this.reloadFromDatabase();
         return;
       }
+      // Handle Ctrl+Shift+J for Join Items
+      if (event.ctrlKey && event.shiftKey && event.key === 'J' && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        this.initiateJoinMode();
+        return;
+      }
       // Handle Ctrl+Shift+I for new item
       if (event.ctrlKey && event.shiftKey && event.key === 'I' && !event.altKey && !event.metaKey) {
         event.preventDefault();
@@ -4127,54 +4492,54 @@ Try dropping an image or video file here!`
           this.deleteCueAtCursor(event.target);
         }
       }
-      // Handle Alt+D for NOTE cue
-      else if (event.altKey && event.key === 'd' && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault();
-        this.showDirModal = true;
-      }
-      // Handle Alt+B for BUMP (Bumper) cue
-      else if (event.altKey && event.key === 'b' && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault();
-        this.showBumpModal = true;
-      }
-      // Handle Alt+R for STING (Stinger) cue
-      else if (event.altKey && event.key === 'r' && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault();
-        this.showStingModal = true;
-      }
-      // Handle Alt+G for GFX cue modal
-      else if (event.altKey && event.key === 'g' && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault();
-        this.showGfxModal = true;
-      }
-      // Handle Alt+S for SOT cue - works globally, even in text fields
-      else if (event.altKey && event.key === 's' && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.handleShowSotModal();
-      }
-      // Handle Alt+Q for creating FSQ (Full Screen Quote) cue
-      // NOTE: ALT+Q is now handled by EditorPanel.vue with placement overlay workflow
-      // Removed duplicate handler to prevent conflicts
-      // Handle Alt+I for IMG cue
-      else if (event.altKey && event.key === 'i' && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault();
-        this.showImgCueModal = true;
-      }
-      // Handle Alt+V for VO (Voice Over) cue
-      else if (event.altKey && event.key === 'v' && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault();
-        this.showVoModal = true;
-      }
-      // Handle Alt+N for NAT (Natural Sound) cue
-      else if (event.altKey && event.key === 'n' && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault();
-        this.showNatModal = true;
-      }
-      // Handle Alt+P for PKG (Package) cue
-      else if (event.altKey && event.key === 'p' && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault();
-        this.showPkgModal = true;
+      // Alt+key cue hotkeys — skip when typing in text fields / contenteditable
+      // EditorPanel handles its own hotkeys when focused in script paragraphs
+      if (event.altKey && !event.ctrlKey && !event.metaKey && !isInTextField && !hasModalOpen) {
+        switch (event.key.toLowerCase()) {
+          case 'c':
+            event.preventDefault();
+            if (this.$refs.editorPanel) {
+              this.$refs.editorPanel.toggleCueMenu();
+            }
+            return;
+          case 'd':
+            event.preventDefault();
+            this.handleShowDirModal();
+            return;
+          case 'b':
+            event.preventDefault();
+            this.handleShowBumpModal();
+            return;
+          case 'r':
+            event.preventDefault();
+            this.handleShowStingModal();
+            return;
+          case 'g':
+            event.preventDefault();
+            this.handleShowGfxModal();
+            return;
+          case 's':
+            event.preventDefault();
+            event.stopPropagation();
+            this.handleShowSotModal();
+            return;
+          case 'i':
+            event.preventDefault();
+            this.handleShowImgModal();
+            return;
+          case 'v':
+            event.preventDefault();
+            this.handleShowVoModal();
+            return;
+          case 'n':
+            event.preventDefault();
+            this.handleShowNatModal();
+            return;
+          case 'p':
+            event.preventDefault();
+            this.handleShowPkgModal();
+            return;
+        }
       }
       // Handle Ctrl+Alt+Shift+Number for test segment generation (developer tool)
       else if (event.ctrlKey && event.altKey && event.shiftKey && /^Digit[1-9]$/.test(event.code)) {
@@ -4352,6 +4717,307 @@ Try dropping an image or video file here!`
         const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
         notifyUserStandard(`Failed to delete region: ${errorMsg}`, NOTIFICATION_COLORS.ERROR, 3000);
       }
+    },
+
+    // ─── Join Items ───────────────────────────────────────────────
+
+    async initiateJoinMode() {
+      // Must have an episode loaded with 2+ items
+      if (!this.currentEpisodeNumber || !this.rundownItems || this.rundownItems.length < 2) {
+        notifyUserStandard('Need at least 2 rundown items to join', NOTIFICATION_COLORS.WARNING, 3000);
+        return;
+      }
+
+      // Already in join mode
+      if (this.joinMode.active) return;
+
+      // Flush pending edits first
+      if (this.$refs.editorPanel?.flushPendingChanges) {
+        this.$refs.editorPanel.flushPendingChanges();
+        await this.$nextTick();
+      }
+
+      // Save current state before anything
+      if (this.hasUnsavedChanges) {
+        await this.saveCurrentItem(true);
+      }
+
+      // Force an episode snapshot via backend
+      const paddedEp = this.padEpisodeNumber(this.currentEpisodeNumber);
+      try {
+        const headers = this.getAuthHeaders();
+        const response = await axios.post(`/api/episodes/${paddedEp}/history/episode/force-snapshot`, {}, { headers });
+
+        if (response.data?.success) {
+          this.joinMode.snapshotName = response.data.snapshot_name;
+          this.joinMode.snapshotFilename = response.data.snapshot_filename;
+          notifyUserStandard(
+            `Capturing pre-join state. Restore to: ${response.data.snapshot_name} if the join is inaccurate.`,
+            NOTIFICATION_COLORS.INFO,
+            5000
+          );
+        }
+      } catch (err) {
+        console.error('Failed to create pre-join snapshot:', err);
+        notifyUserStandard('Warning: could not create pre-join snapshot', NOTIFICATION_COLORS.WARNING, 3000);
+      }
+
+      // Deep clone current state
+      this.joinMode.originalItems = structuredClone(this.rundownItems);
+      this.joinMode.originalSelectedIndex = this.selectedItemIndex;
+      this.joinMode.originalRawMarkdown = this.rawMarkdownContent;
+
+      // Enter selection phase
+      this.joinMode.active = true;
+      this.joinMode.phase = 'selecting';
+
+      // Ensure rundown panel is visible
+      this.showRundownPanel = true;
+    },
+
+    async handleJoinItemsSelected(selectedItems) {
+      if (!selectedItems || selectedItems.length < 2) return;
+
+      // If not already in join mode (e.g. coming from Ctrl+click multi-select),
+      // do the snapshot and setup first
+      if (!this.joinMode.active) {
+        // Flush and save pending edits
+        if (this.$refs.editorPanel?.flushPendingChanges) {
+          this.$refs.editorPanel.flushPendingChanges();
+          await this.$nextTick();
+        }
+        if (this.hasUnsavedChanges) {
+          await this.saveCurrentItem(true);
+        }
+
+        // Force snapshot
+        const paddedEp = this.padEpisodeNumber(this.currentEpisodeNumber);
+        try {
+          const headers = this.getAuthHeaders();
+          const response = await axios.post(`/api/episodes/${paddedEp}/history/episode/force-snapshot`, {}, { headers });
+          if (response.data?.success) {
+            this.joinMode.snapshotName = response.data.snapshot_name;
+            this.joinMode.snapshotFilename = response.data.snapshot_filename;
+            notifyUserStandard(
+              `Capturing pre-join state. Restore to: ${response.data.snapshot_name} if the join is inaccurate.`,
+              NOTIFICATION_COLORS.INFO,
+              5000
+            );
+          }
+        } catch (err) {
+          console.error('Failed to create pre-join snapshot:', err);
+          notifyUserStandard('Warning: could not create pre-join snapshot', NOTIFICATION_COLORS.WARNING, 3000);
+        }
+
+        // Deep clone current state
+        this.joinMode.originalItems = structuredClone(this.rundownItems);
+        this.joinMode.originalSelectedIndex = this.selectedItemIndex;
+        this.joinMode.originalRawMarkdown = this.rawMarkdownContent;
+        this.joinMode.active = true;
+      }
+
+      // Store selected items and move to configuration phase
+      this.joinMode.selectedItems = selectedItems;
+      this.joinMode.phase = 'configuring';
+      this.showJoinConfigModal = true;
+    },
+
+    handleJoinConfigConfirmed(config) {
+      // config: { slug, title, type, orderedItems }
+      this.showJoinConfigModal = false;
+
+      // Concatenate script content in the configured order
+      const mergedContent = config.orderedItems
+        .map(item => (item.script_content || '').trim())
+        .filter(Boolean)
+        .join('\n\n---\n\n');
+
+      // Build a merged item object (mimic rundownItems structure)
+      const firstItem = config.orderedItems[0];
+      this.joinMode.mergedItem = {
+        ...firstItem,
+        slug: config.slug,
+        title: config.title,
+        type: config.type,
+        item_type: config.type,
+        script_content: mergedContent,
+        // Clear IDs — this will be a new item
+        id: null,
+        asset_id: null,
+        db_id: null,
+        _joinSourceIds: config.orderedItems.map(i => i.asset_id || i.id),
+      };
+
+      // Remove source items from rundownItems (simulate)
+      const sourceIds = new Set(this.joinMode.mergedItem._joinSourceIds);
+      this.rundownItems = this.rundownItems.filter(item => {
+        const itemId = item.asset_id || item.id;
+        return !sourceIds.has(itemId);
+      });
+
+      // Enter placement phase
+      this.joinMode.phase = 'placing';
+    },
+
+    handleJoinPlacement(insertIndex) {
+      // Insert the merged item at the chosen position
+      this.rundownItems.splice(insertIndex, 0, this.joinMode.mergedItem);
+
+      // Select the new item and load its content
+      this.selectedItemIndex = insertIndex;
+      this.rawMarkdownContent = this.joinMode.mergedItem.script_content || '';
+
+      // Enter preview phase
+      this.joinMode.phase = 'previewing';
+    },
+
+    async acceptJoin() {
+      const paddedEp = this.padEpisodeNumber(this.currentEpisodeNumber);
+      const headers = this.getAuthHeaders();
+      const mergedItem = this.joinMode.mergedItem;
+      const sourceIds = mergedItem._joinSourceIds || [];
+      const targetIndex = this.selectedItemIndex;
+
+      // Temporarily lift the join preview save block so we can persist
+      this.joinMode.phase = 'committing';
+
+      try {
+        // Step 1: Create the merged item with script_content
+        const createResponse = await axios.post(
+          `/api/episodes/${paddedEp}/rundown/item`,
+          {
+            title: mergedItem.title,
+            slug: mergedItem.slug,
+            type: mergedItem.type || mergedItem.item_type || 'segment',
+            script_content: mergedItem.script_content || '',
+            index: targetIndex
+          },
+          { headers: { 'Content-Type': 'application/json', ...headers } }
+        );
+
+        const newAssetId = createResponse.data?.asset_id;
+
+        // Step 2: Delete the source items
+        for (const assetId of sourceIds) {
+          try {
+            await fetch(`/api/episodes/${paddedEp}/rundown/by-asset-id/${assetId}`, {
+              method: 'DELETE',
+              headers
+            });
+          } catch (err) {
+            console.error(`Failed to delete source item ${assetId}:`, err);
+          }
+        }
+
+        // Step 3: Reload from database to get clean state with proper IDs
+        await this.reloadFromDatabase();
+
+        // Step 4: Find the new item and move it to the intended position
+        const currentIdx = this.rundownItems.findIndex(i => i.asset_id === newAssetId);
+        if (currentIdx >= 0 && currentIdx !== targetIndex) {
+          // Remove from current position
+          const [movedItem] = this.rundownItems.splice(currentIdx, 1);
+          // Insert at target (clamp to valid range after source items were removed)
+          const clampedTarget = Math.min(targetIndex, this.rundownItems.length);
+          this.rundownItems.splice(clampedTarget, 0, movedItem);
+        }
+
+        // Step 5: Save rundown order to persist the correct positioning
+        await this.saveRundownItems({ recalculateOrder: true, showSuccessMessage: false });
+
+        // Step 6: Select the new item
+        const finalIdx = this.rundownItems.findIndex(i => i.asset_id === newAssetId);
+        if (finalIdx >= 0) {
+          await this.selectRundownItem(finalIdx);
+        }
+
+        notifyUserStandard(
+          `Joined ${sourceIds.length} items into "${mergedItem.slug}"`,
+          NOTIFICATION_COLORS.SUCCESS,
+          4000
+        );
+      } catch (err) {
+        console.error('Join accept failed:', err);
+        notifyUserStandard('Failed to save joined item. Reverting...', NOTIFICATION_COLORS.ERROR, 4000);
+        this.rundownItems = this.joinMode.originalItems;
+        this.selectedItemIndex = this.joinMode.originalSelectedIndex;
+        this.rawMarkdownContent = this.joinMode.originalRawMarkdown;
+      }
+
+      this.resetJoinMode();
+    },
+
+    rejectJoin() {
+      // Restore original state if we modified rundownItems
+      if (this.joinMode.originalItems) {
+        this.rundownItems = this.joinMode.originalItems;
+        this.selectedItemIndex = this.joinMode.originalSelectedIndex;
+        this.rawMarkdownContent = this.joinMode.originalRawMarkdown;
+      }
+
+      notifyUserStandard('Join cancelled', NOTIFICATION_COLORS.INFO, 2000);
+      this.resetJoinMode();
+    },
+
+    resetJoinMode() {
+      this.joinMode = {
+        active: false,
+        phase: null,
+        originalItems: null,
+        originalSelectedIndex: -1,
+        originalRawMarkdown: '',
+        selectedItems: [],
+        mergedItem: null,
+        snapshotName: '',
+        snapshotFilename: '',
+      };
+      this.showJoinConfigModal = false;
+
+      // Tell RundownPanel to reset its join state
+      if (this.$refs.rundownPanelRef?.resetJoinState) {
+        this.$refs.rundownPanelRef.resetJoinState();
+      }
+    },
+
+    // ─── End Join Items ─────────────────────────────────────────
+
+    // --- Relocate Cue ---
+    // User clicked "Relocate" in a cue's orbital menu. Show the rundown item picker.
+    handleRelocateCue({ segmentIndex, markdown, type }) {
+      this.pendingRelocate = { segmentIndex, markdown, type };
+      this.showRelocatePicker = true;
+    },
+
+    async confirmRelocate(targetItem, targetIndex) {
+      if (targetIndex === this.selectedItemIndex) return; // Can't relocate to same item
+      this.showRelocatePicker = false;
+
+      const { segmentIndex, markdown } = this.pendingRelocate;
+      this.pendingRelocate = null;
+
+      // Step 1: Extract and remove the segment from current item
+      const editorPanel = this.$refs.editorPanel;
+      if (!editorPanel) return;
+
+      const extracted = editorPanel.extractAndRemoveSegment(segmentIndex);
+      if (!extracted) {
+        notifyUserStandard('Failed to extract cue content', NOTIFICATION_COLORS.ERROR, 3000);
+        return;
+      }
+
+      // Step 2: Switch to the target rundown item
+      await this.selectRundownItem(targetIndex);
+
+      // Step 3: Enter placement mode on the new item
+      this.$nextTick(() => {
+        setTimeout(() => {
+          const panel = this.$refs.editorPanel;
+          if (panel && panel.enterCrossPlacementMode) {
+            panel.enterCrossPlacementMode(markdown);
+            notifyUserStandard('Click a drop zone to place the cue', NOTIFICATION_COLORS.INFO, 5000);
+          }
+        }, 500);
+      });
     },
 
     // Handle rundown cleared event from RundownPanel
@@ -4750,7 +5416,49 @@ Try dropping an image or video file here!`
     
     pasteUrl() {
     },
-    
+
+    handleInsertWhiteboardCue({ item, option }) {
+      const prefill = buildModalPrefill(item, option);
+      console.log('📋 Whiteboard cue insert:', option.cueType, prefill);
+
+      // Clear any previous prefill
+      this.whiteboardPrefillData = null;
+
+      switch (option.cueType) {
+        case 'GFX':
+          this.whiteboardPrefillData = prefill;
+          this.editingGfxCueData = null;
+          this.showGfxModal = true;
+          break;
+        case 'SOT':
+          this.editingSotCueData = null;
+          this.showSotModal = true;
+          break;
+        case 'VO':
+          this.showVoModal = true;
+          break;
+        case 'NAT':
+          this.showNatModal = true;
+          break;
+        case 'IMG':
+          this.showImgCueModal = true;
+          break;
+        case 'FSQ':
+          this.editingFsqCueData = null;
+          this.showFsqModal = true;
+          break;
+        case 'PARAGRAPH':
+          // Direct paragraph insertion
+          if (prefill.text && this.$refs.editorPanel) {
+            this.$refs.editorPanel.insertParagraphAtCursor(prefill.text);
+            this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
+          }
+          break;
+        default:
+          console.warn('Unknown cue type:', option.cueType);
+      }
+    },
+
     async submitGraphic(gfxCueData) {
       console.log('🎨 GFX cue submitted:', gfxCueData);
 
@@ -4801,7 +5509,12 @@ Try dropping an image or video file here!`
         }
         if (gfxCueData.sourceUrl) gfxCueBlock += `[SourceURL: ${gfxCueData.sourceUrl}]\n`;
         if (gfxCueData.aspectRatio) gfxCueBlock += `[AspectRatio: ${gfxCueData.aspectRatio}]\n`;
+        if (gfxCueData.views) gfxCueBlock += `[Views: ${gfxCueData.views}]\n`;
+        if (gfxCueData.bookmarks) gfxCueBlock += `[Bookmarks: ${gfxCueData.bookmarks}]\n`;
         gfxCueBlock += `[Status: pending]\n`;
+
+        // Sync xpost cue to database
+        this.syncXpostCueToDatabase(gfxCueData);
       } else {
         // Standard GFX fields
         if (gfxCueData.title) {
@@ -4811,10 +5524,28 @@ Try dropping an image or video file here!`
           const escapedBody = gfxCueData.body.replace(/\n/g, '\\n');
           gfxCueBlock += `[Body: ${escapedBody}]\n`;
         }
+        if (gfxCueData.listItems && gfxCueData.listItems.length) {
+          gfxCueBlock += `[ListItems: ${JSON.stringify(gfxCueData.listItems)}]\n`;
+        }
         if (gfxCueData.style) {
           gfxCueBlock += `[FontSize: ${gfxCueData.style.fontSize}px]\n`;
           gfxCueBlock += `[FontFamily: ${gfxCueData.style.fontFamily}]\n`;
           gfxCueBlock += `[TextAlign: ${gfxCueData.style.textAlign}]\n`;
+          if (gfxCueData.style.titleFontSize) {
+            gfxCueBlock += `[TitleFontSize: ${gfxCueData.style.titleFontSize}px]\n`;
+          }
+          if (gfxCueData.style.titleAlign) {
+            gfxCueBlock += `[TitleAlign: ${gfxCueData.style.titleAlign}]\n`;
+          }
+          if (gfxCueData.style.titlePinToTop) {
+            gfxCueBlock += `[TitlePinToTop: true]\n`;
+          }
+          if (gfxCueData.style.titleMarginTop != null) {
+            gfxCueBlock += `[TitleMarginTop: ${gfxCueData.style.titleMarginTop}]\n`;
+          }
+          if (gfxCueData.style.titleMarginBottom != null) {
+            gfxCueBlock += `[TitleMarginBottom: ${gfxCueData.style.titleMarginBottom}]\n`;
+          }
         }
         if (gfxCueData.renderMode) {
           gfxCueBlock += `[RenderMode: ${gfxCueData.renderMode}]\n`;
@@ -4830,8 +5561,46 @@ Try dropping an image or video file here!`
 
       console.log('📝 GFX cue block:', gfxCueBlock);
 
-      // Use EditorPanel's handleSotCueSubmit which properly uses selectedSegmentIndex
-      // This is the same method SOT uses and it works correctly
+      const cueLabel = gfxCueData.gfxType === 'xpost' ? 'X Post' : 'GFX';
+
+      // ── EDIT MODE: Replace existing cue in-place ──
+      if (this.editingGfxCueData) {
+        const editAssetId = this.editingGfxCueData.assetId || this.editingGfxCueData.rawData?.assetId;
+        console.log(`📝 EDIT MODE: Replacing GFX cue with assetId ${editAssetId}`);
+
+        // Find and replace the old cue block directly in raw markdown
+        // This is more reliable than segment manipulation since reconstructContent
+        // uses segment.data.rawData which wouldn't reflect the new cue block
+        const raw = this.rawMarkdownContent || '';
+        const cuePattern = new RegExp(
+          `<!-- Begin Cue -->\\n[\\s\\S]*?\\[Asset\\s*Id:\\s*${editAssetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\][\\s\\S]*?<!-- End Cue -->`,
+          'i'
+        );
+
+        if (cuePattern.test(raw)) {
+          const newRawContent = raw.replace(cuePattern, gfxCueBlock);
+          this.updateScriptContent(newRawContent);
+          console.log(`✅ GFX cue replaced in-place via raw markdown for assetId ${editAssetId}`);
+        } else {
+          console.warn('⚠️ Could not find existing cue to replace, inserting as new');
+          this.editingGfxCueData = null;
+          await this.submitGraphic(gfxCueData);
+          return;
+        }
+
+        // Close modal and clean up edit state
+        this.showGfxModal = false;
+        this.editingGfxCueData = null;
+        this.whiteboardPrefillData = null;
+        this.gfxInsertionIndex = null;
+        this.hasUnsavedChanges = true;
+        this.checkForUnsavedRundownChanges();
+        this.$toast?.success(`${cueLabel} cue updated successfully!`);
+        console.log(`✅ ${cueLabel} cue updated in-place`);
+        return;
+      }
+
+      // ── NEW MODE: Insert cue at cursor position ──
       console.log('🎨 Inserting GFX cue via EditorPanel method (same as SOT)');
 
       if (this.$refs.editorPanel && this.$refs.editorPanel.handleSotCueSubmit) {
@@ -4849,15 +5618,56 @@ Try dropping an image or video file here!`
 
       // Close the modal
       this.showGfxModal = false;
+      this.editingGfxCueData = null;
+      this.whiteboardPrefillData = null;
 
       this.hasUnsavedChanges = true;
       this.checkForUnsavedRundownChanges();
 
-      const cueLabel = gfxCueData.gfxType === 'xpost' ? 'X Post' : 'GFX';
       this.$toast?.success(`${cueLabel} cue inserted successfully!`);
+      this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
       console.log(`✅ ${cueLabel} cue inserted`);
     },
     
+    async syncXpostCueToDatabase(gfxCueData) {
+      try {
+        const payload = {
+          asset_id: gfxCueData.assetId,
+          episode_number: this.currentEpisodeNumber || '0000',
+          slug: gfxCueData.slug,
+          xpost_name: gfxCueData.authorName || null,
+          xpost_username: gfxCueData.authorHandle || null,
+          xpost_profile_photo: gfxCueData.authorAvatar || null,
+          xpost_verified: gfxCueData.authorVerified || false,
+          xpost_bio: gfxCueData.authorBio || null,
+          xpost_followers: gfxCueData.authorFollowers || null,
+          xpost_following: gfxCueData.authorFollowing || null,
+          xpost_post_text: gfxCueData.tweetText || null,
+          xpost_tweet_id: gfxCueData.tweetId || null,
+          xpost_conversation_id: gfxCueData.conversationId || null,
+          xpost_media_urls: gfxCueData.mediaUrls || null,
+          xpost_media_objects: gfxCueData.mediaObjects || null,
+          xpost_datetime: gfxCueData.publishedTime || null,
+          xpost_view_count: gfxCueData.views || null,
+          xpost_likes: gfxCueData.likes || null,
+          xpost_retweets: gfxCueData.retweets || null,
+          xpost_replies: gfxCueData.replies || null,
+          xpost_quotes: gfxCueData.quotes || null,
+          xpost_bookmarks: gfxCueData.bookmarks || null,
+          xpost_source_url: gfxCueData.sourceUrl || null,
+          xpost_platform: gfxCueData.platform || 'x',
+          xpost_entities: gfxCueData.entities || null,
+          xpost_referenced_tweets: gfxCueData.referencedTweets || null,
+          aspect_ratio: gfxCueData.aspectRatio || null,
+          full_metadata: gfxCueData.fullMetadata || null,
+        };
+        await axios.post('/api/gfx/xpost', payload);
+        console.log('✅ XPOST cue synced to database:', gfxCueData.assetId);
+      } catch (err) {
+        console.error('⚠️ Failed to sync XPOST cue to database (cue block still inserted):', err);
+      }
+    },
+
     submitFsq(fsqCueData) {
       console.log('🎬 FSQ cue submitted:', fsqCueData);
 
@@ -4883,6 +5693,18 @@ Try dropping an image or video file here!`
       }
       if (fsqCueData.fontSize) {
         fsqCueBlock += `[FontSize: ${fsqCueData.fontSize}px]\n`;
+      }
+      if (fsqCueData.boxHeight != null) {
+        fsqCueBlock += `[BoxHeight: ${fsqCueData.boxHeight}]\n`;
+      }
+      if (fsqCueData.boxOpacity != null) {
+        fsqCueBlock += `[BoxOpacity: ${fsqCueData.boxOpacity}]\n`;
+      }
+      if (fsqCueData.lineSpacing != null) {
+        fsqCueBlock += `[LineSpacing: ${fsqCueData.lineSpacing}]\n`;
+      }
+      if (fsqCueData.attributionSize != null) {
+        fsqCueBlock += `[AttributionSize: ${fsqCueData.attributionSize}]\n`;
       }
       fsqCueBlock += `[Duration: ${fsqCueData.duration}]\n`;
       if (fsqCueData.wordCount) {
@@ -5030,6 +5852,8 @@ Try dropping an image or video file here!`
         const fsqDataToGenerate = [...this.$refs.editorPanel.pendingFsqDataArray];
         this.triggerFsqGeneration(fsqDataToGenerate);
 
+        this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
+
         // Clear the arrays for next time
         this.$refs.editorPanel.pendingCueDataArray = [];
         this.$refs.editorPanel.pendingFsqDataArray = [];
@@ -5091,12 +5915,14 @@ Try dropping an image or video file here!`
             asset_id: fsqData.assetId,
             alignment: alignmentMap[fsqData.style] || 'center',
             font_family: fsqData.fontFamily || 'sans-serif',
-            box_height: 80,
-            box_opacity: 75,
-            line_spacing: 30,
+            max_font_size: fsqData.fontSize ? parseInt(fsqData.fontSize) * 3 : null,
+            box_height: fsqData.boxHeight ? parseInt(fsqData.boxHeight) : 80,
+            box_opacity: fsqData.boxOpacity ? parseInt(fsqData.boxOpacity) : 75,
+            line_spacing: fsqData.lineSpacing ? parseInt(fsqData.lineSpacing) : 30,
+            attribution_size: fsqData.attributionSize ? parseInt(fsqData.attributionSize) : null,
             duration: fsqData.duration || '00:00:05:00',
-            enumerator: null,  // Can add rundown position later
-            priority: 'high'   // User-initiated = high priority
+            enumerator: null,
+            priority: 'high'
           };
 
           console.log(`🎨 Queuing FSQ generation: ${fsqData.slug}`);
@@ -5267,6 +6093,9 @@ Try dropping an image or video file here!`
           }
         }
 
+        // Capture selection before insertion — modal close can race with re-renders
+        const savedItemIndex = this.selectedItemIndex;
+
         // Delegate to EditorPanel (uses pendingCueInsertionIndex snapshotted at button-press time)
         if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
           this.$refs.editorPanel.insertCueAtSnapshotPosition(sotCue);
@@ -5276,16 +6105,30 @@ Try dropping an image or video file here!`
           this.appendToScriptContent(`\n${sotCue}\n`, null);
         }
 
+        // Restore selection if it was lost during insertion/modal-close race
+        if (this.selectedItemIndex < 0 && savedItemIndex >= 0) {
+          console.warn('⚠️ Selection was lost during SOT insertion, restoring index:', savedItemIndex);
+          this.selectedItemIndex = savedItemIndex;
+        }
+
         this.hasUnsavedChanges = true;
         this.checkForUnsavedRundownChanges();
 
-        console.log(`✅ SOT cue inserted successfully`);
+        // Verify the SOT was actually inserted into rawMarkdownContent
+        if (!this.rawMarkdownContent?.includes(data.assetId)) {
+          console.error('❌ SOT cue NOT found in rawMarkdownContent after insertion!');
+          console.error('❌ rawMarkdownContent length:', this.rawMarkdownContent?.length);
+          // Force it in as fallback
+          this.rawMarkdownContent = (this.rawMarkdownContent || '') + '\n\n' + sotCue + '\n';
+          console.log('🔧 Force-appended SOT cue as fallback');
+        }
 
-        // CRITICAL: Save to database BEFORE triggering processing
-        // The worker needs to find the cue block in the database
-        console.log('💾 Saving script content to database before processing...');
+        console.log(`✅ SOT cue inserted successfully`);
+        this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
+
+        // Wait for Vue to process the content update, then save
+        await this.$nextTick();
         await this.saveCurrentItem();
-        console.log('💾 Save complete - cue block is now in database');
 
         // Trigger processing NOW that cue is in database
         console.log('🔄 About to trigger SOT processing...');
@@ -5467,8 +6310,8 @@ Try dropping an image or video file here!`
         // Send cue data to EditorPanel for placement-based insertion
         if (this.$refs.editorPanel) {
           await this.$refs.editorPanel.handleVoCueSubmit(voCue);
+          this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
           console.log('✅ VO cue data sent to EditorPanel - placement overlay now active');
-          console.log('📍 Waiting for user to click drop zone to insert VO...');
         }
 
         // NOTE: Database save will happen automatically after user clicks placement
@@ -5498,8 +6341,8 @@ Try dropping an image or video file here!`
         // Send cue data to EditorPanel for placement-based insertion
         if (this.$refs.editorPanel) {
           await this.$refs.editorPanel.handleNatCueSubmit(natCue);
+          this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
           console.log('✅ NAT cue data sent to EditorPanel - placement overlay now active');
-          console.log('📍 Waiting for user to click drop zone to insert NAT...');
         }
 
       } catch (error) {
@@ -5650,6 +6493,7 @@ Try dropping an image or video file here!`
 
       this.showVoxModal = false;
       this.$toast.success('VOX cue inserted successfully!');
+      this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
       console.log('✅ VOX cue inserted');
     },
 
@@ -5664,6 +6508,7 @@ Try dropping an image or video file here!`
 
       this.showMusModal = false;
       this.$toast.success('MUS cue inserted successfully!');
+      this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
       console.log('✅ MUS cue inserted');
     },
 
@@ -5678,7 +6523,208 @@ Try dropping an image or video file here!`
 
       this.showLiveModal = false;
       this.$toast.success('LIVE cue inserted successfully!');
+      this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
       console.log('✅ LIVE cue inserted');
+    },
+
+    autoscrubAllItems() {
+      // Run auto scrub rules across ALL rundown items, not just the currently selected one
+      if (!this.rundownItems || this.rundownItems.length === 0) return
+
+      const interfaceSettings = JSON.parse(localStorage.getItem('showbuild_interface_settings') || '{}')
+      const autoscrubEnabled = (interfaceSettings.autoscrubEnabled ?? interfaceSettings.autoformatEnabled) !== false
+      if (!autoscrubEnabled) return
+
+      const stripSpans = (interfaceSettings.autoscrubStripSpans ?? interfaceSettings.autoformatStripSpans) !== false
+      const removeLeadingDashes = (interfaceSettings.autoscrubRemoveLeadingDashes ?? interfaceSettings.autoformatRemoveLeadingDashes) !== false
+      const cleanWhitespace = (interfaceSettings.autoscrubCleanWhitespace ?? interfaceSettings.autoformatCleanWhitespace) !== false
+
+      const invalidCuePattern = /\{(SOT|VO|VOT|NAT|FSQ|FS\s*QUOTE|GFX|IMG|PKG|DIR|BUMP|STING|VOX|MUS|LIVE|RIF|CUE)\s*\/[^}]+\}/i
+      const unwelcomeHtmlPattern = /<\/?(?:img|a|div|span|table|thead|tbody|tr|td|th|iframe|style|script|link|embed|object|svg|video|audio|source|picture|figure|figcaption|form|input|select|textarea|button|canvas|map|area|meta|base|section|article|aside|nav|header|footer|main|details|summary|dialog|pre|code|blockquote|ol|ul|li|dl|dt|dd|hr|font|center)\b[^>]*>/i
+
+      let totalChanged = 0
+
+      for (let i = 0; i < this.rundownItems.length; i++) {
+        // Skip the currently selected item — EditorPanel handles that one
+        if (i === this.selectedItemIndex) continue
+
+        const item = this.rundownItems[i]
+        let content = item.script || ''
+        if (!content) continue
+
+        let changed = false
+
+        // STEP 1: Strip spans and inline styles
+        if (stripSpans) {
+          const before = content.length
+          content = content.replace(/<span id="docs-internal-guid-[^"]*">/gi, '')
+          content = content.replace(/<p dir="ltr"[^>]*>/gi, '')
+          content = content.replace(/<span[^>]*font-weight:\s*700[^>]*>([\s\S]*?)<\/span>/gi, '<b>$1</b>')
+          content = content.replace(/<span[^>]*font-weight:\s*bold[^>]*>([\s\S]*?)<\/span>/gi, '<b>$1</b>')
+          content = content.replace(/<span[^>]*font-style:\s*italic[^>]*>([\s\S]*?)<\/span>/gi, '<i>$1</i>')
+          content = content.replace(/<span[^>]*>/gi, '')
+          content = content.replace(/<\/span>/gi, '')
+          content = content.replace(/&lt;span[^&]*&gt;/gi, '')
+          content = content.replace(/&lt;\/span&gt;/gi, '')
+          content = content.replace(/<div><\/div>/gi, '')
+          content = content.replace(/<div><br\s*\/?><\/div>/gi, '')
+          content = content.replace(/<div[^>]*>/gi, '')
+          content = content.replace(/<\/div>/gi, '')
+          content = content.replace(/<p([^>]*)>\s+/gi, '<p$1>')
+          content = content.replace(/\s+<\/p>/gi, '</p>')
+          if (content.length !== before) changed = true
+        }
+
+        // STEP 1b: Clean whitespace
+        if (cleanWhitespace) {
+          const before = content.length
+          content = content.replace(/&nbsp;/gi, ' ')
+          content = content.replace(/  +/g, ' ')
+          if (content.length !== before) changed = true
+        }
+
+        // STEP 3: Remove leading dashes
+        if (removeLeadingDashes) {
+          const dashMatches = [...content.matchAll(/<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/g)]
+          for (const match of dashMatches) {
+            const fullMatch = match[0]
+            const speaker = match[1] || 'josh'
+            const innerContent = match[2]
+            if (/^\s*[-–—]/.test(innerContent)) {
+              const lines = innerContent.split('\n').filter(l => l.trim())
+              const dashLines = lines.filter(l => /^\s*[-–—]/.test(l))
+              const isListContent = dashLines.length >= 2 && dashLines.length === lines.length
+              if (!isListContent) {
+                const cleanedContent = innerContent.replace(/^\s*[-–—]\s*/, '')
+                const newTag = `<p class="${speaker}">${cleanedContent}</p>`
+                if (newTag !== fullMatch) {
+                  content = content.replace(fullMatch, newTag)
+                  changed = true
+                }
+              }
+            }
+          }
+        }
+
+        // STEP 3b: Flag invalid cue patterns and unwelcome HTML
+        {
+          const pMatches = [...content.matchAll(/<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/g)]
+          for (const match of pMatches) {
+            const fullMatch = match[0]
+            const innerContent = match[2]
+            const plainContent = innerContent.replace(/<[^>]+>/g, '')
+
+            if (plainContent.trim().startsWith('***')) continue
+
+            let flagReason = null
+            if (invalidCuePattern.test(plainContent)) {
+              flagReason = 'Invalid cue code'
+            } else if (unwelcomeHtmlPattern.test(innerContent)) {
+              flagReason = 'Unwelcome HTML detected'
+            }
+
+            if (flagReason) {
+              const speaker = match[1] || 'josh'
+              const attrs = fullMatch.includes('data-needs-attention') ? '' : ' data-needs-attention="true"'
+              const noteAttr = fullMatch.includes('data-flag-note') ? '' : ` data-flag-note="${flagReason}"`
+              const newTag = `<p class="${speaker}"${attrs}${noteAttr}>*** ${innerContent}</p>`
+              content = content.replace(fullMatch, newTag)
+              changed = true
+            }
+          }
+        }
+
+        // STEP 3c: Un-flag paragraphs that no longer contain bad content
+        {
+          const flaggedMatches = [...content.matchAll(/<p\s+class="([^"]*)"([^>]*data-flag-note="(?:Invalid cue code|Unwelcome HTML detected)"[^>]*)>([\s\S]*?)<\/p>/g)]
+          for (const match of flaggedMatches) {
+            const fullMatch = match[0]
+            const speaker = match[1] || 'josh'
+            const innerContent = match[3]
+            const plainInner = innerContent.replace(/<[^>]+>/g, '')
+
+            const stillHasCue = invalidCuePattern.test(plainInner)
+            const stillHasHtml = unwelcomeHtmlPattern.test(innerContent)
+
+            if (!stillHasCue && !stillHasHtml) {
+              const cleanedContent = innerContent.replace(/^\*\*\*\s*/, '')
+              const newTag = `<p class="${speaker}">${cleanedContent}</p>`
+              content = content.replace(fullMatch, newTag)
+              changed = true
+            }
+          }
+        }
+
+        if (changed) {
+          item.script = content
+          totalChanged++
+        }
+      }
+
+      if (totalChanged > 0) {
+        console.log(`Auto Scrub: Scrubbed ${totalChanged} other rundown item(s)`)
+      }
+    },
+
+    handleScriptCompareApply(changes) {
+      // changes: [{ rundownIndex, comparatorText }]
+      // Rebuild script content: keep cue blocks from original, replace English text
+      for (const change of changes) {
+        const item = this.rundownItems[change.rundownIndex]
+        if (!item) continue
+
+        const originalScript = item.script || ''
+        const newScript = this.rebuildScriptFromComparator(originalScript, change.comparatorText)
+
+        // Update the rundown item
+        item.script = newScript
+
+        // If this is the currently selected item, update the editor
+        if (change.rundownIndex === this.selectedItemIndex) {
+          this.rawMarkdownContent = newScript
+        }
+      }
+
+      this.hasUnsavedChanges = true
+      if (this.$toast) {
+        this.$toast.success(`Applied ${changes.length} change(s) from comparator`)
+      }
+    },
+
+    rebuildScriptFromComparator(originalScript, comparatorText) {
+      // Extract cue blocks from the original script in order
+      const cueBlocks = []
+      const cuePattern = /<!-- Begin Cue -->[\s\S]*?<!-- End Cue -->/g
+      let match
+      while ((match = cuePattern.exec(originalScript)) !== null) {
+        cueBlocks.push(match[0])
+      }
+
+      // Remove replacement pattern placeholders from comparator text
+      // These are {TYPE/slug} tokens that correspond to cue blocks
+      const lines = comparatorText.split('\n')
+      const outputParts = []
+      let cueIndex = 0
+
+      for (const line of lines) {
+        const placeholderMatch = line.match(/^\{([^/}]+)\/([^}]+)\}$/)
+        if (placeholderMatch && cueIndex < cueBlocks.length) {
+          // Replace placeholder with original cue block
+          outputParts.push(cueBlocks[cueIndex])
+          cueIndex++
+        } else if (line.trim()) {
+          // Wrap text in paragraph tags (default speaker)
+          outputParts.push(`<p class="josh">${line.trim()}</p>`)
+        }
+      }
+
+      // Append any remaining cue blocks not matched by placeholders
+      while (cueIndex < cueBlocks.length) {
+        outputParts.push(cueBlocks[cueIndex])
+        cueIndex++
+      }
+
+      return outputParts.join('\n')
     },
 
     async createNewItem(itemData) {
@@ -5953,6 +6999,44 @@ Try dropping an image or video file here!`
     },
 
     // Handle refresh rundown from Options menu
+    async handleRecalculateDurations() {
+      if (!this.episodeNumber) {
+        notifyUserStandard('No episode selected', NOTIFICATION_COLORS.WARNING, 2000)
+        return
+      }
+      notifyUserStandard('Recalculating durations...', NOTIFICATION_COLORS.INFO, 2000)
+      try {
+        const authToken = localStorage.getItem('auth-token')
+        const response = await this.$axios.post(
+          `/estimateDuration/recalculate/${this.episodeNumber}`,
+          {},
+          { headers: { 'Authorization': `Bearer ${authToken}` } }
+        )
+        if (response.data.success) {
+          const { items_updated, total_duration, total_items } = response.data
+          // Update local rundown items with new durations
+          for (const result of response.data.items) {
+            const item = this.rundownItems.find(i => i.asset_id === result.asset_id)
+            if (item) {
+              item.duration = result.new_duration
+            }
+          }
+          notifyUserStandard(
+            `Durations updated: ${items_updated}/${total_items} items changed. TRT: ${total_duration}`,
+            NOTIFICATION_COLORS.SUCCESS,
+            4000
+          )
+        }
+      } catch (error) {
+        console.error('Duration recalculation failed:', error)
+        notifyUserStandard(
+          'Duration recalculation failed: ' + (error.response?.data?.detail || error.message),
+          NOTIFICATION_COLORS.ERROR,
+          4000
+        )
+      }
+    },
+
     async handleRefreshRundown() {
       console.log('🔄 Refresh rundown requested from Options menu');
       await this.reloadFromDatabase();
@@ -6176,6 +7260,7 @@ Try dropping an image or video file here!`
 
         this.hasUnsavedChanges = true;
         this.$toast?.success('IMG cue inserted successfully!');
+        this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
         console.log('✅ IMG cue inserted');
 
       } catch (error) {
@@ -6643,6 +7728,97 @@ Try dropping an image or video file here!`
       }
     },
 
+    /**
+     * Scan all rundown items for unresolved revision tags.
+     * Returns an array of { slug, title, count } for items with pending revisions.
+     */
+    findUnresolvedRevisions() {
+      const revPattern = /<rev\s+[^>]*>[\s\S]*?<\/rev>/gi;
+      const results = [];
+
+      for (const item of this.rundownItems) {
+        // For the currently selected item, use rawMarkdownContent (may have unsaved edits)
+        const content = (this.currentRundownItem && item.id === this.currentRundownItem.id)
+          ? (this.rawMarkdownContent || '')
+          : (item.script || item.script_content || '');
+
+        const matches = content.match(revPattern);
+        if (matches && matches.length > 0) {
+          results.push({
+            slug: item.slug || item.id,
+            title: item.title || item.slug || `Item ${item.id}`,
+            count: matches.length,
+            id: item.id
+          });
+        }
+      }
+
+      return results;
+    },
+
+    /**
+     * Resolve all revisions across all rundown items, then retry script generation.
+     * @param {'accept'|'reject'} action
+     */
+    async resolveAllRevisions(action) {
+      this.showRevisionBlockerModal = false;
+
+      const revPattern = /<rev\s+[^>]*>([\s\S]*?)<\/rev>/g;
+      const replacer = (match, inner) => {
+        const pipeIdx = inner.indexOf('|');
+        if (action === 'accept') {
+          return pipeIdx === -1 ? '' : inner.substring(pipeIdx + 1);
+        } else {
+          return pipeIdx === -1 ? inner : inner.substring(0, pipeIdx);
+        }
+      };
+
+      let updated = false;
+
+      // Fix current item via rawMarkdownContent
+      if (this.rawMarkdownContent && revPattern.test(this.rawMarkdownContent)) {
+        revPattern.lastIndex = 0;
+        this.rawMarkdownContent = this.rawMarkdownContent.replace(revPattern, replacer);
+        updated = true;
+      }
+
+      // Fix all other items by saving cleaned content to the API
+      for (const item of this.rundownItems) {
+        if (this.currentRundownItem && item.id === this.currentRundownItem.id) continue;
+        const content = item.script || item.script_content || '';
+        if (!revPattern.test(content)) continue;
+        revPattern.lastIndex = 0;
+
+        const cleaned = content.replace(revPattern, replacer);
+        item.script = cleaned;
+        item.script_content = cleaned;
+
+        try {
+          const token = localStorage.getItem('auth-token');
+          await this.$axios.put(`/rundown-items/${item.id}`, {
+            script_content: cleaned
+          }, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          updated = true;
+        } catch (err) {
+          console.error(`Failed to save cleaned content for item ${item.slug}:`, err);
+        }
+      }
+
+      if (updated) {
+        // Save current item if it was modified
+        await this.saveCurrentItem();
+        const label = action === 'accept' ? 'accepted' : 'rejected';
+        this.$toast.info(`All revisions ${label}`);
+      }
+
+      // Retry generation with the stashed preset
+      if (this.revisionBlockerPreset) {
+        await this.handleGenerateScript(this.revisionBlockerPreset);
+      }
+    },
+
     // Generate script for current episode with specified preset
     async handleGenerateScript(preset = 'host_full') {
       console.log('🎬 handleGenerateScript called with preset:', preset);
@@ -6650,6 +7826,15 @@ Try dropping an image or video file here!`
 
       if (!this.currentEpisodeNumber) {
         this.$toast.warning('No episode loaded');
+        return;
+      }
+
+      // Check for unresolved revisions before generating
+      const unresolvedItems = this.findUnresolvedRevisions();
+      if (unresolvedItems.length > 0) {
+        this.revisionBlockerItems = unresolvedItems;
+        this.revisionBlockerPreset = preset;
+        this.showRevisionBlockerModal = true;
         return;
       }
 
@@ -7848,6 +9033,166 @@ Try dropping an image or video file here!`
 
 .sidebar-expand-right {
   border-radius: 4px 0 0 4px;
+}
+
+/* Relocate cue picker */
+.relocate-list-item {
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.relocate-list-item:hover {
+  background: rgba(66, 165, 245, 0.15) !important;
+}
+.relocate-current {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.relocate-index {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.75rem;
+  opacity: 0.5;
+  min-width: 28px;
+  text-align: right;
+  margin-right: 8px;
+}
+
+/* ── Join Mode (selecting / configuring / placing phases) ── */
+
+.join-mode-active:not(.join-mode-previewing) .editor-panel,
+.join-mode-active:not(.join-mode-previewing) :deep(.metadata-panel),
+.join-mode-active:not(.join-mode-previewing) .sidebar-collapse-toggle,
+.join-mode-active:not(.join-mode-previewing) .sidebar-collapse-left,
+.join-mode-active:not(.join-mode-previewing) .sidebar-expand-left {
+  filter: blur(3px) saturate(0.3);
+  pointer-events: none;
+  transition: filter 0.3s ease;
+}
+
+.join-mode-active:not(.join-mode-previewing) :deep(.show-info-header) {
+  filter: blur(2px) saturate(0.4);
+  pointer-events: none;
+  transition: filter 0.3s ease;
+}
+
+.join-mode-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.25);
+  z-index: 4;
+  pointer-events: none;
+}
+
+/* Keep rundown panel above the overlay and un-blurred (all phases) */
+.join-mode-active :deep(.rundown-panel) {
+  position: relative;
+  z-index: 6;
+  filter: none !important;
+  pointer-events: auto !important;
+}
+
+/* ── Join Mode Preview Phase ── */
+/* Unblurred, visible, but read-only: user can click rundown items to look around */
+
+.join-mode-previewing :deep(.show-info-header) {
+  pointer-events: none;
+  transition: filter 0.3s ease;
+}
+
+.join-mode-previewing .editor-panel {
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.join-mode-previewing :deep(.metadata-panel) {
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+/* Push content below the banner (110px) so nothing hides behind it */
+.join-mode-previewing .scrollable-content-wrapper {
+  padding-top: 110px;
+}
+
+.join-instruction-tooltip {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  background: rgba(30, 20, 50, 0.95);
+  border: 1px solid rgba(103, 58, 183, 0.4);
+  border-radius: 8px;
+  padding: 10px 20px;
+  color: white;
+  font-size: 13px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Unresolved Revisions Blocker Modal */
+.revision-blocker-card {
+  background: #1a1a2e !important;
+  color: #e0e0e0;
+}
+
+.revision-blocker-header {
+  background: #16213e;
+  color: #fff;
+  font-weight: 600;
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.revision-blocker-body {
+  padding: 20px !important;
+}
+
+.revision-blocker-body p {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.95rem;
+}
+
+.revision-blocker-list {
+  max-height: 300px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.revision-blocker-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 4px;
+}
+
+.revision-blocker-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.revision-item-title {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.revision-blocker-actions {
+  padding: 12px 20px !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 </style>

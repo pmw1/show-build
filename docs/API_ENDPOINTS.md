@@ -3,11 +3,10 @@
 Complete reference for all API endpoints in the Show-Build broadcast content management system.
 
 ## Network Environment
-- **Server**: Ubuntu 192.168.51.210 (accessed via SSH from Windows/WSL 192.168.51.225)
-- **Frontend**: http://192.168.51.210:8080 (Vue.js dev server)
-- **Backend API**: http://192.168.51.210:8888 (FastAPI in Docker)
-- **MQTT Broker**: 192.168.51.210:1883
-- **Documentation**: http://192.168.51.210:8888/docs/api
+- **Server**: `prefect` (192.168.51.207) — all show-build services run here
+- **Frontend**: https://192.168.51.207:8091
+- **Backend API**: https://192.168.51.207:8888 (FastAPI in Docker)
+- **Documentation**: https://192.168.51.207:8888/docs/api
 
 ## Legend
 - 🔒 = Requires authentication (JWT token or API key)
@@ -24,9 +23,8 @@ Complete reference for all API endpoints in the Show-Build broadcast content man
 - `GET /health` - Basic health check
 - `GET /show-info` - Show metadata (title, description, episode path)
 
-### MQTT Communication  
-- `POST /publish/` - Send MQTT messages to broker
-- `GET /listen/` - Subscribe to MQTT topic stream
+### ~~MQTT Communication~~ (REMOVED)
+> MQTT has been removed. All async processing now uses Celery + Redis.
 
 ---
 
@@ -48,14 +46,14 @@ Complete reference for all API endpoints in the Show-Build broadcast content man
 
 ## 3. EPISODE MANAGEMENT
 
-### Main Episode Endpoints (`main.py`) - **File-Based Legacy System**
+### Main Episode Endpoints (`routers/legacy_router.py`, formerly in `main.py`) - **File-Based Legacy System**
 - `GET /episodes` - List all episodes with metadata from `info.md` 📁
 - `GET /episodes/{episode_number}/rundown` - Get rundown items with frontmatter 📁
 - `GET /episodes/{episode_number}/info` - Get episode info from `info.md` 🔒📁
 - `PUT /episodes/{episode_number}/info` - Update episode info in `info.md` 🔒📁
 - `GET /rundown/{episode_number}/debug` - Debug rundown parsing issues 📁
 
-### Enhanced Episode Router (`episodes_router.py`) - **Database-Driven Modern System**
+### Enhanced Episode Router (`routers/episodes/` package, shim at `episodes_router.py`) - **Database-Driven Modern System**
 - `GET /episodes/` - List episodes (database version) 🔒
 - `GET /episodes/{episode_id}` - Get episode details 🔒
 - `POST /episodes/{episode_id}/scaffold` - Create episode structure 🔒📁
@@ -80,7 +78,7 @@ Complete reference for all API endpoints in the Show-Build broadcast content man
 
 ## 4. ADVANCED DATABASE PROCESSING SYSTEM
 
-### **Background Job System** (`main.py`)
+### **Background Job System** (`routers/misc_router.py`, formerly in `main.py`)
 - `POST /episodes/{episode_id}/compile-script` - **Celery background script compilation** 🔒🔄
 - `GET /jobs/{job_id}/status` - Check job progress and status 🔒
 - `WebSocket /ws/{client_id}` - **Real-time job updates**
@@ -135,13 +133,12 @@ Complete reference for all API endpoints in the Show-Build broadcast content man
 ### 🔄 Dual System Architecture
 The Show-Build system operates with two parallel architectures:
 
-**File-Based Legacy System** (`main.py`)
+**File-Based Legacy System** (`routers/legacy_router.py`, formerly in `main.py`)
 - Direct file manipulation and YAML frontmatter parsing
 - Immediate synchronous responses
-- Compatible with existing Obsidian workflows
 - Production-ready and stable
 
-**Database-Driven Modern System** (`episodes_router.py` + background services)
+**Database-Driven Modern System** (`routers/episodes/` package + background services)
 - Background Celery job processing
 - PostgreSQL database for rich metadata
 - Real-time WebSocket progress updates
@@ -167,7 +164,6 @@ The Show-Build system operates with two parallel architectures:
 - **Episode Storage**: `/home/episodes/{episode_number}/`
 - **Asset Storage**: `/shared_media/`
 - **Configuration**: JSON files in `app/storage/`
-- **Obsidian Compatibility**: Full markdown + YAML frontmatter support
 - **Docker Volumes**: Host filesystem mounted into containers
 
 ### 🚀 Background Processing Features
@@ -205,7 +201,7 @@ The Show-Build system operates with two parallel architectures:
 
 ## SETTINGS MANAGEMENT
 
-### Settings Management (`settings_router.py`)
+### Settings Management (`routers/settings/` package, shim at `settings_router.py`)
 - `GET /settings/` - Get all current settings 
 - `PUT /settings/rundown` - **Update rundown settings** 🔒
   - `auto_number_rundown_items`: Enable auto-numbering

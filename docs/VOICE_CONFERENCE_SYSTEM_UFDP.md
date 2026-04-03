@@ -112,7 +112,7 @@ SELECT * FROM api_configs WHERE service = 'asterisk';
 
 **Key Files:**
 - `app/voice_conference_router.py` - FastAPI endpoints for conference management
-- `app/asterisk_service.py` - Asterisk AMI client and service layer
+- `app/services/asterisk_service.py` - Asterisk AMI client and service layer (moved from app root to services/)
 - `asterisk_pin_validator.py` - PIN validation script called by Asterisk
 
 **API Endpoints:**

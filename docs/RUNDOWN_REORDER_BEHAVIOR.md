@@ -9,7 +9,7 @@ When you drag and drop items in the Content Editor rundown:
    - Calls `saveRundownOrder()` which sends a POST to `/api/rundown/{episode}/reorder`
    - Sends the current filenames and new order values
 
-2. **Backend** (`main.py` - `reorder_rundown` function):
+2. **Backend** (`routers/legacy_router.py` - `reorder_rundown` function, formerly in `main.py`):
    - **ONLY updates the `order:` field** in the YAML frontmatter
    - **DOES NOT rename files**
    - Files keep their original names
@@ -69,13 +69,13 @@ After dragging "closing" to the top:
 
 - ✅ Current basic reorder (updates frontmatter only) is **WORKING**
 - 📝 Enhanced reorder with file renaming is **AVAILABLE** in `enhanced_reorder.py`
-- ⚠️ Enhanced version is **NOT YET INTEGRATED** into main.py
+- ⚠️ Enhanced version is **NOT YET INTEGRATED** into the legacy router
 
 ## How to Enable Enhanced Reordering
 
 To enable file renaming on reorder:
 
-1. Import the enhanced function in `main.py`:
+1. Import the enhanced function in the legacy router (`app/routers/legacy_router.py`):
 ```python
 from enhanced_reorder import reorder_rundown_with_rename
 ```

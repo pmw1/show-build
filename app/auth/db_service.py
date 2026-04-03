@@ -1,77 +1,27 @@
 """
-Isolated database service for authentication
-Avoids SQLAlchemy relationship conflicts by defining minimal models
+Authentication database service.
+
+Uses the shared database connection from database.py and models from models_user.py.
 """
-import os
 from datetime import datetime
-from typing import Dict, Optional, List
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, JSON
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.sql import func
+from typing import Optional, List
+from database import SessionLocal
+from models_user import User, APIKey
 from passlib.context import CryptContext
 import logging
-import hashlib
-
-# Create isolated base and connection
-Base = declarative_base()
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://showbuild:showbuild@postgres:5432/showbuild")
-engine = create_engine(DATABASE_URL, echo=False)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 logger = logging.getLogger(__name__)
 
 
-class User(Base):
-    """Isolated User model for authentication"""
-    __tablename__ = "users"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(50), unique=True, nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=False)
-    access_level = Column(String(20), nullable=False, default="user")
-    first_name = Column(String(100), nullable=True, default="")
-    last_name = Column(String(100), nullable=True, default="")
-    email = Column(String(255), nullable=True, default="")
-    phone = Column(String(20), nullable=True, default="")
-    profile_picture = Column(String(500), nullable=True, default="")
-    is_active = Column(Boolean, default=True)
-    is_verified = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    last_login = Column(DateTime(timezone=True), nullable=True)
-    preferences = Column(JSON, default=dict)
-    organization_id = Column(Integer, nullable=True)
-    is_test_data = Column(Boolean, nullable=False, default=False)
-
-
-class APIKey(Base):
-    """Isolated API Key model for authentication"""
-    __tablename__ = "api_keys"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    key_hash = Column(String(255), unique=True, nullable=False, index=True)
-    key_prefix = Column(String(8), nullable=False, index=True)
-    client_name = Column(String(100), nullable=False)
-    access_level = Column(String(20), nullable=False, default="service")
-    created_by_username = Column(String(50), nullable=False)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    last_used = Column(DateTime(timezone=True), nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
-    usage_count = Column(Integer, default=0)
-
-
 class AuthService:
-    """Authentication service using isolated database connection"""
-    
+    """Authentication service using shared database connection"""
+
     @staticmethod
-    def get_db() -> Session:
+    def get_db():
         return SessionLocal()
-    
+
     @classmethod
     def get_user(cls, username: str) -> Optional[dict]:
         """Get a user by username"""
@@ -79,9 +29,8 @@ class AuthService:
         try:
             user = db.query(User).filter(User.username == username).first()
             logger.info(f"Database query for user '{username}': {'Found' if user else 'Not found'}")
-            
+
             if user:
-                # Return dict to avoid session issues
                 return {
                     "id": user.id,
                     "username": user.username,
@@ -103,7 +52,7 @@ class AuthService:
             return None
         finally:
             db.close()
-    
+
     @classmethod
     def get_api_key(cls, api_key: str) -> Optional[dict]:
         """Get API key by the actual key value"""
@@ -113,15 +62,13 @@ class AuthService:
                 APIKey.key_hash == api_key,
                 APIKey.is_active == True
             ).first()
-            
+
             if key_record:
-                # Update last used timestamp
                 key_record.last_used = datetime.utcnow()
                 key_record.usage_count += 1
                 db.commit()
                 logger.info(f"API key {api_key[:8]}... found and usage updated")
-                
-                # Return dict to avoid session issues
+
                 return {
                     "id": key_record.id,
                     "client_name": key_record.client_name,
@@ -133,25 +80,23 @@ class AuthService:
             else:
                 logger.warning(f"API key {api_key[:8]}... not found")
                 return None
-            
+
         except Exception as e:
             logger.error(f"Error getting API key: {e}")
             return None
         finally:
             db.close()
-    
+
     @classmethod
     def create_user(cls, username: str, password: str, **kwargs) -> Optional[User]:
         """Create a new user"""
         db = cls.get_db()
         try:
-            # Check if user already exists
             existing = db.query(User).filter(User.username == username).first()
             if existing:
                 logger.warning(f"User {username} already exists")
                 return None
-            
-            # Create new user
+
             hashed_password = pwd_context.hash(password)
             user = User(
                 username=username,
@@ -168,29 +113,29 @@ class AuthService:
                 organization_id=kwargs.get('organization_id', None),
                 is_test_data=kwargs.get('is_test_data', False)
             )
-            
+
             db.add(user)
             db.commit()
             db.refresh(user)
-            
+
             logger.info(f"Created user: {username}")
             return user
-            
+
         except Exception as e:
             db.rollback()
             logger.error(f"Error creating user {username}: {e}")
             return None
         finally:
             db.close()
-    
+
     @classmethod
-    def create_api_key(cls, api_key: str, client_name: str, created_by: str, 
+    def create_api_key(cls, api_key: str, client_name: str, created_by: str,
                       access_level: str = "service") -> Optional[APIKey]:
         """Create a new API key"""
         db = cls.get_db()
         try:
             key_record = APIKey(
-                key_hash=api_key,  # Store actual key for now (legacy)
+                key_hash=api_key,
                 key_prefix=api_key[:8],
                 client_name=client_name,
                 access_level=access_level,
@@ -198,21 +143,21 @@ class AuthService:
                 is_active=True,
                 usage_count=0
             )
-            
+
             db.add(key_record)
             db.commit()
             db.refresh(key_record)
-            
+
             logger.info(f"Created API key for: {client_name}")
             return key_record
-            
+
         except Exception as e:
             db.rollback()
             logger.error(f"Error creating API key: {e}")
             return None
         finally:
             db.close()
-    
+
     @classmethod
     def list_users(cls) -> List[User]:
         """Get all users"""
@@ -225,7 +170,7 @@ class AuthService:
             return []
         finally:
             db.close()
-    
+
     @classmethod
     def list_api_keys(cls) -> List[APIKey]:
         """Get all API keys"""
@@ -238,7 +183,7 @@ class AuthService:
             return []
         finally:
             db.close()
-    
+
     @classmethod
     def update_last_login(cls, username: str) -> None:
         """Update user's last login timestamp"""
@@ -264,7 +209,6 @@ class AuthService:
                 logger.warning(f"User {username} not found for update")
                 return None
 
-            # Update allowed fields
             if 'first_name' in kwargs:
                 user.first_name = kwargs['first_name']
             if 'last_name' in kwargs:
@@ -280,7 +224,6 @@ class AuthService:
             if 'profile_picture' in kwargs:
                 user.profile_picture = kwargs['profile_picture']
             if 'password' in kwargs:
-                # Hash new password if provided
                 user.hashed_password = pwd_context.hash(kwargs['password'])
 
             user.updated_at = datetime.utcnow()

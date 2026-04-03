@@ -1,16 +1,30 @@
 /**
  * useLLM.js - Composable for LLM API integrations
  * Supports: Ollama, OpenAI, Anthropic, Google Gemini, xAI Grok
+ *
+ * Provider implementations: ./llm/providers.js
+ * Quote splitting utilities: ./llm/quoteSplitting.js
  */
 
 import { ref } from 'vue'
 import axios from 'axios'
 import { notifyUserStandard, NOTIFICATION_COLORS } from '@/composables/useStandardNotification'
+import {
+  callOllama as _callOllama,
+  callOpenAI as _callOpenAI,
+  callAnthropic as _callAnthropic,
+  callGemini as _callGemini,
+  callGrok as _callGrok
+} from './llm/providers'
+import {
+  validateAndFixSegments,
+  deterministicSplit
+} from './llm/quoteSplitting'
 
 export function useLLM() {
   const loading = ref(false)
   const error = ref(null)
-  const lastUsedModel = ref(null) // Track last used model {service, model, timestamp}
+  const lastUsedModel = ref(null)
 
   /**
    * Get API configurations from backend
@@ -33,237 +47,37 @@ export function useLLM() {
     }
   }
 
-  /**
-   * Call Ollama (local LLM via llama.cpp)
-   * Falls back to hardcoded host if config fetch fails
-   */
-  async function callOllama(prompt, model = 'deepseek-r1:32b-qwen-distill-q4_K_M', options = {}) {
-    try {
-      // Use backend proxy to avoid HTTPS->HTTP mixed content blocking
-      const response = await axios.post('/api/llm/ollama/generate', {
-        model: model,
-        prompt: prompt,
-        stream: false,
-        options: {
-          temperature: options.temperature || 0.7,
-          top_p: options.top_p || 0.9,
-          max_tokens: options.max_tokens || 500
-        }
-      })
-
-      return response.data.response
-    } catch (err) {
-      console.error('Ollama API error:', err)
-      throw err
-    }
+  // Wrap provider calls to fetch configs automatically (backward compat)
+  async function callOllama(prompt, model, options = {}) {
+    return _callOllama(prompt, model, options)
   }
 
-  /**
-   * Call OpenAI API
-   */
-  async function callOpenAI(prompt, model = 'gpt-4', options = {}) {
-    try {
-      const configs = await getApiConfigs()
-      const openaiConfig = configs?.preproduction?.ai_services?.openai
-
-      if (!openaiConfig?.enabled) {
-        throw new Error('OpenAI is not enabled in settings')
-      }
-
-      // Enhanced logging for debugging
-      console.log('🔍 OpenAI API Request:', {
-        model,
-        apiKeyPresent: !!openaiConfig.apiKey,
-        apiKeyLength: openaiConfig.apiKey?.length,
-        apiKeyPrefix: openaiConfig.apiKey?.substring(0, 10) + '...',
-        enabled: openaiConfig.enabled
-      })
-
-      const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-        model: model,
-        messages: [
-          { role: 'system', content: options.systemPrompt || 'You are a helpful assistant.' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: options.temperature || 0.7,
-        max_tokens: options.max_tokens || 500
-      }, {
-        headers: {
-          'Authorization': `Bearer ${openaiConfig.apiKey}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      console.log('✅ OpenAI API Success')
-      return response.data.choices[0].message.content
-    } catch (err) {
-      console.error('❌ OpenAI API error:', {
-        message: err.message,
-        responseData: err.response?.data,
-        status: err.response?.status,
-        statusText: err.response?.statusText,
-        headers: err.response?.headers
-      })
-      throw err
-    }
+  async function callOpenAI(prompt, model, options = {}) {
+    const configs = await getApiConfigs()
+    const openaiConfig = configs?.preproduction?.ai_services?.openai
+    if (!openaiConfig?.enabled) throw new Error('OpenAI is not enabled in settings')
+    return _callOpenAI(prompt, model, options, openaiConfig.apiKey)
   }
 
-  /**
-   * Call Anthropic Claude API
-   */
-  async function callAnthropic(prompt, model = 'claude-3-5-sonnet-20241022', options = {}) {
-    try {
-      const configs = await getApiConfigs()
-      const anthropicConfig = configs?.preproduction?.ai_services?.anthropic
-
-      if (!anthropicConfig?.enabled) {
-        throw new Error('Anthropic is not enabled in settings')
-      }
-
-      // Enhanced logging for debugging
-      console.log('🔍 Anthropic API Request:', {
-        model,
-        apiKeyPresent: !!anthropicConfig.apiKey,
-        apiKeyLength: anthropicConfig.apiKey?.length,
-        apiKeyPrefix: anthropicConfig.apiKey?.substring(0, 10) + '...',
-        enabled: anthropicConfig.enabled
-      })
-
-      const response = await axios.post('https://api.anthropic.com/v1/messages', {
-        model: model,
-        max_tokens: options.max_tokens || 1024,
-        messages: [
-          { role: 'user', content: prompt }
-        ],
-        system: options.systemPrompt || 'You are a helpful assistant.'
-      }, {
-        headers: {
-          'x-api-key': anthropicConfig.apiKey,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json'
-        }
-      })
-
-      console.log('✅ Anthropic API Success')
-      return response.data.content[0].text
-    } catch (err) {
-      console.error('❌ Anthropic API error:', {
-        message: err.message,
-        responseData: err.response?.data,
-        status: err.response?.status,
-        statusText: err.response?.statusText,
-        headers: err.response?.headers
-      })
-      throw err
-    }
+  async function callAnthropic(prompt, model, options = {}) {
+    const configs = await getApiConfigs()
+    const anthropicConfig = configs?.preproduction?.ai_services?.anthropic
+    if (!anthropicConfig?.enabled) throw new Error('Anthropic is not enabled in settings')
+    return _callAnthropic(prompt, model, options, anthropicConfig.apiKey)
   }
 
-  /**
-   * Call Google Gemini API
-   */
-  async function callGemini(prompt, model = 'gemini-2.0-flash', options = {}) {
-    try {
-      const configs = await getApiConfigs()
-      const geminiConfig = configs?.preproduction?.ai_services?.gemini
-
-      if (!geminiConfig?.enabled) {
-        throw new Error('Gemini is not enabled in settings')
-      }
-
-      // Enhanced logging for debugging
-      console.log('🔍 Gemini API Request:', {
-        model,
-        apiKeyPresent: !!geminiConfig.apiKey,
-        apiKeyLength: geminiConfig.apiKey?.length,
-        apiKeyPrefix: geminiConfig.apiKey?.substring(0, 10) + '...',
-        enabled: geminiConfig.enabled
-      })
-
-      const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-        {
-          contents: [{
-            parts: [{
-              text: prompt
-            }]
-          }],
-          generationConfig: {
-            temperature: options.temperature || 0.7,
-            maxOutputTokens: options.max_tokens || 500
-          }
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-goog-api-key': geminiConfig.apiKey
-          }
-        }
-      )
-
-      console.log('✅ Gemini API Success')
-      return response.data.candidates[0].content.parts[0].text
-    } catch (err) {
-      console.error('❌ Gemini API error:', {
-        message: err.message,
-        responseData: err.response?.data,
-        status: err.response?.status,
-        statusText: err.response?.statusText,
-        headers: err.response?.headers
-      })
-      throw err
-    }
+  async function callGemini(prompt, model, options = {}) {
+    const configs = await getApiConfigs()
+    const geminiConfig = configs?.preproduction?.ai_services?.gemini
+    if (!geminiConfig?.enabled) throw new Error('Gemini is not enabled in settings')
+    return _callGemini(prompt, model, options, geminiConfig.apiKey)
   }
 
-  /**
-   * Call xAI Grok API
-   */
-  async function callGrok(prompt, model = 'grok-4-latest', options = {}) {
-    try {
-      const configs = await getApiConfigs()
-      const grokConfig = configs?.preproduction?.ai_services?.grok
-
-      if (!grokConfig?.enabled) {
-        throw new Error('Grok is not enabled in settings')
-      }
-
-      // Enhanced logging for debugging
-      console.log('🔍 Grok API Request:', {
-        model,
-        apiKeyPresent: !!grokConfig.apiKey,
-        apiKeyLength: grokConfig.apiKey?.length,
-        apiKeyPrefix: grokConfig.apiKey?.substring(0, 10) + '...',
-        enabled: grokConfig.enabled
-      })
-
-      // xAI uses OpenAI-compatible API
-      const response = await axios.post('https://api.x.ai/v1/chat/completions', {
-        model: model,
-        messages: [
-          { role: 'system', content: options.systemPrompt || 'You are Grok, a helpful assistant.' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: options.temperature || 0.7,
-        max_tokens: options.max_tokens || 500,
-        stream: false
-      }, {
-        headers: {
-          'Authorization': `Bearer ${grokConfig.apiKey}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      console.log('✅ Grok API Success')
-      return response.data.choices[0].message.content
-    } catch (err) {
-      console.error('❌ Grok API error:', {
-        message: err.message,
-        responseData: err.response?.data,
-        status: err.response?.status,
-        statusText: err.response?.statusText,
-        headers: err.response?.headers
-      })
-      throw err
-    }
+  async function callGrok(prompt, model, options = {}) {
+    const configs = await getApiConfigs()
+    const grokConfig = configs?.preproduction?.ai_services?.grok
+    if (!grokConfig?.enabled) throw new Error('Grok is not enabled in settings')
+    return _callGrok(prompt, model, options, grokConfig.apiKey)
   }
 
   /**
@@ -274,16 +88,15 @@ export function useLLM() {
     if (saved) {
       return JSON.parse(saved)
     }
-    // Optimized defaults for Show-Build with Ollama models
     return {
       routing: {
-        quoteSplitting: 'ollama',      // Qwen2.5-Coder:7b - Best at JSON output
-        slugGeneration: 'ollama',       // mistral:7b - Fast text transforms
-        scriptSummary: 'ollama',        // llama3:latest - Balanced quality
-        titleGeneration: 'ollama',      // llama3:latest - Creative + fast
-        contentExpansion: 'ollama',     // llama2:13b-chat - Creative depth
-        factChecking: 'ollama',         // deepseek-r1:8b - Reasoning specialist
-        entityExtraction: 'ollama',     // Qwen2.5-Coder:7b - JSON output for structured data
+        quoteSplitting: 'ollama',
+        slugGeneration: 'ollama',
+        scriptSummary: 'ollama',
+        titleGeneration: 'ollama',
+        contentExpansion: 'ollama',
+        factChecking: 'ollama',
+        entityExtraction: 'ollama',
         enableFallback: true,
         fallbackOrder: ['ollama', 'openai', 'gemini', 'grok', 'anthropic']
       },
@@ -292,7 +105,7 @@ export function useLLM() {
         slugGeneration: 'mistral:7b',
         scriptSummary: 'llama3:latest',
         titleGeneration: 'llama3:latest',
-        contentExpansion: 'llama3:latest',  // Changed from llama2:13b-chat (too slow)
+        contentExpansion: 'llama3:latest',
         factChecking: 'deepseek-r1:8b',
         entityExtraction: 'Qwen2.5-Coder:7b'
       }
@@ -301,8 +114,6 @@ export function useLLM() {
 
   /**
    * Smart LLM call with task-specific routing
-   * @param {string} prompt - The prompt to send
-   * @param {object} options - Options including taskType for routing
    */
   async function smartCall(prompt, options = {}) {
     loading.value = true
@@ -312,7 +123,6 @@ export function useLLM() {
       const configs = await getApiConfigs()
       const routing = getRoutingPreferences().routing
 
-      // If configs failed to load (auth issue), try Ollama directly as fallback
       if (!configs) {
         console.warn('⚠️ Failed to load API configs, attempting direct Ollama fallback')
         try {
@@ -322,7 +132,6 @@ export function useLLM() {
         }
       }
 
-      // Determine preferred service based on task type
       let preferredService = 'auto'
       if (options.taskType) {
         const taskMap = {
@@ -337,7 +146,6 @@ export function useLLM() {
         preferredService = taskMap[options.taskType] || 'auto'
       }
 
-      // If specific service requested, try it first
       if (preferredService !== 'auto') {
         try {
           console.log(`🎯 Using preferred service for ${options.taskType}: ${preferredService}`)
@@ -349,21 +157,10 @@ export function useLLM() {
         }
       }
 
-      // Auto routing or fallback
       const fallbackOrder = routing.enableFallback ? routing.fallbackOrder : ['ollama', 'openai', 'anthropic', 'gemini', 'grok']
-
-      console.log('🔍 Checking enabled services...', {
-        hasConfigs: !!configs,
-        hasPreproduction: !!configs?.preproduction,
-        hasAiServices: !!configs?.preproduction?.ai_services,
-        ollamaConfig: configs?.preproduction?.ai_services?.ollama,
-        fallbackOrder
-      })
 
       for (const service of fallbackOrder) {
         const isEnabled = configs?.preproduction?.ai_services?.[service]?.enabled
-        console.log(`  ${service}: enabled=${isEnabled}`, configs?.preproduction?.ai_services?.[service])
-
         if (isEnabled) {
           try {
             const result = await callSpecificService(service, prompt, options, configs)
@@ -388,15 +185,13 @@ export function useLLM() {
    * Call a specific LLM service by name
    */
   async function callSpecificService(service, prompt, options, configs = null) {
-    // Parse service string if it includes model (e.g., "ollama:llama3:latest")
     let serviceName = service
     let modelOverride = null
 
     if (service.includes(':')) {
       const parts = service.split(':')
       serviceName = parts[0]
-      modelOverride = parts.slice(1).join(':') // Handle models like "llama3:latest"
-      console.log(`📦 Parsed service: ${serviceName}, model: ${modelOverride}`)
+      modelOverride = parts.slice(1).join(':')
     }
 
     // Notify when using cloud-based (paid) services
@@ -412,12 +207,11 @@ export function useLLM() {
       }
       const displayName = serviceNames[serviceName] || serviceName
 
-      // Send notification to backend for tracking
       try {
         await axios.post('/api/llm/notifications', {
           notifications: [{
             id: `llm-usage-${Date.now()}`,
-            title: `💰 Cloud LLM Used`,
+            title: '💰 Cloud LLM Used',
             message: `${displayName} is processing your request`,
             priority: 'medium',
             type: 'llm-usage',
@@ -433,110 +227,62 @@ export function useLLM() {
             }
           }]
         })
-        console.log(`💰 Cloud service notification sent: ${displayName}`)
       } catch (err) {
         console.warn('Failed to send cloud LLM notification:', err)
       }
     }
 
+    const routing = getRoutingPreferences()
+    const serviceConfig = configs?.preproduction?.ai_services?.[serviceName]
+    const apiKey = serviceConfig?.apiKey
+
     switch (serviceName) {
       case 'ollama': {
-        // Use task-specific Ollama model if available
-        const routing = getRoutingPreferences()
         let ollamaModel = modelOverride || options.model
-
-        if (!ollamaModel && options.taskType && routing.ollamaModels && routing.ollamaModels[options.taskType]) {
+        if (!ollamaModel && options.taskType && routing.ollamaModels?.[options.taskType]) {
           ollamaModel = routing.ollamaModels[options.taskType]
-          console.log(`🤖 Using Ollama (${ollamaModel}) for ${options.taskType}`)
-        } else if (!ollamaModel && configs?.preproduction?.ai_services?.ollama?.model) {
-          // Use default model from database config
-          ollamaModel = configs.preproduction.ai_services.ollama.model
-          console.log(`🤖 Using Ollama (${ollamaModel}) from config`)
-        } else {
-          console.log(`🤖 Using Ollama (${ollamaModel || 'default'})`)
+        } else if (!ollamaModel && serviceConfig?.model) {
+          ollamaModel = serviceConfig.model
         }
 
-        // Track model usage
-        lastUsedModel.value = {
-          service: 'ollama',
-          model: ollamaModel || 'default',
-          timestamp: new Date().toISOString()
-        }
+        lastUsedModel.value = { service: 'ollama', model: ollamaModel || 'default', timestamp: new Date().toISOString() }
 
-        // Notify user - LOW priority for local model
         const taskName = options.taskType ? ` for ${options.taskType.replace(/-/g, ' ')}` : ''
-        const displayModel = ollamaModel || configs?.preproduction?.ai_services?.ollama?.model || 'deepseek-r1:32b-qwen-distill-q4_K_M'
+        const displayModel = ollamaModel || serviceConfig?.model || 'deepseek-r1:32b-qwen-distill-q4_K_M'
         notifyUserStandard(
           `🤖 Local AI Processing<small>Model: ${displayModel}${taskName}</small>`,
           NOTIFICATION_COLORS.INFO,
           2500
         )
-
-        return await callOllama(prompt, ollamaModel, options)
+        return await _callOllama(prompt, ollamaModel, options)
       }
       case 'openai': {
-        const openaiModel = modelOverride || options.model || 'gpt-4'
-        lastUsedModel.value = {
-          service: 'openai',
-          model: openaiModel,
-          timestamp: new Date().toISOString()
-        }
-        // Notify user - HIGH priority for cloud model
+        const model = modelOverride || options.model || 'gpt-4'
+        lastUsedModel.value = { service: 'openai', model, timestamp: new Date().toISOString() }
         const taskName = options.taskType ? ` • Task: ${options.taskType.replace(/-/g, ' ')}` : ''
-        notifyUserStandard(
-          `💰 Cloud AI API Call<small>Provider: OpenAI • Model: ${openaiModel}${taskName}</small>`,
-          NOTIFICATION_COLORS.WARNING,
-          5000
-        )
-        return await callOpenAI(prompt, modelOverride || options.model, options)
+        notifyUserStandard(`💰 Cloud AI API Call<small>Provider: OpenAI • Model: ${model}${taskName}</small>`, NOTIFICATION_COLORS.WARNING, 5000)
+        return await _callOpenAI(prompt, model, options, apiKey)
       }
       case 'anthropic': {
-        const anthropicModel = modelOverride || options.model || 'claude-3-5-sonnet-20241022'
-        lastUsedModel.value = {
-          service: 'anthropic',
-          model: anthropicModel,
-          timestamp: new Date().toISOString()
-        }
-        // Notify user - HIGH priority for cloud model
+        const model = modelOverride || options.model || 'claude-3-5-sonnet-20241022'
+        lastUsedModel.value = { service: 'anthropic', model, timestamp: new Date().toISOString() }
         const taskName = options.taskType ? ` • Task: ${options.taskType.replace(/-/g, ' ')}` : ''
-        notifyUserStandard(
-          `💰 Cloud AI API Call<small>Provider: Anthropic • Model: ${anthropicModel}${taskName}</small>`,
-          NOTIFICATION_COLORS.WARNING,
-          5000
-        )
-        return await callAnthropic(prompt, modelOverride || options.model, options)
+        notifyUserStandard(`💰 Cloud AI API Call<small>Provider: Anthropic • Model: ${model}${taskName}</small>`, NOTIFICATION_COLORS.WARNING, 5000)
+        return await _callAnthropic(prompt, model, options, apiKey)
       }
       case 'gemini': {
-        const geminiModel = modelOverride || options.model || 'gemini-2.0-flash'
-        lastUsedModel.value = {
-          service: 'gemini',
-          model: geminiModel,
-          timestamp: new Date().toISOString()
-        }
-        // Notify user - HIGH priority for cloud model
+        const model = modelOverride || options.model || 'gemini-2.0-flash'
+        lastUsedModel.value = { service: 'gemini', model, timestamp: new Date().toISOString() }
         const taskName = options.taskType ? ` • Task: ${options.taskType.replace(/-/g, ' ')}` : ''
-        notifyUserStandard(
-          `💰 Cloud AI API Call<small>Provider: Google Gemini • Model: ${geminiModel}${taskName}</small>`,
-          NOTIFICATION_COLORS.WARNING,
-          5000
-        )
-        return await callGemini(prompt, modelOverride || options.model, options)
+        notifyUserStandard(`💰 Cloud AI API Call<small>Provider: Google Gemini • Model: ${model}${taskName}</small>`, NOTIFICATION_COLORS.WARNING, 5000)
+        return await _callGemini(prompt, model, options, apiKey)
       }
       case 'grok': {
-        const grokModel = modelOverride || options.model || 'grok-4-latest'
-        lastUsedModel.value = {
-          service: 'grok',
-          model: grokModel,
-          timestamp: new Date().toISOString()
-        }
-        // Notify user - HIGH priority for cloud model
+        const model = modelOverride || options.model || 'grok-4-latest'
+        lastUsedModel.value = { service: 'grok', model, timestamp: new Date().toISOString() }
         const taskName = options.taskType ? ` • Task: ${options.taskType.replace(/-/g, ' ')}` : ''
-        notifyUserStandard(
-          `💰 Cloud AI API Call<small>Provider: xAI Grok • Model: ${grokModel}${taskName}</small>`,
-          NOTIFICATION_COLORS.WARNING,
-          5000
-        )
-        return await callGrok(prompt, modelOverride || options.model, options)
+        notifyUserStandard(`💰 Cloud AI API Call<small>Provider: xAI Grok • Model: ${model}${taskName}</small>`, NOTIFICATION_COLORS.WARNING, 5000)
+        return await _callGrok(prompt, model, options, apiKey)
       }
       default:
         throw new Error(`Unknown service: ${service}`)
@@ -544,35 +290,23 @@ export function useLLM() {
   }
 
   /**
-   * Split a long quote intelligently for FSQ (Full Screen Quote) display using LLM
-   * Uses visual layout rules to determine if splitting is needed
-   * @param {string} quote - The quote text to analyze
-   * @param {object} options - Display options from generation settings
+   * Split a long quote intelligently for FSQ display using LLM
    */
   async function intelligentQuoteSplit(quote, options = {}) {
-    // Get display parameters from options or use defaults
     const maxLines = options.maxLines || 5
     const charsPerLine = options.charsPerLine || 50
-
-    // Smart split configuration
     const minSecondScreen = options.minSecondScreen || 80
     const splitStrategy = options.splitStrategy || 'smart'
     const balanceThresholdPercent = options.balanceThresholdPercent || 30
     const preferSentenceBoundaries = options.preferSentenceBoundaries !== false
 
-    // Calculate thresholds
     const maxCharsScreen1 = maxLines * charsPerLine
     const balanceThreshold = maxCharsScreen1 + Math.round(minSecondScreen * (balanceThresholdPercent / 100))
 
     console.log('🧮 Smart Split Configuration:', {
-      maxCharsScreen1,
-      minSecondScreen,
-      balanceThreshold,
-      splitStrategy,
-      quoteLength: quote.length
+      maxCharsScreen1, minSecondScreen, balanceThreshold, splitStrategy, quoteLength: quote.length
     })
 
-    // Simplified prompt - focus on clear instructions and JSON output
     const prompt = `<task>Split this quote for full-screen display if needed.</task>
 
 <constraints>
@@ -600,34 +334,23 @@ Example: ["First segment text here.", "Second segment text here."]
     try {
       const result = await smartCall(prompt, {
         taskType: 'quote-splitting',
-        temperature: 0.2, // Very low temperature for consistent, logical decisions
+        temperature: 0.2,
         max_tokens: 1000,
         systemPrompt: 'You are a precise quote layout analyzer. Return only valid JSON arrays with no additional text.'
       })
 
-      // Clean up response to extract JSON
       let jsonText = result.trim()
-
-      // Remove markdown code blocks if present
       jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '')
-
-      // Remove XML tags that may have leaked through
       jsonText = jsonText.replace(/<\/?(?:task|constraints|quote|rules|output)[^>]*>/gi, '')
-
-      // Remove common LLM preambles before JSON
       jsonText = jsonText.replace(/^(?:Here(?:'s| is) the|The )?(?:JSON|result|output|array)[\s:]*\n?/i, '')
       jsonText = jsonText.replace(/^(?:Sure|Certainly|Of course)[,!]?\s*(?:here(?:'s| is))?[^[]*\n?/i, '')
 
-      // Extract JSON array
       const jsonMatch = jsonText.match(/\[[\s\S]*\]/)
       if (jsonMatch) {
         const segments = JSON.parse(jsonMatch[0])
 
-        // Validate that we got an array of strings
         if (Array.isArray(segments) && segments.every(s => typeof s === 'string')) {
-          // CRITICAL: Validate segments are non-overlapping and cover the full quote
           const validated = validateAndFixSegments(segments, quote)
-
           if (validated.valid) {
             console.log(`✅ Quote split analysis: ${validated.segments.length} segment(s) (validated)`)
             return validated.segments
@@ -638,172 +361,12 @@ Example: ["First segment text here.", "Second segment text here."]
         }
       }
 
-      // Fallback: return original quote as single segment
       console.warn('LLM did not return valid JSON array, using fallback')
       return [quote]
     } catch (err) {
       console.error('Failed to split quote with LLM:', err)
-      // Fallback: use deterministic algorithm
       return deterministicSplit(quote, maxCharsScreen1, minSecondScreen, balanceThreshold, preferSentenceBoundaries)
     }
-  }
-
-  /**
-   * Validate segments returned by LLM
-   * Checks for overlaps and coverage of original quote
-   */
-  function validateAndFixSegments(segments, originalQuote) {
-    // Check for prompt artifacts in segments (indicates LLM returned instructions instead of quote)
-    const promptArtifactPatterns = [
-      /^RULES:/i,
-      /^OUTPUT:/i,
-      /^TEXT:/i,
-      /^EXAMPLE/i,
-      /^-\s*(?:Outer|Inner)\s*quotes?:/i,
-      /^-\s*Apostrophe/i,
-      /^Return\s*ONLY/i,
-      /^NO\s*explanation/i,
-      /<\/?(?:task|rules|output|input|quote)>/i
-    ]
-
-    for (const segment of segments) {
-      for (const pattern of promptArtifactPatterns) {
-        if (pattern.test(segment.trim())) {
-          console.error('❌ Prompt artifact detected in segment:', segment.substring(0, 100))
-          return { valid: false, segments }
-        }
-      }
-    }
-
-    // Single segment is always valid (if no artifacts)
-    if (segments.length === 1) {
-      return { valid: true, segments }
-    }
-
-    // Check if segments are overlapping by seeing if their combined length
-    // is significantly more than the original quote
-    const totalLength = segments.reduce((sum, seg) => sum + seg.trim().length, 0)
-    const originalLength = originalQuote.trim().length
-
-    // Allow 10% variance for punctuation/spacing differences
-    const isOverlapping = totalLength > originalLength * 1.1
-
-    if (isOverlapping) {
-      console.warn('❌ Segments overlap detected:', {
-        totalLength,
-        originalLength,
-        ratio: (totalLength / originalLength).toFixed(2)
-      })
-      return { valid: false, segments }
-    }
-
-    // Check if segments cover the full quote by reconstructing
-    const reconstructed = segments.join(' ').trim()
-    const coverageRatio = reconstructed.length / originalLength
-
-    if (coverageRatio < 0.9) {
-      console.warn('❌ Segments don\'t cover full quote:', {
-        reconstructedLength: reconstructed.length,
-        originalLength,
-        coverageRatio: coverageRatio.toFixed(2)
-      })
-      return { valid: false, segments }
-    }
-
-    console.log('✅ Segments validated as non-overlapping and complete')
-    return { valid: true, segments }
-  }
-
-  /**
-   * Deterministic split algorithm (fallback when LLM fails)
-   * Implements the same smart split logic without AI
-   */
-  function deterministicSplit(quote, maxCharsScreen1, minSecondScreen, balanceThreshold, preferSentenceBoundaries = true) {
-    const quoteLength = quote.length
-
-    // Case A: Fits on single screen
-    if (quoteLength <= maxCharsScreen1) {
-      console.log('📏 Quote fits on single screen')
-      return [quote]
-    }
-
-    // Case B: Gray zone - needs balanced split
-    if (quoteLength <= balanceThreshold) {
-      const targetSplitPoint = Math.floor(quoteLength / 2)
-      console.log(`⚖️ Balanced split at ~${targetSplitPoint} chars (prevents orphan)`)
-
-      const splitPoint = findBestSplitPoint(quote, targetSplitPoint, preferSentenceBoundaries)
-      return [
-        quote.substring(0, splitPoint).trim(),
-        quote.substring(splitPoint).trim()
-      ]
-    }
-
-    // Case C: Long quote - standard split at max chars
-    console.log(`📐 Standard split at ~${maxCharsScreen1} chars`)
-    const splitPoint = findBestSplitPoint(quote, maxCharsScreen1, preferSentenceBoundaries)
-
-    const firstSegment = quote.substring(0, splitPoint).trim()
-    const remainder = quote.substring(splitPoint).trim()
-
-    // If remainder is still too long, recursively split it
-    if (remainder.length > maxCharsScreen1) {
-      console.log('🔁 Remainder too long, creating additional segments')
-      const additionalSegments = deterministicSplit(
-        remainder,
-        maxCharsScreen1,
-        minSecondScreen,
-        balanceThreshold,
-        preferSentenceBoundaries
-      )
-      return [firstSegment, ...additionalSegments]
-    }
-
-    return [firstSegment, remainder]
-  }
-
-  /**
-   * Find the best split point near a target position
-   * Prefers sentence boundaries, then clause breaks, then word boundaries
-   */
-  function findBestSplitPoint(text, targetPosition, preferSentenceBoundaries = true) {
-    // Search window around target
-    const searchStart = Math.max(0, targetPosition - 50)
-    const searchEnd = Math.min(text.length, targetPosition + 50)
-    const searchText = text.substring(searchStart, searchEnd)
-
-    // Priority 1: Sentence boundaries (. ! ?)
-    if (preferSentenceBoundaries) {
-      const sentenceEndings = ['. ', '! ', '? ']
-      for (const ending of sentenceEndings) {
-        const relativePos = searchText.lastIndexOf(ending, targetPosition - searchStart)
-        if (relativePos !== -1) {
-          console.log(`  ✂️ Split at sentence boundary: "${ending.trim()}"`)
-          return searchStart + relativePos + ending.length
-        }
-      }
-    }
-
-    // Priority 2: Clause breaks (, ; :)
-    const clauseBreaks = [', ', '; ', ': ', ' - ']
-    for (const breakChar of clauseBreaks) {
-      const relativePos = searchText.lastIndexOf(breakChar, targetPosition - searchStart)
-      if (relativePos !== -1) {
-        console.log(`  ✂️ Split at clause break: "${breakChar.trim()}"`)
-        return searchStart + relativePos + breakChar.length
-      }
-    }
-
-    // Priority 3: Word boundary (space)
-    const relativePos = searchText.lastIndexOf(' ', targetPosition - searchStart)
-    if (relativePos !== -1) {
-      console.log('  ✂️ Split at word boundary')
-      return searchStart + relativePos + 1
-    }
-
-    // Last resort: exact position
-    console.log('  ✂️ Split at exact position (no good boundary found)')
-    return targetPosition
   }
 
   /**
@@ -822,28 +385,17 @@ Return ONLY the slug, nothing else.`
         temperature: 0.5,
         max_tokens: 50
       })
-
       return result.trim().toLowerCase().replace(/[^a-z0-9-\s]/g, '').replace(/\s+/g, '-')
     } catch (err) {
       console.error('Failed to generate slug with LLM:', err)
-      // Fallback: use simple slugification
-      return quoteText
-        .toLowerCase()
-        .replace(/[^a-z0-9\s-]/g, '')
-        .replace(/\s+/g, '-')
-        .substring(0, 50)
+      return quoteText.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').substring(0, 50)
     }
   }
 
   /**
    * Normalize nested quotes according to English language best practices
-   * Properly nests single and double quotes following AP/Chicago style
-   * @param {string} quoteText - The quote text with potentially inconsistent nesting
-   * @returns {string} - Properly formatted quote text
    */
   async function normalizeNestedQuotes(quoteText) {
-    // Use XML-style tags for clearer instruction following
-    // This format works better with code-focused models like Qwen
     const prompt = `<task>Fix quotation mark nesting in the text below.</task>
 
 <rules>
@@ -864,19 +416,17 @@ Return ONLY the corrected text with no explanation. Do not include XML tags in y
     try {
       const result = await smartCall(prompt, {
         taskType: 'content-expansion',
-        temperature: 0.1, // Very low temperature for deterministic formatting
-        max_tokens: 800,  // Increased for longer quotes
+        temperature: 0.1,
+        max_tokens: 800,
         systemPrompt: 'You fix quotation marks in text. Return ONLY the corrected text. No explanations, no tags, no commentary.',
-        model: 'llama3:latest'  // Use llama3 for better instruction following
+        model: 'llama3:latest'
       })
 
-      // Clean response - remove any markdown, XML tags, or prompt echoes
       let normalized = result.trim()
 
-      // CRITICAL: Remove any XML tags that leaked through
+      // Clean XML tags, prompt echoes, preamble/postamble
       normalized = normalized.replace(/<\/?(?:task|rules|input|output|text|quote)[^>]*>/gi, '')
 
-      // Remove prompt instruction echoes (common with code models)
       const promptEchoPatterns = [
         /^.*?(?:Fix|Correct|Normalize).*?quotation.*?(?:marks?|nesting).*?$/im,
         /^.*?(?:outer|inner)\s*quotes?.*?(?:double|single).*?$/im,
@@ -892,12 +442,10 @@ Return ONLY the corrected text with no explanation. Do not include XML tags in y
         /^-\s*Apostrophes?:.*$/gim,
         /^-\s*(?:Change|Preserve|Do\s*NOT).*$/gim
       ]
-
       for (const pattern of promptEchoPatterns) {
         normalized = normalized.replace(pattern, '')
       }
 
-      // Remove LLM preamble/postamble (common patterns)
       const preamblePatterns = [
         /^Here'?s? the corrected text.*?:\s*/i,
         /^The corrected text is:?\s*/i,
@@ -909,7 +457,6 @@ Return ONLY the corrected text with no explanation. Do not include XML tags in y
         /^Certainly[,!]?\s*/i,
         /^Of course[,!]?\s*/i
       ]
-
       const postamblePatterns = [
         /\s*I hope this helps!?\s*$/i,
         /\s*Let me know if.*$/i,
@@ -920,80 +467,41 @@ Return ONLY the corrected text with no explanation. Do not include XML tags in y
         /\s*Feel free to.*$/i
       ]
 
-      // Remove preamble
-      for (const pattern of preamblePatterns) {
-        normalized = normalized.replace(pattern, '')
-      }
+      for (const pattern of preamblePatterns) normalized = normalized.replace(pattern, '')
+      for (const pattern of postamblePatterns) normalized = normalized.replace(pattern, '')
 
-      // Remove postamble
-      for (const pattern of postamblePatterns) {
-        normalized = normalized.replace(pattern, '')
-      }
-
-      // CRITICAL: Remove conversational paragraphs and instruction echoes
-      // Split by double newlines to find distinct paragraphs
+      // Remove conversational paragraphs
       const paragraphs = normalized.split(/\n\n+/)
-
-      // Keep only paragraphs that look like actual quote content
       const cleanedParagraphs = paragraphs.filter(para => {
         const trimmed = para.trim()
-
-        // Skip empty paragraphs
         if (!trimmed) return false
-
-        // Remove paragraphs that are clearly LLM meta-commentary or instructions
         const metaPatterns = [
-          /^thank you for/i,
-          /^i appreciate/i,
-          /^i'm (happy|glad|pleased) to/i,
-          /^this (demonstrates|shows|illustrates)/i,
-          /^as you can see/i,
-          /^note that/i,
-          /^please note/i,
-          /^feel free to/i,
-          /^let me know/i,
-          /^if you (need|want|would like)/i,
-          /^i hope/i,
-          /^is there anything/i,
-          /^here is the/i,
-          /^the (?:corrected|fixed|normalized)/i,
-          // Instruction-like patterns
-          /^-\s*(?:outer|inner|apostrophe)/i,
-          /^(?:rules|output|input|text):/i,
-          /^example\s*(?:input|output)/i,
-          /^do\s*not\s*(?:write|add|include)/i,
-          /^return\s*only/i,
-          /^no\s*explanation/i
+          /^thank you for/i, /^i appreciate/i, /^i'm (happy|glad|pleased) to/i,
+          /^this (demonstrates|shows|illustrates)/i, /^as you can see/i,
+          /^note that/i, /^please note/i, /^feel free to/i, /^let me know/i,
+          /^if you (need|want|would like)/i, /^i hope/i, /^is there anything/i,
+          /^here is the/i, /^the (?:corrected|fixed|normalized)/i,
+          /^-\s*(?:outer|inner|apostrophe)/i, /^(?:rules|output|input|text):/i,
+          /^example\s*(?:input|output)/i, /^do\s*not\s*(?:write|add|include)/i,
+          /^return\s*only/i, /^no\s*explanation/i
         ]
-
         for (const pattern of metaPatterns) {
-          if (pattern.test(trimmed)) {
-            console.log('🗑️ Removing LLM meta-commentary:', trimmed.substring(0, 100))
-            return false
-          }
+          if (pattern.test(trimmed)) return false
         }
-
         return true
       })
 
-      // Rejoin the cleaned paragraphs
       normalized = cleanedParagraphs.join('\n\n').trim()
-
-      // Final cleanup: remove multiple consecutive newlines
       normalized = normalized.replace(/\n{3,}/g, '\n\n')
 
-      // Remove surrounding quotes if LLM added them
       if ((normalized.startsWith('"') && normalized.endsWith('"')) ||
           (normalized.startsWith("'") && normalized.endsWith("'"))) {
-        // Only remove if they're wrapper quotes, not part of the actual text
         const withoutOuter = normalized.slice(1, -1)
-        // Check if the inner text still has the same quote structure
         if (withoutOuter.includes('"') || withoutOuter.includes("'")) {
           normalized = withoutOuter
         }
       }
 
-      // If after all cleaning, result is empty or too short, return original
       if (!normalized || normalized.length < quoteText.length * 0.5) {
         console.warn('⚠️ Normalization produced invalid result, returning original')
         return quoteText
@@ -1004,84 +512,53 @@ Return ONLY the corrected text with no explanation. Do not include XML tags in y
 
     } catch (err) {
       console.error('Quote normalization failed:', err)
-      // Return original on failure
       return quoteText
     }
   }
 
   /**
    * Extract people and entities from script content
-   * Returns structured JSON with people (names, roles, affiliations) and entities (organizations, locations, events, etc.)
    */
   async function extractEntities(scriptContent) {
     const prompt = `Extract all people and entities from the following script content. Return ONLY valid JSON with no explanation.
 
-Script:
-${scriptContent}
-
-Return a JSON object with this exact structure:
+Format:
 {
-  "people": [
-    {
-      "name": "Full Name",
-      "role": "title/position (if mentioned)",
-      "affiliation": "organization/company (if mentioned)",
-      "description": "brief context about this person from the script"
-    }
-  ],
+  "people": [{"name": "Full Name", "role": "their role/description", "affiliation": "their org/group"}],
   "entities": {
-    "organizations": ["Company Name", "Organization Name"],
-    "locations": ["City", "State", "Country", "Specific Place"],
-    "events": ["Event Name or Description"],
-    "products": ["Product Name or Service"],
-    "other": ["Any other significant entities"]
+    "organizations": ["org names"],
+    "locations": ["place names"],
+    "events": ["event names"],
+    "products": ["product/brand names"],
+    "other": ["other notable entities"]
   }
 }
 
-Rules:
-- Extract ALL named individuals mentioned
-- Include their role/title if stated (e.g., "CEO", "Senator", "Dr.")
-- Include affiliation if mentioned (e.g., "Microsoft", "Harvard")
-- For entities, categorize organizations, locations, events, products, and other significant entities
-- Return ONLY the JSON object, no markdown formatting, no explanation
-- If a category has no items, use an empty array []`
+Script content:
+${scriptContent}
+
+Return ONLY the JSON object.`
 
     try {
       const result = await smartCall(prompt, {
         taskType: 'entity-extraction',
-        temperature: 0.3,  // Lower temperature for more consistent extraction
+        temperature: 0.2,
         max_tokens: 2000,
-        systemPrompt: 'You are a precise entity extraction system. Return only valid JSON with no additional text or markdown formatting.'
+        systemPrompt: 'You extract entities from text. Return ONLY valid JSON.'
       })
 
-      // Clean up the response to extract JSON
       let jsonText = result.trim()
-
-      // Remove markdown code blocks if present
       jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '')
 
-      // Parse and validate
-      const entities = JSON.parse(jsonText)
-
-      // Validate structure
-      if (!entities.people || !entities.entities) {
-        throw new Error('Invalid entity extraction format')
+      const jsonMatch = jsonText.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0])
       }
 
-      return entities
+      return { people: [], entities: { organizations: [], locations: [], events: [], products: [], other: [] } }
     } catch (err) {
       console.error('Entity extraction failed:', err)
-      // Return empty structure on failure
-      return {
-        people: [],
-        entities: {
-          organizations: [],
-          locations: [],
-          events: [],
-          products: [],
-          other: []
-        }
-      }
+      return { people: [], entities: { organizations: [], locations: [], events: [], products: [], other: [] } }
     }
   }
 

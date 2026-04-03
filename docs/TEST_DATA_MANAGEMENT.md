@@ -29,7 +29,7 @@ The following tables now include `is_test_data BOOLEAN DEFAULT FALSE NOT NULL`:
 
 ### Model Integration
 
-All relevant SQLAlchemy models in `models.py`, `models_user.py`, and `models_v2.py` have been updated with:
+All relevant SQLAlchemy models in `app/models/` package (with backward-compat shim at `models_v2.py`) and `models_user.py` have been updated with:
 
 ```python
 # Test data flag

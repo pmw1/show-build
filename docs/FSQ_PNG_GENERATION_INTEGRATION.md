@@ -321,7 +321,7 @@ task_routes={
 ### Test Scenario 3: API Direct Call
 
 ```bash
-curl -X POST http://192.168.51.210:8888/api/fsq/generate-async \
+curl -X POST https://192.168.51.207:8888/api/fsq/generate-async \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_API_KEY" \
   -d '{

@@ -13,7 +13,7 @@ from datetime import datetime
 from PIL import Image
 import mimetypes
 
-from services.file_inventory_llm import match_file_to_expectation, classify_stray_file
+from services.file_inventory_llm_v2 import match_file_to_expectation, classify_stray_file
 
 logger = logging.getLogger(__name__)
 

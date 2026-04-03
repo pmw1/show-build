@@ -45,7 +45,7 @@ Every edit in Script Mode ultimately becomes a string mutation on the same data 
 │    │ two-way            │        │              │              │
 │    │ binding            │        ▼              │              │
 │    │                    │  segmentEditBuffer     │              │
-│    │                    │  (debounced 5s)        │              │
+│    │                    │  (debounced 1.5s)      │              │
 │    │                    │        │              │              │
 │    │                    │        ▼              │              │
 │    │                    │  reconstructRawContent │              │

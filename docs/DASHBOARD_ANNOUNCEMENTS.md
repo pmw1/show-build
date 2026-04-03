@@ -261,10 +261,10 @@ Test the announcements API directly:
 
 ```bash
 # List all announcements
-curl http://192.168.51.210:8888/api/announcements/ | python3 -m json.tool
+curl https://192.168.51.207:8888/api/announcements/ | python3 -m json.tool
 
 # Get specific announcement content
-curl http://192.168.51.210:8888/api/announcements/2025-11-22-modifications | python3 -m json.tool
+curl https://192.168.51.207:8888/api/announcements/2025-11-22-modifications | python3 -m json.tool
 ```
 
 ## Related Files

@@ -23,7 +23,7 @@
       </v-btn>
     </div>
 
-    <v-card class="h-auto" flat>
+    <v-card class="rundown-card" flat>
       <!-- Rundown Header -->
       <v-card-title class="d-flex align-center pa-2 rundown-title">
         <span class="text-h6">Rundown</span>
@@ -80,6 +80,21 @@
               <div v-else-if="selectedRegionId">
                 Delete Selected Region: {{ getRegionById(selectedRegionId)?.name }}
               </div>
+            </v-tooltip>
+          </v-btn>
+
+          <!-- Join Selected Button (visible when 2+ items are Ctrl-selected) -->
+          <v-btn
+            v-if="selectedItemIndices.size >= 2"
+            size="x-small"
+            variant="outlined"
+            @click="joinFromMultiSelect"
+            class="toolbar-btn-tile toolbar-btn-join"
+          >
+            <v-icon size="small">mdi-set-merge</v-icon>
+            <span class="btn-text-tiny">Join ({{ selectedItemIndices.size }})</span>
+            <v-tooltip activator="parent" location="bottom">
+              Join {{ selectedItemIndices.size }} selected items into one segment
             </v-tooltip>
           </v-btn>
 
@@ -148,6 +163,27 @@
                 <v-list-item-title>{{ allBreaksCollapsed ? 'Expand Breaks' : 'Collapse Breaks' }}</v-list-item-title>
                 <v-list-item-subtitle>{{ allBreaksCollapsed ? 'Expand all break regions' : 'Collapse all break regions' }}</v-list-item-subtitle>
               </v-list-item>
+              <v-list-item @click="$emit('recalculate-durations')">
+                <template v-slot:prepend>
+                  <v-icon size="small">mdi-timer-refresh-outline</v-icon>
+                </template>
+                <v-list-item-title>Recalculate Durations</v-list-item-title>
+                <v-list-item-subtitle>Recalculate all item durations from content</v-list-item-subtitle>
+              </v-list-item>
+              <v-list-item @click="$emit('show-script-compare-modal')">
+                <template v-slot:prepend>
+                  <v-icon size="small">mdi-compare-horizontal</v-icon>
+                </template>
+                <v-list-item-title>Compare Script</v-list-item-title>
+                <v-list-item-subtitle>Diff against exported Google Doc</v-list-item-subtitle>
+              </v-list-item>
+              <v-list-item @click="$emit('initiate-join')">
+                <template v-slot:prepend>
+                  <v-icon size="small">mdi-set-merge</v-icon>
+                </template>
+                <v-list-item-title>Join Segments</v-list-item-title>
+                <v-list-item-subtitle>Merge 2+ items into one (Ctrl+Shift+J)</v-list-item-subtitle>
+              </v-list-item>
               <v-divider></v-divider>
               <v-list-item @click="openEpisodeRollbackModal">
                 <template v-slot:prepend>
@@ -188,7 +224,7 @@
             drag-class="drag-region"
             :disabled="false"
             @start="handleRegionDragStart"
-            @end="handleRegionDragEnd"
+            @end="handleRegionDragEndWrapper"
           >
             <template #item="{ element: region }">
               <div
@@ -293,16 +329,33 @@
                     drag-class="drag-item"
                     :move="allowMove"
                     @start="handleItemDragStart"
-                    @end="handleItemDragEnd"
-                    @change="handleItemChange"
+                    @end="handleItemDragEndWrapper"
+                    @change="handleItemChangeWrapper"
                   >
                     <template #item="{ element: item }">
+                      <div class="rundown-item-wrapper">
+                      <!-- Join placement gap indicator (before each item) -->
+                      <div
+                        v-if="joinPlacementMode"
+                        class="join-placement-gap"
+                        :class="{ 'join-placement-gap-hover': joinHoverGapIndex === getItemGlobalIndex(item) }"
+                        @mouseenter="joinHoverGapIndex = getItemGlobalIndex(item)"
+                        @mouseleave="joinHoverGapIndex = -1"
+                        @click.stop="$emit('join-place', getItemGlobalIndex(item))"
+                      >
+                        <div class="join-gap-line"></div>
+                        <div class="join-gap-label" v-if="joinHoverGapIndex === getItemGlobalIndex(item)">
+                          <v-icon size="x-small" color="deep-purple-lighten-2">mdi-arrow-right-bold</v-icon>
+                          Drop here
+                        </div>
+                      </div>
                       <v-card
                         flat
                         :class="[
                           'rundown-item-card',
-                          { 'selected-item': getItemGlobalIndex(item) === selectedItemIndex },
+                          { 'selected-item': getItemGlobalIndex(item) === selectedItemIndex && !joinSelectMode },
                           { 'multi-selected-item': selectedItemIndices.has(getItemGlobalIndex(item)) },
+                          { 'join-selected-item': joinSelectMode && joinSelectedIds.has(item.asset_id || item.id) },
                           { 'editing-item': getItemGlobalIndex(item) === editingItemIndex },
                           { 'placeholder-item': item.isPlaceholder },
                           { 'region-item-selected': isItemRegionSelected(item) },
@@ -312,8 +365,12 @@
                         ]"
                         :style="Object.assign({},
                           {
-                            backgroundColor: itemHasNeedsAttention(item) ? needsAttentionColor : (getItemGlobalIndex(item) === selectedItemIndex ? getSelectionColor() : getBackgroundColorForItem(item?.type || 'unknown')),
-                            color: itemHasNeedsAttention(item) ? '#FFFFFF' : (getItemGlobalIndex(item) === selectedItemIndex ? getSelectionTextColor() : getTextColorForItem(item?.type || 'unknown'))
+                            backgroundColor: (joinSelectMode && joinSelectedIds.has(item.asset_id || item.id))
+                              ? 'rgba(103, 58, 183, 0.35)'
+                              : (itemHasNeedsAttention(item) ? needsAttentionColor : (getItemGlobalIndex(item) === selectedItemIndex ? getSelectionColor() : getBackgroundColorForItem(item?.type || 'unknown'))),
+                            color: (joinSelectMode && joinSelectedIds.has(item.asset_id || item.id))
+                              ? '#E1BEE7'
+                              : (itemHasNeedsAttention(item) ? '#FFFFFF' : (getItemGlobalIndex(item) === selectedItemIndex ? getSelectionTextColor() : getTextColorForItem(item?.type || 'unknown')))
                           },
                           llmState ? llmState.getVisualStyle('item', item.id) : {}
                         )"
@@ -403,6 +460,7 @@
                             </span>
                           </div>
                         </v-card>
+                      </div>
                     </template>
                   </draggable>
                 </div>
@@ -410,8 +468,48 @@
             </template>
           </draggable>
 
+          <!-- Last placement gap (after all items) -->
+          <div
+            v-if="joinPlacementMode && items && items.length > 0"
+            class="join-placement-gap join-placement-gap-last"
+            :class="{ 'join-placement-gap-hover': joinHoverGapIndex === items.length }"
+            @mouseenter="joinHoverGapIndex = items.length"
+            @mouseleave="joinHoverGapIndex = -1"
+            @click.stop="$emit('join-place', items.length)"
+          >
+            <div class="join-gap-line"></div>
+            <div class="join-gap-label" v-if="joinHoverGapIndex === items.length">
+              <v-icon size="x-small" color="deep-purple-lighten-2">mdi-arrow-right-bold</v-icon>
+              Drop here
+            </div>
+          </div>
+
         </div>
 
+        <!-- Join Select Mode Action Bar -->
+        <div v-if="joinSelectMode" class="join-select-bar">
+          <span class="join-select-count">
+            <v-icon size="small" class="mr-1">mdi-set-merge</v-icon>
+            {{ joinSelectedIds.size }} item{{ joinSelectedIds.size !== 1 ? 's' : '' }} selected
+          </span>
+          <v-spacer />
+          <v-btn size="small" variant="text" @click="cancelJoinSelect" class="mr-1">Cancel</v-btn>
+          <v-btn
+            size="small"
+            color="deep-purple"
+            variant="elevated"
+            :disabled="joinSelectedIds.size < 2"
+            @click="confirmJoinSelect"
+          >Continue</v-btn>
+        </div>
+
+        <!-- Join Placement Mode Info Bar -->
+        <div v-if="joinPlacementMode" class="join-placement-bar">
+          <v-icon size="small" class="mr-1" color="deep-purple-lighten-2">mdi-cursor-move</v-icon>
+          <span>Click a gap to place the merged segment</span>
+          <v-spacer />
+          <v-btn size="small" variant="text" @click="$emit('cancel-join')">Cancel</v-btn>
+        </div>
 
         <!-- Empty state -->
         <div v-if="!items || items.length === 0" class="text-center py-8">
@@ -892,6 +990,7 @@
 <script>
 import { themeColorMap, getColorValue, resolveVuetifyColor, getTextColorForBackground, loadColorsFromDatabase } from '@/utils/themeColorMap'
 import { useRegions } from '@/composables/useRegions'
+import { useRundownDragDrop } from '@/composables/useRundownDragDrop'
 import draggable from 'vuedraggable'
 
 export default {
@@ -917,7 +1016,14 @@ export default {
     'create-region',
     'delete-region',
     'rundown-cleared',
-    'select-region'
+    'select-region',
+    'recalculate-durations',
+    'show-script-compare-modal',
+    'initiate-join',
+    'join-items-selected',
+    'cancel-join',
+    'join-place',
+    'delete-item',
   ],
   props: {
     panelWidth: {
@@ -967,19 +1073,29 @@ export default {
     llmState: {
       type: Object,
       default: null
+    },
+    joinSelectMode: {
+      type: Boolean,
+      default: false
+    },
+    joinPlacementMode: {
+      type: Boolean,
+      default: false
+    },
+    joinMergedItem: {
+      type: Object,
+      default: null
+    },
+    episode: {
+      type: [String, Number],
+      default: null
     }
   },
   data() {
     return {
-      isDragging: false,
-      originalTransforms: new Map(), // Store original transforms
       showNewRegionModal: false,
       selectedRegionType: null,
       newRegionName: '',
-      isDraggingRegion: false, // Track if dragging entire region
-      draggedRegionType: null, // Type of region being dragged (block/break)
-      draggedRegionId: null, // ID of region being dragged
-      hoveredRegionId: null, // Region currently being hovered over during drag
       showDeleteRegionDialog: false, // Show region deletion confirmation
       regionToDelete: null, // Store region data for deletion
       selectedRegionId: null, // Track which region is currently selected
@@ -1001,7 +1117,7 @@ export default {
       clearRundownInProgress: false,
 
       // Region visibility toggle
-      showRegions: false,  // Default to regions hidden
+      showRegions: true,  // Default to regions shown (temporary)
 
       // Color reactivity trigger
       colorLoadTrigger: 0,  // Incremented when colors load to force re-computation
@@ -1026,16 +1142,22 @@ export default {
       restoringEpisode: null,
       episodePreviewDialog: false,
       episodePreviewItems: [],
-      episodePreviewSnap: null
+      episodePreviewSnap: null,
+
+      // Join mode state
+      joinSelectedIds: new Set(),
+      joinHoverGapIndex: -1,
     }
   },
   setup() {
     const { groupItemsIntoRegions, getRegionColor } = useRegions()
+    const dragDrop = useRundownDragDrop()
     return {
       groupItemsIntoRegions,
       getRegionColor,
       resolveVuetifyColor,
-      getTextColorForBackground
+      getTextColorForBackground,
+      ...dragDrop
     }
   },
   computed: {
@@ -1070,22 +1192,8 @@ export default {
       if (!this.items || this.items.length === 0) return 0
       let totalSeconds = 0
       this.items.forEach(item => {
-        // 1. Add the item-level duration
         if (item.duration) {
           totalSeconds += this.parseDurationToSeconds(item.duration)
-        }
-        // 2. Add durations from embedded cue blocks (RIF, SOT, VOX, etc.)
-        const scriptContent = item.script || item.script_content
-        if (scriptContent) {
-          const cuePattern = /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g
-          let match
-          while ((match = cuePattern.exec(scriptContent)) !== null) {
-            const cueBlock = match[1]
-            const durMatch = cueBlock.match(/\[Duration:\s*([^\]]+)\]/i)
-            if (durMatch) {
-              totalSeconds += this.parseDurationToSeconds(durMatch[1].trim())
-            }
-          }
         }
       })
       return totalSeconds
@@ -1255,7 +1363,11 @@ export default {
     },
 
     totalSelectionsCount() {
-      return this.selectedItemIndices.size + this.selectedRegionIds.size
+      const multiCount = this.selectedItemIndices.size + this.selectedRegionIds.size
+      // When no multi-selections but a single item or region is selected, count it
+      if (multiCount === 0 && this.selectedItemIndex !== -1) return 1
+      if (multiCount === 0 && this.selectedRegionId) return 1
+      return multiCount
     },
 
     selectionSummary() {
@@ -1366,20 +1478,9 @@ export default {
       return result;
     },
 
-    // Get effective duration for an item including embedded cue durations
+    // Get effective duration for an item (item.duration is authoritative after recalculation)
     getEffectiveItemDuration(item) {
       let totalSeconds = this.parseDurationToSeconds(item?.duration)
-      const scriptContent = item?.script || item?.script_content
-      if (scriptContent) {
-        const cuePattern = /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g
-        let match
-        while ((match = cuePattern.exec(scriptContent)) !== null) {
-          const durMatch = match[1].match(/\[Duration:\s*([^\]]+)\]/i)
-          if (durMatch) {
-            totalSeconds += this.parseDurationToSeconds(durMatch[1].trim())
-          }
-        }
-      }
       if (totalSeconds === 0) return '0:00'
       const h = Math.floor(totalSeconds / 3600)
       const m = Math.floor((totalSeconds % 3600) / 60)
@@ -1430,20 +1531,7 @@ export default {
 
       let totalSeconds = 0
       region.items.forEach(item => {
-        // Item-level duration
         totalSeconds += this.parseDurationToSeconds(item.duration)
-        // Embedded cue durations
-        const scriptContent = item.script || item.script_content
-        if (scriptContent) {
-          const cuePattern = /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g
-          let match
-          while ((match = cuePattern.exec(scriptContent)) !== null) {
-            const durMatch = match[1].match(/\[Duration:\s*([^\]]+)\]/i)
-            if (durMatch) {
-              totalSeconds += this.parseDurationToSeconds(durMatch[1].trim())
-            }
-          }
-        }
       })
 
       const hours = Math.floor(totalSeconds / 3600)
@@ -1681,53 +1769,6 @@ export default {
       return rgb ? `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.8)` : 'rgba(200, 230, 201, 0.8)'
     },
     
-    // Drag handlers for vue.draggable.next - implementing SortableJS transform workaround
-    handleChoose(/* event */) {
-      // Capture all transforms before SortableJS destroys them
-      this.originalTransforms.clear()
-      const container = this.$el.querySelector('.rundown-items-container')
-      const cards = container.querySelectorAll('.rundown-item-card')
-      
-      cards.forEach((card, index) => {
-        const computedStyle = window.getComputedStyle(card)
-        this.originalTransforms.set(index, computedStyle.transform)
-      })
-    },
-
-    handleDragStart(/* event */) {
-      this.isDragging = true
-    },
-    
-    handleDragEnd(event) {
-      this.isDragging = false
-      
-      // Restore transforms after SortableJS finishes (workaround from GitHub issue #2423)
-      setTimeout(() => {
-        const container = this.$el.querySelector('.rundown-items-container')
-        const cards = container.querySelectorAll('.rundown-item-card')
-        
-        cards.forEach((card, index) => {
-          const originalTransform = this.originalTransforms.get(index)
-          if (originalTransform && originalTransform !== 'none') {
-            card.style.transform = originalTransform
-          }
-        })
-        
-        this.originalTransforms.clear()
-      }, 50) // Short delay to let SortableJS finish
-      
-      // Create properly reordered array
-      const newItems = [...this.safeItems]
-      const [draggedItem] = newItems.splice(event.oldIndex, 1)
-      newItems.splice(event.newIndex, 0, draggedItem)
-      
-      this.$emit('reorder-items', {
-        oldIndex: event.oldIndex,
-        newIndex: event.newIndex,
-        items: newItems
-      })
-    },
-
     // Helper method to get the original index of an item in the safeItems array (0-based)
     getItemIndex(item) {
       return this.safeItems.findIndex(i => i.id === item.id)
@@ -1998,33 +2039,6 @@ export default {
       return `Region ${counter}`
     },
 
-    determineRegionType(item) {
-      if (item.regionType) return item.regionType
-
-      const itemType = item.type || item.item_type || 'segment'
-
-
-      // Use the same logic as useRegions.js
-      const regionTypes = [
-        {
-          type: 'break',
-          allowedItemTypes: ['ad', 'promo', 'cta', 'trans', 'break', 'bump']
-        },
-        {
-          type: 'block',
-          allowedItemTypes: ['segment', 'interview', 'live', 'pkg', 'vo', 'sot']
-        }
-      ]
-
-      for (const regionType of regionTypes) {
-        if (regionType.allowedItemTypes.includes(itemType)) {
-          return regionType.type
-        }
-      }
-
-      return 'block' // Default
-    },
-
     getRegionDurationForItem(element) {
       const regionType = element.regionType || this.determineRegionType(element)
 
@@ -2071,7 +2085,7 @@ export default {
       return lastItem && lastItem.id === element.id
     },
 
-    // Region drag and drop methods
+    // Region lookup helpers (used by selection/display methods)
     getRegionIdForItem(element) {
       const regions = this.regions
       for (const region of regions) {
@@ -2088,93 +2102,6 @@ export default {
         region.items.some(item => item.id === element.id)
       )
     },
-
-    isCompatibleDropTarget(element) {
-      if (!this.isDraggingRegion || !this.draggedRegionType) return false
-      const targetRegionType = this.determineRegionType(element)
-      return targetRegionType === this.draggedRegionType
-    },
-
-
-
-    handleRegionDragOver(event, element) {
-      if (!this.isDraggingRegion) return
-
-      if (this.isCompatibleDropTarget(element)) {
-        event.dataTransfer.dropEffect = 'move'
-      } else {
-        event.dataTransfer.dropEffect = 'none'
-      }
-    },
-
-    handleRegionDragEnter(event, element) {
-      if (!this.isDraggingRegion) return
-      const regionId = this.getRegionIdForItem(element)
-      if (regionId && regionId !== this.draggedRegionId) {
-        this.hoveredRegionId = regionId
-      }
-    },
-
-    handleRegionDragLeave() {
-      this.hoveredRegionId = null
-    },
-
-    handleRegionDrop(event, element) {
-      if (!this.isDraggingRegion) return
-
-      const dropRegion = this.getRegionForItem(element)
-      const draggedRegion = this.regions.find(r => r.id === this.draggedRegionId)
-
-      if (!dropRegion || !draggedRegion || dropRegion.id === draggedRegion.id) {
-        return
-      }
-
-      if (!this.isCompatibleDropTarget(element)) {
-        return
-      }
-
-      // Swap the two regions by swapping their items' order values
-      this.swapRegions(draggedRegion, dropRegion)
-
-      // Re-expand items immediately after drop
-      this.$nextTick(() => {
-        this.$forceUpdate() // Force reactivity to re-expand items
-      })
-    },
-
-    swapRegions(region1, region2) {
-      // Get all items from both regions
-      const region1Items = [...region1.items]
-      const region2Items = [...region2.items]
-
-      // Get the order ranges for each region
-      const region1Orders = region1Items.map(item => item.order).sort((a, b) => a - b)
-      const region2Orders = region2Items.map(item => item.order).sort((a, b) => a - b)
-
-      // Assign region1's items to region2's order positions
-      region1Items.forEach((item, index) => {
-        if (region2Orders[index] !== undefined) {
-          item.order = region2Orders[index]
-        }
-      })
-
-      // Assign region2's items to region1's order positions
-      region2Items.forEach((item, index) => {
-        if (region1Orders[index] !== undefined) {
-          item.order = region1Orders[index]
-        }
-      })
-
-      // Emit the reorder event with all affected items
-      const allAffectedItems = [...region1Items, ...region2Items]
-      this.$emit('reorder-items', {
-        type: 'region-swap',
-        items: allAffectedItems,
-        region1: region1.id,
-        region2: region2.id
-      })
-    },
-
 
     // Check if this element shows a region header for a selected region
     isSelectedRegionStart(element) {
@@ -2299,148 +2226,31 @@ export default {
       this.showDeleteRegionDialog = true
     },
 
-    // NEW: Hierarchical drag handlers
-    handleRegionDragStart(evt) {
-      console.log('🚀 Region drag started', evt)
-      console.log('🔍 Regions array before drag:', this.regions.map(r => ({ id: r.id, name: r.name, type: r.type })))
-      this.isDragging = true
-
-      // Enhanced region drag start
-      if (evt.item) {
-        evt.item.classList.add('currently-dragging-region')
-      }
-    },
-
-    handleRegionDragEnd(evt) {
-      try {
-        console.log('🏁 Region drag ended', evt)
-        console.log('🔍 Regions array after drag:', this.regions.map(r => ({ id: r.id, name: r.name, type: r.type })))
-        console.log('📊 Old index:', evt.oldIndex, 'New index:', evt.newIndex)
-        this.isDragging = false
-
-        // Clean up drag classes
-        if (evt.item) {
-          evt.item.classList.remove('currently-dragging-region')
-        }
-
-        // Only emit changes if the position actually changed
-        if (evt.oldIndex !== evt.newIndex) {
-          console.log('✅ Region order changed - emitting updates')
-
-          // Emit region reorder - parent will handle the logic
-          if (this.flatItemsFromRegions) {
-            this.$emit('reorder-items', this.flatItemsFromRegions)
-          }
-          if (this.regions) {
-            this.$emit('regions-updated', this.regions)
-          }
-
-          // Force save to persist changes to backend
-          this.$emit('save')
-        } else {
-          console.log('ℹ️ Region position unchanged - no updates needed')
-        }
-      } catch (error) {
-        console.error('❌ Error in handleRegionDragEnd:', error)
-        this.isDragging = false // Ensure we reset state
-      }
-    },
-
-    handleItemDragStart(evt) {
-      console.log('Item drag started', evt)
-      this.isDragging = true
-
-      // Enhanced drag start - add visual feedback
-      if (evt.item) {
-        evt.item.classList.add('currently-dragging')
-      }
-    },
-
-    handleItemDragEnd(evt) {
-      try {
-        console.log('Item drag ended', evt)
-        this.isDragging = false
-
-        // Clean up drag classes
-        if (evt.item) {
-          evt.item.classList.remove('currently-dragging')
-        }
-
-        // Enhanced drag end handling - emit reordered items for any drag operation
-        // This ensures proper parent synchronization even for within-region moves
-        if (this.flatItemsFromRegions) {
-          this.$emit('reorder-items', this.flatItemsFromRegions)
-        }
-        if (this.regions) {
-          this.$emit('regions-updated', this.regions)
-        }
-
-        // Force save to persist changes to backend
-        this.$emit('save')
-      } catch (error) {
-        console.error('❌ Error in handleItemDragEnd:', error)
-        this.isDragging = false // Ensure we reset state
-      }
-    },
-
-    allowMove(evt) {
-      // Debug drag-and-drop blocking issue
-      const draggedElement = evt.draggedElement
-      const relatedElement = evt.related
-
-      console.log('🔍 Drag Move Validation:', {
-        draggedElement: draggedElement,
-        draggedData: draggedElement?.__draggable_context?.element,
-        itemType: draggedElement?.__draggable_context?.element?.type,
-        related: relatedElement,
-        targetRegion: evt.to?.closest('.region-container'),
-        willAccept: evt.willAccept
+    // Drag handlers — delegate to useRundownDragDrop composable
+    // handleRegionDragStart is provided directly by composable (no ctx needed)
+    // handleRegionDragEnd, handleItemDragEnd, handleItemChange need a ctx object
+    handleRegionDragEndWrapper(evt) {
+      this.handleRegionDragEnd(evt, {
+        regions: this.regions,
+        flatItemsFromRegions: this.flatItemsFromRegions,
+        emit: this.$emit.bind(this)
       })
-
-      return true  // Allow all moves for debugging
     },
-
-    handleItemChange(evt) {
-      try {
-        console.log('Item change event', evt)
-
-        // Handle cross-region moves
-        if (evt.added) {
-          console.log('Item added to region:', evt.added)
-          // Update the item's regionId to match its new region
-          const addedItem = evt.added.element
-          if (addedItem && this.regions) {
-            const targetRegion = this.regions.find(r => r.items && r.items.some(item => item.id === addedItem.id))
-            if (targetRegion) {
-              addedItem.regionId = targetRegion.id
-              console.log(`🎯 Updated item ${addedItem.id} to region ${targetRegion.id}`)
-            }
-          }
-        }
-
-        if (evt.removed) {
-          console.log('Item removed from region:', evt.removed)
-        }
-
-        if (evt.moved) {
-          console.log('Item moved within region:', evt.moved)
-        }
-
-        // Emit the flattened items back to parent for persistence
-        console.log('🔄 Emitting updated items after cross-region change')
-        if (this.flatItemsFromRegions) {
-          this.$emit('reorder-items', this.flatItemsFromRegions)
-        }
-        if (this.regions) {
-          this.$emit('regions-updated', this.regions)
-        }
-
-        // Force save to persist changes to backend
-        this.$emit('save')
-      } catch (error) {
-        console.error('❌ Error in handleItemChange:', error)
-        // Don't let the error propagate and crash the component
-      }
+    // handleItemDragStart is provided directly by composable (no ctx needed)
+    handleItemDragEndWrapper(evt) {
+      this.handleItemDragEnd(evt, {
+        regions: this.regions,
+        flatItemsFromRegions: this.flatItemsFromRegions,
+        emit: this.$emit.bind(this)
+      })
+    },
+    // allowMove is provided directly by composable (no ctx needed)
+    handleItemChangeWrapper(evt) {
+      this.handleItemChange(evt, {
+        regions: this.regions,
+        flatItemsFromRegions: this.flatItemsFromRegions,
+        emit: this.$emit.bind(this)
+      })
     },
 
     // Update region selection for hierarchical structure
@@ -2493,7 +2303,26 @@ export default {
 
     // Update item selection for hierarchical structure
     handleItemSelect(item, event) {
+      // Join placement mode — clicking a gap places the item, clicking an item does nothing
+      if (this.joinPlacementMode) {
+        return
+      }
+
       const itemIndex = this.getItemGlobalIndex(item)
+
+      // Join select mode — every click toggles selection (no Ctrl required)
+      if (this.joinSelectMode) {
+        const itemId = item.asset_id || item.id
+        if (this.joinSelectedIds.has(itemId)) {
+          this.joinSelectedIds.delete(itemId)
+        } else {
+          this.joinSelectedIds.add(itemId)
+        }
+        // Force reactivity
+        this.joinSelectedIds = new Set(this.joinSelectedIds)
+        return
+      }
+
       const isCtrlClick = event && (event.ctrlKey || event.metaKey)
 
       if (isCtrlClick) {
@@ -2536,6 +2365,7 @@ export default {
     },
 
     async fetchHistoryStats(item) {
+      if (!this.episode || !item?.id) return
       try {
         const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
         const headers = { 'Authorization': `Bearer ${token}` }
@@ -2543,9 +2373,10 @@ export default {
         let oldestDate = null
         let largestSize = 0
 
-        // Fetch filesystem snapshots
-        const fsRes = await fetch(`/api/episodes/${this.episode}/history/segments/${item.id}`, { headers })
-        if (fsRes.ok) {
+        // Fetch filesystem snapshots (endpoint expects numeric item_id)
+        const numericId = Number(item.id)
+        const fsRes = !isNaN(numericId) ? await fetch(`/api/episodes/${this.episode}/history/segments/${numericId}`, { headers }) : null
+        if (fsRes && fsRes.ok) {
           const fsData = await fsRes.json()
           const snaps = fsData.snapshots || []
           totalCount += snaps.length
@@ -3107,6 +2938,43 @@ export default {
     },
 
     // Episode-level rollback methods
+    joinFromMultiSelect() {
+      // Gather item objects from the multi-selected indices
+      const selectedItems = []
+      for (const idx of this.selectedItemIndices) {
+        if (this.items[idx]) {
+          selectedItems.push(this.items[idx])
+        }
+      }
+      if (selectedItems.length < 2) return
+
+      // Clear multi-select state
+      this.selectedItemIndices.clear()
+      this.isMultiSelectMode = false
+
+      // Emit to parent — this skips the join-select phase and goes straight to snapshot + config
+      this.$emit('join-items-selected', selectedItems)
+    },
+
+    cancelJoinSelect() {
+      this.joinSelectedIds = new Set()
+      this.$emit('cancel-join')
+    },
+
+    confirmJoinSelect() {
+      // Gather the actual item objects for the selected IDs
+      const selectedItems = this.items.filter(item => {
+        const itemId = item.asset_id || item.id
+        return this.joinSelectedIds.has(itemId)
+      })
+      this.$emit('join-items-selected', selectedItems)
+    },
+
+    resetJoinState() {
+      this.joinSelectedIds = new Set()
+      this.joinHoverGapIndex = -1
+    },
+
     async openEpisodeRollbackModal() {
       this.episodeRollbackDialog = true
       this.episodeRollbackLoading = true
@@ -3392,7 +3260,7 @@ export default {
   /* height is set dynamically via inline style from panelHeight prop */
   max-height: 100vh;
   border-right: none; /* Remove border */
-  overflow-y: auto; /* Allow internal scrolling for long rundowns */
+  overflow-y: hidden; /* Panel itself doesn't scroll — .rundown-content does */
   overflow-x: visible; /* Allow items to extend beyond right edge */
   display: flex;
   flex-direction: column;
@@ -3401,9 +3269,18 @@ export default {
   align-self: flex-start; /* Required for sticky to work in flex container */
 }
 
+.rundown-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0; /* Allow flex shrink */
+  overflow: hidden;
+}
+
 .rundown-title {
   border-bottom: none; /* Remove border */
   min-height: 56px;
+  flex-shrink: 0; /* Never shrink — stays visible */
 }
 
 .rundown-toolbar {
@@ -3853,6 +3730,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0; /* Never shrink — stays visible above scrolling content */
 }
 
 .toolbar-main-grid {
@@ -4967,5 +4845,95 @@ export default {
 .snapshot-preview-content th {
   background: #2a2a2a;
   font-weight: 600;
+}
+
+/* ── Join Mode Styles ── */
+
+.toolbar-btn-join {
+  border-color: rgba(103, 58, 183, 0.5) !important;
+  color: #CE93D8 !important;
+}
+
+.toolbar-btn-join:hover {
+  background: rgba(103, 58, 183, 0.15) !important;
+}
+
+.join-selected-item {
+  outline: 2px solid rgba(103, 58, 183, 0.7) !important;
+  outline-offset: -2px;
+}
+
+.join-select-bar,
+.join-placement-bar {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(103, 58, 183, 0.15);
+  border-top: 1px solid rgba(103, 58, 183, 0.3);
+  font-size: 12px;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}
+
+.join-select-count {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  color: #CE93D8;
+}
+
+.join-placement-gap {
+  height: 8px;
+  margin: 0 4px;
+  position: relative;
+  cursor: pointer;
+  transition: height 0.15s ease;
+}
+
+.join-placement-gap:hover,
+.join-placement-gap-hover {
+  height: 32px;
+}
+
+.join-gap-line {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  height: 2px;
+  background: rgba(103, 58, 183, 0.3);
+  border-radius: 1px;
+  transition: background 0.15s, height 0.15s;
+}
+
+.join-placement-gap:hover .join-gap-line,
+.join-placement-gap-hover .join-gap-line {
+  background: rgba(103, 58, 183, 0.8);
+  height: 3px;
+  box-shadow: 0 0 8px rgba(103, 58, 183, 0.4);
+}
+
+.join-gap-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  font-weight: 600;
+  color: #CE93D8;
+  background: rgba(30, 30, 30, 0.9);
+  padding: 2px 10px;
+  border-radius: 10px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.join-placement-gap-last {
+  margin-top: 2px;
+  margin-bottom: 4px;
 }
 </style>

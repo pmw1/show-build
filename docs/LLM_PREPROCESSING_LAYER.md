@@ -368,7 +368,7 @@ When building prompts for downstream operations, these variables are resolved fr
 
 | File | Changes |
 |------|---------|
-| `app/main.py` | Register segment_llm_router |
+| `app/main.py` | Register segment_llm_router (main.py is now ~238 lines, router-registration only) |
 
 ---
 

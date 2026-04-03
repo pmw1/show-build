@@ -52,14 +52,8 @@
 
 ## Training & Research
 
-### Model Training
-- [`VOICE_MODEL_TRAINING_GUIDE.md`](VOICE_MODEL_TRAINING_GUIDE.md) - Voice model training system (stubbed)
-- [`FINE_TUNE_GROK_SASS_GUIDE.md`](FINE_TUNE_GROK_SASS_GUIDE.md) - Fine-tuning Grok for SASS
-- [`GROK_QUANTIZATION_QUALITY_COMPARISON.md`](GROK_QUANTIZATION_QUALITY_COMPARISON.md) - Quantization quality analysis
-- [`IQ_QUANTIZATION_RESEARCH.md`](IQ_QUANTIZATION_RESEARCH.md) - IQ quantization research
-
-### Analysis Tools
-- [`WPM_AUDIO_ANALYSIS_TODO.md`](WPM_AUDIO_ANALYSIS_TODO.md) - WPM audio analysis (needs Whisper)
+### Model Training & Research (archived)
+- See `docs/archived/` for: VOICE_MODEL_TRAINING_GUIDE, FINE_TUNE_GROK_SASS_GUIDE, GROK_QUANTIZATION_QUALITY_COMPARISON, IQ_QUANTIZATION_RESEARCH, WPM_AUDIO_ANALYSIS_TODO
 
 ---
 
@@ -149,12 +143,21 @@ show-build/
 │   ├── VUE_APP_MOUNTING_WARNING.md       # Vue mounting issues
 │   ├── CUE_BLOCK_INSERTION_PROTOCOL.md   # Cue insertion UX
 │   ├── HEALTH_CHECK_PROGRESSIVE_LOADING.md # Health check system
-│   ├── VOICE_MODEL_TRAINING_GUIDE.md     # Voice training
-│   ├── WPM_AUDIO_ANALYSIS_TODO.md        # WPM analysis
+│   ├── archived/                          # Deprecated docs (migrations, research, stubs)
 │   └── [quantization guides]
 │
 ├── app/                        # FastAPI backend
-│   ├── main.py                # Main application entry
+│   ├── main.py                # App entry (~238 lines): middleware, static mounts, router registration
+│   ├── models/                # Domain-split SQLAlchemy models (enums, organization, episode, etc.)
+│   ├── routers/               # Modularized router packages
+│   │   ├── episodes/          # 8 sub-routers (crud, metadata, rundown, versioning, etc.)
+│   │   ├── settings/          # 5 sub-routers (general, media_paths, interface, etc.)
+│   │   ├── whiteboard/        # 4 sub-routers (crud, media, social_media, node_links)
+│   │   ├── health_router.py   # Health check endpoints
+│   │   ├── upload_router.py   # File upload endpoints
+│   │   ├── legacy_router.py   # File-based legacy endpoints
+│   │   └── misc_router.py     # Miscellaneous endpoints
+│   ├── services/              # Business logic (rbac, housekeeping, asterisk, link_preview, etc.)
 │   ├── llm_proxy_router.py    # LLM proxy endpoint
 │   ├── prompts_router.py      # Prompt override API
 │   ├── auth/                  # Authentication system

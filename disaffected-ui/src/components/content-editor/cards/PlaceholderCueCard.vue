@@ -13,23 +13,6 @@
     variant="elevated"
     @click="$emit('select')"
   >
-    <!-- Three-state checkbox in upper right corner -->
-    <!-- States: unchecked -> complete (green) -> needs_attention (yellow) -> urgent_attention (red) -> unchecked -->
-    <div
-      class="cue-checkbox-container"
-      :class="checkboxContainerClass"
-      @click.stop="cycleCheckboxState"
-    >
-      <v-icon
-        :color="checkboxIconColor"
-        size="24"
-      >
-        {{ checkboxIcon }}
-      </v-icon>
-      <v-tooltip activator="parent" location="left">
-        {{ checkboxTooltip }}
-      </v-tooltip>
-    </div>
     <!-- Card Header -->
     <v-card-title class="cue-card-header" :style="headerStyleWithStatus">
       <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 8px;">mdi-drag-vertical</v-icon>
@@ -79,8 +62,8 @@
         </div>
       </template>
 
-      <!-- Non-RIF: Show action buttons in header -->
-      <div v-if="cueData.type !== 'RIF'" class="cue-actions">
+      <!-- Non-RIF/GFX: Show action buttons in header (GFX has its own controls) -->
+      <div v-if="cueData.type !== 'RIF' && cueData.type !== 'GFX'" class="cue-actions">
         <v-btn
           icon
           size="small"
@@ -106,577 +89,83 @@
 
     <!-- Card Content (hidden entirely for RIF) -->
     <v-card-text v-if="cueData.type !== 'RIF'" class="cue-card-content">
-      <!-- FSQ-specific Display - Large Preview + Compact Controls Layout -->
-      <div v-if="cueData.type === 'FSQ' && cueData.quote" class="fsq-preview-layout">
-        <!-- Left Side: 65% - Large Preview with animated background -->
-        <div class="fsq-preview-side">
-          <div
-            class="fsq-large-preview"
-            :class="{ 'clickable': cueData.mediaUrl }"
-            @click.stop="cueData.mediaUrl && openFsqPreviewModal()"
-          >
-            <!-- Video Background -->
-            <video
-              class="fsq-preview-video-bg"
-              autoplay
-              loop
-              muted
-              playsinline
-            >
-              <source :src="fsqBackgroundVideoUrl" type="video/mp4">
-            </video>
-            <!-- Black bar overlay -->
-            <div class="fsq-preview-black-bar"></div>
-            <!-- Quote text overlay (live preview) -->
-            <div class="fsq-preview-quote-overlay" :style="fsqPreviewStyle">
-              <div class="fsq-preview-quote-wrapper">
-                <div class="fsq-preview-quote-text" :style="fsqPreviewTextStyle">{{ cueData.quote }}</div>
-              </div>
-              <div v-if="cueData.attribution" class="fsq-preview-attribution" :style="fsqPreviewAttributionStyle">— {{ cueData.attribution }}</div>
-            </div>
-            <!-- Click indicator if PNG exists -->
-            <div v-if="cueData.mediaUrl" class="fsq-preview-click-hint">
-              <v-icon size="20" color="white">mdi-magnify-plus</v-icon>
-              <span>View Full</span>
-            </div>
-            <!-- PNG Generated indicator -->
-            <div v-if="cueData.mediaUrl" class="fsq-png-indicator">
-              <v-icon size="12" color="success">mdi-check-circle</v-icon>
-              <span>PNG</span>
-            </div>
-          </div>
-        </div>
+      <!-- FSQ-specific Display - Delegated to FsqCueContent -->
+      <FsqCueContent
+        v-if="cueData.type === 'FSQ' && cueData.quote"
+        ref="fsqContentRef"
+        :cue-data="cueData"
+        :fsq-dirty="fsqDirty"
+        :generatingPNG="generatingPNG"
+        :fsq-generation-status="fsqGenerationStatus"
+        :fsq-background-video-url="fsqBackgroundVideoUrl"
+        @edit-fsq="$emit('edit-fsq', $event)"
+        @delete="$emit('delete')"
+        @generate-png="handleGeneratePNG"
+        @download-png="downloadFsqPNG"
+        @open-fsq-preview="openFsqPreviewModal"
+        @update-meta="handleChildUpdateMeta"
+        @apply-all-fsq="$emit('apply-all-fsq', $event)"
+      />
 
-        <!-- Right Side: 35% - Compact Controls -->
-        <div class="fsq-controls-side">
-          <!-- Generate/Regenerate Button -->
-          <v-btn
-            block
-            size="small"
-            :variant="cueData.mediaUrl ? 'outlined' : 'elevated'"
-            :color="cueData.mediaUrl ? 'primary' : 'success'"
-            @click.stop="handleGeneratePNG"
-            :loading="generatingPNG"
-            class="mb-2"
-          >
-            <v-icon size="small" start>{{ cueData.mediaUrl ? 'mdi-sync' : 'mdi-creation' }}</v-icon>
-            {{ cueData.mediaUrl ? 'Regenerate' : 'Generate PNG' }}
-          </v-btn>
+      <!-- SOT Display - Delegated to SotCueContent -->
+      <SotCueContent
+        v-else-if="cueData.type?.toUpperCase() === 'SOT'"
+        :cue-data="cueData"
+        variant="SOT"
+        :job-status="jobStatus"
+        :sot-thumbnail-url="sotThumbnailUrl"
+        :sot-thumbnail-options="sotThumbnailOptions"
+        :current-sot-thumbnail-url="currentSotThumbnailUrl"
+        :sot-video-url="sotVideoUrl"
+        :sot-transcription="sotTranscription"
+        :sot-outcue="sotOutcue"
+        :is-job-completed="isJobCompleted"
+        :display-duration="displayDuration"
+        :display-video-path="displayVideoPath"
+        :display-processing-status="displayProcessingStatus"
+        :current-thumbnail-sharpness="currentThumbnailSharpness"
+        :sharpness-color="sharpnessColor"
+        :initial-thumbnail-index="currentThumbnailIndex"
+        @open-sot-preview="openSotPreviewModal"
+        @update-meta="handleChildUpdateMeta"
+      />
 
-          <!-- Edit FSQ Button -->
-          <v-btn
-            block
-            size="small"
-            variant="text"
-            color="primary"
-            class="mb-2"
-            @click.stop="$emit('edit-fsq', cueData)"
-          >
-            <v-icon size="small" start>mdi-pencil</v-icon>
-            Edit FSQ
-          </v-btn>
+      <!-- VO Display - Reuses SotCueContent with VO variant -->
+      <SotCueContent
+        v-else-if="cueData.type?.toUpperCase() === 'VO'"
+        :cue-data="cueData"
+        variant="VO"
+        :job-status="jobStatus"
+        :sot-thumbnail-url="sotThumbnailUrl"
+        :sot-thumbnail-options="sotThumbnailOptions"
+        :current-sot-thumbnail-url="currentSotThumbnailUrl"
+        :sot-video-url="sotVideoUrl"
+        :is-job-completed="isJobCompleted"
+        :display-duration="displayDuration"
+        :display-video-path="displayVideoPath"
+        :display-processing-status="displayProcessingStatus"
+        :initial-thumbnail-index="currentThumbnailIndex"
+        @open-sot-preview="openSotPreviewModal"
+        @update-meta="handleChildUpdateMeta"
+      />
 
-          <!-- Download PNG Button -->
-          <v-btn
-            v-if="cueData.mediaUrl"
-            block
-            size="small"
-            variant="text"
-            color="deep-purple"
-            class="mb-2"
-            @click.stop="downloadFsqPNG"
-          >
-            <v-icon size="small" start>mdi-download</v-icon>
-            Download PNG
-          </v-btn>
-
-          <!-- Status Indicator -->
-          <div v-if="fsqGenerationStatus" class="fsq-status-chip mb-2">
-            <v-chip size="x-small" :color="fsqStatusChipColor" variant="tonal">
-              <v-icon size="x-small" start :class="{ 'mdi-spin': fsqGenerationStatus === 'generating' }">{{ fsqStatusChipIcon }}</v-icon>
-              {{ fsqStatusText }}
-            </v-chip>
-          </div>
-
-          <!-- Compact Style Controls -->
-          <div class="fsq-compact-controls">
-            <!-- Font Size -->
-            <div class="fsq-control-row fsq-slider-row">
-              <span class="fsq-control-label">Size</span>
-              <v-slider
-                v-model="localFontSize"
-                :min="15"
-                :max="50"
-                :step="1"
-                density="compact"
-                hide-details
-                thumb-label
-                class="fsq-control-slider"
-                @update:model-value="emitParamChange('fontSize', $event)"
-              />
-              <span class="fsq-slider-value">{{ localFontSize }}px</span>
-            </div>
-
-            <!-- Font Family -->
-            <div class="fsq-control-row">
-              <span class="fsq-control-label">Font</span>
-              <v-select
-                v-model="localFontFamily"
-                :items="fontFamilyOptions"
-                density="compact"
-                hide-details
-                variant="outlined"
-                class="fsq-control-input"
-                @update:model-value="emitParamChange('fontFamily', $event)"
-              />
-            </div>
-
-            <!-- Box Height -->
-            <div class="fsq-control-row">
-              <span class="fsq-control-label">Height</span>
-              <v-text-field
-                v-model.number="localBoxHeight"
-                type="number"
-                density="compact"
-                hide-details
-                variant="outlined"
-                suffix="%"
-                :min="50"
-                :max="100"
-                class="fsq-control-input"
-                @update:model-value="emitParamChange('boxHeight', $event)"
-              />
-            </div>
-
-            <!-- Box Opacity -->
-            <div class="fsq-control-row">
-              <span class="fsq-control-label">Opacity</span>
-              <v-text-field
-                v-model.number="localBoxOpacity"
-                type="number"
-                density="compact"
-                hide-details
-                variant="outlined"
-                suffix="%"
-                :min="50"
-                :max="100"
-                class="fsq-control-input"
-                @update:model-value="emitParamChange('boxOpacity', $event)"
-              />
-            </div>
-
-            <!-- Line Spacing -->
-            <div class="fsq-control-row">
-              <span class="fsq-control-label">Spacing</span>
-              <v-text-field
-                v-model.number="localLineSpacing"
-                type="number"
-                density="compact"
-                hide-details
-                variant="outlined"
-                suffix="%"
-                :min="10"
-                :max="60"
-                class="fsq-control-input"
-                @update:model-value="emitParamChange('lineSpacing', $event)"
-              />
-            </div>
-
-            <!-- Alignment -->
-            <div class="fsq-control-row">
-              <span class="fsq-control-label">Align</span>
-              <v-btn-toggle
-                v-model="localAlignment"
-                mandatory
-                density="compact"
-                color="primary"
-                class="fsq-control-toggle"
-                @update:model-value="emitParamChange('alignment', $event)"
-              >
-                <v-btn value="left" size="x-small">
-                  <v-icon size="small">mdi-format-align-left</v-icon>
-                </v-btn>
-                <v-btn value="center" size="x-small">
-                  <v-icon size="small">mdi-format-align-center</v-icon>
-                </v-btn>
-                <v-btn value="right" size="x-small">
-                  <v-icon size="small">mdi-format-align-right</v-icon>
-                </v-btn>
-              </v-btn-toggle>
-            </div>
-
-            <!-- Revert Button -->
-            <v-btn
-              block
-              size="x-small"
-              variant="text"
-              color="grey"
-              class="mt-2"
-              @click.stop="revertFsqChanges"
-            >
-              <v-icon size="small" start>mdi-undo</v-icon>
-              Revert
-            </v-btn>
-          </div>
-        </div>
-      </div>
-
-      <!-- SOT Display with Thumbnail, Video and Transcription -->
-      <div v-else-if="cueData.type?.toUpperCase() === 'SOT'" class="sot-container">
-        <!-- Inline Video Player (discreet, toggleable) -->
-        <div v-if="showInlinePlayer && sotVideoUrl" class="sot-inline-player-container">
-          <div class="sot-inline-player-header">
-            <span class="sot-inline-player-title">Video Preview</span>
-            <v-btn
-              icon
-              size="x-small"
-              variant="text"
-              color="grey-darken-1"
-              @click.stop="showInlinePlayer = false"
-            >
-              <v-icon size="small">mdi-close</v-icon>
-            </v-btn>
-          </div>
-          <video
-            ref="inlineVideoPlayer"
-            :src="sotVideoUrl"
-            controls
-            class="sot-inline-video"
-            @loadedmetadata="onVideoLoaded"
-          ></video>
-        </div>
-
-        <!-- Thumbnail + Info Layout (when completed, has thumbnail, or has any display data) -->
-        <div v-if="sotThumbnailUrl || isJobCompleted || displayDuration || displayVideoPath" class="sot-completed-layout">
-          <!-- Left: Thumbnail with navigation -->
-          <div class="sot-thumbnail-wrapper">
-            <div class="sot-thumbnail-section">
-              <img
-                v-if="currentSotThumbnailUrl"
-                :src="currentSotThumbnailUrl"
-                class="sot-thumbnail-img sot-thumbnail-clickable"
-                @click="openSotPreviewModal"
-                @error="handleSotThumbnailError"
-              />
-              <div v-else class="sot-thumbnail-placeholder">
-                <v-icon size="48" color="grey-darken-1">mdi-video-outline</v-icon>
-                <span class="sot-placeholder-text">No Thumbnail</span>
-              </div>
-              <!-- Play overlay icon -->
-              <div v-if="currentSotThumbnailUrl" class="sot-play-overlay" @click.stop="openSotPreviewModal">
-                <v-icon size="48" color="white">mdi-play-circle</v-icon>
-              </div>
-              <!-- Completion badge -->
-              <div v-if="jobStatus && jobStatus.status === 'completed'" class="sot-complete-badge">
-                <v-icon size="16" color="white">mdi-check</v-icon>
-                <span>Complete</span>
-              </div>
-            </div>
-            <!-- Thumbnail Navigation Buttons -->
-            <div v-if="sotThumbnailOptions.length > 1" class="sot-thumbnail-nav">
-              <v-btn
-                size="x-small"
-                variant="outlined"
-                color="primary"
-                :disabled="currentThumbnailIndex === 0"
-                @click.stop="prevThumbnail"
-                class="sot-nav-btn"
-              >
-                <v-icon size="small">mdi-chevron-left</v-icon>
-                Back
-              </v-btn>
-              <span class="sot-thumbnail-counter">{{ currentThumbnailIndex + 1 }} / {{ sotThumbnailOptions.length }}</span>
-              <v-btn
-                size="x-small"
-                variant="outlined"
-                color="primary"
-                :disabled="currentThumbnailIndex >= sotThumbnailOptions.length - 1"
-                @click.stop="nextThumbnail"
-                class="sot-nav-btn"
-              >
-                Next
-                <v-icon size="small">mdi-chevron-right</v-icon>
-              </v-btn>
-            </div>
-          </div>
-
-          <!-- Right: Info -->
-          <div class="sot-info-section">
-            <!-- Duration (uses computed displayDuration to handle stale placeholders) -->
-            <div v-if="displayDuration" class="sot-info-row">
-              <v-icon size="small" color="primary">mdi-timer-outline</v-icon>
-              <span class="sot-info-label">Duration:</span>
-              <span class="sot-info-value">{{ displayDuration }}</span>
-            </div>
-
-            <!-- Media URL (uses computed displayVideoPath to handle stale placeholders) -->
-            <div v-if="displayVideoPath" class="sot-info-row">
-              <v-icon size="small" color="primary">mdi-video</v-icon>
-              <span class="sot-info-label">Video:</span>
-              <span class="sot-info-value sot-media-path">{{ formatMediaPath(displayVideoPath) }}</span>
-            </div>
-
-            <!-- Processing Status (uses computed displayProcessingStatus for live status) -->
-            <div v-if="displayProcessingStatus" class="sot-info-row">
-              <v-icon size="small" :color="isJobCompleted ? 'success' : 'info'">{{ isJobCompleted ? 'mdi-check-circle' : 'mdi-progress-clock' }}</v-icon>
-              <span class="sot-info-label">Status:</span>
-              <span class="sot-info-value">{{ displayProcessingStatus }}</span>
-            </div>
-
-            <!-- Transcription Preview -->
-            <div v-if="sotTranscription" class="sot-transcription-preview">
-              <v-icon size="small" color="primary">mdi-text</v-icon>
-              <span class="sot-transcription-text">{{ truncateTranscription(sotTranscription) }}</span>
-              <v-tooltip activator="parent" location="top" max-width="400">
-                <span style="white-space: pre-wrap;">{{ sotTranscription }}</span>
-              </v-tooltip>
-            </div>
-
-            <!-- Enhanced Video Specs (from job status) -->
-            <div v-if="jobStatus?.video_specs" class="sot-info-row">
-              <v-icon size="small" color="secondary">mdi-cog</v-icon>
-              <span class="sot-info-label">Specs:</span>
-              <span class="sot-info-value sot-tech-specs">
-                {{ jobStatus.video_specs.resolution }}
-                <span v-if="jobStatus.video_specs.codec !== 'unknown' && jobStatus.video_specs.codec !== 'processing'"> &bull; {{ jobStatus.video_specs.codec }}</span>
-                <span v-if="jobStatus.video_specs.file_size_mb"> &bull; {{ jobStatus.video_specs.file_size_mb }}MB</span>
-              </span>
-            </div>
-
-            <!-- Audio Info (from job status) -->
-            <div v-if="jobStatus?.audio_analysis" class="sot-info-row">
-              <v-icon size="small" color="secondary">mdi-volume-high</v-icon>
-              <span class="sot-info-label">Audio:</span>
-              <span class="sot-info-value">{{ jobStatus.audio_analysis.channels }}</span>
-            </div>
-
-            <!-- Warnings Badge (blur, audio issues) -->
-            <div v-if="jobStatus?.warnings?.length" class="sot-warnings-row">
-              <v-chip
-                v-for="(warning, idx) in jobStatus.warnings.slice(0, 2)"
-                :key="idx"
-                size="x-small"
-                :color="warning.includes('low_sharpness') ? 'error' : 'warning'"
-                variant="tonal"
-                class="mr-1"
-              >
-                <v-icon size="x-small" start>{{ warning.includes('sharpness') ? 'mdi-blur' : 'mdi-alert' }}</v-icon>
-                {{ formatWarningLabel(warning) }}
-              </v-chip>
-            </div>
-
-            <!-- Thumbnail Sharpness Indicator -->
-            <div v-if="currentThumbnailSharpness" class="sot-info-row sot-sharpness-row">
-              <v-icon size="small" :color="sharpnessColor">mdi-image-filter-hdr</v-icon>
-              <span class="sot-info-label">Sharpness:</span>
-              <span class="sot-info-value" :style="{ color: sharpnessColor }">{{ currentThumbnailSharpness.toFixed(0) }}</span>
-              <v-tooltip activator="parent" location="top">
-                Thumbnail sharpness score (higher = sharper). Below 100 may indicate blur.
-              </v-tooltip>
-            </div>
-          </div>
-
-          <!-- Outcue Display - Full Width at Bottom (MOVED INSIDE completed layout) -->
-          <div v-if="sotOutcue" class="sot-outcue-banner">
-            <span class="sot-outcue-label">OUTCUE:</span>
-            <span class="sot-outcue-text">{{ sotOutcue }}</span>
-          </div>
-        </div>
-
-        <!-- Processing In Progress (no thumbnail yet) -->
-        <div v-else-if="jobStatus && jobStatus.status === 'processing'" class="sot-processing-layout">
-          <v-progress-circular indeterminate size="40" width="3" color="primary"></v-progress-circular>
-          <div class="sot-processing-info">
-            <div class="sot-processing-phase">{{ jobStatus.current_phase || 'Processing...' }}</div>
-            <div class="sot-processing-message">Video is being processed</div>
-          </div>
-        </div>
-
-        <!-- No Job Status Yet -->
-        <div v-else class="sot-pending-layout">
-          <v-icon size="48" color="grey-lighten-1">mdi-video-off-outline</v-icon>
-          <span class="sot-pending-text">Awaiting processing</span>
-        </div>
-      </div>
-
-      <!-- VO (Voice Over) Display - Similar to SOT but without transcription/outcue -->
-      <div v-else-if="cueData.type?.toUpperCase() === 'VO'" class="sot-container vo-container">
-        <!-- Inline Video Player (discreet, toggleable) -->
-        <div v-if="showInlinePlayer && sotVideoUrl" class="sot-inline-player-container">
-          <div class="sot-inline-player-header">
-            <span class="sot-inline-player-title">B-Roll Preview</span>
-            <v-btn
-              icon
-              size="x-small"
-              variant="text"
-              color="grey-darken-1"
-              @click.stop="showInlinePlayer = false"
-            >
-              <v-icon size="small">mdi-close</v-icon>
-            </v-btn>
-          </div>
-          <video
-            ref="inlineVideoPlayer"
-            :src="sotVideoUrl"
-            controls
-            class="sot-inline-video"
-            @loadedmetadata="onVideoLoaded"
-          ></video>
-        </div>
-
-        <!-- Thumbnail + Info Layout (when completed, has thumbnail, or has any display data) -->
-        <div v-if="sotThumbnailUrl || isJobCompleted || displayDuration || displayVideoPath" class="sot-completed-layout">
-          <!-- Left: Thumbnail with navigation -->
-          <div class="sot-thumbnail-wrapper">
-            <div class="sot-thumbnail-section">
-              <img
-                v-if="currentSotThumbnailUrl"
-                :src="currentSotThumbnailUrl"
-                class="sot-thumbnail-img sot-thumbnail-clickable"
-                @click="openSotPreviewModal"
-                @error="handleSotThumbnailError"
-              />
-              <div v-else class="sot-thumbnail-placeholder">
-                <v-icon size="48" color="grey-darken-1">mdi-video-outline</v-icon>
-                <span class="sot-placeholder-text">No Thumbnail</span>
-              </div>
-              <!-- Play overlay icon -->
-              <div v-if="currentSotThumbnailUrl" class="sot-play-overlay" @click.stop="openSotPreviewModal">
-                <v-icon size="48" color="white">mdi-play-circle</v-icon>
-              </div>
-              <!-- VO Badge -->
-              <div class="vo-badge">
-                <v-icon size="14" color="white">mdi-microphone-off</v-icon>
-                <span>B-ROLL</span>
-              </div>
-              <!-- Completion badge -->
-              <div v-if="jobStatus && jobStatus.status === 'completed'" class="sot-complete-badge" style="bottom: 35px;">
-                <v-icon size="16" color="white">mdi-check</v-icon>
-                <span>Complete</span>
-              </div>
-            </div>
-            <!-- Thumbnail Navigation Buttons -->
-            <div v-if="sotThumbnailOptions.length > 1" class="sot-thumbnail-nav">
-              <v-btn
-                size="x-small"
-                variant="outlined"
-                color="primary"
-                :disabled="currentThumbnailIndex === 0"
-                @click.stop="prevThumbnail"
-                class="sot-nav-btn"
-              >
-                <v-icon size="small">mdi-chevron-left</v-icon>
-                Back
-              </v-btn>
-              <span class="sot-thumbnail-counter">{{ currentThumbnailIndex + 1 }} / {{ sotThumbnailOptions.length }}</span>
-              <v-btn
-                size="x-small"
-                variant="outlined"
-                color="primary"
-                :disabled="currentThumbnailIndex >= sotThumbnailOptions.length - 1"
-                @click.stop="nextThumbnail"
-                class="sot-nav-btn"
-              >
-                Next
-                <v-icon size="small">mdi-chevron-right</v-icon>
-              </v-btn>
-            </div>
-          </div>
-
-          <!-- Right: Info (no transcription for VO) -->
-          <div class="sot-info-section">
-            <!-- Duration (uses computed displayDuration to handle stale placeholders) -->
-            <div v-if="displayDuration" class="sot-info-row">
-              <v-icon size="small" color="primary">mdi-timer-outline</v-icon>
-              <span class="sot-info-label">Duration:</span>
-              <span class="sot-info-value">{{ displayDuration }}</span>
-            </div>
-
-            <!-- Media URL (uses computed displayVideoPath to handle stale placeholders) -->
-            <div v-if="displayVideoPath" class="sot-info-row">
-              <v-icon size="small" color="primary">mdi-video</v-icon>
-              <span class="sot-info-label">Video:</span>
-              <span class="sot-info-value sot-media-path">{{ formatMediaPath(displayVideoPath) }}</span>
-            </div>
-
-            <!-- Processing Status (uses computed displayProcessingStatus for live status) -->
-            <div v-if="displayProcessingStatus" class="sot-info-row">
-              <v-icon size="small" :color="isJobCompleted ? 'success' : 'info'">{{ isJobCompleted ? 'mdi-check-circle' : 'mdi-progress-clock' }}</v-icon>
-              <span class="sot-info-label">Status:</span>
-              <span class="sot-info-value">{{ displayProcessingStatus }}</span>
-            </div>
-
-            <!-- VO indicator (no audio) -->
-            <div class="sot-info-row vo-notice">
-              <v-icon size="small" color="grey">mdi-microphone-off</v-icon>
-              <span class="sot-info-label">Type:</span>
-              <span class="sot-info-value">Voice Over (B-Roll)</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Processing In Progress (no thumbnail yet) -->
-        <div v-else-if="jobStatus && jobStatus.status === 'processing'" class="sot-processing-layout">
-          <v-progress-circular indeterminate size="40" width="3" color="primary"></v-progress-circular>
-          <div class="sot-processing-info">
-            <div class="sot-processing-phase">{{ jobStatus.current_phase || 'Processing...' }}</div>
-            <div class="sot-processing-message">B-Roll video is being processed</div>
-          </div>
-        </div>
-
-        <!-- No Job Status Yet -->
-        <div v-else class="sot-pending-layout">
-          <v-icon size="48" color="grey-lighten-1">mdi-video-off-outline</v-icon>
-          <span class="sot-pending-text">Awaiting processing</span>
-        </div>
-      </div>
-
-      <!-- GFX-specific Display -->
-      <div v-else-if="cueData.type === 'GFX'" class="gfx-container">
-        <div class="gfx-preview-section">
-          <!-- Show generated image if available -->
-          <div v-if="cueData.assetUrl || cueData.mediaUrl" class="gfx-image-preview">
-            <img
-              :src="gfxImageUrl"
-              alt="GFX Preview"
-              class="gfx-preview-img"
-              @error="handleGfxImageError"
-            />
-            <div class="gfx-generated-badge">
-              <v-icon size="12" color="success">mdi-check-circle</v-icon>
-              <span>Generated</span>
-            </div>
-          </div>
-          <!-- Show text preview if not generated -->
-          <div v-else class="gfx-text-preview">
-            <div v-if="cueData.title" class="gfx-title">{{ cueData.title }}</div>
-            <div v-if="cueData.body" class="gfx-body">{{ formatGfxBody(cueData.body) }}</div>
-            <div v-if="!cueData.body && !cueData.title" class="gfx-no-content">No content</div>
-          </div>
-        </div>
-
-        <div class="gfx-controls">
-          <!-- Generate/Regenerate Button -->
-          <v-btn
-            block
-            size="small"
-            :variant="(cueData.assetUrl || cueData.mediaUrl) ? 'outlined' : 'elevated'"
-            :color="(cueData.assetUrl || cueData.mediaUrl) ? 'primary' : 'success'"
-            @click.stop="handleGenerateGfx"
-            :loading="generatingGfx"
-            class="mb-2"
-          >
-            <v-icon size="small" start>{{ (cueData.assetUrl || cueData.mediaUrl) ? 'mdi-sync' : 'mdi-creation' }}</v-icon>
-            {{ (cueData.assetUrl || cueData.mediaUrl) ? 'Regenerate' : 'Generate GFX' }}
-          </v-btn>
-
-          <!-- Style info -->
-          <div v-if="cueData.fontSize || cueData.fontFamily" class="gfx-style-info">
-            <span v-if="cueData.fontSize">{{ cueData.fontSize }}</span>
-            <span v-if="cueData.fontFamily"> · {{ cueData.fontFamily }}</span>
-          </div>
-        </div>
-      </div>
+      <!-- GFX Display - Delegated to GfxCueContent -->
+      <GfxCueContent
+        v-else-if="cueData.type === 'GFX'"
+        ref="gfxContentRef"
+        :cue-data="cueData"
+        :has-gfx-asset="hasGfxAsset"
+        :generating-gfx="generatingGfx"
+        :gfx-generation-status="gfxGenerationStatus"
+        :fsq-background-video-url="fsqBackgroundVideoUrl"
+        :xpost-data="xpostData"
+        :gfx-active-list-items="gfxActiveListItems"
+        @edit-gfx="$emit('edit-gfx', $event)"
+        @delete="$emit('delete')"
+        @generate-gfx="handleGenerateGfx"
+        @download-gfx-png="downloadGfxPNG"
+        @update-meta="handleChildUpdateMeta"
+      />
 
       <!-- NOTE (Directors Note) Display -->
       <div v-else-if="cueData.type === 'NOTE' || cueData.type === 'DIR'" class="dir-container">
@@ -805,54 +294,84 @@
         </v-tooltip>
       </v-chip>
 
-      <!-- Re-upload Button (SOT only) -->
-      <v-btn
-        v-if="showReprocessButton"
-        size="x-small"
-        variant="text"
-        color="white"
-        @click.stop="handleReupload"
-        class="reupload-btn"
-      >
-        <v-icon size="small">mdi-upload</v-icon>
-        <span style="margin-left: 4px;">Re-upload</span>
-        <v-tooltip activator="parent" location="top">
-          Upload new video while keeping metadata
-        </v-tooltip>
-      </v-btn>
+      <!-- Orbital Action Menu -->
+      <div class="orbital-menu" :class="{ 'orbital-open': orbitalOpen }" @click.stop>
+        <v-btn
+          icon
+          size="x-small"
+          class="orbital-trigger"
+          @click.stop="orbitalOpen = !orbitalOpen"
+        >
+          <v-icon size="18" :class="{ 'orbital-icon-spin': orbitalOpen }">
+            {{ orbitalOpen ? 'mdi-close' : 'mdi-dots-horizontal' }}
+          </v-icon>
+          <v-tooltip v-if="!orbitalOpen" activator="parent" location="top">Actions</v-tooltip>
+        </v-btn>
 
-      <!-- Reprocess Button (SOT only) -->
-      <v-btn
-        v-if="showReprocessButton"
-        size="x-small"
-        variant="text"
-        color="white"
-        @click.stop="handleReprocess"
-        class="reprocess-btn"
-      >
-        <v-icon size="small">mdi-refresh</v-icon>
-        <span style="margin-left: 4px;">Reprocess</span>
-        <v-tooltip activator="parent" location="top">
-          Clean up and restart video processing
-        </v-tooltip>
-      </v-btn>
+        <!-- Orbital items radiate outward from trigger -->
+        <transition-group name="orbital-item">
+          <v-btn
+            v-if="orbitalOpen"
+            key="edit"
+            icon
+            size="x-small"
+            class="orbital-btn orbital-pos-1"
+            @click.stop="orbitalOpen = false; $emit('edit')"
+          >
+            <v-icon size="16">mdi-pencil</v-icon>
+            <v-tooltip activator="parent" location="top">Edit cue</v-tooltip>
+          </v-btn>
 
-      <!-- Generate PNG Button (FSQ only) -->
-      <v-btn
-        v-if="cueData.type === 'FSQ'"
-        size="x-small"
-        variant="text"
-        color="white"
-        @click.stop="handleGeneratePNG"
-        :loading="generatingPNG"
-        class="generate-png-btn"
-      >
-        <v-icon size="small">mdi-image-auto-adjust</v-icon>
-        <span style="margin-left: 4px;">Generate PNG</span>
-        <v-tooltip activator="parent" location="top">
-          Generate full-screen quote PNG graphic using Celery worker
-        </v-tooltip>
-      </v-btn>
+          <v-btn
+            v-if="orbitalOpen && showReprocessButton"
+            key="reupload"
+            icon
+            size="x-small"
+            class="orbital-btn orbital-pos-2"
+            @click.stop="orbitalOpen = false; handleReupload()"
+          >
+            <v-icon size="16">mdi-upload</v-icon>
+            <v-tooltip activator="parent" location="top">Re-upload video</v-tooltip>
+          </v-btn>
+
+          <v-btn
+            v-if="orbitalOpen && showReprocessButton"
+            key="reprocess"
+            icon
+            size="x-small"
+            class="orbital-btn orbital-pos-3"
+            @click.stop="orbitalOpen = false; handleReprocess()"
+          >
+            <v-icon size="16">mdi-refresh</v-icon>
+            <v-tooltip activator="parent" location="top">Reprocess video</v-tooltip>
+          </v-btn>
+
+          <v-btn
+            v-if="orbitalOpen && cueData.type === 'FSQ'"
+            key="genpng"
+            icon
+            size="x-small"
+            class="orbital-btn orbital-pos-2"
+            :loading="generatingPNG"
+            @click.stop="orbitalOpen = false; handleGeneratePNG()"
+          >
+            <v-icon size="16">mdi-image-auto-adjust</v-icon>
+            <v-tooltip activator="parent" location="top">Generate PNG</v-tooltip>
+          </v-btn>
+
+          <v-btn
+            v-if="orbitalOpen"
+            key="relocate"
+            icon
+            size="x-small"
+            class="orbital-btn orbital-pos-last"
+            @click.stop="orbitalOpen = false; $emit('relocate')"
+          >
+            <v-icon size="16">mdi-truck-delivery</v-icon>
+            <v-tooltip activator="parent" location="top">Move to another segment</v-tooltip>
+          </v-btn>
+        </transition-group>
+      </div>
     </v-card-actions>
 
     <!-- FSQ Preview Modal (960x540 - half resolution) -->
@@ -984,10 +503,18 @@
 <script>
 import { getColorValue, resolveVuetifyColor } from '../../../utils/themeColorMap.js';
 import { useSOTProcessing } from '../../../composables/useSOTProcessing.js';
+import FsqCueContent from './cue-types/FsqCueContent.vue';
+import SotCueContent from './cue-types/SotCueContent.vue';
+import GfxCueContent from './cue-types/GfxCueContent.vue';
 
 export default {
   name: 'PlaceholderCueCard',
-  emits: ['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq'],
+  components: {
+    FsqCueContent,
+    SotCueContent,
+    GfxCueContent
+  },
+  emits: ['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq'],
   props: {
     cueData: {
       type: Object,
@@ -1018,9 +545,13 @@ export default {
   },
   data() {
     return {
+      orbitalOpen: false,
       generatingPNG: false,
+      fsqDirty: true, // Assume dirty until proven generated (no PNG = needs generation)
       generatingGfx: false,       // GFX generation in progress
       gfxImageError: false,       // GFX image failed to load
+      gfxGenerationStatus: null,  // GFX generation status: null, 'queued', 'generating', 'completed', 'failed'
+      gfxTaskId: null,            // Current GFX Celery task ID
       fsqGenerationStatus: null, // FSQ generation status: null, 'queued', 'generating', 'completed', 'failed'
       fsqTaskId: null,        // Current FSQ Celery task ID
       fsqCacheBuster: null,   // Timestamp to bust browser cache after regeneration
@@ -1028,21 +559,9 @@ export default {
       statusPollInterval: null, // Interval ID for polling
       currentThumbnailIndex: 7, // Default to middle thumbnail (index 7 = thumb 8 of 15)
       pollingActive: false,    // Whether we're currently polling
-      // Three-state cue status: null (unchecked), 'complete', 'needs_attention', 'urgent_attention'
-      cueStatus: this.cueData?.cue_status || null,
-      // FSQ editable parameters (local state)
-      localFontFamily: this.cueData?.fontFamily || 'sans-serif',
-      localFontSize: parseInt(this.cueData?.fontSize) || 25,  // Max font size in px for auto-fitting
-      localBoxHeight: parseInt(this.cueData?.boxHeight) || 80,
-      localBoxOpacity: parseInt(this.cueData?.boxOpacity) || 75,
-      localLineSpacing: parseInt(this.cueData?.lineSpacing) || 30,
-      localAlignment: this.cueData?.alignment || this.cueData?.style || 'center',
+      cueStatus: null,
       thumbnailError: false,
-      // Font family options
-      fontFamilyOptions: [
-        { title: 'Sans-Serif', value: 'sans-serif' },
-        { title: 'Serif', value: 'serif' }
-      ],
+      gfxGeneratedUrl: null,  // Local override for immediate card refresh after generation
       // Inline video player state
       showInlinePlayer: false,
       // FSQ preview modal state
@@ -1063,72 +582,11 @@ export default {
       if ((t === 'NOTE' || t === 'DIR') && this.cueData.noteFor) {
         return `${t}: ${this.cueData.noteFor.toUpperCase()}`;
       }
+      if (t === 'GFX' && this.cueData.gfxType === 'xpost') {
+        return 'GFX-XPOST';
+      }
       return t;
     },
-    /**
-     * Checkbox icon based on cue_status
-     */
-    checkboxIcon() {
-      switch (this.cueStatus) {
-        case 'complete':
-          return 'mdi-checkbox-marked';
-        case 'needs_attention':
-          return 'mdi-alert-box';
-        case 'urgent_attention':
-          return 'mdi-close-box';
-        default:
-          return 'mdi-checkbox-blank-outline';
-      }
-    },
-
-    /**
-     * Checkbox icon color based on cue_status
-     */
-    checkboxIconColor() {
-      switch (this.cueStatus) {
-        case 'complete':
-          return 'white';
-        case 'needs_attention':
-          return '#1a1a1a';  // Dark for contrast on yellow
-        case 'urgent_attention':
-          return 'white';
-        default:
-          return 'grey-darken-1';
-      }
-    },
-
-    /**
-     * Checkbox container CSS class based on cue_status
-     */
-    checkboxContainerClass() {
-      switch (this.cueStatus) {
-        case 'complete':
-          return 'checkbox-complete';
-        case 'needs_attention':
-          return 'checkbox-needs-attention';
-        case 'urgent_attention':
-          return 'checkbox-urgent-attention';
-        default:
-          return '';
-      }
-    },
-
-    /**
-     * Tooltip text for checkbox based on current state
-     */
-    checkboxTooltip() {
-      switch (this.cueStatus) {
-        case 'complete':
-          return 'Click: Needs Attention';
-        case 'needs_attention':
-          return 'Click: URGENT ATTENTION';
-        case 'urgent_attention':
-          return 'Click: Clear status';
-        default:
-          return 'Click: Mark Complete';
-      }
-    },
-
     /**
      * Card style based on cue_status
      */
@@ -1194,6 +652,12 @@ export default {
           .split('-')
           .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
           .join(' ');
+      }
+
+      // For XPOST cues: show @handle if available
+      if (this.cueData.type === 'GFX' && this.cueData.gfxType === 'xpost') {
+        const handle = this.cueData.rawData?.authorHandle || this.cueData.authorHandle;
+        if (handle) return `@${handle}`;
       }
 
       // For all other cues: return as-is
@@ -1518,14 +982,46 @@ export default {
     /**
      * Get GFX image URL from cue data
      */
+    gfxActiveListItems() {
+      const raw = this.cueData?.listItems || this.cueData?.rawData?.listItems;
+      if (!raw) return [];
+      try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return Array.isArray(parsed) ? parsed.filter(item => item && item.trim()) : [];
+      } catch (e) {
+        return [];
+      }
+    },
+
+    hasGfxAsset() {
+      return !!(this.gfxGeneratedUrl || this.cueData?.assetUrl || this.cueData?.mediaUrl);
+    },
+
+    xpostData() {
+      const rd = this.cueData?.rawData || this.cueData || {};
+      return {
+        name: rd.authorName || '',
+        username: rd.authorHandle || '',
+        profilePhoto: rd.authorAvatar || '',
+        verified: rd.authorVerified === 'true' || rd.authorVerified === true,
+        text: (rd.tweetText || '').replace(/\\n/g, '\n'),
+        datetime: rd.publishedTime || '',
+        views: parseInt(rd.views) || 0,
+        likes: parseInt(rd.likes) || 0,
+        retweets: parseInt(rd.retweets) || 0,
+        replies: parseInt(rd.replies) || 0,
+        quotes: parseInt(rd.quotes) || 0,
+        bookmarks: parseInt(rd.bookmarks) || 0,
+        sourceUrl: rd.sourceUrl || rd.sourceURL || '',
+      };
+    },
+
     gfxImageUrl() {
-      const url = this.cueData?.assetUrl || this.cueData?.mediaUrl;
+      const url = this.gfxGeneratedUrl || this.cueData?.assetUrl || this.cueData?.mediaUrl;
       if (!url) return '';
-      // If it's already a full URL, use it
       if (url.startsWith('http') || url.startsWith('/')) {
         return url;
       }
-      // Build episode-relative URL
       const episode = this.currentEpisode || this.$route?.params?.episode || '';
       return `/episodes/${episode}/assets/graphics/${url}`;
     },
@@ -1570,75 +1066,32 @@ export default {
     },
 
     /**
+     * Get GFX generation status text for display
+     */
+    gfxStatusText() {
+      const map = { queued: 'Queued', generating: 'Generating...', completed: 'Complete', failed: 'Failed' }
+      return map[this.gfxGenerationStatus] || ''
+    },
+
+    /**
+     * Get GFX status chip color
+     */
+    gfxStatusChipColor() {
+      const map = { queued: 'blue-grey', generating: 'amber', completed: 'success', failed: 'error' }
+      return map[this.gfxGenerationStatus] || 'grey'
+    },
+
+    /**
+     * Get GFX status chip icon
+     */
+    gfxStatusChipIcon() {
+      const map = { queued: 'mdi-clock-outline', generating: 'mdi-cog', completed: 'mdi-check-circle', failed: 'mdi-alert-circle' }
+      return map[this.gfxGenerationStatus] || 'mdi-help-circle'
+    },
+
+    /**
      * Get FSQ preview container style (alignment)
      */
-    fsqPreviewStyle() {
-      const alignment = this.localAlignment || 'left';
-      return {
-        textAlign: alignment,
-        justifyContent: alignment === 'center' ? 'center' : alignment === 'right' ? 'flex-end' : 'flex-start'
-      };
-    },
-
-    /**
-     * Get FSQ preview text style
-     */
-    fsqPreviewTextStyle() {
-      const fontFamily = this.localFontFamily || 'serif';
-      const fontSize = this.localFontSize || 25;
-      const lineSpacing = this.localLineSpacing || 30;
-      const alignment = this.localAlignment || 'center';
-
-      // Map font family names to CSS
-      const fontMap = {
-        'serif': 'Georgia, "Times New Roman", serif',
-        'sans-serif': 'Arial, Helvetica, sans-serif',
-        'monospace': '"Courier New", Courier, monospace',
-        'cursive': 'cursive'
-      };
-
-      // Scale font size for preview (smaller container)
-      const scaledFontSize = Math.max(10, fontSize * 0.5);
-
-      return {
-        fontFamily: fontMap[fontFamily] || fontFamily,
-        fontSize: `${scaledFontSize}px`,
-        lineHeight: `${100 + lineSpacing}%`,
-        color: 'white',
-        textAlign: alignment,
-        width: '100%'
-      };
-    },
-
-    /**
-     * Get FSQ preview attribution style
-     */
-    fsqPreviewAttributionStyle() {
-      const fontFamily = this.localFontFamily || 'serif';
-      const fontSize = this.localFontSize || 25;
-      const alignment = this.localAlignment || 'center';
-
-      const fontMap = {
-        'serif': 'Georgia, "Times New Roman", serif',
-        'sans-serif': 'Arial, Helvetica, sans-serif',
-        'monospace': '"Courier New", Courier, monospace',
-        'cursive': 'cursive'
-      };
-
-      // Attribution is smaller than main text
-      const scaledFontSize = Math.max(8, fontSize * 0.35);
-
-      return {
-        fontFamily: fontMap[fontFamily] || fontFamily,
-        fontSize: `${scaledFontSize}px`,
-        color: 'rgba(255, 255, 255, 0.8)',
-        marginTop: '8px',
-        fontStyle: 'italic',
-        textAlign: alignment,
-        width: '100%'
-      };
-    },
-
     /**
      * Get motion background style for FSQ thumbnail container
      * Uses fsqBackgroundVideo from settings
@@ -1868,6 +1321,17 @@ export default {
     }
   },
   methods: {
+    /**
+     * Forward update-meta events from child cue content components
+     */
+    handleChildUpdateMeta(payload) {
+      // Mark FSQ as dirty when FSQ params change (so Generate PNG button re-enables)
+      if (this.cueData.type === 'FSQ') {
+        this.fsqDirty = true;
+      }
+      this.$emit('update-meta', payload);
+    },
+
     darkenColor(color, amount) {
       if (!color || color === 'grey') return '#555';
       // Handle hex colors
@@ -2045,56 +1509,6 @@ export default {
       });
     },
 
-    /**
-     * Cycle through checkbox states: null -> complete -> needs_attention -> urgent_attention -> null
-     */
-    cycleCheckboxState() {
-      // Define the state cycle
-      const states = [null, 'complete', 'needs_attention', 'urgent_attention'];
-      const currentIndex = states.indexOf(this.cueStatus);
-      const nextIndex = (currentIndex + 1) % states.length;
-      this.cueStatus = states[nextIndex];
-
-      const statusLabels = {
-        null: 'unchecked',
-        'complete': 'Complete',
-        'needs_attention': 'Needs Attention',
-        'urgent_attention': 'URGENT ATTENTION'
-      };
-      console.log(`📋 Cue ${this.cueData.assetId || this.cueData.slug} status: ${statusLabels[this.cueStatus]}`);
-
-      // Emit to parent for persistence in YAML frontmatter
-      this.$emit('update-meta', {
-        assetId: this.cueData.assetId,
-        field: 'cue_status',
-        value: this.cueStatus
-      });
-    },
-
-    /**
-     * Emit parameter change to parent for cue data update
-     */
-    emitParamChange(paramName, value) {
-      console.log(`📝 FSQ param changed: ${paramName} = ${value}`);
-      this.$emit('update-meta', {
-        assetId: this.cueData.assetId,
-        field: paramName,
-        value: value
-      });
-    },
-
-    /**
-     * Revert FSQ style changes back to saved values
-     */
-    revertFsqChanges() {
-      console.log('↩️ Reverting FSQ changes to saved values');
-      this.localFontFamily = this.cueData?.fontFamily || 'sans-serif';
-      this.localFontSize = parseInt(this.cueData?.fontSize) || 25;
-      this.localBoxHeight = parseInt(this.cueData?.boxHeight) || 80;
-      this.localBoxOpacity = parseInt(this.cueData?.boxOpacity) || 75;
-      this.localLineSpacing = parseInt(this.cueData?.lineSpacing) || 30;
-      this.localAlignment = this.cueData?.alignment || this.cueData?.style || 'center';
-    },
 
     /**
      * Select quote text for copying
@@ -2301,6 +1715,109 @@ export default {
     },
 
     /**
+     * Download GFX PNG image
+     */
+    downloadGfxPNG() {
+      const mediaUrl = this.cueData.assetUrl || this.cueData.mediaUrl
+      if (!mediaUrl) return
+
+      const url = mediaUrl.startsWith('http') ? mediaUrl : `${window.location.origin}${mediaUrl}`
+      const filename = mediaUrl.split('/').pop() || `${this.cueData.slug || 'gfx'}.png`
+
+      const authToken = localStorage.getItem('auth-token')
+      fetch(url, {
+        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+      })
+        .then(res => {
+          if (!res.ok) throw new Error('Download failed')
+          return res.blob()
+        })
+        .then(blob => {
+          const a = document.createElement('a')
+          a.href = URL.createObjectURL(blob)
+          a.download = filename
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          URL.revokeObjectURL(a.href)
+        })
+        .catch(err => {
+          console.error('GFX PNG download error:', err)
+        })
+    },
+
+    /**
+     * Poll GFX Celery task status until completion
+     */
+    async pollGfxTaskStatus(taskId, maxAttempts = 30) {
+      let attempts = 0;
+
+      const poll = async () => {
+        if (attempts >= maxAttempts) {
+          console.log('⏱️ GFX polling timeout');
+          this.gfxGenerationStatus = 'failed';
+          return;
+        }
+
+        attempts++;
+
+        try {
+          const token = localStorage.getItem('auth-token');
+          const response = await fetch(`/api/gfx/task/${taskId}`, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+          });
+
+          if (!response.ok) {
+            console.error('Failed to check GFX task status');
+            return;
+          }
+
+          const status = await response.json();
+          console.log(`📊 GFX Task ${taskId} status:`, status.state);
+
+          if (status.ready) {
+            if (status.successful) {
+              console.log('🎉 GFX generation completed!', status.result);
+              this.gfxGenerationStatus = 'completed';
+
+              if (status.result.asset_url) {
+                const assetUrl = status.result.asset_url;
+                console.log('📝 Updating GFX assetUrl to:', assetUrl);
+
+                // Store locally so card refreshes immediately
+                this.gfxGeneratedUrl = assetUrl;
+                this.gfxImageError = false;
+
+                // Update the cue block in the script (persists to database)
+                this.$emit('update-meta', {
+                  assetId: this.cueData.assetId,
+                  field: 'assetUrl',
+                  value: assetUrl
+                });
+              }
+
+              setTimeout(() => {
+                if (this.gfxGenerationStatus === 'completed') {
+                  this.gfxGenerationStatus = null;
+                }
+              }, 3000);
+
+            } else {
+              console.error('❌ GFX generation failed:', status.error);
+              this.gfxGenerationStatus = 'failed';
+            }
+          } else {
+            setTimeout(poll, 2000);
+          }
+        } catch (error) {
+          console.error('Error polling GFX task status:', error);
+        }
+      };
+
+      poll();
+    },
+
+    /**
      * Handle re-upload button click - Open SotModal with existing metadata but no mediaUrl
      * This allows uploading a new video while keeping the slug, description, credits, etc.
      */
@@ -2408,20 +1925,30 @@ export default {
         const episode = this.currentEpisode || this.$route?.params?.episode || '';
 
         // Use LOCAL state values (from editable controls) not cueData values
+        // Get values from child component ref or fall back to cueData
+        const fsqRef = this.$refs.fsqContentRef;
+        const localFontSize = fsqRef?.localFontSize ?? (parseInt(this.cueData?.fontSize) || 34);
+        const localAlignment = fsqRef?.localAlignment ?? (this.cueData?.alignment || 'center');
+        const localFontFamily = fsqRef?.localFontFamily ?? (this.cueData?.fontFamily || 'sans-serif');
+        const localBoxHeight = fsqRef?.localBoxHeight ?? (parseInt(this.cueData?.boxHeight) || 75);
+        const localBoxOpacity = fsqRef?.localBoxOpacity ?? (parseInt(this.cueData?.boxOpacity) || 75);
+        const localLineSpacing = fsqRef?.localLineSpacing ?? (parseInt(this.cueData?.lineSpacing) || 22);
+        const localAttributionSize = fsqRef?.localAttributionSize ?? (parseInt(this.cueData?.attributionSize) || 16);
         // Scale up font size: slider shows 15-50, but renderer needs 60-200px for 1920x1080 canvas
-        const scaledMaxFontSize = this.localFontSize * 4;
+        const scaledMaxFontSize = localFontSize * 4;
         const requestData = {
           episode_id: episode,
           quote: this.cueData.quote,
           attribution: this.cueData.attribution || this.cueData.source || '',
           slug: this.cueData.slug || 'quote',
           asset_id: this.cueData.assetId,
-          alignment: this.localAlignment,
-          font_family: this.localFontFamily,
+          alignment: localAlignment,
+          font_family: localFontFamily,
           max_font_size: scaledMaxFontSize,
-          box_height: this.localBoxHeight,
-          box_opacity: this.localBoxOpacity,
-          line_spacing: this.localLineSpacing,
+          box_height: localBoxHeight,
+          box_opacity: localBoxOpacity,
+          line_spacing: localLineSpacing,
+          attribution_size: localAttributionSize,
           duration: this.cueData.duration || '00:00:05:00'
         };
 
@@ -2468,35 +1995,62 @@ export default {
         return;
       }
 
-      if (!this.cueData.body) {
-        console.error('Cannot generate GFX: no body text found');
+      // Allow generation with body OR list items OR title
+      const gfxTitle = this.cueData.gfxTitle || this.cueData.rawData?.title || null;
+      const rawListItems = this.cueData.listItems || this.cueData.rawData?.listItems || null;
+      const hasListItems = rawListItems && (
+        typeof rawListItems === 'string' ? JSON.parse(rawListItems).length > 0 : rawListItems.length > 0
+      );
+      if (!this.cueData.body && !gfxTitle && !hasListItems) {
+        console.error('Cannot generate GFX: no body, title, or list items found');
         return;
       }
 
       try {
         this.generatingGfx = true;
+        this.gfxGenerationStatus = 'queued';
         console.log(`🎨 Generating GFX for: ${this.cueData.assetId}`);
 
         const token = localStorage.getItem('auth-token');
         const episode = this.currentEpisode || this.$route?.params?.episode || '';
 
+        // Use gfxTitle (actual title text) not title (card display label)
+        const gfxTitle = this.cueData.gfxTitle || this.cueData.rawData?.title || null;
+        const listItems = this.cueData.listItems || this.cueData.rawData?.listItems || null;
+        let parsedListItems = null;
+        if (listItems) {
+          parsedListItems = typeof listItems === 'string' ? JSON.parse(listItems) : listItems;
+        }
+
+        // Use LOCAL state values from child component faceplate controls, not stale cueData
+        const gfxRef = this.$refs.gfxContentRef;
+        const localGfxAlignment = gfxRef?.localGfxAlignment ?? (this.cueData?.textAlign || 'center');
+        const localGfxFontFamily = gfxRef?.localGfxFontFamily ?? (this.cueData?.fontFamily || 'sans-serif');
+        const localGfxFontSize = gfxRef?.localGfxFontSize ?? (parseInt(this.cueData?.fontSize) || 25);
         const requestData = {
           episode_id: episode,
-          gfx_type: this.cueData.gfxType || 'fullscreen-text',
-          body: this.cueData.body?.replace(/\\n/g, '\n') || '',
+          gfx_type: this.cueData.gfxType || this.cueData.rawData?.gfxType || 'fullscreen-text',
+          body: (this.cueData.body || this.cueData.rawData?.body || '').replace(/\\n/g, '\n'),
           slug: this.cueData.slug || 'gfx',
           asset_id: this.cueData.assetId,
-          title: this.cueData.title || null,
-          alignment: this.cueData.textAlign || 'center',
-          font_family: this.cueData.fontFamily || 'sans-serif',
-          font_size: parseInt(this.cueData.fontSize) || 25,
-          render_mode: this.cueData.renderMode || 'png',
-          priority: 'high'
+          title: gfxTitle,
+          alignment: localGfxAlignment,
+          font_family: localGfxFontFamily,
+          font_size: localGfxFontSize,
+          render_mode: this.cueData.renderMode || this.cueData.rawData?.renderMode || 'png',
+          priority: 'high',
+          title_alignment: this.cueData.titleAlign || this.cueData.rawData?.titleAlign || null,
+          title_font_size: (this.cueData.titleFontSize || this.cueData.rawData?.titleFontSize) ? parseInt(this.cueData.titleFontSize || this.cueData.rawData?.titleFontSize) : null,
+          title_pin_to_top: (this.cueData.titlePinToTop || this.cueData.rawData?.titlePinToTop) === 'true' || this.cueData.titlePinToTop === true,
+          title_margin_top: (this.cueData.titleMarginTop || this.cueData.rawData?.titleMarginTop) ? parseFloat(this.cueData.titleMarginTop || this.cueData.rawData?.titleMarginTop) : 1.0,
+          title_margin_bottom: (this.cueData.titleMarginBottom || this.cueData.rawData?.titleMarginBottom) ? parseFloat(this.cueData.titleMarginBottom || this.cueData.rawData?.titleMarginBottom) : 1.5,
+          list_items: parsedListItems,
+          enumerator: this.cueData.enumerator || null
         };
 
         console.log('📤 Sending GFX generation request:', requestData);
 
-        const response = await fetch('/api/gfx/generate', {
+        const response = await fetch('/api/gfx/generate-async', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -2507,29 +2061,31 @@ export default {
 
         if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(errorData.detail || 'Failed to generate GFX');
+          throw new Error(errorData.detail || 'Failed to queue GFX generation');
         }
 
         const result = await response.json();
-        console.log('✅ GFX generated:', result);
+        console.log('✅ GFX generation queued:', result);
 
-        // Update cue with generated asset URL
-        if (result.asset_url) {
-          this.$emit('update-cue-field', {
-            assetId: this.cueData.assetId,
-            field: 'assetUrl',
-            value: result.asset_url
-          });
-          // Force image reload
-          this.gfxImageError = false;
-        }
+        this.gfxGenerationStatus = 'generating';
+        this.gfxTaskId = result.task_id;
+
+        // Poll for completion
+        this.pollGfxTaskStatus(result.task_id);
 
       } catch (error) {
         console.error('❌ Error generating GFX:', error);
-        alert('Failed to generate GFX: ' + error.message);
+        this.gfxGenerationStatus = 'failed';
       } finally {
         this.generatingGfx = false;
       }
+    },
+
+    formatMetric(n) {
+      if (!n) return '0';
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return String(n);
     },
 
     /**
@@ -2583,6 +2139,7 @@ export default {
             if (status.successful) {
               console.log('🎉 PNG generation completed!', status.result);
               this.fsqGenerationStatus = 'completed';
+              this.fsqDirty = false;
 
               // Update the cue block with the generated mediaUrl
               if (status.result.asset_url) {
@@ -2800,57 +2357,6 @@ export default {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
-/* Checkbox container in upper right */
-.cue-checkbox-container {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 20;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  background-color: rgba(255, 255, 255, 0.9);
-  transition: background-color 0.2s ease;
-}
-
-.cue-checkbox-container:hover {
-  background-color: rgba(255, 255, 255, 1);
-}
-
-/* Three-state checkbox container styles */
-.cue-checkbox-container.checkbox-complete {
-  background-color: rgba(56, 142, 60, 0.9);  /* Green */
-}
-
-.cue-checkbox-container.checkbox-complete:hover {
-  background-color: rgba(56, 142, 60, 1);
-}
-
-.cue-checkbox-container.checkbox-needs-attention {
-  background-color: rgba(255, 193, 7, 0.95);  /* Yellow/amber */
-}
-
-.cue-checkbox-container.checkbox-needs-attention:hover {
-  background-color: rgba(255, 193, 7, 1);
-}
-
-.cue-checkbox-container.checkbox-urgent-attention {
-  background-color: rgba(211, 47, 47, 0.95);  /* Red */
-}
-
-.cue-checkbox-container.checkbox-urgent-attention:hover {
-  background-color: rgba(211, 47, 47, 1);
-}
-
-/* Legacy class for backwards compatibility */
-.cue-complete .cue-checkbox-container {
-  background-color: rgba(56, 142, 60, 0.9);
-}
-
-.cue-complete .cue-checkbox-container:hover {
-  background-color: rgba(56, 142, 60, 1);
-}
-
 /* Card border states for needs_attention and urgent_attention */
 .cue-needs-attention {
   border-color: #FFC107 !important;
@@ -3006,84 +2512,128 @@ export default {
   font-style: italic;
 }
 
-/* GFX Container Styles */
-.gfx-container {
+/* XPOST Preview Overlay */
+.xpost-preview-overlay {
+  position: absolute;
+  top: 6%;
+  left: 0;
+  width: 100%;
+  height: 88%;
   display: flex;
-  gap: 16px;
-  padding: 12px;
+  flex-direction: column;
+  padding: 3% 6%;
+  z-index: 3;
+  box-sizing: border-box;
+  overflow: hidden;
+  color: white;
 }
 
-.gfx-preview-section {
-  flex: 1;
-  min-width: 0;
+.xpost-author-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
 }
 
-.gfx-image-preview {
-  position: relative;
-  border-radius: 4px;
+.xpost-author-info {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.xpost-display-name {
+  font-weight: bold;
+  font-size: 0.75rem;
+}
+
+.xpost-handle {
+  font-size: 0.65rem;
+  opacity: 0.7;
+}
+
+.xpost-text {
+  font-size: 0.7rem;
+  line-height: 1.3;
+  white-space: pre-wrap;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  margin-bottom: 4px;
+}
+
+.xpost-meta-row {
+  font-size: 0.55rem;
+  opacity: 0.6;
+  margin-bottom: 2px;
+}
+
+.xpost-engagement-row {
+  display: flex;
+  gap: 8px;
+  font-size: 0.6rem;
+  opacity: 0.8;
+  margin-top: auto;
+}
+
+.xpost-metric {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* GFX Container Styles */
+/* GFX Preview Overlay (inside FSQ-style animated background) */
+.gfx-preview-overlay {
+  position: absolute;
+  top: 10%;
+  left: 0;
+  width: 100%;
+  height: 80%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 4% 8%;
+  z-index: 3;
+  box-sizing: border-box;
   overflow: hidden;
 }
 
-.gfx-preview-img {
-  width: 100%;
-  max-height: 200px;
-  object-fit: contain;
-  background: #1a1a1a;
-  border-radius: 4px;
-}
-
-.gfx-generated-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background: rgba(0, 0, 0, 0.7);
-  padding: 2px 8px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: #4CAF50;
-}
-
-.gfx-text-preview {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  padding: 16px;
-  border-radius: 4px;
+.gfx-overlay-title {
   color: white;
-  min-height: 80px;
-}
-
-.gfx-title {
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: #fff;
-}
-
-.gfx-body {
-  font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.gfx-no-content {
-  font-style: italic;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.gfx-controls {
-  width: 140px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.gfx-style-info {
-  font-size: 11px;
-  color: rgba(var(--v-theme-on-surface), 0.6);
+  font-weight: bold;
+  font-size: 1.1vw;
+  margin-bottom: 0.4em;
   text-align: center;
+}
+
+.gfx-overlay-body {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.85vw;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  text-align: center;
+}
+
+.gfx-overlay-list {
+  list-style: disc;
+  padding-left: 1.5em;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.75vw;
+  line-height: 1.5;
+}
+
+.gfx-overlay-list li {
+  margin-bottom: 0.2em;
+}
+
+.gfx-overlay-empty {
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
+  font-size: 0.9vw;
+  text-align: center;
+  margin-top: 2em;
 }
 
 /* DIR (Directors Note) Styling */
@@ -3552,7 +3102,7 @@ export default {
   word-break: break-all;
 }
 
-/* FSQ Preview Layout - Large preview on left, controls on right */
+/* FSQ Preview Layout - Stacked: preview+buttons on top, controls below */
 .fsq-preview-layout {
   display: flex;
   gap: 12px;
@@ -3560,7 +3110,18 @@ export default {
   padding: 8px;
 }
 
-/* Left side: 65% - Large preview */
+.fsq-preview-layout--stacked {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fsq-top-row {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+/* Left side of top row: preview */
 .fsq-preview-side {
   flex: 0 0 65%;
 }
@@ -3589,6 +3150,8 @@ export default {
   z-index: 1;
 }
 
+/* Black bar styles now come from dynamic :style binding (computeBlackBarStyle)
+   when box height/opacity sliders are connected. Fallback for static rendering: */
 .fsq-preview-black-bar {
   position: absolute;
   top: 10%;
@@ -3607,8 +3170,8 @@ export default {
   height: 80%;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
-  padding: 5% 10% 8% 10%;
+  justify-content: center;
+  padding: 4.5% 10%;
   z-index: 3;
   box-sizing: border-box;
 }
@@ -3622,12 +3185,9 @@ export default {
 }
 
 .fsq-preview-quote-text {
-  font-style: italic;
   word-wrap: break-word;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 6;
-  -webkit-box-orient: vertical;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
 }
 
 .fsq-preview-attribution {
@@ -3739,6 +3299,88 @@ export default {
   font-size: 11px;
   color: rgba(0, 0, 0, 0.7);
   text-align: right;
+}
+
+/* Wide controls variant (below preview) */
+.fsq-compact-controls--wide {
+  width: 100%;
+}
+
+.fsq-slider-row--full {
+  width: 100%;
+}
+
+/* 3-per-row grid for FSQ adjustment controls */
+.fsq-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  width: 100%;
+}
+
+.fsq-grid-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fsq-grid-label {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.6);
+  text-transform: uppercase;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.fsq-grid-input {
+  width: 100%;
+}
+
+.fsq-grid-input :deep(.v-field__input) {
+  font-size: 12px;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.fsq-grid-input :deep(.v-field__append-inner) {
+  padding-top: 2px;
+}
+
+.fsq-grid-toggle {
+  width: 100%;
+}
+
+/* Apply All FSQ button on slider rows */
+.fsq-apply-all-btn {
+  flex: 0 0 auto;
+  font-size: 10px !important;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 0 6px !important;
+  min-width: 0 !important;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+.fsq-apply-all-btn:hover {
+  opacity: 1;
+}
+
+/* FSQ footer row with delete */
+.fsq-footer-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px 2px;
+}
+
+.fsq-delete-btn {
+  font-size: 13px !important;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.fsq-delete-btn:hover {
+  opacity: 1;
 }
 
 /* Legacy FSQ styles (kept for backwards compatibility) */
@@ -4228,5 +3870,88 @@ export default {
   .primary-message {
     font-size: 0.9rem;
   }
+}
+
+/* ---- Orbital Action Menu ---- */
+.orbital-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+}
+
+.orbital-trigger {
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  z-index: 2;
+}
+
+.orbital-open .orbital-trigger {
+  opacity: 1;
+}
+
+.orbital-icon-spin {
+  transition: transform 0.3s ease;
+  transform: rotate(90deg);
+}
+
+.orbital-btn {
+  position: absolute;
+  bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 1;
+  background: rgba(50, 50, 50, 0.95) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(4px);
+}
+
+.orbital-btn:hover {
+  background: rgba(80, 80, 80, 1) !important;
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+/* Closed state: all buttons stacked at trigger position */
+.orbital-btn.orbital-pos-1,
+.orbital-btn.orbital-pos-2,
+.orbital-btn.orbital-pos-3,
+.orbital-btn.orbital-pos-last {
+  transform: translateX(0);
+}
+
+/* Open state: spread left in a row with fixed spacing */
+.orbital-open .orbital-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.orbital-open .orbital-pos-1 {
+  transform: translateX(-32px);
+  transition-delay: 0s;
+}
+.orbital-open .orbital-pos-2 {
+  transform: translateX(-60px);
+  transition-delay: 0.03s;
+}
+.orbital-open .orbital-pos-3 {
+  transform: translateX(-88px);
+  transition-delay: 0.06s;
+}
+.orbital-open .orbital-pos-last {
+  transform: translateX(-116px);
+  transition-delay: 0.09s;
+}
+
+/* Transition group classes */
+.orbital-item-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.orbital-item-leave-active {
+  transition: opacity 0.15s ease-in, transform 0.15s ease-in;
+}
+.orbital-item-enter-from,
+.orbital-item-leave-to {
+  opacity: 0;
+  transform: translateX(0) !important;
 }
 </style>

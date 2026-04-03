@@ -83,7 +83,7 @@ const fetchHealthProgressive = async () => {
 
 ### Backend: Split Health Endpoints
 
-**Location**: `app/main.py`
+**Location**: `app/routers/health_router.py` (formerly in `app/main.py`)
 
 #### Original Endpoint (Fallback)
 ```python
@@ -122,7 +122,7 @@ Reduced timeouts for faster failure detection:
 | XTTS HTTP | 5.0s | 2.0s | Health check only needs quick ping |
 | Redis Socket | 5.0s | 2.0s | Local network should be fast |
 
-**File**: `app/main.py` lines 375, 430-431, 567
+**File**: `app/routers/health_router.py` (health endpoints moved from `main.py` during modularization)
 
 ## User Experience Flow
 
@@ -233,7 +233,7 @@ Each indicator has 3 possible states:
 
 ### Adjust Timeouts
 
-Edit `app/main.py`:
+Edit `app/routers/health_router.py` (health endpoints moved from `main.py`):
 
 ```python
 # Ollama timeout (line 375)
@@ -294,7 +294,7 @@ setTimeout(async () => {
 - Check backend logs for timeout errors
 
 ### Health check still slow
-- Reduce timeouts further in `main.py`
+- Reduce timeouts further in `app/routers/health_router.py`
 - Check if any service is hanging (use backend logs)
 - Consider disabling slow services in config
 

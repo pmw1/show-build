@@ -161,7 +161,7 @@ LLM hallucinated non-existent files for assets_images: ['assets/images/charlie-k
 1. `app/services/file_inventory_llm_v2.py` - Model, parameters, prompts
 2. `app/services/file_inventory_batched.py` - Slot list, parameters, fallback
 3. `app/file_inventory_router.py` - Default batch size
-4. `docs/LLM_JSON_RESPONSE_CONSULTATION.md` - Full analysis (saved)
+4. ~~`docs/LLM_JSON_RESPONSE_CONSULTATION.md`~~ - Removed (issue resolved)
 
 ## Next Steps
 

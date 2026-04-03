@@ -61,7 +61,7 @@ Show-Build is a mature database-first broadcast production platform with **33+ e
 | `script_compilation.py` | Server-side compilation | compilation |
 | `episode_scaffold.py` | Episode creation from templates | - |
 | `asset_id.py` | AssetID management | - |
-| `file_inventory_scanner.py` | Directory scanning | - |
+| `file_inventory_scanner_v2.py` | Directory scanning (v2) | - |
 
 ---
 
