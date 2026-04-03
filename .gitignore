@@ -56,9 +56,31 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Secrets or personal data (optional)
+# Secrets, keys, and credentials
 .env
 .env.*
+secret.key
+*.key
+*.pem
+app/storage/encryption.key
+app/app/storage/encryption.key
+disaffected-ui/ssl/
+
+# Database dumps and backups
+migration_db_*/
+*.dump
+update_blueprint.sql
+
+# Build artifacts
+dist/
+
+# IDE and editor config
+.vscode/
+*.code-workspace
+.idea/
+
+# Python virtualenv
+.venv/
 
 # Development and testing files
 debug_*.py
