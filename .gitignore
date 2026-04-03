@@ -1,5 +1,7 @@
 disaffected-ui/node_modules/
 
+# Claude Code
+.claude/
 
 # Python / FastAPI backend
 __pycache__/
