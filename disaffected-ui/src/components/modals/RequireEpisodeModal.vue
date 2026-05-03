@@ -65,87 +65,84 @@
   </v-dialog>
 </template>
 
-<script>
+<script setup>
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import axios from 'axios';
 
-export default {
-  name: 'RequireEpisodeModal',
-  emits: ['update:show', 'episode-selected', 'cancelled'],
-  props: {
-    show: {
-      type: Boolean,
-      default: false
-    },
-    actionDescription: {
-      type: String,
-      default: ''
-    }
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
   },
-  data() {
-    return {
-      selectedEpisode: '',
-      episodes: [],
-      loadingEpisodes: false
-    };
-  },
-  watch: {
-    show(newVal) {
-      if (newVal) {
-        this.loadEpisodes();
-      }
-    }
-  },
-  methods: {
-    async loadEpisodes() {
-      this.loadingEpisodes = true;
-      try {
-        const response = await axios.get('/api/episodes');
-        if (response.data && response.data.episodes) {
-          this.episodes = response.data.episodes.map(ep => ({
-            text: `${ep.episode_number} - ${ep.title || 'Untitled'}`,
-            value: ep.episode_number
-          }));
-        }
-      } catch (error) {
-        console.error('Failed to load episodes:', error);
-      } finally {
-        this.loadingEpisodes = false;
-      }
-    },
-
-    confirm() {
-      if (!this.selectedEpisode) return;
-
-      // Emit the selected episode
-      this.$emit('episode-selected', this.selectedEpisode);
-
-      // Update sessionStorage to persist selection
-      sessionStorage.setItem('currentEpisodeId', this.selectedEpisode);
-      sessionStorage.setItem('selectedEpisode', this.selectedEpisode);
-
-      // Close modal
-      this.$emit('update:show', false);
-    },
-
-    cancel() {
-      this.$emit('cancelled');
-      this.$emit('update:show', false);
-    },
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.cancel();
-      }
-    }
-  },
-  mounted() {
-    document.addEventListener('keydown', this.handleKeydown);
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown);
+  actionDescription: {
+    type: String,
+    default: ''
   }
-};
+});
+
+const emit = defineEmits(['update:show', 'episode-selected', 'cancelled']);
+
+const selectedEpisode = ref('');
+const episodes = ref([]);
+const loadingEpisodes = ref(false);
+
+watch(() => props.show, (newVal) => {
+  if (newVal) {
+    loadEpisodes();
+  }
+});
+
+async function loadEpisodes() {
+  loadingEpisodes.value = true;
+  try {
+    const response = await axios.get('/api/episodes');
+    if (response.data && response.data.episodes) {
+      episodes.value = response.data.episodes.map(ep => ({
+        text: `${ep.episode_number} - ${ep.title || 'Untitled'}`,
+        value: ep.episode_number
+      }));
+    }
+  } catch (error) {
+    console.error('Failed to load episodes:', error);
+  } finally {
+    loadingEpisodes.value = false;
+  }
+}
+
+function confirm() {
+  if (!selectedEpisode.value) return;
+
+  // Emit the selected episode
+  emit('episode-selected', selectedEpisode.value);
+
+  // Update sessionStorage to persist selection
+  sessionStorage.setItem('currentEpisodeId', selectedEpisode.value);
+  sessionStorage.setItem('selectedEpisode', selectedEpisode.value);
+
+  // Close modal
+  emit('update:show', false);
+}
+
+function cancel() {
+  emit('cancelled');
+  emit('update:show', false);
+}
+
+function handleKeydown(event) {
+  if (event.key === 'Escape' && props.show) {
+    event.preventDefault();
+    event.stopPropagation();
+    cancel();
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', handleKeydown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleKeydown);
+});
 </script>
 
 <style scoped>

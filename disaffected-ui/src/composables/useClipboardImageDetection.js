@@ -408,6 +408,20 @@ export function useClipboardImageDetection(options = {}) {
     try {
       let result = null
 
+      // When triggered by the button (no event), re-probe the clipboard so
+      // primaryType reflects what's on the clipboard RIGHT NOW, not what was
+      // there when the modal opened. Without this, the first probe's
+      // optimistic HTML_CLIPBOARD default sticks and a later right-click
+      // "Copy Image" (which puts image/* on the clipboard, not text/html)
+      // gets mis-routed to the HTML handler and fails.
+      if (!event) {
+        try {
+          await probeClipboard()
+        } catch (probeErr) {
+          console.log('Re-probe before paste failed:', probeErr.message)
+        }
+      }
+
       // If no type detected, try to detect from event
       let typeToUse = primaryType.value
 

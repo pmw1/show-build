@@ -234,133 +234,132 @@
   </v-container>
 </template>
 
-<script>
+<script setup>
+import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap'
 import { getAllItemTypes, getItemTypeIcon } from '@/config/itemTypes'
 
-export default {
-  name: 'ItemTypesView',
-  data() {
-    return {
-      search: '',
-      showAddDialog: false,
-      editingType: null,
-      formValid: false,
-      typeForm: {
-        title: '',
-        value: '',
-        category: '',
-        description: '',
-        color: ''
-      },
-      headers: [
-        { title: 'Color', key: 'color', sortable: false, width: '120px' },
-        { title: 'Type', key: 'title', sortable: true },
-        { title: 'Code', key: 'value', sortable: true, width: '100px' },
-        { title: 'Category', key: 'category', sortable: true, width: '120px' },
-        { title: 'Description', key: 'description', sortable: false },
-        { title: 'Actions', key: 'actions', sortable: false, width: '100px' }
-      ],
-      itemTypes: getAllItemTypes(), // Load from single source of truth
-      categoryOptions: ['Core', 'Production', 'Technical', 'Content'],
-      colorOptions: [
-        { title: 'Primary', value: 'primary' },
-        { title: 'Secondary', value: 'secondary' },
-        { title: 'Success', value: 'success' },
-        { title: 'Info', value: 'info' },
-        { title: 'Warning', value: 'warning' },
-        { title: 'Error', value: 'error' },
-        { title: 'Red', value: 'red' },
-        { title: 'Pink', value: 'pink' },
-        { title: 'Purple', value: 'purple' },
-        { title: 'Deep Purple', value: 'deep-purple' },
-        { title: 'Indigo', value: 'indigo' },
-        { title: 'Blue', value: 'blue' },
-        { title: 'Light Blue', value: 'light-blue' },
-        { title: 'Cyan', value: 'cyan' },
-        { title: 'Teal', value: 'teal' },
-        { title: 'Green', value: 'green' },
-        { title: 'Light Green', value: 'light-green' },
-        { title: 'Lime', value: 'lime' },
-        { title: 'Yellow', value: 'yellow' },
-        { title: 'Amber', value: 'amber' },
-        { title: 'Orange', value: 'orange' },
-        { title: 'Deep Orange', value: 'deep-orange' },
-        { title: 'Brown', value: 'brown' },
-        { title: 'Grey', value: 'grey' },
-        { title: 'Blue Grey', value: 'blue-grey' }
-      ]
-    }
-  },
-  computed: {
-    filteredItemTypes() {
-      if (!this.search) return this.itemTypes
-      return this.itemTypes.filter(type => 
-        type.title.toLowerCase().includes(this.search.toLowerCase()) ||
-        type.value.toLowerCase().includes(this.search.toLowerCase()) ||
-        type.category.toLowerCase().includes(this.search.toLowerCase()) ||
-        (type.description && type.description.toLowerCase().includes(this.search.toLowerCase()))
-      )
-    },
-    coreTypes() {
-      return this.itemTypes.filter(type => type.category === 'Core')
-    },
-    productionTypes() {
-      return this.itemTypes.filter(type => type.category === 'Production')
-    },
-    technicalTypes() {
-      return this.itemTypes.filter(type => type.category === 'Technical')
-    },
-    contentTypes() {
-      return this.itemTypes.filter(type => type.category === 'Content')
-    },
-    categories() {
-      return [
-        { name: 'Core Types', types: this.coreTypes },
-        { name: 'Production Types', types: this.productionTypes },
-        { name: 'Technical Types', types: this.technicalTypes },
-        { name: 'Content Types', types: this.contentTypes }
-      ]
-    }
-  },
-  methods: {
-    getColorValue,
-    resolveVuetifyColor,
-    getTypeIcon: getItemTypeIcon, // Use centralized icon function
-    getCategoryColor(category) {
-      const colors = {
-        'Core': 'primary',
-        'Production': 'success', 
-        'Technical': 'info',
-        'Content': 'warning'
-      }
-      return colors[category] || 'grey'
-    },
-    editType(type) {
-      this.editingType = type
-      this.typeForm = { ...type }
-      this.showAddDialog = true
-    },
-    editColor(type) {
-      // Open color selector for this type
-      this.$router.push(`/settings?tab=colors&type=${type.value}`)
-    },
-    saveType() {
-      if (this.editingType) {
-        // Update existing type
-        const index = this.itemTypes.findIndex(t => t.value === this.editingType.value)
-        if (index >= 0) {
-          this.itemTypes.splice(index, 1, { ...this.typeForm })
-        }
-      } else {
-        // Add new type
-        this.itemTypes.push({ ...this.typeForm })
-      }
-      this.showAddDialog = false
-      this.editingType = null
-      this.typeForm = { title: '', value: '', category: '', description: '', color: '' }
-    }
+const router = useRouter()
+
+const search = ref('')
+const showAddDialog = ref(false)
+const editingType = ref(null)
+const formValid = ref(false)
+const typeForm = ref({
+  title: '',
+  value: '',
+  category: '',
+  description: '',
+  color: ''
+})
+const headers = [
+  { title: 'Color', key: 'color', sortable: false, width: '120px' },
+  { title: 'Type', key: 'title', sortable: true },
+  { title: 'Code', key: 'value', sortable: true, width: '100px' },
+  { title: 'Category', key: 'category', sortable: true, width: '120px' },
+  { title: 'Description', key: 'description', sortable: false },
+  { title: 'Actions', key: 'actions', sortable: false, width: '100px' }
+]
+const itemTypes = ref(getAllItemTypes()) // Load from single source of truth
+const categoryOptions = ['Core', 'Production', 'Technical', 'Content']
+const colorOptions = [
+  { title: 'Primary', value: 'primary' },
+  { title: 'Secondary', value: 'secondary' },
+  { title: 'Success', value: 'success' },
+  { title: 'Info', value: 'info' },
+  { title: 'Warning', value: 'warning' },
+  { title: 'Error', value: 'error' },
+  { title: 'Red', value: 'red' },
+  { title: 'Pink', value: 'pink' },
+  { title: 'Purple', value: 'purple' },
+  { title: 'Deep Purple', value: 'deep-purple' },
+  { title: 'Indigo', value: 'indigo' },
+  { title: 'Blue', value: 'blue' },
+  { title: 'Light Blue', value: 'light-blue' },
+  { title: 'Cyan', value: 'cyan' },
+  { title: 'Teal', value: 'teal' },
+  { title: 'Green', value: 'green' },
+  { title: 'Light Green', value: 'light-green' },
+  { title: 'Lime', value: 'lime' },
+  { title: 'Yellow', value: 'yellow' },
+  { title: 'Amber', value: 'amber' },
+  { title: 'Orange', value: 'orange' },
+  { title: 'Deep Orange', value: 'deep-orange' },
+  { title: 'Brown', value: 'brown' },
+  { title: 'Grey', value: 'grey' },
+  { title: 'Blue Grey', value: 'blue-grey' }
+]
+
+const filteredItemTypes = computed(() => {
+  if (!search.value) return itemTypes.value
+  return itemTypes.value.filter(type =>
+    type.title.toLowerCase().includes(search.value.toLowerCase()) ||
+    type.value.toLowerCase().includes(search.value.toLowerCase()) ||
+    type.category.toLowerCase().includes(search.value.toLowerCase()) ||
+    (type.description && type.description.toLowerCase().includes(search.value.toLowerCase()))
+  )
+})
+const coreTypes = computed(() => {
+  return itemTypes.value.filter(type => type.category === 'Core')
+})
+const productionTypes = computed(() => {
+  return itemTypes.value.filter(type => type.category === 'Production')
+})
+const technicalTypes = computed(() => {
+  return itemTypes.value.filter(type => type.category === 'Technical')
+})
+const contentTypes = computed(() => {
+  return itemTypes.value.filter(type => type.category === 'Content')
+})
+const categories = computed(() => {
+  return [
+    { name: 'Core Types', types: coreTypes.value },
+    { name: 'Production Types', types: productionTypes.value },
+    { name: 'Technical Types', types: technicalTypes.value },
+    { name: 'Content Types', types: contentTypes.value }
+  ]
+})
+
+function getTypeIcon(value) {
+  return getItemTypeIcon(value)
+}
+
+function getCategoryColor(category) {
+  const colors = {
+    'Core': 'primary',
+    'Production': 'success',
+    'Technical': 'info',
+    'Content': 'warning'
   }
+  return colors[category] || 'grey'
+}
+
+function editType(type) {
+  editingType.value = type
+  typeForm.value = { ...type }
+  showAddDialog.value = true
+}
+
+function editColor(type) {
+  // Open color selector for this type
+  router.push(`/settings?tab=colors&type=${type.value}`)
+}
+
+function saveType() {
+  if (editingType.value) {
+    // Update existing type
+    const index = itemTypes.value.findIndex(t => t.value === editingType.value.value)
+    if (index >= 0) {
+      itemTypes.value.splice(index, 1, { ...typeForm.value })
+    }
+  } else {
+    // Add new type
+    itemTypes.value.push({ ...typeForm.value })
+  }
+  showAddDialog.value = false
+  editingType.value = null
+  typeForm.value = { title: '', value: '', category: '', description: '', color: '' }
 }
 </script>
 

@@ -65,20 +65,11 @@
   </v-container>
 </template>
 
-<script>
-import CustomerManager from '@/components/settings/CustomerManager.vue'
+<script setup>
+import { ref } from 'vue'
+import CustomerManager from '@/components/settings/CustomerManager.vue' // eslint-disable-line no-unused-vars
 
-export default {
-  name: 'MoneyFactoryView',
-  components: {
-    CustomerManager
-  },
-  data() {
-    return {
-      activeTab: 'customers'
-    }
-  }
-}
+const activeTab = ref('customers')
 </script>
 
 <style scoped>

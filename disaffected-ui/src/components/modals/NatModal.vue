@@ -23,87 +23,213 @@
     </v-card>
   </v-dialog>
 </template>
-<script>
-import axios from 'axios';
-import { cueModalMixin } from '@/mixins/cueModalMixin';
+<script setup>
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
+import axios from 'axios'
+import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap'
+import { useScreenFlash } from '@/composables/useScreenFlash'
 
-export default {
-  name: 'NatModal',
-  mixins: [cueModalMixin],
-  props: {
-    show: Boolean,
-    episode: String,
-    duplicateSlugs: {
-      type: Array,
-      default: () => []
-    },
-    cueType: {
-      type: String,
-      default: 'nat'
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
+  },
+  episode: String,
+  duplicateSlugs: {
+    type: Array,
+    default: () => []
+  },
+  cueType: {
+    type: String,
+    default: 'nat'
+  }
+})
+
+const emit = defineEmits(['update:show', 'submit', 'abort'])
+
+// Template refs
+const slugField = ref(null)
+
+// Data
+const slug = ref('')
+const description = ref('')
+const duration = ref('')
+const timestamp = ref('')
+const file = ref(null)
+
+// Keyboard handler reference
+let keydownHandler = null
+
+// Toast access
+const instance = getCurrentInstance()
+const toast = instance?.proxy?.$toast
+
+// --- Inlined mixin: computed ---
+
+const cueColor = computed(() => {
+  const colorName = getColorValue(props.cueType.toLowerCase())
+  return resolveVuetifyColor(colorName)
+})
+
+const cueColorLight = computed(() => {
+  const color = cueColor.value
+  if (!color || !color.startsWith('#')) return '#f5f5f5'
+
+  const hex = color.replace('#', '')
+  const r = parseInt(hex.substring(0, 2), 16)
+  const g = parseInt(hex.substring(2, 4), 16)
+  const b = parseInt(hex.substring(4, 6), 16)
+
+  const lighten = (c) => Math.round(c + (255 - c) * 0.8)
+
+  const newR = lighten(r).toString(16).padStart(2, '0')
+  const newG = lighten(g).toString(16).padStart(2, '0')
+  const newB = lighten(b).toString(16).padStart(2, '0')
+
+  return `#${newR}${newG}${newB}`
+})
+
+const modalStyles = computed(() => ({
+  backgroundColor: cueColorLight.value
+}))
+
+const headerStyles = computed(() => ({
+  backgroundColor: cueColor.value,
+  color: 'white'
+}))
+
+// --- Inlined mixin: keyboard handlers ---
+
+function setupKeyboardHandlers() {
+  keydownHandler = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      handleAbort()
+      return
     }
-  },
-  data() { return { slug: '', description: '', duration: '', timestamp: '', file: null }; },
-  methods: {
-    async handleSubmit() {
-      // Validate before submitting
-      if (!this.slug || !this.description || !this.duration) {
-        return;
-      }
-      await this.submit();
-    },
-    async submit() {
-      const normalizedSlug = this.slug.toLowerCase().replace(/['".,!?]/g, '').replace(/\s+/g, '-');
-      try {
-        const formData = new FormData();
-        formData.append('type', 'nat');
-        formData.append('slug', normalizedSlug);
-        const response = await axios.post('/assetid/generate-legacy', formData, {
-          headers: {
-            'Accept': 'application/json',
-            'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
-          }
-        });
-        const assetID = response.data.id;
-        let mediaURL = '';
-        if (this.file) {
-          const uploadForm = new FormData();
-          uploadForm.append('type', 'nat');
-          uploadForm.append('episode', this.episode);
-          uploadForm.append('asset_id', assetID);
-          uploadForm.append('file', this.file);
-          uploadForm.append('slug', normalizedSlug);
-          uploadForm.append('duration', this.duration);
-          uploadForm.append('timestamp', this.timestamp || '00:00:00');
-          await axios.post('http://192.168.51.210:8888/preproc_nat', uploadForm, {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
-          });
-          mediaURL = `episodes/${this.episode}/assets/audio/${normalizedSlug}.${this.file.name.split('.').pop()}`;
-        }
-        this.$emit('submit', { description: this.description, duration: this.duration, timestamp: this.timestamp, slug: normalizedSlug, assetID, mediaURL });
-        this.$toast.success('NAT cue added');
-        this.reset();
-      } catch (error) { this.$toast.error('Failed to add NAT cue'); }
-    },
-    reset() { this.slug = ''; this.description = ''; this.duration = ''; this.timestamp = ''; this.file = null; this.$emit('update:show', false); },
-    handleAbort() {
-      this.$emit('update:show', false);
-      this.reset();
-    },
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.handleAbort();
-      }
+    if (event.shiftKey && event.key === 'Enter') {
+      event.preventDefault()
+      event.stopPropagation()
+      handleSubmit()
+      return
     }
-  },
-  watch: { show(val) { if (!val) this.reset(); } },
-  mounted() {
-    document.addEventListener('keydown', this.handleKeydown);
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown);
+  }
+  document.addEventListener('keydown', keydownHandler, true)
+}
+
+function removeKeyboardHandlers() {
+  if (keydownHandler) {
+    document.removeEventListener('keydown', keydownHandler, true)
+    keydownHandler = null
   }
 }
+
+function focusSlugField() {
+  const el = slugField.value
+  if (el) {
+    const input = el.$el?.querySelector('input') || el
+    if (input && input.focus) {
+      input.focus()
+    }
+  }
+}
+
+// --- Component methods ---
+
+function reset() {
+  slug.value = ''
+  description.value = ''
+  duration.value = ''
+  timestamp.value = ''
+  file.value = null
+  emit('update:show', false)
+}
+
+function handleAbort() {
+  const { flashUrgent } = useScreenFlash()
+  flashUrgent('ABORT', '#F44336', 500)
+  emit('update:show', false)
+  emit('abort')
+  reset()
+}
+
+async function handleSubmit() {
+  if (!slug.value || !description.value || !duration.value) {
+    return
+  }
+  await submit()
+}
+
+async function submit() {
+  const normalizedSlug = slug.value.toLowerCase().replace(/['".,!?]/g, '').replace(/\s+/g, '-')
+  try {
+    const formData = new FormData()
+    formData.append('type', 'nat')
+    formData.append('slug', normalizedSlug)
+    const response = await axios.post('/assetid/generate-legacy', formData, {
+      headers: {
+        'Accept': 'application/json',
+        'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
+      }
+    })
+    const assetID = response.data.id
+    let mediaURL = ''
+    if (file.value) {
+      const uploadForm = new FormData()
+      uploadForm.append('type', 'nat')
+      uploadForm.append('episode', props.episode)
+      uploadForm.append('asset_id', assetID)
+      uploadForm.append('file', file.value)
+      uploadForm.append('slug', normalizedSlug)
+      uploadForm.append('duration', duration.value)
+      uploadForm.append('timestamp', timestamp.value || '00:00:00')
+      await axios.post('http://192.168.51.210:8888/preproc_nat', uploadForm, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
+      })
+      mediaURL = `episodes/${props.episode}/assets/audio/${normalizedSlug}.${file.value.name.split('.').pop()}`
+    }
+    emit('submit', { description: description.value, duration: duration.value, timestamp: timestamp.value, slug: normalizedSlug, assetID, mediaURL })
+    if (toast) {
+      toast.success('NAT cue added')
+    } else {
+      console.log('NAT cue added')
+    }
+    reset()
+  } catch (error) {
+    if (toast) {
+      toast.error('Failed to add NAT cue')
+    } else {
+      console.error('Failed to add NAT cue')
+    }
+  }
+}
+
+// --- Watch & lifecycle (merged from mixin + component) ---
+
+watch(() => props.show, (newVal) => {
+  if (newVal) {
+    setupKeyboardHandlers()
+    nextTick(() => {
+      focusSlugField()
+    })
+  } else {
+    removeKeyboardHandlers()
+    reset()
+  }
+}, { immediate: true })
+
+onMounted(() => {
+  if (props.show) {
+    setupKeyboardHandlers()
+    nextTick(() => {
+      focusSlugField()
+    })
+  }
+})
+
+onBeforeUnmount(() => {
+  removeKeyboardHandlers()
+})
 </script>
 <style scoped>.v-card { padding: 16px; }</style>

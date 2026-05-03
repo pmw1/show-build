@@ -11,27 +11,76 @@
             <!-- Left: Title & Description -->
             <div class="section-1-left">
               <div class="title-ep-badge" v-if="episodeNumber">EP {{ episodeNumber }}</div>
-              <v-text-field
-                :model-value="episodeTitle"
-                @update:model-value="$emit('update:episodeTitle', $event)"
-                variant="plain"
-                density="compact"
-                class="episode-title-input"
-                hide-details
-                single-line
-                placeholder="Untitled Episode"
-              />
-              <v-text-field
-                :model-value="description || ''"
-                @update:model-value="$emit('update:description', $event)"
-                variant="plain"
-                density="compact"
-                class="episode-description-input"
-                hide-details
-                single-line
-                placeholder="Type a description of this episode"
-                persistent-placeholder
-              />
+              <div class="episode-title-row">
+                <v-text-field
+                  :model-value="episodeTitle"
+                  @update:model-value="$emit('update:episodeTitle', $event)"
+                  variant="plain"
+                  density="compact"
+                  class="episode-title-input"
+                  hide-details
+                  single-line
+                  placeholder="Untitled Episode"
+                />
+              </div>
+              <div class="ep-desc-wrapper" :class="{ 'ep-desc-llm': descriptionModel }">
+                <textarea
+                  ref="epDescTextareaRef"
+                  :value="description || ''"
+                  @input="resizeEpDescTextarea(); $emit('update:description', $event.target.value)"
+                  class="ep-desc-textarea"
+                  :class="{ 'ep-desc-llm-text': descriptionModel }"
+                  placeholder="Type a description of this episode"
+                ></textarea>
+              </div>
+              <div class="ep-desc-actions-row">
+                <v-btn
+                  size="x-small"
+                  variant="tonal"
+                  color="primary"
+                  class="edit-details-btn"
+                  prepend-icon="mdi-square-edit-outline"
+                  @click="episodeDetailsModalOpen = true"
+                  :disabled="!episodeNumber"
+                >
+                  Edit Episode Details
+                  <v-tooltip activator="parent" location="top">Open the full episode editor</v-tooltip>
+                </v-btn>
+                <span v-if="descriptionModel" class="ep-desc-model-label">{{ descriptionModel }}</span>
+                <v-btn
+                  size="x-small"
+                  variant="flat"
+                  class="ep-desc-action-btn"
+                  :class="{ 'ep-desc-btn-on': autoGenerateEnabled, 'ep-desc-btn-off': !autoGenerateEnabled }"
+                  @click="$emit('update-segment-field', { field: 'auto_generate_enabled', value: !autoGenerateEnabled })"
+                >
+                  <v-icon size="10" class="mr-half">{{ autoGenerateEnabled ? 'mdi-lightning-bolt' : 'mdi-lightning-bolt-outline' }}</v-icon>
+                  <span>Auto</span>
+                  <v-tooltip activator="parent" location="top">{{ autoGenerateEnabled ? 'Auto-describe ON' : 'Auto-describe OFF' }}</v-tooltip>
+                </v-btn>
+                <v-btn
+                  v-if="description"
+                  size="x-small"
+                  variant="flat"
+                  class="ep-desc-action-btn ep-desc-btn-on"
+                  @click="$emit('update:description', ''); $emit('update-segment-field', { field: 'auto_generate_enabled', value: true })"
+                >
+                  <v-icon size="10" class="mr-half">mdi-refresh</v-icon>
+                  <span>Regen</span>
+                  <v-tooltip activator="parent" location="top">Clear and regenerate episode description</v-tooltip>
+                </v-btn>
+                <v-btn
+                  v-if="description"
+                  size="x-small"
+                  variant="flat"
+                  class="ep-desc-action-btn ep-desc-btn-off"
+                  @click="$emit('update:description', '')"
+                >
+                  <v-icon size="10" class="mr-half">mdi-close</v-icon>
+                  <span>Clear</span>
+                  <v-tooltip activator="parent" location="top">Clear episode description</v-tooltip>
+                </v-btn>
+              </div>
             </div>
             <!-- Right: Air Schedule -->
             <div class="section-1-right">
@@ -91,9 +140,8 @@
                       @error="handleThumbnailError"
                     />
                   </div>
-                </div>
-                <!-- Thumbnail Controls Overlay -->
-                <div class="thumbnail-controls">
+                  <!-- Thumbnail Controls Overlay (inside viewport so they anchor to the image, not the whitespace) -->
+                  <div class="thumbnail-controls" @click.stop>
                   <!-- Navigation (only if multiple) -->
                   <div v-if="thumbnails.length > 1" class="thumbnail-nav">
                     <v-btn
@@ -118,18 +166,33 @@
                       <v-icon size="small">mdi-chevron-right</v-icon>
                     </v-btn>
                   </div>
-                  <!-- Take Button -->
-                  <v-btn
-                    size="x-small"
-                    :color="isCurrentThumbnailConfirmed ? 'success' : 'primary'"
-                    variant="elevated"
-                    @click="takeThumbnail"
-                    class="take-btn"
-                    :disabled="isCurrentThumbnailConfirmed"
-                  >
-                    <v-icon size="x-small" class="mr-1">{{ isCurrentThumbnailConfirmed ? 'mdi-check' : 'mdi-camera' }}</v-icon>
-                    {{ isCurrentThumbnailConfirmed ? 'Confirmed' : 'Take' }}
-                  </v-btn>
+                  <!-- Take + Download (side-by-side) -->
+                  <div class="thumbnail-action-row">
+                    <v-btn
+                      size="x-small"
+                      :color="isCurrentThumbnailConfirmed ? 'success' : 'primary'"
+                      variant="elevated"
+                      @click="takeThumbnail"
+                      class="take-btn"
+                      :disabled="isCurrentThumbnailConfirmed"
+                    >
+                      <v-icon size="x-small" class="mr-1">{{ isCurrentThumbnailConfirmed ? 'mdi-check' : 'mdi-camera' }}</v-icon>
+                      {{ isCurrentThumbnailConfirmed ? 'Confirmed' : 'Take' }}
+                    </v-btn>
+                    <v-btn
+                      size="x-small"
+                      color="deep-purple"
+                      variant="elevated"
+                      @click="downloadThumbnail"
+                      class="take-btn"
+                      :disabled="!currentThumbnailUrl"
+                    >
+                      <v-icon size="x-small" class="mr-1">mdi-download</v-icon>
+                      Download
+                      <v-tooltip activator="parent" location="top">Download current thumbnail</v-tooltip>
+                    </v-btn>
+                  </div>
+                  </div>
                 </div>
               </div>
               <!-- No Thumbnail — Show generic logo placeholder -->
@@ -139,12 +202,6 @@
                   alt="Show logo placeholder"
                   class="episode-thumbnail placeholder-logo"
                 />
-              </div>
-            </div>
-            <!-- Section 2.2: Reserved -->
-            <div class="section-2-2">
-              <div class="section-placeholder">
-                <span class="placeholder-text">2.2</span>
               </div>
             </div>
           </div>
@@ -167,13 +224,13 @@
               </v-btn>
             </template>
             <v-list>
-              <v-list-item @click="$emit('toggle-script-reading')" :disabled="!isXttsConfigured">
+              <v-list-item @click="$emit('toggle-script-reading')" :disabled="!isTtsConfigured">
                 <v-list-item-title>
                   <v-icon size="small" class="mr-2" :color="isReadingScript ? 'error' : 'primary'">{{ isReadingScript ? 'mdi-stop' : 'mdi-volume-high' }}</v-icon>
                   {{ isReadingScript ? 'Stop Reading' : 'Read Script Aloud' }}
                 </v-list-item-title>
                 <v-list-item-subtitle>
-                  {{ isXttsConfigured ? 'Read with XTTS' : 'XTTS not configured' }}
+                  {{ isTtsConfigured ? 'Read with TTS' : 'TTS not configured' }}
                 </v-list-item-subtitle>
               </v-list-item>
               <v-divider></v-divider>
@@ -287,468 +344,577 @@
       </v-card>
     </v-dialog>
 
+    <EpisodeDetailsModal
+      v-model="episodeDetailsModalOpen"
+      :episode-number="episodeNumber"
+      :episode-asset-id="episodeAssetId"
+      :episode-title="episodeTitle"
+      :subtitle="subtitle"
+      :slug="slug"
+      :guest="guest"
+      :description="description"
+      :description-model="descriptionModel"
+      :air-date="airDate"
+      :air-time="airTime"
+      :air-timezone="airTimezone"
+      :production-status="productionStatus"
+      :production-statuses="productionStatuses"
+      :duration="duration"
+      @update:episode-title="$emit('update:episodeTitle', $event)"
+      @update:subtitle="$emit('update:subtitle', $event)"
+      @update:slug="$emit('update:slug', $event)"
+      @update:guest="$emit('update:guest', $event)"
+      @update:description="$emit('update:description', $event)"
+      @update:air-date="$emit('update:airDate', $event)"
+      @update:air-time="$emit('update:airTime', $event)"
+      @update:air-timezone="$emit('update:airTimezone', $event)"
+      @update:production-status="$emit('update:productionStatus', $event)"
+      @save="$emit('save-episode')"
+    />
+
   </v-card>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { getColorValue, resolveVuetifyColor } from '../../utils/themeColorMap';
+import { useContentIndicators } from '@/composables/useContentIndicators';
+import EpisodeDetailsModal from './modals/EpisodeDetailsModal.vue';
 
-export default {
-  name: 'ShowInfoHeader',
-  emits: ['update:airDate', 'update:airTime', 'update:airTimezone', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description', 'save-all', 'save-episode', 'toggle-metadata-panel', 'toggle-script-reading', 'request-new-episode-assetid', 'show-assetid-info', 'generate-script', 'thumbnail-selected', 'take-thumbnail', 'select-thumbnail', 'update-segment-field', 'convert-thumbnail-to-png'],
-  data() {
-    return {
-      currentThumbnailIndex: 0,
-      assetIdCopied: false,
-      thumbnailError: false,
-      thumbnailConverting: false,
-      thumbnailConvertSuccess: false,
-      showThumbnailPreview: false,
-      showDatePicker: false,
-      showTimePicker: false,
-      timezoneOptions: [
-        { label: 'ET', value: 'America/New_York' },
-        { label: 'CT', value: 'America/Chicago' },
-        { label: 'MT', value: 'America/Denver' },
-        { label: 'PT', value: 'America/Los_Angeles' },
-        { label: 'UTC', value: 'UTC' }
-      ],
-      priorityOptions: ['low', 'normal', 'high', 'urgent']
-    };
+const props = defineProps({
+  title: {
+    type: String,
+    default: 'Disaffected'
   },
-  props: {
-    title: {
-      type: String,
-      default: 'Disaffected'
-    },
-    episodeInfo: {
-      type: String,
-      default: 'Episode Production Workspace'
-    },
-    episodeAssetId: {
-      type: String,
-      default: ''
-    },
-    slug: {
-      type: String,
-      default: ''
-    },
-    episodeTitle: {
-      type: String,
-      default: ''
-    },
-    subtitle: {
-      type: String,
-      default: ''
-    },
-    guest: {
-      type: String,
-      default: ''
-    },
-    description: {
-      type: String,
-      default: ''
-    },
-    airDate: {
-      type: String,
-      default: ''
-    },
-    airTime: {
-      type: String,
-      default: ''
-    },
-    airTimezone: {
-      type: String,
-      default: 'America/New_York'
-    },
-    showTimezone: {
-      type: String,
-      default: 'America/New_York'
-    },
-    productionStatus: {
-      type: String,
-      default: 'draft'
-    },
-    duration: {
-      type: String,
-      default: '00:00:00'
-    },
-    productionStatuses: {
-      type: Array,
-      default: () => [
-        { title: 'Draft', value: 'draft' },
-        { title: 'Approved', value: 'approved' },
-        { title: 'Production', value: 'production' },
-        { title: 'Completed', value: 'completed' }
-      ]
-    },
-    loadingRundown: {
-      type: Boolean,
-      default: false
-    },
-    isDummy: {
-      type: Boolean,
-      default: false
-    },
-    saveState: {
-      type: Object,
-      default: () => ({
-        hasChanges: false,
-        buttonText: 'Synchronized',
-        buttonColor: 'success',
-        buttonIcon: 'mdi-check-circle',
-        isDisabled: true,
-        tooltip: 'Episode is synchronized - no changes to save'
-      })
-    },
-    showMetadataPanel: {
-      type: Boolean,
-      default: false
-    },
-    isXttsConfigured: {
-      type: Boolean,
-      default: false
-    },
-    isReadingScript: {
-      type: Boolean,
-      default: false
-    },
-    episodeNumber: {
-      type: String,
-      default: ''
-    },
-    thumbnails: {
-      type: Array,
-      default: () => []
-    },
-    confirmedThumbnailUrl: {
-      type: String,
-      default: null
-    },
-    takenSourceUrl: {
-      type: String,
-      default: null
-    },
-    selectedItem: {
-      type: Object,
-      default: null
-    },
-    saving: {
-      type: Boolean,
-      default: false
-    },
-    hasUnsavedChanges: {
-      type: Boolean,
-      default: false
+  episodeInfo: {
+    type: String,
+    default: 'Episode Production Workspace'
+  },
+  episodeAssetId: {
+    type: String,
+    default: ''
+  },
+  slug: {
+    type: String,
+    default: ''
+  },
+  episodeTitle: {
+    type: String,
+    default: ''
+  },
+  subtitle: {
+    type: String,
+    default: ''
+  },
+  guest: {
+    type: String,
+    default: ''
+  },
+  description: {
+    type: String,
+    default: ''
+  },
+  descriptionModel: {
+    type: String,
+    default: ''
+  },
+  airDate: {
+    type: String,
+    default: ''
+  },
+  airTime: {
+    type: String,
+    default: ''
+  },
+  airTimezone: {
+    type: String,
+    default: 'America/New_York'
+  },
+  showTimezone: {
+    type: String,
+    default: 'America/New_York'
+  },
+  productionStatus: {
+    type: String,
+    default: 'draft'
+  },
+  duration: {
+    type: String,
+    default: '00:00:00'
+  },
+  productionStatuses: {
+    type: Array,
+    default: () => [
+      { title: 'Scheduled', value: 'scheduled' },
+      { title: 'Draft', value: 'draft' },
+      { title: 'Production', value: 'production' },
+      { title: 'Running', value: 'running' },
+      { title: 'Completed', value: 'completed' }
+    ]
+  },
+  loadingRundown: {
+    type: Boolean,
+    default: false
+  },
+  isDummy: {
+    type: Boolean,
+    default: false
+  },
+  saveState: {
+    type: Object,
+    default: () => ({
+      hasChanges: false,
+      buttonText: 'Synchronized',
+      buttonColor: 'success',
+      buttonIcon: 'mdi-check-circle',
+      isDisabled: true,
+      tooltip: 'Episode is synchronized - no changes to save'
+    })
+  },
+  showMetadataPanel: {
+    type: Boolean,
+    default: false
+  },
+  isTtsConfigured: {
+    type: Boolean,
+    default: false
+  },
+  isReadingScript: {
+    type: Boolean,
+    default: false
+  },
+  episodeNumber: {
+    type: String,
+    default: ''
+  },
+  autoGenerateEnabled: {
+    type: Boolean,
+    default: true
+  },
+  thumbnails: {
+    type: Array,
+    default: () => []
+  },
+  confirmedThumbnailUrl: {
+    type: String,
+    default: null
+  },
+  takenSourceUrl: {
+    type: String,
+    default: null
+  },
+  selectedItem: {
+    type: Object,
+    default: null
+  },
+  saving: {
+    type: Boolean,
+    default: false
+  },
+  hasUnsavedChanges: {
+    type: Boolean,
+    default: false
+  }
+});
+
+const emit = defineEmits(['update:airDate', 'update:airTime', 'update:airTimezone', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description', 'save-all', 'save-episode', 'toggle-metadata-panel', 'toggle-script-reading', 'request-new-episode-assetid', 'show-assetid-info', 'generate-script', 'thumbnail-selected', 'take-thumbnail', 'select-thumbnail', 'update-segment-field', 'update-episode-field', 'convert-thumbnail-to-png']);
+
+const { llmTextColor } = useContentIndicators() // eslint-disable-line no-unused-vars
+
+const epDescTextareaRef = ref(null)
+
+function resizeEpDescTextarea() {
+  const el = epDescTextareaRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = el.scrollHeight + 'px'
+}
+
+watch(
+  () => props.description,
+  (newVal) => nextTick(() => {
+    const el = epDescTextareaRef.value
+    if (el) el.value = newVal || ''
+    resizeEpDescTextarea()
+  }),
+  { immediate: true }
+)
+
+onMounted(() => nextTick(resizeEpDescTextarea))
+
+// data
+const currentThumbnailIndex = ref(0);
+const assetIdCopied = ref(false); // eslint-disable-line no-unused-vars
+const thumbnailError = ref(false);
+const thumbnailConverting = ref(false);
+const thumbnailConvertSuccess = ref(false);
+const showThumbnailPreview = ref(false);
+const episodeDetailsModalOpen = ref(false);
+const showDatePicker = ref(false);
+const showTimePicker = ref(false);
+const timezoneOptions = ref([ // eslint-disable-line no-unused-vars
+  { label: 'ET', value: 'America/New_York' },
+  { label: 'CT', value: 'America/Chicago' },
+  { label: 'MT', value: 'America/Denver' },
+  { label: 'PT', value: 'America/Los_Angeles' },
+  { label: 'UTC', value: 'UTC' }
+]);
+const priorityOptions = ref(['low', 'normal', 'high', 'urgent']); // eslint-disable-line no-unused-vars
+
+// computed
+const formattedAirDate = computed(() => {
+  if (!props.airDate) return '';
+  try {
+    const date = new Date(props.airDate);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  } catch {
+    return props.airDate;
+  }
+});
+
+const airDateForPicker = computed(() => {
+  if (!props.airDate) return null;
+  try {
+    return new Date(props.airDate);
+  } catch {
+    return null;
+  }
+});
+
+const timezoneAbbreviation = computed(() => {
+  const tzAbbreviations = {
+    'America/New_York': 'ET',
+    'America/Chicago': 'CT',
+    'America/Denver': 'MT',
+    'America/Los_Angeles': 'PT',
+    'UTC': 'UTC',
+    'America/Phoenix': 'AZ',
+    'America/Anchorage': 'AK',
+    'Pacific/Honolulu': 'HT'
+  };
+  return tzAbbreviations[props.showTimezone] || 'ET';
+});
+
+const utcDateTime = computed(() => {
+  if (!props.airTime || !props.airDate) return '';
+  try {
+    // Normalize airDate to YYYY-MM-DD (it may arrive as ISO with time, or formatted)
+    let dateStr = String(props.airDate).trim();
+    const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    let y, m, d;
+    if (isoMatch) {
+      y = +isoMatch[1]; m = +isoMatch[2]; d = +isoMatch[3];
+    } else {
+      const parsed = new Date(dateStr);
+      if (isNaN(parsed.getTime())) return '';
+      y = parsed.getFullYear(); m = parsed.getMonth() + 1; d = parsed.getDate();
     }
-  },
-  watch: {
-    thumbnails: {
-      handler() {
-        // Reset index when thumbnails change (e.g., episode change)
-        this.thumbnailError = false;
-        // If we have a confirmed thumbnail, navigate to it; otherwise start at 0
-        this.navigateToConfirmedThumbnail();
-      },
-      immediate: true
-    },
-    takenSourceUrl: {
-      handler() {
-        // When confirmed thumbnail URL changes, navigate to it
-        this.navigateToConfirmedThumbnail();
-      }
-    },
-    currentThumbnailUrl: {
-      handler(url) {
-        // Reset conversion states when thumbnail changes
-        this.thumbnailConverting = false;
-        this.thumbnailConvertSuccess = false;
-        // Auto-trigger conversion for non-PNG thumbnails
-        if (url && this.isCurrentThumbnailNonPng) {
-          this.$nextTick(() => {
-            this.$emit('convert-thumbnail-to-png', {
-              url: url,
-              thumbnail: this.thumbnails[this.currentThumbnailIndex]
-            });
-            this.thumbnailConverting = true;
-          });
-        }
-      }
-    }
-  },
-  computed: {
-    formattedAirDate() {
-      // Format the ISO date string for display (e.g., "Jan 20, 2026")
-      if (!this.airDate) return '';
-      try {
-        const date = new Date(this.airDate);
-        return date.toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric'
-        });
-      } catch {
-        return this.airDate;
-      }
-    },
-    airDateForPicker() {
-      // Convert ISO string to Date object for v-date-picker
-      if (!this.airDate) return null;
-      try {
-        return new Date(this.airDate);
-      } catch {
-        return null;
-      }
-    },
-    timezoneAbbreviation() {
-      // Map IANA timezone to abbreviation
-      const tzAbbreviations = {
-        'America/New_York': 'ET',
-        'America/Chicago': 'CT',
-        'America/Denver': 'MT',
-        'America/Los_Angeles': 'PT',
-        'UTC': 'UTC',
-        'America/Phoenix': 'AZ',
-        'America/Anchorage': 'AK',
-        'Pacific/Honolulu': 'HT'
-      };
-      return tzAbbreviations[this.showTimezone] || 'ET';
-    },
-    timezoneOffsetHours() {
-      // Standard offsets (non-DST) in hours from UTC
-      const offsets = {
-        'America/New_York': -5,
-        'America/Chicago': -6,
-        'America/Denver': -7,
-        'America/Los_Angeles': -8,
-        'UTC': 0,
-        'America/Phoenix': -7,
-        'America/Anchorage': -9,
-        'Pacific/Honolulu': -10
-      };
-      return offsets[this.showTimezone] ?? -5;
-    },
-    utcDateTime() {
-      // Calculate UTC date/time from show timezone
-      if (!this.airTime || !this.airDate) return '';
-      try {
-        // Create a date object in the show's timezone
-        const localDate = new Date(this.airDate + 'T' + this.airTime + ':00');
-        // Convert to UTC by subtracting the timezone offset
-        const utcDate = new Date(localDate.getTime() - (this.timezoneOffsetHours * 60 * 60 * 1000));
+    const timeMatch = String(props.airTime).match(/^(\d{1,2}):(\d{2})/);
+    if (!timeMatch) return '';
+    const hh = +timeMatch[1];
+    const mm = +timeMatch[2];
+    if (isNaN(hh) || isNaN(mm)) return '';
 
-        const month = utcDate.toLocaleDateString('en-US', { month: 'short' });
-        const day = utcDate.getDate();
-        const utcHours = String(utcDate.getHours()).padStart(2, '0');
-        const utcMinutes = String(utcDate.getMinutes()).padStart(2, '0');
+    const tz = props.showTimezone || props.airTimezone || 'America/New_York';
 
-        return `${month} ${day}, ${utcHours}:${utcMinutes}`;
-      } catch {
-        return '';
-      }
-    },
-    currentThumbnailUrl() {
-      if (!this.thumbnails || this.thumbnails.length === 0) {
-        return null;
-      }
-      return this.thumbnails[this.currentThumbnailIndex]?.url || null;
-    },
-    isCurrentThumbnailNonPng() {
-      const url = this.currentThumbnailUrl;
-      if (!url) return false;
-      const ext = url.split('.').pop().toLowerCase();
-      return ext !== 'png';
-    },
-    thumbnailViewportClasses() {
-      return {
-        'confirmed': this.isCurrentThumbnailConfirmed,
-        'non-png': this.isCurrentThumbnailNonPng && !this.thumbnailConverting && !this.thumbnailConvertSuccess,
-        'converting': this.thumbnailConverting,
-        'convert-success': this.thumbnailConvertSuccess
-      };
-    },
-    isCurrentThumbnailConfirmed() {
-      // Check if the current thumbnail matches the one that was taken/confirmed
-      if (!this.currentThumbnailUrl) {
-        return false;
-      }
-      // Compare against the original source URL that was taken
-      if (this.takenSourceUrl) {
-        return this.currentThumbnailUrl === this.takenSourceUrl;
-      }
-      // Fallback: no thumbnail has been confirmed yet
-      return false;
-    },
-    displayEpisodeInfo() {
-      // Show episode title if available, otherwise fall back to episodeInfo prop
-      if (this.episodeTitle && this.episodeTitle.trim()) {
-        return this.episodeTitle;
-      } else {
-        return this.episodeInfo || 'Episode Production Workspace';
-      }
-    },
-    statusColor() {
-      // Status values now directly match color keys ('draft', 'approved', 'production', 'completed')
-      const status = (this.productionStatus || '').toLowerCase();
-      const colorName = getColorValue(status);
-      const resolvedColor = resolveVuetifyColor(colorName);
-      return resolvedColor || '#ccc'; // fallback to grey
-    },
-    statusFieldStyle() {
-      if (!this.productionStatus) return {};
-      
-      // Status values now directly match color keys
-      const status = this.productionStatus.toLowerCase();
-      const colorName = getColorValue(status);
-      const baseColor = resolveVuetifyColor(colorName);
-      if (!baseColor) return {};
-      
-      // Create darker variant by reducing lightness
-      const darkerTextColor = this.darkenColor(baseColor, 0.4); // 40% darker
-      const darkerLabelColor = this.darkenColor(baseColor, 0.5); // 50% darker for labels
-      
-      // Create themed variations
-      const bgColor = baseColor + '15'; // 15% opacity for subtle background
-      const borderColor = baseColor + '80'; // 80% opacity for border
-      
-      return {
-        '--status-bg-color': bgColor,
-        '--status-border-color': borderColor,
-        '--status-text-color': darkerTextColor,
-        '--status-label-color': darkerLabelColor,
-        '--status-base-color': baseColor
-      };
-    }
-  },
-  methods: {
-    copyAssetId() {
-      const id = this.selectedItem?.asset_id || this.selectedItem?.id
-      if (id) {
-        navigator.clipboard.writeText(String(id))
-        this.assetIdCopied = true
-        setTimeout(() => { this.assetIdCopied = false }, 2000)
-      }
-    },
-    navigateToConfirmedThumbnail() {
-      // Navigate to the confirmed thumbnail if it exists in the list
-      if (!this.thumbnails || this.thumbnails.length === 0) {
-        this.currentThumbnailIndex = 0;
-        return;
-      }
+    // Compute the UTC instant whose wall-clock time in `tz` equals (y,m,d,hh,mm).
+    // Trick: treat (y,m,d,hh,mm) as if it were UTC, then ask what time that
+    // instant displays as in `tz`; the difference is the tz's offset at that moment.
+    const naiveUTC = Date.UTC(y, m - 1, d, hh, mm);
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit'
+    });
+    const parts = fmt.formatToParts(new Date(naiveUTC)).reduce((a, p) => {
+      if (p.type !== 'literal') a[p.type] = p.value;
+      return a;
+    }, {});
+    const tzReadAsUTC = Date.UTC(
+      +parts.year, +parts.month - 1, +parts.day,
+      +parts.hour === 24 ? 0 : +parts.hour, +parts.minute
+    );
+    const offsetMs = tzReadAsUTC - naiveUTC;
+    const realUTC = new Date(naiveUTC - offsetMs);
+    if (isNaN(realUTC.getTime())) return '';
 
-      if (this.takenSourceUrl) {
-        // Find the index of the confirmed thumbnail
-        const confirmedIndex = this.thumbnails.findIndex(
-          thumb => thumb.url === this.takenSourceUrl
-        );
-        if (confirmedIndex >= 0) {
-          this.currentThumbnailIndex = confirmedIndex;
-          return;
-        }
-      }
+    const monthName = realUTC.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+    const dayU = realUTC.getUTCDate();
+    const hhU = String(realUTC.getUTCHours()).padStart(2, '0');
+    const mmU = String(realUTC.getUTCMinutes()).padStart(2, '0');
+    return `${monthName} ${dayU}, ${hhU}:${mmU}`;
+  } catch {
+    return '';
+  }
+});
 
-      // Default to first thumbnail if no confirmed thumbnail found
-      this.currentThumbnailIndex = 0;
-    },
-    handleDateSelect(date) {
-      // Convert Date object to ISO string (YYYY-MM-DD)
-      if (date) {
-        const isoDate = date.toISOString().split('T')[0];
-        this.$emit('update:airDate', isoDate);
-      }
-      this.showDatePicker = false;
-    },
-    handleTimeSelect(time) {
-      this.$emit('update:airTime', time);
-      this.showTimePicker = false;
-    },
-    prevThumbnail() {
-      if (this.currentThumbnailIndex > 0) {
-        this.currentThumbnailIndex--;
-        this.$emit('thumbnail-selected', this.thumbnails[this.currentThumbnailIndex]);
-      }
-    },
-    nextThumbnail() {
-      if (this.currentThumbnailIndex < this.thumbnails.length - 1) {
-        this.currentThumbnailIndex++;
-        this.$emit('thumbnail-selected', this.thumbnails[this.currentThumbnailIndex]);
-      }
-    },
-    handleThumbnailError(event) {
-      console.warn('Thumbnail failed to load:', event.target.src);
-      this.thumbnailError = true;
-    },
-    onThumbnailConverted() {
-      this.thumbnailConverting = false;
-      this.thumbnailConvertSuccess = true;
-      // Blue outline fades out after 10 seconds
-      setTimeout(() => {
-        this.thumbnailConvertSuccess = false;
-      }, 10000);
-    },
-    takeThumbnail() {
-      if (this.currentThumbnailUrl) {
-        this.$emit('take-thumbnail', {
-          url: this.currentThumbnailUrl,
-          thumbnail: this.thumbnails[this.currentThumbnailIndex]
-        });
-      }
-    },
-    getStatusBackgroundColor(status) {
-      if (!status || typeof status !== 'string') return 'transparent';
-      try {
-        const colorValue = getColorValue(status.toLowerCase());
-        if (!colorValue) return 'transparent';
-        // Add some transparency to make text readable
-        return colorValue + '20'; // Add 20% opacity
-      } catch (error) {
-        console.warn('Error getting status color:', error);
-        return 'transparent';
-      }
-    },
-    saveShowTitle() {
-      // Emit save event or handle save logic
-      console.log('Saving show title');
-    },
-    saveSlug() {
-      console.log('Saving slug');
-    },
-    saveEpisodeTitle() {
-      console.log('Saving episode title');
-    },
-    saveSubtitle() {
-      console.log('Saving subtitle');
-    },
-    saveGuest() {
-      console.log('Saving guest');
-    },
-    saveDescription() {
-      console.log('Saving description');
-    },
-    darkenColor(hexColor, factor) {
-      // Remove # if present
-      const hex = hexColor.replace('#', '');
-      
-      // Parse RGB components
-      const r = parseInt(hex.substr(0, 2), 16);
-      const g = parseInt(hex.substr(2, 2), 16);
-      const b = parseInt(hex.substr(4, 2), 16);
-      
-      // Darken by reducing each component
-      const newR = Math.round(r * (1 - factor));
-      const newG = Math.round(g * (1 - factor));
-      const newB = Math.round(b * (1 - factor));
-      
-      // Convert back to hex
-      const toHex = (c) => {
-        const hex = c.toString(16);
-        return hex.length === 1 ? '0' + hex : hex;
-      };
-      
-      return '#' + toHex(newR) + toHex(newG) + toHex(newB);
+const currentThumbnailUrl = computed(() => {
+  if (!props.thumbnails || props.thumbnails.length === 0) {
+    return null;
+  }
+  return props.thumbnails[currentThumbnailIndex.value]?.url || null;
+});
+
+const isCurrentThumbnailNonPng = computed(() => {
+  const url = currentThumbnailUrl.value;
+  if (!url) return false;
+  const ext = url.split('.').pop().toLowerCase();
+  return ext !== 'png';
+});
+
+const thumbnailViewportClasses = computed(() => {
+  return {
+    'confirmed': isCurrentThumbnailConfirmed.value,
+    'non-png': isCurrentThumbnailNonPng.value && !thumbnailConverting.value && !thumbnailConvertSuccess.value,
+    'converting': thumbnailConverting.value,
+    'convert-success': thumbnailConvertSuccess.value
+  };
+});
+
+const isCurrentThumbnailConfirmed = computed(() => {
+  if (!currentThumbnailUrl.value) {
+    return false;
+  }
+  if (props.takenSourceUrl) {
+    return currentThumbnailUrl.value === props.takenSourceUrl;
+  }
+  return false;
+});
+
+const displayEpisodeInfo = computed(() => { // eslint-disable-line no-unused-vars
+  if (props.episodeTitle && props.episodeTitle.trim()) {
+    return props.episodeTitle;
+  } else {
+    return props.episodeInfo || 'Episode Production Workspace';
+  }
+});
+
+const statusColor = computed(() => { // eslint-disable-line no-unused-vars
+  const status = (props.productionStatus || '').toLowerCase();
+  const colorName = getColorValue(status);
+  const resolvedColor = resolveVuetifyColor(colorName);
+  return resolvedColor || '#ccc';
+});
+
+const statusFieldStyle = computed(() => { // eslint-disable-line no-unused-vars
+  if (!props.productionStatus) return {};
+
+  const status = props.productionStatus.toLowerCase();
+  const colorName = getColorValue(status);
+  const baseColor = resolveVuetifyColor(colorName);
+  if (!baseColor) return {};
+
+  const darkerTextColor = darkenColor(baseColor, 0.4);
+  const darkerLabelColor = darkenColor(baseColor, 0.5);
+
+  const bgColor = baseColor + '15';
+  const borderColor = baseColor + '80';
+
+  return {
+    '--status-bg-color': bgColor,
+    '--status-border-color': borderColor,
+    '--status-text-color': darkerTextColor,
+    '--status-label-color': darkerLabelColor,
+    '--status-base-color': baseColor
+  };
+});
+
+// watchers
+watch(() => props.thumbnails, () => {
+  thumbnailError.value = false;
+  navigateToConfirmedThumbnail();
+}, { immediate: true });
+
+watch(() => props.takenSourceUrl, () => {
+  navigateToConfirmedThumbnail();
+});
+
+watch(currentThumbnailUrl, (url) => {
+  thumbnailConverting.value = false;
+  thumbnailConvertSuccess.value = false;
+  if (url && isCurrentThumbnailNonPng.value) {
+    nextTick(() => {
+      emit('convert-thumbnail-to-png', {
+        url: url,
+        thumbnail: props.thumbnails[currentThumbnailIndex.value]
+      });
+      thumbnailConverting.value = true;
+    });
+  }
+});
+
+// methods
+function copyAssetId() { // eslint-disable-line no-unused-vars
+  const id = props.selectedItem?.asset_id || props.selectedItem?.id;
+  if (id) {
+    navigator.clipboard.writeText(String(id));
+    assetIdCopied.value = true;
+    setTimeout(() => { assetIdCopied.value = false; }, 2000);
+  }
+}
+
+function navigateToConfirmedThumbnail() {
+  if (!props.thumbnails || props.thumbnails.length === 0) {
+    currentThumbnailIndex.value = 0;
+    return;
+  }
+
+  if (props.takenSourceUrl) {
+    const confirmedIndex = props.thumbnails.findIndex(
+      thumb => thumb.url === props.takenSourceUrl
+    );
+    if (confirmedIndex >= 0) {
+      currentThumbnailIndex.value = confirmedIndex;
+      return;
     }
   }
-};
+
+  currentThumbnailIndex.value = 0;
+}
+
+function handleDateSelect(date) {
+  if (date) {
+    const isoDate = date.toISOString().split('T')[0];
+    emit('update:airDate', isoDate);
+  }
+  showDatePicker.value = false;
+}
+
+function handleTimeSelect(time) {
+  emit('update:airTime', time);
+  showTimePicker.value = false;
+}
+
+function prevThumbnail() {
+  if (currentThumbnailIndex.value > 0) {
+    currentThumbnailIndex.value--;
+    emit('thumbnail-selected', props.thumbnails[currentThumbnailIndex.value]);
+  }
+}
+
+function nextThumbnail() {
+  if (currentThumbnailIndex.value < props.thumbnails.length - 1) {
+    currentThumbnailIndex.value++;
+    emit('thumbnail-selected', props.thumbnails[currentThumbnailIndex.value]);
+  }
+}
+
+function handleThumbnailError(event) {
+  console.warn('Thumbnail failed to load:', event.target.src);
+  thumbnailError.value = true;
+}
+
+function onThumbnailConverted() {
+  thumbnailConverting.value = false;
+  thumbnailConvertSuccess.value = true;
+  setTimeout(() => {
+    thumbnailConvertSuccess.value = false;
+  }, 10000);
+}
+
+function takeThumbnail() {
+  if (currentThumbnailUrl.value) {
+    emit('take-thumbnail', {
+      url: currentThumbnailUrl.value,
+      thumbnail: props.thumbnails[currentThumbnailIndex.value]
+    });
+  }
+}
+
+async function downloadThumbnail() {
+  const url = currentThumbnailUrl.value;
+  if (!url) return;
+
+  // Build a sensible filename: prefer the source filename, fall back to episode+index
+  const srcName = url.split('?')[0].split('/').pop() || '';
+  const ext = srcName.includes('.') ? srcName.split('.').pop() : 'png';
+  const filename = srcName || `episode-${props.episodeNumber || 'thumbnail'}-${currentThumbnailIndex.value + 1}.${ext}`;
+
+  try {
+    const token = localStorage.getItem('auth-token');
+    const response = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+  } catch (err) {
+    console.error('Failed to download thumbnail:', err);
+    // Fallback: open the URL directly so the browser's native save-as handles it
+    window.open(url, '_blank');
+  }
+}
+
+function getStatusBackgroundColor(status) { // eslint-disable-line no-unused-vars
+  if (!status || typeof status !== 'string') return 'transparent';
+  try {
+    const colorValue = getColorValue(status.toLowerCase());
+    if (!colorValue) return 'transparent';
+    return colorValue + '20';
+  } catch (error) { // eslint-disable-line no-unused-vars
+    console.warn('Error getting status color:', error);
+    return 'transparent';
+  }
+}
+
+function saveShowTitle() { // eslint-disable-line no-unused-vars
+  console.log('Saving show title');
+}
+
+function saveSlug() { // eslint-disable-line no-unused-vars
+  console.log('Saving slug');
+}
+
+function saveEpisodeTitle() { // eslint-disable-line no-unused-vars
+  console.log('Saving episode title');
+}
+
+function saveSubtitle() { // eslint-disable-line no-unused-vars
+  console.log('Saving subtitle');
+}
+
+function saveGuest() { // eslint-disable-line no-unused-vars
+  console.log('Saving guest');
+}
+
+function saveDescription() { // eslint-disable-line no-unused-vars
+  console.log('Saving description');
+}
+
+function darkenColor(hexColor, factor) {
+  const hex = hexColor.replace('#', '');
+
+  const r = parseInt(hex.substr(0, 2), 16);
+  const g = parseInt(hex.substr(2, 2), 16);
+  const b = parseInt(hex.substr(4, 2), 16);
+
+  const newR = Math.round(r * (1 - factor));
+  const newG = Math.round(g * (1 - factor));
+  const newB = Math.round(b * (1 - factor));
+
+  const toHex = (c) => {
+    const h = c.toString(16);
+    return h.length === 1 ? '0' + h : h;
+  };
+
+  return '#' + toHex(newR) + toHex(newG) + toHex(newB);
+}
+
+// Expose methods accessed by parent via $refs
+defineExpose({
+  onThumbnailConverted
+});
 </script>
 
 <style scoped>
@@ -766,7 +932,7 @@ export default {
   margin-top: 20px; /* Push down to avoid overlap with app navigation */
   padding-top: 0;
   position: relative !important; /* Override any Vuetify position: sticky */
-  max-height: 100px;
+  max-height: 150px; /* 50% taller than the previous 100px */
   overflow: hidden;
 }
 
@@ -777,7 +943,10 @@ export default {
 
 .header-container {
   display: grid;
-  grid-template-columns: 2fr 1fr auto;
+  /* Column 1: thumbnail (intrinsic width, min 260px so it doesn't collapse)
+     Column 2: episode info (takes all remaining space)
+     Column 3: action buttons (intrinsic width) */
+  grid-template-columns: minmax(260px, auto) 1fr auto;
   gap: 0;
   width: 100%;
   align-items: stretch;
@@ -793,6 +962,11 @@ export default {
 .section-1,
 .section-2 {
   border-right: 1px dotted rgba(0, 0, 0, 0.15);
+}
+
+/* Move thumbnail (section 2) to the far left */
+.section-2 {
+  order: -1;
 }
 
 /* Section 1 — Split layout */
@@ -885,14 +1059,13 @@ export default {
 }
 
 .section-2-1 {
-  flex: 0 0 65%;
+  flex: 1 1 auto;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   position: relative;
-  border-right: 1px dotted #ddd;
   padding: 4px;
-  max-height: 90px;
+  max-height: 140px; /* Scaled with the 150px header */
 }
 
 .section-2-2 {
@@ -916,7 +1089,8 @@ export default {
   flex-shrink: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain; /* Display full image, never crop */
+  background: #000;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
@@ -953,10 +1127,15 @@ export default {
   opacity: 1;
 }
 
-/* Viewport clips the overflow - 16:9 aspect ratio */
+/* Viewport sized by height so the thumbnail always fits within the header.
+   Width auto-computes from the 16:9 aspect ratio. */
 .thumbnail-viewport {
-  width: 100%;
+  position: relative; /* anchor for .thumbnail-controls overlay */
+  height: 100%;
+  max-height: 100%;
   aspect-ratio: 16 / 9;
+  width: auto;
+  max-width: 100%;
   overflow: hidden;
   border-radius: 4px;
   border: 3px solid #ccc;
@@ -1007,12 +1186,11 @@ export default {
 .thumbnail-controls {
   position: absolute;
   bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 8px;
   z-index: 10;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-end;
   gap: 4px;
 }
 
@@ -1045,12 +1223,26 @@ export default {
   font-weight: 500;
 }
 
+.thumbnail-action-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .take-btn {
-  font-size: 0.65rem !important;
+  font-size: 0.5rem !important;      /* was 0.65rem */
   text-transform: none !important;
   letter-spacing: 0 !important;
-  height: 22px !important;
-  padding: 0 8px !important;
+  height: 17px !important;            /* was 22px */
+  padding: 0 6px !important;          /* was 0 8px */
+}
+
+.take-btn :deep(.v-icon) {
+  font-size: 11px !important;         /* scaled down to match */
+}
+
+.take-btn :deep(.mr-1) {
+  margin-right: 2px !important;
 }
 
 
@@ -1161,18 +1353,19 @@ export default {
 
 /* section-4 removed — merged into section-3 */
 
-/* Section 3 — stacked buttons filling full height */
+/* Section 3 — buttons side-by-side, filling full height */
 .section-3-stacked {
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: row !important;
+  align-items: stretch !important;
   gap: 0 !important;
   padding: 0 !important;
 }
 
 .episode-action-btn {
-  flex: 1 !important;
+  flex: 1 1 0 !important;
   min-width: 0 !important;
-  width: 100% !important;
+  height: 100% !important;
   font-size: 0.65rem !important;
   text-transform: none !important;
   letter-spacing: 0.2px !important;
@@ -1229,17 +1422,141 @@ export default {
   color: #1976D2;
   text-transform: uppercase;
   line-height: 1;
-  margin-bottom: -2px;
+  margin-bottom: 4px;
   opacity: 0.7;
+}
+
+.auto-describe-toggle {
+  margin-left: 2px;
+}
+.auto-describe-switch {
+  flex: 0 0 auto;
+}
+.auto-describe-switch :deep(.v-selection-control) {
+  min-height: 20px;
+}
+.auto-describe-label {
+  font-size: 0.68rem !important;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  cursor: default;
 }
 
 .episode-title-input {
   width: 100%;
+  margin-top: 0 !important;
+}
+
+.episode-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.episode-title-row .episode-title-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.edit-details-btn {
+  flex: 0 0 auto;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-size: 0.7rem !important;
+  height: 24px !important;
+  min-height: 24px !important;
+  padding: 0 8px !important;
 }
 
 .episode-description-input {
   width: 100%;
-  margin-top: -6px !important;
+  margin-top: -14px !important;
+}
+
+.ep-desc-wrapper {
+  width: 100%;
+  margin-top: -6px;
+  border-radius: 3px;
+  transition: border-color 0.2s;
+}
+
+.ep-desc-wrapper.ep-desc-llm {
+  border: 1px solid var(--llm-indicator-border, #7e57c2);
+  border-radius: 3px;
+  padding: 1px;
+}
+
+.ep-desc-textarea {
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: #555;
+  padding: 2px 4px;
+  font-family: inherit;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+.ep-desc-textarea::placeholder {
+  color: #999;
+  font-style: normal;
+}
+
+.ep-desc-textarea.ep-desc-llm-text {
+  color: var(--llm-indicator-text, #7e57c2);
+  font-style: italic;
+}
+
+.ep-desc-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 0px;
+  margin-bottom: 2px;
+}
+
+.ep-desc-actions-row .edit-details-btn {
+  margin-right: auto;
+}
+
+.ep-desc-model-label {
+  font-size: 0.5rem;
+  color: var(--llm-indicator-text, #7e57c2);
+  opacity: 0.7;
+  letter-spacing: 0.2px;
+  line-height: 1;
+}
+
+.mr-half {
+  margin-right: 2px;
+}
+
+.ep-desc-action-btn {
+  text-transform: none !important;
+  font-size: 0.55rem !important;
+  height: 16px !important;
+  padding: 0 4px !important;
+  min-width: 0 !important;
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.ep-desc-btn-on {
+  background-color: var(--llm-indicator-text, #7e57c2) !important;
+  color: white !important;
+}
+
+.ep-desc-btn-off {
+  background-color: #e0e0e0 !important;
+  color: #999 !important;
 }
 
 /* Title — bold, editorial headline */

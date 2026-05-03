@@ -1,12 +1,18 @@
 """
-Server-side script compilation service with database integration.
-Migrated from tools/compile-script-dev.py to run as Celery background tasks.
+Server-side script compilation service (LEGACY - filesystem-based).
+
+DEPRECATED: This service reads from filesystem .md files and references
+deleted ProcessingJob/ProcessingStatus models. Use the database-based
+host_script_generator.py instead, which reads from RundownItem.script_content.
+
+The compile_episode_script Celery task is kept as a stub so existing
+callers (misc_router.py) don't crash on import, but it now delegates
+to the DB-based host script generator.
 """
 from celery import current_task
 from celery_app import celery_app
 from database import SessionLocal
 from models_v2 import Episode, RundownItem
-# from models import CueBlock, ProcessingJob, ProcessingStatus  # REMOVED - models.py deleted
 from core.paths import paths
 import logging
 import re
@@ -20,120 +26,82 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task(bind=True)
 def compile_episode_script(
-    self, 
-    episode_id: str, 
+    self,
+    episode_id: str,
     output_format: str = "html",
     include_cues: bool = True,
     validate_only: bool = False
 ) -> Dict[str, Any]:
     """
-    Server-side script compilation with database storage and progress tracking.
-    
-    Args:
-        episode_id: Episode number (e.g., "0225")
-        output_format: Output format (html, pdf, txt)
-        include_cues: Whether to include cue blocks
-        validate_only: If True, only validate without generating output
-        
-    Returns:
-        Dict with compilation results and metadata
+    Server-side script compilation.
+
+    This now delegates to the DB-based host_script_generator for actual
+    compilation. The filesystem-based compilation path is preserved below
+    as fallback only.
     """
     db = SessionLocal()
-    job_id = self.request.id
-    
+
     try:
-        # Update job status
         current_task.update_state(state="RUNNING", meta={"progress": 0, "status": "Starting compilation"})
-        
-        # Get or create episode in database
+
+        # Try DB-based compilation first via host_script_generator
+        try:
+            from services.host_script_generator import generate_host_script, ScriptPreset
+            preset = ScriptPreset.HOST_FULL
+            current_task.update_state(state="RUNNING", meta={"progress": 10, "status": "Using DB-based script generator"})
+
+            result = generate_host_script(episode_id, preset=preset.value)
+            if result and result.get("success"):
+                current_task.update_state(state="RUNNING", meta={"progress": 100, "status": "Compilation completed (DB-based)"})
+                return {
+                    "success": True,
+                    "output_path": result.get("output_path", ""),
+                    "message": f"Script compiled successfully for episode {episode_id} (DB-based)",
+                    "source": "database"
+                }
+        except Exception as e:
+            logger.warning(f"DB-based compilation failed for {episode_id}, trying filesystem fallback: {e}")
+
+        # Filesystem fallback: load rundown files and compile from .md
+        current_task.update_state(state="RUNNING", meta={"progress": 20, "status": "Falling back to filesystem compilation"})
+
         episode = db.query(Episode).filter(Episode.episode_number == episode_id).first()
         if not episode:
             episode = _create_episode_from_filesystem(db, episode_id)
-        
-        # Create processing job record
-        job = ProcessingJob(
-            episode_id=episode.id,
-            job_type="script_compilation",
-            job_id=job_id,
-            status=ProcessingStatus.RUNNING,
-            parameters={
-                "output_format": output_format,
-                "include_cues": include_cues,
-                "validate_only": validate_only
-            }
-        )
-        db.add(job)
-        db.commit()
-        
-        # Update progress
-        current_task.update_state(state="RUNNING", meta={"progress": 10, "status": "Loading rundown files"})
-        
-        # Load and validate rundown files
+
         rundown_files = paths.get_rundown_files(episode_id)
         if not rundown_files:
             raise Exception(f"No rundown files found for episode {episode_id}")
-        
-        # Validate cue blocks
-        current_task.update_state(state="RUNNING", meta={"progress": 20, "status": "Validating cue blocks"})
+
         validation_results = _validate_cue_blocks(rundown_files)
-        
+
         if not validation_results["valid"]:
-            job.status = ProcessingStatus.FAILED
-            job.error_message = f"Validation failed: {'; '.join(validation_results['errors'])}"
-            db.commit()
-            raise Exception(job.error_message)
-        
+            raise Exception(f"Validation failed: {'; '.join(validation_results['errors'])}")
+
         if validate_only:
-            job.status = ProcessingStatus.COMPLETED
-            job.result = {"validation": validation_results}
-            db.commit()
             return {"validation": validation_results, "message": "Validation completed"}
-        
-        # Parse episode info
+
         current_task.update_state(state="RUNNING", meta={"progress": 40, "status": "Parsing episode information"})
         episode_info = _parse_episode_info(episode_id)
-        
-        # Generate script content
+
         current_task.update_state(state="RUNNING", meta={"progress": 60, "status": "Generating script content"})
         script_html = _generate_script_html(episode_info, rundown_files, include_cues)
-        
-        # Save script to filesystem
+
         current_task.update_state(state="RUNNING", meta={"progress": 80, "status": "Saving compiled script"})
         output_path = _save_compiled_script(episode_id, script_html, episode_info)
-        
-        # Update episode last_compiled timestamp
-        episode.last_compiled = datetime.utcnow()
-        
-        # Complete job
+
         current_task.update_state(state="RUNNING", meta={"progress": 100, "status": "Compilation completed"})
-        job.status = ProcessingStatus.COMPLETED
-        job.completed_at = datetime.utcnow()
-        job.result = {
-            "output_path": str(output_path),
-            "output_format": output_format,
-            "validation": validation_results,
-            "episode_info": episode_info,
-            "rundown_files_count": len(rundown_files)
-        }
-        
-        db.commit()
-        
+
         return {
             "success": True,
             "output_path": str(output_path),
             "validation": validation_results,
-            "message": f"Script compiled successfully for episode {episode_id}"
+            "message": f"Script compiled successfully for episode {episode_id} (filesystem fallback)",
+            "source": "filesystem"
         }
-        
+
     except Exception as e:
         logger.error(f"Script compilation failed for episode {episode_id}: {str(e)}")
-        
-        # Update job with failure
-        if 'job' in locals():
-            job.status = ProcessingStatus.FAILED
-            job.error_message = str(e)
-            db.commit()
-        
         current_task.update_state(
             state="FAILURE",
             meta={"error": str(e), "progress": 0}

@@ -203,131 +203,111 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import { ref, computed, watch } from 'vue'
 import { useLLMState } from '@/composables/useLLMState'
 
-export default {
-  name: 'NotificationCenter',
-  setup() {
-    const llmState = useLLMState()
-    const panelOpen = ref(false)
-    const priorityFilter = ref(['critical', 'high', 'normal', 'low'])
+const llmState = useLLMState()
+const panelOpen = ref(false)
+const priorityFilter = ref(['critical', 'high', 'normal', 'low'])
+const notifications = llmState.notifications
 
-    // Toggle panel
-    function togglePanel() {
-      panelOpen.value = !panelOpen.value
-    }
+// Toggle panel
+function togglePanel() {
+  panelOpen.value = !panelOpen.value
+}
 
-    // Filtered notifications based on priority
-    const filteredNotifications = computed(() => {
-      return llmState.notifications.filter(n =>
-        priorityFilter.value.includes(n.priority)
-      ).sort((a, b) => {
-        // Sort by timestamp only - newest first (descending)
-        return b.timestamp - a.timestamp
-      })
-    })
+// Filtered notifications based on priority
+const filteredNotifications = computed(() => {
+  return llmState.notifications.filter(n =>
+    priorityFilter.value.includes(n.priority)
+  ).sort((a, b) => {
+    // Sort by timestamp only - newest first (descending)
+    return b.timestamp - a.timestamp
+  })
+})
 
-    // Unread count
-    const unreadCount = computed(() => llmState.unreadCount.value)
+// Unread count
+const unreadCount = computed(() => llmState.unreadCount.value)
 
-    // Mark notification as read
-    function markRead(notificationId) {
-      llmState.markAsRead(notificationId)
-    }
+// Mark notification as read
+function markRead(notificationId) {
+  llmState.markAsRead(notificationId)
+}
 
-    // Toggle expanded state
-    function toggleExpanded(notificationId) {
-      const notification = llmState.notifications.find(n => n.id === notificationId)
-      if (notification) {
-        notification.expanded = !notification.expanded
-      }
-    }
-
-    // Dismiss notification
-    function dismiss(notificationId) {
-      llmState.dismissNotification(notificationId)
-    }
-
-    // Clear all notifications
-    function clearAll() {
-      if (confirm('Clear all notifications?')) {
-        llmState.clearAllNotifications()
-      }
-    }
-
-    // Get priority color
-    function getPriorityColor(priority) {
-      const colors = {
-        critical: 'error',
-        high: 'warning',
-        normal: 'info',
-        low: 'grey'
-      }
-      return colors[priority] || 'grey'
-    }
-
-    // Get priority icon
-    function getPriorityIcon(priority) {
-      const icons = {
-        critical: 'mdi-alert-octagon',
-        high: 'mdi-alert',
-        normal: 'mdi-information',
-        low: 'mdi-chat-outline'
-      }
-      return icons[priority] || 'mdi-bell'
-    }
-
-    // Format timestamp
-    function formatTime(timestamp) {
-      const now = Date.now()
-      const diff = now - timestamp
-
-      if (diff < 60000) return 'Just now'
-      if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
-      if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-
-      const date = new Date(timestamp)
-      return date.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
-      })
-    }
-
-    // Auto-mark as read when panel opens
-    watch(panelOpen, (isOpen) => {
-      if (isOpen) {
-        // Mark all as read after a short delay
-        setTimeout(() => {
-          llmState.notifications.forEach(n => {
-            if (!n.read) {
-              llmState.markAsRead(n.id)
-            }
-          })
-        }, 1000)
-      }
-    })
-
-    return {
-      panelOpen,
-      priorityFilter,
-      notifications: llmState.notifications,
-      filteredNotifications,
-      unreadCount,
-      togglePanel,
-      markRead,
-      toggleExpanded,
-      dismiss,
-      clearAll,
-      getPriorityColor,
-      getPriorityIcon,
-      formatTime
-    }
+// Toggle expanded state
+function toggleExpanded(notificationId) {
+  const notification = llmState.notifications.find(n => n.id === notificationId)
+  if (notification) {
+    notification.expanded = !notification.expanded
   }
 }
+
+// Dismiss notification
+function dismiss(notificationId) {
+  llmState.dismissNotification(notificationId)
+}
+
+// Clear all notifications
+function clearAll() {
+  if (confirm('Clear all notifications?')) {
+    llmState.clearAllNotifications()
+  }
+}
+
+// Get priority color
+function getPriorityColor(priority) {
+  const colors = {
+    critical: 'error',
+    high: 'warning',
+    normal: 'info',
+    low: 'grey'
+  }
+  return colors[priority] || 'grey'
+}
+
+// Get priority icon
+function getPriorityIcon(priority) {
+  const icons = {
+    critical: 'mdi-alert-octagon',
+    high: 'mdi-alert',
+    normal: 'mdi-information',
+    low: 'mdi-chat-outline'
+  }
+  return icons[priority] || 'mdi-bell'
+}
+
+// Format timestamp
+function formatTime(timestamp) {
+  const now = Date.now()
+  const diff = now - timestamp
+
+  if (diff < 60000) return 'Just now'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
+
+  const date = new Date(timestamp)
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}
+
+// Auto-mark as read when panel opens
+watch(panelOpen, (isOpen) => {
+  if (isOpen) {
+    // Mark all as read after a short delay
+    setTimeout(() => {
+      llmState.notifications.forEach(n => {
+        if (!n.read) {
+          llmState.markAsRead(n.id)
+        }
+      })
+    }, 1000)
+  }
+})
 </script>
 
 <style scoped>

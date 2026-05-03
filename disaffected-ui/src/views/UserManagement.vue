@@ -271,211 +271,206 @@
   </v-container>
 </template>
 
-<script>
+<script setup>
+import { ref, onMounted } from 'vue'
 import axios from 'axios'
 
-export default {
-  name: 'UserManagement',
-  data() {
-    return {
-      users: [],
-      search: '',
-      loading: false,
-      dialog: false,
-      deleteDialog: false,
-      dialogMode: 'create', // 'create' or 'edit'
-      formValid: false,
-      saving: false,
-      deleting: false,
-      error: '',
-      userToDelete: null,
+const users = ref([])
+const search = ref('')
+const loading = ref(false)
+const dialog = ref(false)
+const deleteDialog = ref(false)
+const dialogMode = ref('create') // 'create' or 'edit'
+const formValid = ref(false)
+const saving = ref(false)
+const deleting = ref(false)
+const error = ref('')
+const userToDelete = ref(null)
+const userForm = ref(null) // template ref for v-form
 
-      headers: [
-        { title: 'Username', key: 'username', sortable: true },
-        { title: 'Name', key: 'name', sortable: true },
-        { title: 'Email', key: 'email', sortable: true },
-        { title: 'Access Level', key: 'access_level', sortable: true },
-        { title: 'Status', key: 'is_active', sortable: true },
-        { title: 'Last Login', key: 'last_login', sortable: true },
-        { title: 'Actions', key: 'actions', sortable: false, width: '120px' }
-      ],
+const headers = [
+  { title: 'Username', key: 'username', sortable: true },
+  { title: 'Name', key: 'name', sortable: true },
+  { title: 'Email', key: 'email', sortable: true },
+  { title: 'Access Level', key: 'access_level', sortable: true },
+  { title: 'Status', key: 'is_active', sortable: true },
+  { title: 'Last Login', key: 'last_login', sortable: true },
+  { title: 'Actions', key: 'actions', sortable: false, width: '120px' }
+]
 
-      accessLevels: [
-        { title: 'Admin', value: 'admin' },
-        { title: 'User', value: 'user' },
-        { title: 'Guest', value: 'guest' }
-      ],
+const accessLevels = [
+  { title: 'Admin', value: 'admin' },
+  { title: 'User', value: 'user' },
+  { title: 'Guest', value: 'guest' }
+]
 
-      formData: {
-        username: '',
-        password: '',
-        first_name: '',
-        last_name: '',
-        email: '',
-        phone: '',
-        access_level: 'user',
-        is_active: true
-      }
-    }
-  },
-  mounted() {
-    this.fetchUsers()
-  },
-  methods: {
-    async fetchUsers() {
-      this.loading = true
-      try {
-        const response = await axios.get('/api/auth/users')
-        this.users = response.data
-      } catch (error) {
-        console.error('Error fetching users:', error)
-        this.error = 'Failed to load users'
-      } finally {
-        this.loading = false
-      }
-    },
+const formData = ref({
+  username: '',
+  password: '',
+  first_name: '',
+  last_name: '',
+  email: '',
+  phone: '',
+  access_level: 'user',
+  is_active: true
+})
 
-    openCreateDialog() {
-      this.dialogMode = 'create'
-      this.resetForm()
-      this.dialog = true
-    },
-
-    openEditDialog(user) {
-      this.dialogMode = 'edit'
-      this.formData = {
-        username: user.username,
-        password: '',
-        first_name: user.first_name || '',
-        last_name: user.last_name || '',
-        email: user.email || '',
-        phone: user.phone || '',
-        access_level: user.access_level,
-        is_active: user.is_active
-      }
-      this.dialog = true
-    },
-
-    openDeleteDialog(user) {
-      this.userToDelete = user
-      this.deleteDialog = true
-    },
-
-    async saveUser() {
-      if (!this.formValid) return
-
-      this.saving = true
-      this.error = ''
-
-      try {
-        if (this.dialogMode === 'create') {
-          // Create new user
-          await axios.post('/api/auth/users', {
-            username: this.formData.username,
-            password: this.formData.password
-          })
-
-          // Update additional fields if provided
-          const updateData = {}
-          if (this.formData.first_name) updateData.first_name = this.formData.first_name
-          if (this.formData.last_name) updateData.last_name = this.formData.last_name
-          if (this.formData.email) updateData.email = this.formData.email
-          if (this.formData.phone) updateData.phone = this.formData.phone
-          if (this.formData.access_level) updateData.access_level = this.formData.access_level
-          updateData.is_active = this.formData.is_active
-
-          if (Object.keys(updateData).length > 0) {
-            await axios.put(`/api/auth/users/${this.formData.username}`, updateData)
-          }
-        } else {
-          // Update existing user
-          const updateData = {
-            first_name: this.formData.first_name,
-            last_name: this.formData.last_name,
-            email: this.formData.email,
-            phone: this.formData.phone,
-            access_level: this.formData.access_level,
-            is_active: this.formData.is_active
-          }
-
-          if (this.formData.password) {
-            updateData.password = this.formData.password
-          }
-
-          await axios.put(`/api/auth/users/${this.formData.username}`, updateData)
-        }
-
-        // Refresh user list
-        await this.fetchUsers()
-        this.closeDialog()
-      } catch (error) {
-        console.error('Error saving user:', error)
-        this.error = error.response?.data?.detail || 'Failed to save user'
-      } finally {
-        this.saving = false
-      }
-    },
-
-    async confirmDelete() {
-      if (!this.userToDelete) return
-
-      this.deleting = true
-
-      try {
-        await axios.delete(`/api/auth/users/${this.userToDelete.username}`)
-        await this.fetchUsers()
-        this.deleteDialog = false
-        this.userToDelete = null
-      } catch (error) {
-        console.error('Error deleting user:', error)
-        this.error = error.response?.data?.detail || 'Failed to delete user'
-      } finally {
-        this.deleting = false
-      }
-    },
-
-    closeDialog() {
-      this.dialog = false
-      this.error = ''
-      this.resetForm()
-    },
-
-    resetForm() {
-      this.formData = {
-        username: '',
-        password: '',
-        first_name: '',
-        last_name: '',
-        email: '',
-        phone: '',
-        access_level: 'user',
-        is_active: true
-      }
-      if (this.$refs.userForm) {
-        this.$refs.userForm.resetValidation()
-      }
-    },
-
-    getAccessLevelColor(level) {
-      switch (level) {
-        case 'admin':
-          return 'error'
-        case 'user':
-          return 'success'
-        case 'guest':
-          return 'warning'
-        default:
-          return 'grey'
-      }
-    },
-
-    formatDate(dateString) {
-      if (!dateString) return 'Never'
-      const date = new Date(dateString)
-      return date.toLocaleString()
-    }
+async function fetchUsers() {
+  loading.value = true
+  try {
+    const response = await axios.get('/api/auth/users')
+    users.value = response.data
+  } catch (err) {
+    console.error('Error fetching users:', err)
+    error.value = 'Failed to load users'
+  } finally {
+    loading.value = false
   }
 }
+
+function openCreateDialog() {
+  dialogMode.value = 'create'
+  resetForm()
+  dialog.value = true
+}
+
+function openEditDialog(user) {
+  dialogMode.value = 'edit'
+  formData.value = {
+    username: user.username,
+    password: '',
+    first_name: user.first_name || '',
+    last_name: user.last_name || '',
+    email: user.email || '',
+    phone: user.phone || '',
+    access_level: user.access_level,
+    is_active: user.is_active
+  }
+  dialog.value = true
+}
+
+function openDeleteDialog(user) {
+  userToDelete.value = user
+  deleteDialog.value = true
+}
+
+async function saveUser() {
+  if (!formValid.value) return
+
+  saving.value = true
+  error.value = ''
+
+  try {
+    if (dialogMode.value === 'create') {
+      // Create new user
+      await axios.post('/api/auth/users', {
+        username: formData.value.username,
+        password: formData.value.password
+      })
+
+      // Update additional fields if provided
+      const updateData = {}
+      if (formData.value.first_name) updateData.first_name = formData.value.first_name
+      if (formData.value.last_name) updateData.last_name = formData.value.last_name
+      if (formData.value.email) updateData.email = formData.value.email
+      if (formData.value.phone) updateData.phone = formData.value.phone
+      if (formData.value.access_level) updateData.access_level = formData.value.access_level
+      updateData.is_active = formData.value.is_active
+
+      if (Object.keys(updateData).length > 0) {
+        await axios.put(`/api/auth/users/${formData.value.username}`, updateData)
+      }
+    } else {
+      // Update existing user
+      const updateData = {
+        first_name: formData.value.first_name,
+        last_name: formData.value.last_name,
+        email: formData.value.email,
+        phone: formData.value.phone,
+        access_level: formData.value.access_level,
+        is_active: formData.value.is_active
+      }
+
+      if (formData.value.password) {
+        updateData.password = formData.value.password
+      }
+
+      await axios.put(`/api/auth/users/${formData.value.username}`, updateData)
+    }
+
+    // Refresh user list
+    await fetchUsers()
+    closeDialog()
+  } catch (err) {
+    console.error('Error saving user:', err)
+    error.value = err.response?.data?.detail || 'Failed to save user'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function confirmDelete() {
+  if (!userToDelete.value) return
+
+  deleting.value = true
+
+  try {
+    await axios.delete(`/api/auth/users/${userToDelete.value.username}`)
+    await fetchUsers()
+    deleteDialog.value = false
+    userToDelete.value = null
+  } catch (err) {
+    console.error('Error deleting user:', err)
+    error.value = err.response?.data?.detail || 'Failed to delete user'
+  } finally {
+    deleting.value = false
+  }
+}
+
+function closeDialog() {
+  dialog.value = false
+  error.value = ''
+  resetForm()
+}
+
+function resetForm() {
+  formData.value = {
+    username: '',
+    password: '',
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone: '',
+    access_level: 'user',
+    is_active: true
+  }
+  if (userForm.value) {
+    userForm.value.resetValidation()
+  }
+}
+
+function getAccessLevelColor(level) {
+  switch (level) {
+    case 'admin':
+      return 'error'
+    case 'user':
+      return 'success'
+    case 'guest':
+      return 'warning'
+    default:
+      return 'grey'
+  }
+}
+
+function formatDate(dateString) {
+  if (!dateString) return 'Never'
+  const date = new Date(dateString)
+  return date.toLocaleString()
+}
+
+onMounted(() => {
+  fetchUsers()
+})
 </script>
 
 <style scoped>

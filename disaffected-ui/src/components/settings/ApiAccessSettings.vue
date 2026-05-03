@@ -792,6 +792,101 @@
           </v-expansion-panel-text>
         </v-expansion-panel>
 
+        <!-- Production Control -->
+        <v-expansion-panel value="production-control">
+          <v-expansion-panel-title>
+            <v-icon left class="mr-3">mdi-television-classic</v-icon>
+            Production Control
+          </v-expansion-panel-title>
+          <v-expansion-panel-text>
+            <v-row>
+              <!-- vMix -->
+              <v-col cols="12" md="6">
+                <v-card variant="outlined" class="pa-4">
+                  <v-card-title class="text-subtitle-1">vMix</v-card-title>
+                  <v-text-field
+                    v-model="configs.vmix.host"
+                    label="Host"
+                    placeholder="192.168.x.x"
+                    persistent-hint
+                    hint="IP address of the vMix machine"
+                  />
+                  <v-text-field
+                    v-model="configs.vmix.port"
+                    label="Port"
+                    placeholder="8088"
+                    persistent-hint
+                    hint="vMix Web Controller port (default: 8088)"
+                  />
+                  <v-text-field
+                    v-model="configs.vmix.remoteMediaPath"
+                    label="Remote Media Path"
+                    placeholder="\\\\vmix-server\\episodes\\{episode_number}\\"
+                    persistent-hint
+                    hint="Windows UNC path on vMix machine. Use {episode_number} as placeholder."
+                  />
+                  <v-switch
+                    v-model="configs.vmix.enabled"
+                    label="Enable vMix integration"
+                    color="primary"
+                  />
+                  <v-btn
+                    variant="outlined"
+                    size="small"
+                    :loading="testingVmix"
+                    :color="vmixTestResult?.success ? 'success' : vmixTestResult?.success === false ? 'error' : 'primary'"
+                    @click="testVmixConnection"
+                  >
+                    <v-icon start>mdi-connection</v-icon>
+                    Test Connection
+                  </v-btn>
+                  <span v-if="vmixTestResult" class="ml-3 text-caption" :class="vmixTestResult.success ? 'text-success' : 'text-error'">
+                    {{ vmixTestResult.message }}
+                  </span>
+                </v-card>
+              </v-col>
+              <!-- ComfyUI -->
+              <v-col cols="12" md="6">
+                <v-card variant="outlined" class="pa-4">
+                  <v-card-title class="text-subtitle-1">ComfyUI</v-card-title>
+                  <v-text-field
+                    v-model="configs.comfyui.host"
+                    label="Host"
+                    placeholder="192.168.x.x"
+                    persistent-hint
+                    hint="IP address of the ComfyUI machine"
+                  />
+                  <v-text-field
+                    v-model="configs.comfyui.port"
+                    label="Port"
+                    placeholder="8188"
+                    persistent-hint
+                    hint="ComfyUI API port (default: 8188)"
+                  />
+                  <v-switch
+                    v-model="configs.comfyui.enabled"
+                    label="Enable ComfyUI integration"
+                    color="purple"
+                  />
+                  <v-btn
+                    variant="outlined"
+                    size="small"
+                    :loading="testingComfyui"
+                    :color="comfyuiTestResult?.success ? 'success' : comfyuiTestResult?.success === false ? 'error' : 'purple'"
+                    @click="testComfyuiConnection"
+                  >
+                    <v-icon start>mdi-connection</v-icon>
+                    Test Connection
+                  </v-btn>
+                  <span v-if="comfyuiTestResult" class="ml-3 text-caption" :class="comfyuiTestResult.success ? 'text-success' : 'text-error'">
+                    {{ comfyuiTestResult.message }}
+                  </span>
+                </v-card>
+              </v-col>
+            </v-row>
+          </v-expansion-panel-text>
+        </v-expansion-panel>
+
         <!-- Development & Automation -->
         <v-expansion-panel value="development">
           <v-expansion-panel-title>
@@ -904,6 +999,10 @@ const configs = computed({
 
 const expandedPanels = ref([])
 const saving = ref(false)
+const testingVmix = ref(false)
+const vmixTestResult = ref(null)
+const testingComfyui = ref(false)
+const comfyuiTestResult = ref(null)
 
 // Snackbar state
 const snackbar = ref({
@@ -917,6 +1016,72 @@ const showSnackbar = (message, color = 'success') => {
   snackbar.value.message = message
   snackbar.value.color = color
   snackbar.value.show = true
+}
+
+// vMix test connection
+async function testVmixConnection() {
+  testingVmix.value = true
+  vmixTestResult.value = null
+  try {
+    const host = configs.value.vmix?.host
+    const port = configs.value.vmix?.port || '8088'
+    if (!host) {
+      vmixTestResult.value = { success: false, message: 'Host is required' }
+      return
+    }
+    const response = await fetch('/health/vmix', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token') || localStorage.getItem('token')}`
+      }
+    })
+    if (response.ok) {
+      const data = await response.json()
+      if (data.connected) {
+        vmixTestResult.value = { success: true, message: `Connected to ${host}:${port}` }
+      } else {
+        vmixTestResult.value = { success: false, message: data.error || 'Connection failed' }
+      }
+    } else {
+      vmixTestResult.value = { success: false, message: 'Health check unavailable' }
+    }
+  } catch (error) {
+    vmixTestResult.value = { success: false, message: error.message }
+  } finally {
+    testingVmix.value = false
+  }
+}
+
+// ComfyUI test connection
+async function testComfyuiConnection() {
+  testingComfyui.value = true
+  comfyuiTestResult.value = null
+  try {
+    const host = configs.value.comfyui?.host
+    const port = configs.value.comfyui?.port || '8188'
+    if (!host) {
+      comfyuiTestResult.value = { success: false, message: 'Host is required' }
+      return
+    }
+    const response = await fetch('/api/comfyui/health', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token') || localStorage.getItem('token')}`
+      }
+    })
+    if (response.ok) {
+      const data = await response.json()
+      if (data.connected) {
+        comfyuiTestResult.value = { success: true, message: `Connected to ${host}:${port}` }
+      } else {
+        comfyuiTestResult.value = { success: false, message: data.error || 'Connection failed' }
+      }
+    } else {
+      comfyuiTestResult.value = { success: false, message: 'Health check unavailable' }
+    }
+  } catch (error) {
+    comfyuiTestResult.value = { success: false, message: error.message }
+  } finally {
+    testingComfyui.value = false
+  }
 }
 
 // TikTok secret visibility
@@ -1174,6 +1339,16 @@ async function saveSettings() {
           vimeo: configs.value.vimeo,
           twitter: configs.value.twitter,
           tiktok: configs.value.tiktok
+        }
+      },
+      production: {
+        control: {
+          vmix: configs.value.vmix
+        }
+      },
+      generation: {
+        ai_services: {
+          comfyui: configs.value.comfyui
         }
       },
       development: {

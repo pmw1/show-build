@@ -15,51 +15,29 @@
     </v-card>
   </v-dialog>
 </template>
-<script>
-export default {
-  name: 'MusModal',
-  props: { show: Boolean },
-  emits: ['update:show', 'submit'],
-  data() { return { slug: '', description: '', duration: '' }; },
-  methods: {
-    submit() {
-      this.$emit('submit', { 
-        type: 'MUS',
-        slug: this.slug, 
-        description: this.description, 
-        duration: this.duration 
-      });
-      this.reset();
-    },
-    reset() {
-      this.slug = '';
-      this.description = '';
-      this.duration = '';
-      this.$emit('update:show', false);
-    },
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.$emit('update:show', false);
-      }
-    }
-  },
-  watch: {
-    show(val) {
-      if (!val) {
-        this.slug = '';
-        this.description = '';
-        this.duration = '';
-      }
-    }
-  },
-  mounted() {
-    document.addEventListener('keydown', this.handleKeydown);
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown);
-  }
+<script setup>
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+
+const props = defineProps({ show: Boolean })
+const emit = defineEmits(['update:show', 'submit'])
+
+const slug = ref('')
+const description = ref('')
+const duration = ref('')
+
+function submit() {
+  emit('submit', { type: 'MUS', slug: slug.value, description: description.value, duration: duration.value })
+  reset()
 }
+function reset() {
+  slug.value = ''; description.value = ''; duration.value = ''
+  emit('update:show', false)
+}
+function handleKeydown(event) {
+  if (event.key === 'Escape' && props.show) { event.preventDefault(); event.stopPropagation(); emit('update:show', false) }
+}
+watch(() => props.show, (val) => { if (!val) { slug.value = ''; description.value = ''; duration.value = '' } })
+onMounted(() => document.addEventListener('keydown', handleKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
 </script>
 <style scoped>.v-card { padding: 16px; }</style>

@@ -323,3 +323,34 @@ input[type="number"]::-webkit-inner-spin-button {
   margin-top: 0 !important;
   z-index: 10002 !important;
 }
+
+/* ============================================================
+   Sitewide: remove all rounded corners.
+   Circular elements (avatars, radio buttons, progress circulars,
+   spinners, badges) are preserved via more-specific overrides.
+   ============================================================ */
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
+}
+
+/* Preserve genuinely circular UI */
+.v-avatar,
+.v-avatar *,
+.v-progress-circular,
+.v-progress-circular *,
+.v-icon,
+.v-badge__badge,
+.v-selection-control--inline .v-selection-control__input,
+.v-radio .v-selection-control__input,
+.v-radio .v-selection-control__wrapper,
+[class*="rounded-circle"] {
+  border-radius: 50% !important;
+}
+
+/* Vuetify switch thumb stays pill-shaped */
+.v-switch .v-switch__thumb,
+.v-switch .v-switch__track {
+  border-radius: 9999px !important;
+}

@@ -525,3 +525,42 @@
 **Document Version:** 1.0
 **Sprint**: Architecture Cleanup (Jan 1-15, 2026)
 **Owner**: Show-Build Development Team
+
+---
+
+## 📋 Follow-up TODO: Extract shared cue-type schema as single source of truth
+
+**Filed:** 2026-05-03 (during Legacy Cue Convert module rollout)
+**Dashboard todo id:** 23 (POST /api/todos, created_by='claude')
+**Status:** pending — awaiting prioritization
+
+### Problem
+The cue-block format for each of the 16 cue types lives only inside its modal:
+`SotModal.vue`, `ImgCueModal.vue`, `FsqModal.vue`, `GfxModal.vue`, `NatModal.vue`,
+`VoModal.vue`, `PkgModal.vue`, `DirModal.vue`, `RifModal.vue`, plus library-backed
+`BumpModal/StingModal/MusModal/LiveModal/VoxModal`. Each builds its cue block via
+inline string concatenation. There is no schema, no field registry, no shared
+definition.
+
+This duplication is partially mirrored by the **Legacy Cue Convert** module
+(`disaffected-ui/src/modules/legacyCueConvert/`) — its `conversion.js` +
+`patterns.js DEFAULT_DURATION_BY_TYPE` hand-mirrors each modal's output. Parity
+tests guard against drift today, but the right fix is to extract a single source.
+
+### Proposed
+New file `disaffected-ui/src/utils/cueTypeSchema.js` (or `src/data/cueTypeSchema.js`)
+defining per-type fields, order, defaults, mediaCategory. All 16 modals +
+the Legacy Cue Convert module consume it. Parity tests retired.
+
+### Affected files (refactor scope)
+- `disaffected-ui/src/components/modals/{Sot,Vo,Nat,Pkg,Bump,Sting,Mus,Vox,Live,Rif}Modal.vue`
+- `disaffected-ui/src/components/modals/{Gfx,Fsq}Modal.vue`
+- `disaffected-ui/src/components/content-editor/modals/{Img,Dir}CueModal.vue` (plus DirModal at modals/)
+- `disaffected-ui/src/modules/legacyCueConvert/conversion.js` (replaces inline `buildCueBlock`)
+- `disaffected-ui/src/modules/legacyCueConvert/patterns.js` (DEFAULT_DURATION_BY_TYPE deleted)
+- `disaffected-ui/src/modules/legacyCueConvert/__tests__/parity.test.js` (retired)
+
+### Trigger to revisit
+- Adding a new cue type
+- A cue-format change that touches >1 of (modal / conversion module / parser)
+- Parity-test maintenance gets noticeable

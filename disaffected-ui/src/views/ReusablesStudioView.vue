@@ -213,315 +213,268 @@
   </v-container>
 </template>
 
-<script>
+<script setup>
 import { ref, computed, onMounted } from 'vue'
-import ReusablesStudioEditor from '@/components/settings/ReusablesStudioEditor.vue'
+import ReusablesStudioEditor from '@/components/settings/ReusablesStudioEditor.vue' // eslint-disable-line no-unused-vars
 import axios from 'axios'
 
-export default {
-  name: 'ReusablesStudioView',
-  components: {
-    ReusablesStudioEditor
-  },
-  setup() {
-    // Data
-    const loading = ref(false)
-    const libraryItems = ref([])
-    const typeSettings = ref([])
+// Data
+const loading = ref(false)
+const libraryItems = ref([])
+const typeSettings = ref([])
 
-    // Filters
-    const filterType = ref(null)
-    const searchQuery = ref('')
-    const filterStatus = ref('active')
+// Filters
+const filterType = ref(null)
+const searchQuery = ref('')
+const filterStatus = ref('active')
 
-    // Editor state
-    const editorOpen = ref(false)
-    const selectedItem = ref(null)
-    const isNewItem = ref(false)
+// Editor state
+const editorOpen = ref(false)
+const selectedItem = ref(null)
+const isNewItem = ref(false)
 
-    // Create dialog
-    const createDialog = ref(false)
-    const newItemType = ref('')
-    const newItemTitle = ref('')
+// Create dialog
+const createDialog = ref(false)
+const newItemType = ref('')
+const newItemTitle = ref('')
 
-    // Usage dialog
-    const usageDialog = ref(false)
-    const usageItem = ref(null)
-    const usageHistory = ref([])
+// Usage dialog
+const usageDialog = ref(false)
+const usageItem = ref(null)
+const usageHistory = ref([])
 
-    // Computed
-    const typeOptions = computed(() => {
-      const types = [...new Set(libraryItems.value.map(item => item.item_type))]
-      return types.map(type => ({
-        title: formatTypeName(type),
-        value: type
-      }))
+// Computed
+const typeOptions = computed(() => {
+  const types = [...new Set(libraryItems.value.map(item => item.item_type))]
+  return types.map(type => ({
+    title: formatTypeName(type),
+    value: type
+  }))
+})
+
+const reusableTypeOptions = computed(() => {
+  return typeSettings.value
+    .filter(ts => ts.is_reusable)
+    .map(ts => ({
+      title: ts.display_name,
+      value: ts.type_name
+    }))
+})
+
+const statusOptions = [
+  { title: 'Active', value: 'active' },
+  { title: 'All', value: 'all' },
+  { title: 'Inactive', value: 'inactive' }
+]
+
+const tableHeaders = [
+  { title: 'Type', key: 'item_type', width: '120px' },
+  { title: 'Title', key: 'title' },
+  { title: 'Customer', key: 'customer_name', width: '150px' },
+  { title: 'Duration', key: 'duration', width: '80px' },
+  { title: 'Valid Range', key: 'valid_range', width: '180px' },
+  { title: 'Used', key: 'placement_count', width: '60px', align: 'center' },
+  { title: 'Active', key: 'is_active', width: '60px', align: 'center' },
+  { title: 'Actions', key: 'actions', width: '120px', sortable: false }
+]
+
+const filteredItems = computed(() => {
+  let items = [...libraryItems.value]
+
+  // Filter by type
+  if (filterType.value) {
+    items = items.filter(item => item.item_type === filterType.value)
+  }
+
+  // Filter by status
+  if (filterStatus.value === 'active') {
+    items = items.filter(item => item.is_active)
+  } else if (filterStatus.value === 'inactive') {
+    items = items.filter(item => !item.is_active)
+  }
+
+  // Filter by search
+  if (searchQuery.value) {
+    const query = searchQuery.value.toLowerCase()
+    items = items.filter(item =>
+      item.title?.toLowerCase().includes(query) ||
+      item.customer_name?.toLowerCase().includes(query)
+    )
+  }
+
+  return items
+})
+
+// Helper for auth headers
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('auth-token')
+  return token ? { 'Authorization': `Bearer ${token}` } : {}
+}
+
+// Methods
+const loadLibraryItems = async () => {
+  loading.value = true
+  try {
+    const response = await axios.get('/api/content-library/', {
+      headers: getAuthHeaders(),
+      params: {
+        is_active: filterStatus.value === 'active' ? true : null,
+        limit: 500
+      }
     })
-
-    const reusableTypeOptions = computed(() => {
-      return typeSettings.value
-        .filter(ts => ts.is_reusable)
-        .map(ts => ({
-          title: ts.display_name,
-          value: ts.type_name
-        }))
-    })
-
-    const statusOptions = [
-      { title: 'Active', value: 'active' },
-      { title: 'All', value: 'all' },
-      { title: 'Inactive', value: 'inactive' }
-    ]
-
-    const tableHeaders = [
-      { title: 'Type', key: 'item_type', width: '120px' },
-      { title: 'Title', key: 'title' },
-      { title: 'Customer', key: 'customer_name', width: '150px' },
-      { title: 'Duration', key: 'duration', width: '80px' },
-      { title: 'Valid Range', key: 'valid_range', width: '180px' },
-      { title: 'Used', key: 'placement_count', width: '60px', align: 'center' },
-      { title: 'Active', key: 'is_active', width: '60px', align: 'center' },
-      { title: 'Actions', key: 'actions', width: '120px', sortable: false }
-    ]
-
-    const filteredItems = computed(() => {
-      let items = [...libraryItems.value]
-
-      // Filter by type
-      if (filterType.value) {
-        items = items.filter(item => item.item_type === filterType.value)
-      }
-
-      // Filter by status
-      if (filterStatus.value === 'active') {
-        items = items.filter(item => item.is_active)
-      } else if (filterStatus.value === 'inactive') {
-        items = items.filter(item => !item.is_active)
-      }
-
-      // Filter by search
-      if (searchQuery.value) {
-        const query = searchQuery.value.toLowerCase()
-        items = items.filter(item =>
-          item.title?.toLowerCase().includes(query) ||
-          item.customer_name?.toLowerCase().includes(query)
-        )
-      }
-
-      return items
-    })
-
-    // Helper for auth headers
-    const getAuthHeaders = () => {
-      const token = localStorage.getItem('auth-token')
-      return token ? { 'Authorization': `Bearer ${token}` } : {}
-    }
-
-    // Methods
-    const loadLibraryItems = async () => {
-      loading.value = true
-      try {
-        const response = await axios.get('/api/content-library/', {
-          headers: getAuthHeaders(),
-          params: {
-            is_active: filterStatus.value === 'active' ? true : null,
-            limit: 500
-          }
-        })
-        libraryItems.value = response.data.items || []
-      } catch (error) {
-        console.error('Failed to load library items:', error)
-      } finally {
-        loading.value = false
-      }
-    }
-
-    const loadTypeSettings = async () => {
-      try {
-        const response = await axios.get('/api/content-library/type-settings/', {
-          headers: getAuthHeaders()
-        })
-        typeSettings.value = response.data.settings || []
-      } catch (error) {
-        console.error('Failed to load type settings:', error)
-      }
-    }
-
-    const formatTypeName = (typeName) => {
-      if (!typeName) return ''
-      return typeName
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, l => l.toUpperCase())
-    }
-
-    const getTypeColor = (typeName) => {
-      const colorMap = {
-        advertisement: 'green',
-        promo: 'purple',
-        cta: 'orange',
-        transition: 'blue-grey',
-        segment: 'blue',
-        interview: 'teal'
-      }
-      return colorMap[typeName] || 'grey'
-    }
-
-    const formatDateRange = (from, until) => {
-      if (!from && !until) return 'Always valid'
-      const formatDate = (dateStr) => {
-        if (!dateStr) return ''
-        return new Date(dateStr).toLocaleDateString()
-      }
-      if (from && until) return `${formatDate(from)} - ${formatDate(until)}`
-      if (from) return `From ${formatDate(from)}`
-      if (until) return `Until ${formatDate(until)}`
-      return ''
-    }
-
-    const formatDateTime = (dateStr) => {
-      if (!dateStr) return ''
-      return new Date(dateStr).toLocaleString()
-    }
-
-    const handleRowClick = (event, { item }) => {
-      editItem(item)
-    }
-
-    const editItem = async (item) => {
-      try {
-        // Fetch full item data including script_content and scratch_content
-        const response = await axios.get(`/api/content-library/${item.asset_id}`, {
-          headers: getAuthHeaders()
-        })
-        selectedItem.value = response.data
-        isNewItem.value = false
-        editorOpen.value = true
-      } catch (error) {
-        console.error('Failed to load item:', error)
-      }
-    }
-
-    const createNewItem = () => {
-      newItemType.value = ''
-      newItemTitle.value = ''
-      createDialog.value = true
-    }
-
-    const confirmCreateItem = async () => {
-      try {
-        const response = await axios.post('/api/content-library/', {
-          item_type: newItemType.value,
-          title: newItemTitle.value,
-          script_content: '',
-          duration: '00:00:30'
-        }, {
-          headers: getAuthHeaders()
-        })
-
-        createDialog.value = false
-
-        // Reload and open the new item
-        await loadLibraryItems()
-        const newItem = libraryItems.value.find(i => i.asset_id === response.data.asset_id)
-        if (newItem) {
-          editItem(newItem)
-        }
-      } catch (error) {
-        console.error('Failed to create item:', error)
-        console.error('Response:', error.response?.data)
-        console.error('Token present:', !!localStorage.getItem('auth-token'))
-        alert(`Failed to create item: ${error.response?.data?.detail || error.message}`)
-      }
-    }
-
-    const closeEditor = () => {
-      editorOpen.value = false
-      selectedItem.value = null
-      isNewItem.value = false
-    }
-
-    const handleItemSaved = async () => {
-      await loadLibraryItems()
-    }
-
-    const handleItemDeleted = async () => {
-      closeEditor()
-      await loadLibraryItems()
-    }
-
-    const viewUsage = async (item) => {
-      usageItem.value = item
-      try {
-        const response = await axios.get(`/api/content-library/${item.asset_id}/usage`, {
-          headers: getAuthHeaders()
-        })
-        usageHistory.value = response.data.placements || []
-        usageDialog.value = true
-      } catch (error) {
-        console.error('Failed to load usage:', error)
-        usageHistory.value = []
-      }
-    }
-
-    const toggleItemActive = async (item) => {
-      try {
-        await axios.patch(`/api/content-library/${item.asset_id}`, {
-          is_active: !item.is_active
-        }, {
-          headers: getAuthHeaders()
-        })
-        await loadLibraryItems()
-      } catch (error) {
-        console.error('Failed to toggle item:', error)
-      }
-    }
-
-    // Lifecycle
-    onMounted(() => {
-      loadLibraryItems()
-      loadTypeSettings()
-    })
-
-    return {
-      // Data
-      loading,
-      libraryItems,
-      typeSettings,
-      filterType,
-      searchQuery,
-      filterStatus,
-      editorOpen,
-      selectedItem,
-      isNewItem,
-      createDialog,
-      newItemType,
-      newItemTitle,
-      usageDialog,
-      usageItem,
-      usageHistory,
-      // Computed
-      typeOptions,
-      reusableTypeOptions,
-      statusOptions,
-      tableHeaders,
-      filteredItems,
-      // Methods
-      formatTypeName,
-      getTypeColor,
-      formatDateRange,
-      formatDateTime,
-      handleRowClick,
-      editItem,
-      createNewItem,
-      confirmCreateItem,
-      closeEditor,
-      handleItemSaved,
-      handleItemDeleted,
-      viewUsage,
-      toggleItemActive
-    }
+    libraryItems.value = response.data.items || []
+  } catch (error) {
+    console.error('Failed to load library items:', error)
+  } finally {
+    loading.value = false
   }
 }
+
+const loadTypeSettings = async () => {
+  try {
+    const response = await axios.get('/api/content-library/type-settings/', {
+      headers: getAuthHeaders()
+    })
+    typeSettings.value = response.data.settings || []
+  } catch (error) {
+    console.error('Failed to load type settings:', error)
+  }
+}
+
+const formatTypeName = (typeName) => {
+  if (!typeName) return ''
+  return typeName
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, l => l.toUpperCase())
+}
+
+const getTypeColor = (typeName) => {
+  const colorMap = {
+    advertisement: 'green',
+    promo: 'purple',
+    cta: 'orange',
+    transition: 'blue-grey',
+    segment: 'blue',
+    interview: 'teal'
+  }
+  return colorMap[typeName] || 'grey'
+}
+
+const formatDateRange = (from, until) => {
+  if (!from && !until) return 'Always valid'
+  const formatDate = (dateStr) => {
+    if (!dateStr) return ''
+    return new Date(dateStr).toLocaleDateString()
+  }
+  if (from && until) return `${formatDate(from)} - ${formatDate(until)}`
+  if (from) return `From ${formatDate(from)}`
+  if (until) return `Until ${formatDate(until)}`
+  return ''
+}
+
+const formatDateTime = (dateStr) => {
+  if (!dateStr) return ''
+  return new Date(dateStr).toLocaleString()
+}
+
+const handleRowClick = (event, { item }) => {
+  editItem(item)
+}
+
+const editItem = async (item) => {
+  try {
+    // Fetch full item data including script_content and scratch_content
+    const response = await axios.get(`/api/content-library/${item.asset_id}`, {
+      headers: getAuthHeaders()
+    })
+    selectedItem.value = response.data
+    isNewItem.value = false
+    editorOpen.value = true
+  } catch (error) {
+    console.error('Failed to load item:', error)
+  }
+}
+
+const createNewItem = () => {
+  newItemType.value = ''
+  newItemTitle.value = ''
+  createDialog.value = true
+}
+
+const confirmCreateItem = async () => {
+  try {
+    const response = await axios.post('/api/content-library/', {
+      item_type: newItemType.value,
+      title: newItemTitle.value,
+      script_content: '',
+      duration: '00:00:30'
+    }, {
+      headers: getAuthHeaders()
+    })
+
+    createDialog.value = false
+
+    // Reload and open the new item
+    await loadLibraryItems()
+    const newItem = libraryItems.value.find(i => i.asset_id === response.data.asset_id)
+    if (newItem) {
+      editItem(newItem)
+    }
+  } catch (error) {
+    console.error('Failed to create item:', error)
+    console.error('Response:', error.response?.data)
+    console.error('Token present:', !!localStorage.getItem('auth-token'))
+    alert(`Failed to create item: ${error.response?.data?.detail || error.message}`)
+  }
+}
+
+const closeEditor = () => {
+  editorOpen.value = false
+  selectedItem.value = null
+  isNewItem.value = false
+}
+
+const handleItemSaved = async () => {
+  await loadLibraryItems()
+}
+
+const handleItemDeleted = async () => {
+  closeEditor()
+  await loadLibraryItems()
+}
+
+const viewUsage = async (item) => {
+  usageItem.value = item
+  try {
+    const response = await axios.get(`/api/content-library/${item.asset_id}/usage`, {
+      headers: getAuthHeaders()
+    })
+    usageHistory.value = response.data.placements || []
+    usageDialog.value = true
+  } catch (error) {
+    console.error('Failed to load usage:', error)
+    usageHistory.value = []
+  }
+}
+
+const toggleItemActive = async (item) => {
+  try {
+    await axios.patch(`/api/content-library/${item.asset_id}`, {
+      is_active: !item.is_active
+    }, {
+      headers: getAuthHeaders()
+    })
+    await loadLibraryItems()
+  } catch (error) {
+    console.error('Failed to toggle item:', error)
+  }
+}
+
+// Lifecycle
+onMounted(() => {
+  loadLibraryItems()
+  loadTypeSettings()
+})
 </script>
 
 <style scoped>

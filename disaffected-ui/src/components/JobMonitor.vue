@@ -226,84 +226,37 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useJobMonitor } from '../composables/useJobMonitor.js'
 
-export default {
-  name: 'JobMonitor',
+const panelOpen = ref(false)
+const activeTab = ref('active')
 
-  setup() {
-    const panelOpen = ref(false)
-    const activeTab = ref('active')
+const {
+  activeJobs, recentJobs, isPolling, activeJobCount, recentFailureCount, hasIssues,
+  fetchActiveJobs, fetchRecentJobs, clearJobs, startPolling, stopPolling,
+  getTimeAgo, getStatusColor, getCategoryColor
+} = useJobMonitor()
 
-    const {
-      activeJobs,
-      recentJobs,
-      isPolling,
-      activeJobCount,
-      recentFailureCount,
-      hasIssues,
-      fetchActiveJobs,
-      fetchRecentJobs,
-      clearJobs,
-      startPolling,
-      stopPolling,
-      getTimeAgo,
-      getStatusColor,
-      getCategoryColor
-    } = useJobMonitor()
+function togglePanel() { panelOpen.value = !panelOpen.value }
 
-    const togglePanel = () => {
-      panelOpen.value = !panelOpen.value
-    }
+const badgeColor = computed(() => {
+  if (hasIssues.value) return 'warning'
+  if (activeJobCount.value > 0) return 'primary'
+  return 'grey'
+})
 
-    const badgeColor = computed(() => {
-      if (hasIssues.value) return 'warning'
-      if (activeJobCount.value > 0) return 'primary'
-      return 'grey'
-    })
-
-    const getJobIcon = (job) => {
-      if (job.status === 'pending') return 'mdi-clock-outline'
-      if (job.status === 'running') return 'mdi-cog'
-      return 'mdi-help-circle'
-    }
-
-    const handleClear = async () => {
-      await clearJobs()
-    }
-
-    onMounted(() => {
-      startPolling()
-    })
-
-    onBeforeUnmount(() => {
-      stopPolling()
-    })
-
-    return {
-      panelOpen,
-      activeTab,
-      activeJobs,
-      recentJobs,
-      isPolling,
-      activeJobCount,
-      recentFailureCount,
-      hasIssues,
-      badgeColor,
-      togglePanel,
-      fetchActiveJobs,
-      fetchRecentJobs,
-      clearJobs,
-      getTimeAgo,
-      getStatusColor,
-      getCategoryColor,
-      getJobIcon,
-      handleClear
-    }
-  }
+function getJobIcon(job) {
+  if (job.status === 'pending') return 'mdi-clock-outline'
+  if (job.status === 'running') return 'mdi-cog'
+  return 'mdi-help-circle'
 }
+
+async function handleClear() { await clearJobs() }
+
+onMounted(() => startPolling())
+onBeforeUnmount(() => stopPolling())
 </script>
 
 <style scoped>

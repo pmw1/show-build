@@ -197,269 +197,235 @@
   </v-card>
 </template>
 
-<script>
+<script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { debounce } from 'lodash-es'
 import EditorPanel from '@/components/content-editor/EditorPanel.vue'
 import axios from 'axios'
 
-export default {
-  name: 'ReusablesStudioEditor',
-  components: {
-    EditorPanel
+const props = defineProps({
+  item: {
+    type: Object,
+    default: null
   },
-  props: {
-    item: {
-      type: Object,
-      default: null
-    },
-    isNew: {
-      type: Boolean,
-      default: false
-    }
-  },
-  emits: ['close', 'saved', 'deleted', 'view-usage'],
-  setup(props, { emit }) {
-    // Refs
-    const editorPanelRef = ref(null)
+  isNew: {
+    type: Boolean,
+    default: false
+  }
+})
 
-    // Local state
-    const localItem = ref(null)
-    const editorMode = ref('script')
-    const metadataExpanded = ref([])
-    const isDirty = ref(false)
-    const saving = ref(false)
-    const saveStatus = ref(null)
-    const deleteDialog = ref(false)
-    const customers = ref([])
+const emit = defineEmits(['close', 'saved', 'deleted', 'view-usage'])
 
-    // Priority options
-    const priorityOptions = [
-      { title: 'High', value: 'high' },
-      { title: 'Normal', value: 'normal' },
-      { title: 'Low', value: 'low' }
-    ]
+// Refs
+const editorPanelRef = ref(null)
 
-    // Computed
-    const syntheticItem = computed(() => {
-      if (!localItem.value) return null
-      return {
-        id: localItem.value.asset_id,
-        title: localItem.value.title,
-        slug: localItem.value.slug,
-        item_type: localItem.value.item_type,
-        duration: localItem.value.duration,
-        status: localItem.value.is_active ? 'active' : 'inactive'
-      }
+// Local state
+const localItem = ref(null)
+const editorMode = ref('script')
+const metadataExpanded = ref([])
+const isDirty = ref(false)
+const saving = ref(false)
+const saveStatus = ref(null)
+const deleteDialog = ref(false)
+const customers = ref([])
+
+// Priority options
+const priorityOptions = [
+  { title: 'High', value: 'high' },
+  { title: 'Normal', value: 'normal' },
+  { title: 'Low', value: 'low' }
+]
+
+// Computed
+const syntheticItem = computed(() => {
+  if (!localItem.value) return null
+  return {
+    id: localItem.value.asset_id,
+    title: localItem.value.title,
+    slug: localItem.value.slug,
+    item_type: localItem.value.item_type,
+    duration: localItem.value.duration,
+    status: localItem.value.is_active ? 'active' : 'inactive'
+  }
+})
+
+const placementCount = computed(() => {
+  return localItem.value?.placement_count || 0
+})
+
+// Helper for auth headers
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('auth-token')
+  return token ? { 'Authorization': `Bearer ${token}` } : {}
+}
+
+// Load customers for dropdown
+const loadCustomers = async () => {
+  try {
+    const response = await axios.get('/api/customers/dropdown', {
+      headers: getAuthHeaders()
     })
-
-    const placementCount = computed(() => {
-      return localItem.value?.placement_count || 0
-    })
-
-    // Helper for auth headers
-    const getAuthHeaders = () => {
-      const token = localStorage.getItem('auth-token')
-      return token ? { 'Authorization': `Bearer ${token}` } : {}
-    }
-
-    // Load customers for dropdown
-    const loadCustomers = async () => {
-      try {
-        const response = await axios.get('/api/customers/dropdown', {
-          headers: getAuthHeaders()
-        })
-        customers.value = response.data.customers || []
-      } catch (error) {
-        console.error('Failed to load customers:', error)
-        customers.value = []
-      }
-    }
-
-    // Load customers on mount
-    onMounted(() => {
-      loadCustomers()
-    })
-
-    // Debounced autosave
-    const debouncedSave = debounce(async () => {
-      if (!localItem.value?.asset_id || !isDirty.value) return
-
-      saveStatus.value = 'saving'
-      try {
-        await axios.patch(`/api/content-library/${localItem.value.asset_id}`, {
-          title: localItem.value.title,
-          script_content: localItem.value.script_content,
-          scratch_content: localItem.value.scratch_content,
-          duration: localItem.value.duration,
-          customer_name: localItem.value.customer_name,
-          priority: localItem.value.priority,
-          is_active: localItem.value.is_active,
-          valid_from: localItem.value.valid_from,
-          valid_until: localItem.value.valid_until
-        }, {
-          headers: getAuthHeaders()
-        })
-        saveStatus.value = 'saved'
-        isDirty.value = false
-        emit('saved')
-
-        // Clear saved indicator after 2 seconds
-        setTimeout(() => {
-          if (saveStatus.value === 'saved') {
-            saveStatus.value = null
-          }
-        }, 2000)
-      } catch (error) {
-        console.error('Autosave failed:', error)
-        saveStatus.value = null
-      }
-    }, 500)
-
-    // Methods
-    const markDirty = () => {
-      isDirty.value = true
-      debouncedSave()
-    }
-
-    const handleScriptContentUpdate = (newContent) => {
-      if (localItem.value) {
-        localItem.value.script_content = newContent
-        markDirty()
-      }
-    }
-
-    const handleScratchContentUpdate = (newContent) => {
-      if (localItem.value) {
-        localItem.value.scratch_content = newContent
-        markDirty()
-      }
-    }
-
-    const handleInsertCue = (cueData) => {
-      // Handle cue insertion - this will be handled by EditorPanel
-      console.log('Cue inserted:', cueData)
-    }
-
-    const saveItem = async () => {
-      if (!localItem.value?.asset_id) return
-
-      saving.value = true
-      try {
-        await axios.patch(`/api/content-library/${localItem.value.asset_id}`, {
-          title: localItem.value.title,
-          script_content: localItem.value.script_content,
-          scratch_content: localItem.value.scratch_content,
-          duration: localItem.value.duration,
-          customer_name: localItem.value.customer_name,
-          priority: localItem.value.priority,
-          is_active: localItem.value.is_active,
-          valid_from: localItem.value.valid_from,
-          valid_until: localItem.value.valid_until
-        }, {
-          headers: getAuthHeaders()
-        })
-        isDirty.value = false
-        saveStatus.value = 'saved'
-        emit('saved')
-
-        setTimeout(() => {
-          if (saveStatus.value === 'saved') {
-            saveStatus.value = null
-          }
-        }, 2000)
-      } catch (error) {
-        console.error('Save failed:', error)
-      } finally {
-        saving.value = false
-      }
-    }
-
-    const confirmDelete = () => {
-      deleteDialog.value = true
-    }
-
-    const deleteItem = async () => {
-      if (!localItem.value?.asset_id) return
-
-      try {
-        await axios.delete(`/api/content-library/${localItem.value.asset_id}`, {
-          headers: getAuthHeaders(),
-          params: { hard_delete: true }
-        })
-        deleteDialog.value = false
-        emit('deleted')
-      } catch (error) {
-        console.error('Delete failed:', error)
-      }
-    }
-
-    const formatTypeName = (typeName) => {
-      if (!typeName) return ''
-      return typeName
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, l => l.toUpperCase())
-    }
-
-    const getTypeColor = (typeName) => {
-      const colorMap = {
-        advertisement: 'green',
-        promo: 'purple',
-        cta: 'orange',
-        transition: 'blue-grey',
-        segment: 'blue',
-        interview: 'teal'
-      }
-      return colorMap[typeName] || 'grey'
-    }
-
-    // Watch for prop changes
-    watch(() => props.item, (newItem) => {
-      if (newItem) {
-        // Deep copy to avoid mutating prop
-        localItem.value = JSON.parse(JSON.stringify(newItem))
-        isDirty.value = false
-        saveStatus.value = null
-
-        // Format dates for input fields if needed
-        if (localItem.value.valid_from) {
-          localItem.value.valid_from = localItem.value.valid_from.split('T')[0]
-        }
-        if (localItem.value.valid_until) {
-          localItem.value.valid_until = localItem.value.valid_until.split('T')[0]
-        }
-      }
-    }, { immediate: true })
-
-    return {
-      // Refs
-      editorPanelRef,
-      // State
-      localItem,
-      editorMode,
-      metadataExpanded,
-      isDirty,
-      saving,
-      saveStatus,
-      deleteDialog,
-      priorityOptions,
-      customers,
-      // Computed
-      syntheticItem,
-      placementCount,
-      // Methods
-      markDirty,
-      handleScriptContentUpdate,
-      handleScratchContentUpdate,
-      handleInsertCue,
-      saveItem,
-      confirmDelete,
-      deleteItem,
-      formatTypeName,
-      getTypeColor
-    }
+    customers.value = response.data.customers || []
+  } catch (error) {
+    console.error('Failed to load customers:', error)
+    customers.value = []
   }
 }
+
+// Load customers on mount
+onMounted(() => {
+  loadCustomers()
+})
+
+// Debounced autosave
+const debouncedSave = debounce(async () => {
+  if (!localItem.value?.asset_id || !isDirty.value) return
+
+  saveStatus.value = 'saving'
+  try {
+    await axios.patch(`/api/content-library/${localItem.value.asset_id}`, {
+      title: localItem.value.title,
+      script_content: localItem.value.script_content,
+      scratch_content: localItem.value.scratch_content,
+      duration: localItem.value.duration,
+      customer_name: localItem.value.customer_name,
+      priority: localItem.value.priority,
+      is_active: localItem.value.is_active,
+      valid_from: localItem.value.valid_from,
+      valid_until: localItem.value.valid_until
+    }, {
+      headers: getAuthHeaders()
+    })
+    saveStatus.value = 'saved'
+    isDirty.value = false
+    emit('saved')
+
+    // Clear saved indicator after 2 seconds
+    setTimeout(() => {
+      if (saveStatus.value === 'saved') {
+        saveStatus.value = null
+      }
+    }, 2000)
+  } catch (error) {
+    console.error('Autosave failed:', error)
+    saveStatus.value = null
+  }
+}, 500)
+
+// Methods
+const markDirty = () => {
+  isDirty.value = true
+  debouncedSave()
+}
+
+const handleScriptContentUpdate = (newContent) => {
+  if (localItem.value) {
+    localItem.value.script_content = newContent
+    markDirty()
+  }
+}
+
+const handleScratchContentUpdate = (newContent) => {
+  if (localItem.value) {
+    localItem.value.scratch_content = newContent
+    markDirty()
+  }
+}
+
+const handleInsertCue = (cueData) => {
+  // Handle cue insertion - this will be handled by EditorPanel
+  console.log('Cue inserted:', cueData)
+}
+
+const saveItem = async () => {
+  if (!localItem.value?.asset_id) return
+
+  saving.value = true
+  try {
+    await axios.patch(`/api/content-library/${localItem.value.asset_id}`, {
+      title: localItem.value.title,
+      script_content: localItem.value.script_content,
+      scratch_content: localItem.value.scratch_content,
+      duration: localItem.value.duration,
+      customer_name: localItem.value.customer_name,
+      priority: localItem.value.priority,
+      is_active: localItem.value.is_active,
+      valid_from: localItem.value.valid_from,
+      valid_until: localItem.value.valid_until
+    }, {
+      headers: getAuthHeaders()
+    })
+    isDirty.value = false
+    saveStatus.value = 'saved'
+    emit('saved')
+
+    setTimeout(() => {
+      if (saveStatus.value === 'saved') {
+        saveStatus.value = null
+      }
+    }, 2000)
+  } catch (error) {
+    console.error('Save failed:', error)
+  } finally {
+    saving.value = false
+  }
+}
+
+const confirmDelete = () => {
+  deleteDialog.value = true
+}
+
+const deleteItem = async () => {
+  if (!localItem.value?.asset_id) return
+
+  try {
+    await axios.delete(`/api/content-library/${localItem.value.asset_id}`, {
+      headers: getAuthHeaders(),
+      params: { hard_delete: true }
+    })
+    deleteDialog.value = false
+    emit('deleted')
+  } catch (error) {
+    console.error('Delete failed:', error)
+  }
+}
+
+const formatTypeName = (typeName) => {
+  if (!typeName) return ''
+  return typeName
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, l => l.toUpperCase())
+}
+
+const getTypeColor = (typeName) => {
+  const colorMap = {
+    advertisement: 'green',
+    promo: 'purple',
+    cta: 'orange',
+    transition: 'blue-grey',
+    segment: 'blue',
+    interview: 'teal'
+  }
+  return colorMap[typeName] || 'grey'
+}
+
+// Watch for prop changes
+watch(() => props.item, (newItem) => {
+  if (newItem) {
+    // Deep copy to avoid mutating prop
+    localItem.value = JSON.parse(JSON.stringify(newItem))
+    isDirty.value = false
+    saveStatus.value = null
+
+    // Format dates for input fields if needed
+    if (localItem.value.valid_from) {
+      localItem.value.valid_from = localItem.value.valid_from.split('T')[0]
+    }
+    if (localItem.value.valid_until) {
+      localItem.value.valid_until = localItem.value.valid_until.split('T')[0]
+    }
+  }
+}, { immediate: true })
 </script>
 
 <style scoped>

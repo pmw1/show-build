@@ -308,6 +308,69 @@ def fetch_tweet_via_syndication(tweet_id: str) -> Optional[dict]:
         return None
 
 
+def fetch_x_user_by_username(username: str, oauth_creds: Dict[str, str]) -> Optional[dict]:
+    """
+    Look up a single X (Twitter) user by username via the v2 API.
+
+    Used by Phase 2 enrichment to verify that a Grok-suggested handle
+    actually exists and to pull authoritative profile info (verified
+    badge, profile photo, follower counts, bio, location, join date).
+
+    Args:
+        username: Handle without leading "@". Caller should strip the "@".
+        oauth_creds: dict with apiKey/apiSecret/accessToken/accessTokenSecret
+                     (from get_twitter_oauth_credentials()).
+
+    Returns:
+        dict on success: {id, username, name, description, profile_image_url,
+                          verified, public_metrics, location, url, created_at}
+        None if user not found, creds invalid, or API error.
+    """
+    if not username:
+        return None
+    if not oauth_creds or not all(
+        k in oauth_creds for k in ('apiKey', 'apiSecret', 'accessToken', 'accessTokenSecret')
+    ):
+        logger.warning("fetch_x_user_by_username called without complete OAuth creds")
+        return None
+
+    handle = username.lstrip('@').strip()
+    if not handle:
+        return None
+
+    url = f'https://api.x.com/2/users/by/username/{handle}'
+    params = {
+        'user.fields': ','.join([
+            'id', 'name', 'username', 'created_at', 'description',
+            'location', 'profile_image_url', 'public_metrics', 'verified', 'url',
+        ])
+    }
+    auth = OAuth1(
+        oauth_creds['apiKey'],
+        oauth_creds['apiSecret'],
+        oauth_creds['accessToken'],
+        oauth_creds['accessTokenSecret'],
+    )
+    try:
+        resp = requests.get(url, auth=auth, params=params, timeout=8)
+        if resp.status_code == 404:
+            logger.info(f"X user @{handle} not found (404)")
+            return None
+        if resp.status_code == 429:
+            logger.warning(f"X API rate-limited while looking up @{handle}")
+            return None
+        resp.raise_for_status()
+        body = resp.json() or {}
+        data = body.get('data')
+        if not data:
+            logger.info(f"X API returned no data for @{handle}: {body}")
+            return None
+        return data
+    except requests.RequestException as e:
+        logger.warning(f"X API lookup failed for @{handle}: {e}")
+        return None
+
+
 def fetch_tweet_from_api(tweet_id: str, bearer_token: str = None, oauth_creds: Dict[str, str] = None) -> Optional[dict]:
     """
     Fetch comprehensive tweet data from Twitter API v2

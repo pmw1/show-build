@@ -39,7 +39,9 @@ celery_app = Celery(
         "services.asset_processing",
         "services.ffmpeg_tasks",
         "services.tools_tasks",  # Production tools (validation, reports)
-        "celery_cleanup"  # Orphaned job cleanup tasks
+        "celery_cleanup",  # Orphaned job cleanup tasks
+        "services.auto_description_service",  # Background tone + description generation
+        "services.phase2_enrichment_service"  # Async Phase 2 Grok enrichment
     ]
 )
 
@@ -73,6 +75,8 @@ celery_app.conf.update(
             "services.quote_extraction.*": {"queue": "quotes"},
             "services.asset_processing.*": {"queue": "assets"},  # Default for other asset tasks
             "services.ffmpeg_tasks.*": {"queue": "media"},
+            "services.auto_description_service.*": {"queue": "llm_content"},
+            "services.phase2_enrichment_service.*": {"queue": "llm_content"},
         }
     ],
 
@@ -107,6 +111,10 @@ celery_app.conf.update(
             'exchange': 'fsq',
             'routing_key': 'fsq',
         },
+        'llm_content': {
+            'exchange': 'llm_content',
+            'routing_key': 'llm_content',
+        },
     },
 
     # Result backend settings
@@ -121,8 +129,29 @@ celery_app.conf.update(
     task_send_sent_event=True,
 
     # Task time limits (prevent runaway tasks)
-    task_soft_time_limit=120,  # 2 minutes soft limit (raises exception)
-    task_time_limit=180,       # 3 minutes hard limit (kills task)
+    task_soft_time_limit=540,  # 9 minutes soft limit (allows model loading + generation)
+    task_time_limit=600,       # 10 minutes hard limit
+
+    # Beat schedule — must live here so beat process loads it on startup
+    beat_schedule={
+        'cleanup-orphaned-jobs-every-5-min': {
+            'task': 'cleanup_orphaned_jobs',
+            'schedule': 300.0,
+        },
+        'cleanup-old-jobs-daily': {
+            'task': 'cleanup_old_completed_jobs',
+            'schedule': 86400.0,
+            'args': (30,),
+        },
+        'llm-content-sweep-every-60s': {
+            'task': 'services.auto_description_service.sweep_segments_for_auto_generation',
+            'schedule': 60.0,
+        },
+        'episode-desc-sweep-every-120s': {
+            'task': 'services.auto_description_service.sweep_episodes_for_auto_generation',
+            'schedule': 120.0,
+        },
+    },
 )
 
 # Windows popup notifications (only on Windows)

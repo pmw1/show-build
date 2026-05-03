@@ -671,121 +671,119 @@ export async function getWorkersStatus() {
   </v-card>
 </template>
 
-<script>
-export default {
-  name: 'DeploymentSettings',
-  data() {
-    return {
-      deployment: {
-        hostname: '',
-        workerName: '',
-        queueName: 'media',
-        concurrency: 4,
-        redisHost: '192.168.51.223',
-        redisPort: 6379,
-        redisPassword: 'showbuild2025',
-        volumeEpisodes: '/mnt/sync/disaffected/episodes',
-        volumeSharedMedia: '/mnt/sync/shared_media'
-      },
-      queueOptions: [
-        {
-          value: 'media',
-          label: 'Media Queue',
-          description: 'FFmpeg video/audio processing (high CPU/GPU)',
-          icon: 'mdi-video',
-          color: 'primary'
-        },
-        {
-          value: 'compilation',
-          label: 'Compilation Queue',
-          description: 'Script compilation and rendering',
-          icon: 'mdi-file-document',
-          color: 'secondary'
-        },
-        {
-          value: 'quotes',
-          label: 'Quotes Queue',
-          description: 'Quote extraction and processing',
-          icon: 'mdi-format-quote-close',
-          color: 'success'
-        },
-        {
-          value: 'assets',
-          label: 'Assets Queue',
-          description: 'Asset optimization and metadata extraction',
-          icon: 'mdi-folder-star',
-          color: 'info'
-        }
-      ],
-      generatedScript: '',
-      rules: {
-        required: v => !!v || 'Required field',
-        workerName: v => /^[a-zA-Z0-9_]+$/.test(v) || 'Only alphanumeric and underscores allowed',
-        concurrency: v => (v >= 1 && v <= 16) || 'Must be between 1 and 16',
-        port: v => (v >= 1 && v <= 65535) || 'Must be a valid port number'
-      }
-    }
-  },
-  computed: {
-    isFormValid() {
-      return this.deployment.hostname &&
-             this.deployment.workerName &&
-             this.deployment.queueName &&
-             this.deployment.concurrency >= 1 &&
-             this.deployment.concurrency <= 16 &&
-             this.deployment.redisHost &&
-             this.deployment.redisPort
-    }
-  },
-  methods: {
-    generateDeploymentScript() {
-      const cmd = `./deploy_celery_worker.sh ${this.deployment.hostname} ${this.deployment.workerName} ${this.deployment.queueName} ${this.deployment.concurrency}`
+<script setup>
+import { ref, computed } from 'vue'
 
-      const envVars = `export REDIS_HOST="${this.deployment.redisHost}"
-export REDIS_PORT="${this.deployment.redisPort}"
-export REDIS_PASSWORD="${this.deployment.redisPassword}"
+const deploymentFormRef = ref(null)
+
+const deployment = ref({
+  hostname: '',
+  workerName: '',
+  queueName: 'media',
+  concurrency: 4,
+  redisHost: '192.168.51.223',
+  redisPort: 6379,
+  redisPassword: 'showbuild2025',
+  volumeEpisodes: '/mnt/sync/disaffected/episodes',
+  volumeSharedMedia: '/mnt/sync/shared_media'
+})
+
+const queueOptions = [
+  {
+    value: 'media',
+    label: 'Media Queue',
+    description: 'FFmpeg video/audio processing (high CPU/GPU)',
+    icon: 'mdi-video',
+    color: 'primary'
+  },
+  {
+    value: 'compilation',
+    label: 'Compilation Queue',
+    description: 'Script compilation and rendering',
+    icon: 'mdi-file-document',
+    color: 'secondary'
+  },
+  {
+    value: 'quotes',
+    label: 'Quotes Queue',
+    description: 'Quote extraction and processing',
+    icon: 'mdi-format-quote-close',
+    color: 'success'
+  },
+  {
+    value: 'assets',
+    label: 'Assets Queue',
+    description: 'Asset optimization and metadata extraction',
+    icon: 'mdi-folder-star',
+    color: 'info'
+  }
+]
+
+const generatedScript = ref('')
+
+const rules = {
+  required: v => !!v || 'Required field',
+  workerName: v => /^[a-zA-Z0-9_]+$/.test(v) || 'Only alphanumeric and underscores allowed',
+  concurrency: v => (v >= 1 && v <= 16) || 'Must be between 1 and 16',
+  port: v => (v >= 1 && v <= 65535) || 'Must be a valid port number'
+}
+
+const isFormValid = computed(() => {
+  return deployment.value.hostname &&
+         deployment.value.workerName &&
+         deployment.value.queueName &&
+         deployment.value.concurrency >= 1 &&
+         deployment.value.concurrency <= 16 &&
+         deployment.value.redisHost &&
+         deployment.value.redisPort
+})
+
+const generateDeploymentScript = () => {
+  const cmd = `./deploy_celery_worker.sh ${deployment.value.hostname} ${deployment.value.workerName} ${deployment.value.queueName} ${deployment.value.concurrency}`
+
+  const envVars = `export REDIS_HOST="${deployment.value.redisHost}"
+export REDIS_PORT="${deployment.value.redisPort}"
+export REDIS_PASSWORD="${deployment.value.redisPassword}"
 `
 
-      this.generatedScript = `# SSH to whisper and run:
+  generatedScript.value = `# SSH to whisper and run:
 cd /mnt/process/show-build/scripts
 
 # Set environment variables
 ${envVars}
 # Execute deployment
 ${cmd}`
-    },
+}
 
-    copyToClipboard(text) {
-      navigator.clipboard.writeText(text)
-      // Add snackbar notification here
-      console.log('Copied to clipboard')
-    },
+const copyToClipboard = (text) => {
+  navigator.clipboard.writeText(text)
+  // Add snackbar notification here
+  console.log('Copied to clipboard')
+}
 
-    downloadScript() {
-      const blob = new Blob([this.generatedScript], { type: 'text/plain' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `deploy-${this.deployment.workerName}.sh`
-      link.click()
-      URL.revokeObjectURL(url)
-    },
+const downloadScript = () => {
+  const blob = new Blob([generatedScript.value], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `deploy-${deployment.value.workerName}.sh`
+  link.click()
+  URL.revokeObjectURL(url)
+}
 
-    resetForm() {
-      this.deployment = {
-        hostname: '',
-        workerName: '',
-        queueName: 'media',
-        concurrency: 4,
-        redisHost: '192.168.51.223',
-        redisPort: 6379,
-        redisPassword: 'showbuild2025',
-        volumeEpisodes: '/mnt/sync/disaffected/episodes',
-        volumeSharedMedia: '/mnt/sync/shared_media'
-      }
-      this.generatedScript = ''
-    }
+const resetForm = () => {
+  deployment.value = {
+    hostname: '',
+    workerName: '',
+    queueName: 'media',
+    concurrency: 4,
+    redisHost: '192.168.51.223',
+    redisPort: 6379,
+    redisPassword: 'showbuild2025',
+    volumeEpisodes: '/mnt/sync/disaffected/episodes',
+    volumeSharedMedia: '/mnt/sync/shared_media'
   }
+  generatedScript.value = ''
 }
 </script>
 

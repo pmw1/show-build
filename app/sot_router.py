@@ -477,6 +477,7 @@ async def process_sot_multi_phase_endpoint(
                     }
                 )
                 db.add(source_asset)
+                db.flush()  # Flush to satisfy FK constraint before job update
                 logger.info(f"✅ Created source asset: {source_asset_id}")
 
         # Update job with episode, slug, and asset_id

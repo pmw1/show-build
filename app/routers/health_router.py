@@ -671,6 +671,49 @@ async def health():
     return health_status
 
 
+@router.get("/health/vmix")
+async def get_vmix_health():
+    """Dedicated vMix health check endpoint."""
+    result = {"connected": False, "status": "not_configured"}
+    try:
+        from api_config import APIConfigManager
+        api_mgr = APIConfigManager()
+        vmix_cfg = api_mgr.get_service_config("production", "control", "vmix") or {}
+        vmix_host = vmix_cfg.get("host", "")
+        vmix_port = vmix_cfg.get("port", "8088")
+        vmix_enabled = vmix_cfg.get("enabled", False)
+
+        if vmix_host and vmix_enabled:
+            vmix_url = f"http://{vmix_host}:{vmix_port}/api"
+            result["host"] = f"{vmix_host}:{vmix_port}"
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    response = await client.get(vmix_url)
+                    if response.status_code == 200:
+                        result["connected"] = True
+                        result["status"] = "connected"
+                    else:
+                        result["error"] = f"HTTP {response.status_code}"
+                        result["status"] = "warning"
+            except httpx.ConnectError:
+                result["error"] = "Connection refused"
+                result["status"] = "error"
+            except httpx.TimeoutException:
+                result["error"] = "Timeout"
+                result["status"] = "error"
+            except Exception as e:
+                result["error"] = str(e)[:100]
+                result["status"] = "error"
+        elif vmix_host and not vmix_enabled:
+            result["status"] = "disabled"
+            result["host"] = f"{vmix_host}:{vmix_port}"
+            result["error"] = "vMix integration is disabled"
+    except Exception as e:
+        result["error"] = str(e)[:100]
+        result["status"] = "error"
+    return result
+
+
 @router.get("/version")
 async def get_version():
     """Get server version information for worker update polling."""

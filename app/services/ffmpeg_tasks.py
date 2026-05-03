@@ -330,12 +330,14 @@ def calculate_sharpness_simple(image_path: str) -> float:
 
     file_size = os.path.getsize(image_path)
 
-    # Validate minimum file size (PNG thumbnails should be at least 5KB)
-    MIN_THUMBNAIL_SIZE = 5 * 1024  # 5KB
-    if file_size < MIN_THUMBNAIL_SIZE:
-        raise ValueError(f"Thumbnail file too small ({file_size} bytes), likely corrupted: {image_path}")
+    # A truncated ffmpeg write can leave a near-empty file; treat that as corrupt.
+    # Anything larger but still small (e.g. a near-uniform black/fade frame that
+    # PNG compresses well) is valid — it just gets a low sharpness score.
+    MIN_VALID_SIZE = 200
+    if file_size < MIN_VALID_SIZE:
+        raise ValueError(f"Thumbnail file truncated ({file_size} bytes): {image_path}")
 
-    # Validate PNG magic bytes
+    # Validate PNG magic bytes — definitive signal that ffmpeg produced a real PNG
     with open(image_path, 'rb') as f:
         magic = f.read(8)
         # PNG magic: 89 50 4E 47 0D 0A 1A 0A
@@ -2125,6 +2127,7 @@ def process_sot_video_multi_phase(
         audio_channels = audio_stream.get('channels', 0)
         audio_layout = audio_stream.get('channel_layout', 'unknown')
         sample_rate = audio_stream.get('sample_rate', 0)
+        has_audio = audio_channels > 0
 
         # Determine orientation
         if width > height:
@@ -2197,8 +2200,12 @@ def process_sot_video_multi_phase(
             validation_warnings.append(f"High framerate: {frame_rate}fps (will be normalized to 30fps)")
 
         # 5. Audio stream validation
-        if audio_channels == 0:
-            validation_errors.append("No audio stream detected (SOT videos must contain audio)")
+        # Audio is no longer required — silent videos process through a reduced pipeline.
+        if not has_audio:
+            validation_warnings.append(
+                "No audio stream detected — skipping transcription, channel analysis, "
+                "loudness normalization, and MP3 extraction"
+            )
 
         # Log validation results
         for warning in validation_warnings:
@@ -2266,60 +2273,71 @@ def process_sot_video_multi_phase(
         # - Extract audio as WAV for transcription
         # - Send to Whisper (medium model on kairo)
         # - Store transcription in cue block
+        # Skipped entirely when the source has no audio track.
         # ================================================================
-        logger.info(f"Phase 0.5: Audio extraction and transcription for {temp_job_id}")
-        _update_job_status(temp_job_id, 'phase0.5', 'processing')
-
-        # Extract audio as WAV for Whisper
-        phase05_audio = working_dir / f"{temp_job_id}_0.5_audio_for_whisper.wav"
-        audio_extract_cmd = [
-            ffmpeg, "-y",
-            "-i", str(input_file),
-            "-vn",  # No video
-            "-acodec", "pcm_s16le",  # WAV format
-            "-ar", "16000",  # 16kHz sample rate (Whisper standard)
-            "-ac", "1",  # Mono
-            str(phase05_audio)
-        ]
-        subprocess.run(audio_extract_cmd, check=True, capture_output=True)
-        logger.info(f"Phase 0.5: Audio extracted to {phase05_audio}")
-
-        # Transcribe with Whisper
         transcription_text = None  # Store for final return payload
-        try:
-            # Use simple transcription function (no FastAPI dependencies)
-            transcription_text = transcribe_audio_simple(str(phase05_audio))
-
-            logger.info(f"Phase 0.5: Transcription complete, {len(transcription_text)} characters")
-
-            # Derive outcue from transcription (last 5 words)
-            outcue_text = derive_outcue(transcription_text, word_count=5)
-            logger.info(f"Phase 0.5: Outcue derived: {outcue_text}")
-
-            # Store transcription in database
-            with db_session() as db:
-                job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
-                if job:
-                    job.transcription = transcription_text
-                    db.commit()
-
-            # Update cue block with transcription and outcue
+        if not has_audio:
+            logger.info(f"Phase 0.5: Skipped (no audio track) for {temp_job_id}")
+            _update_job_status(temp_job_id, 'phase0.5', 'skipped')
             if asset_id:
                 _update_sot_cue_block(episode, slug, asset_id, {
-                    'ProcessingStatus': 'Phase 0.5 Complete: Transcribed',
-                    'Transcription': transcription_text,
-                    'Outcue': outcue_text
+                    'ProcessingStatus': 'Phase 0.5 Skipped: No Audio Track',
+                    'Transcription': '',
+                    'Outcue': ''
                 })
+        else:
+            logger.info(f"Phase 0.5: Audio extraction and transcription for {temp_job_id}")
+            _update_job_status(temp_job_id, 'phase0.5', 'processing')
 
-        except Exception as e:
-            logger.error(f"Phase 0.5: Transcription failed: {e}")
-            transcription_text = f'[Transcription failed: {str(e)}]'
-            # Continue processing even if transcription fails
-            if asset_id:
-                _update_sot_cue_block(episode, slug, asset_id, {
-                    'ProcessingStatus': 'Phase 0.5 Complete: Transcription Failed',
-                    'Transcription': transcription_text
-                })
+            # Extract audio as WAV for Whisper
+            phase05_audio = working_dir / f"{temp_job_id}_0.5_audio_for_whisper.wav"
+            audio_extract_cmd = [
+                ffmpeg, "-y",
+                "-i", str(input_file),
+                "-vn",  # No video
+                "-acodec", "pcm_s16le",  # WAV format
+                "-ar", "16000",  # 16kHz sample rate (Whisper standard)
+                "-ac", "1",  # Mono
+                str(phase05_audio)
+            ]
+            subprocess.run(audio_extract_cmd, check=True, capture_output=True)
+            logger.info(f"Phase 0.5: Audio extracted to {phase05_audio}")
+
+            # Transcribe with Whisper
+            try:
+                # Use simple transcription function (no FastAPI dependencies)
+                transcription_text = transcribe_audio_simple(str(phase05_audio))
+
+                logger.info(f"Phase 0.5: Transcription complete, {len(transcription_text)} characters")
+
+                # Derive outcue from transcription (last 5 words)
+                outcue_text = derive_outcue(transcription_text, word_count=5)
+                logger.info(f"Phase 0.5: Outcue derived: {outcue_text}")
+
+                # Store transcription in database
+                with db_session() as db:
+                    job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+                    if job:
+                        job.transcription = transcription_text
+                        db.commit()
+
+                # Update cue block with transcription and outcue
+                if asset_id:
+                    _update_sot_cue_block(episode, slug, asset_id, {
+                        'ProcessingStatus': 'Phase 0.5 Complete: Transcribed',
+                        'Transcription': transcription_text,
+                        'Outcue': outcue_text
+                    })
+
+            except Exception as e:
+                logger.error(f"Phase 0.5: Transcription failed: {e}")
+                transcription_text = f'[Transcription failed: {str(e)}]'
+                # Continue processing even if transcription fails
+                if asset_id:
+                    _update_sot_cue_block(episode, slug, asset_id, {
+                        'ProcessingStatus': 'Phase 0.5 Complete: Transcription Failed',
+                        'Transcription': transcription_text
+                    })
 
         # ================================================================
         # PHASE 1: Video Normalization
@@ -2342,16 +2360,19 @@ def process_sot_video_multi_phase(
             # CPU encoding fallback for Linux workers (kairo)
             video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
 
+        # Audio args differ based on whether the source has an audio track.
+        if has_audio:
+            phase1_audio_args = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+        else:
+            phase1_audio_args = ["-an"]
+
         phase1_cmd = [
             ffmpeg, "-y",
             "-i", str(input_file),
             *video_encoder_args,
             "-r", "29.97",  # Broadcast standard framerate
             "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",  # Max width 1920, maintain aspect
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-ar", "48000",
-            "-ac", "2",
+            *phase1_audio_args,
             str(phase1_output)
         ]
         subprocess.run(phase1_cmd, check=True, capture_output=True)
@@ -2367,88 +2388,99 @@ def process_sot_video_multi_phase(
         # PHASE 1.1: Audio Channel Analysis and Dual-Mono Conversion
         # - Analyze left/right channel distribution
         # - Convert to dual-mono if channels are unbalanced
+        # Skipped entirely when the source has no audio track.
         # ================================================================
-        logger.info(f"Phase 1.1: Audio channel analysis for {temp_job_id}")
-        _update_job_status(temp_job_id, 'phase1.1', 'processing')
-
-        # Analyze audio channels with volumedetect and astats
-        analyze_cmd = [
-            ffmpeg,
-            "-i", str(phase1_output),
-            "-map", "0:a:0",
-            "-af", "astats=measure_overall=Peak_level:measure_perchannel=Peak_level",
-            "-f", "null",
-            "-"
-        ]
-        analyze_result = subprocess.run(analyze_cmd, capture_output=True, text=True)
-        astats_output = analyze_result.stderr
-
-        # Parse channel levels from astats output
-        # Look for lines like: [Parsed_astats_0 @ ...] Peak level dB: -12.34
-        import re
-        channel_levels = []
-        for line in astats_output.split('\n'):
-            if 'Peak level dB' in line:
-                # Handle -inf (silence), inf, and regular dB values
-                if '-inf' in line.lower():
-                    channel_levels.append(-96.0)  # Treat -inf as very quiet
-                elif 'inf' in line.lower():
-                    channel_levels.append(0.0)  # Treat inf as 0 dB
-                else:
-                    match = re.search(r'Peak level dB:\s*([-]?\d+\.?\d*)', line)
-                    if match:
-                        try:
-                            channel_levels.append(float(match.group(1)))
-                        except ValueError:
-                            logger.warning(f"Could not parse dB level from: {line}")
-                            channel_levels.append(-96.0)  # Default to very quiet
-
-        logger.info(f"Phase 1.1: Channel levels: {channel_levels}")
-
-        # Determine if dual-mono conversion is needed
-        needs_dual_mono = False
-        if len(channel_levels) >= 2:
-            left_level = channel_levels[0]
-            right_level = channel_levels[1]
-
-            # If one channel is significantly quieter (>10dB difference), convert to dual-mono
-            level_diff = abs(left_level - right_level)
-            if level_diff > 10:
-                needs_dual_mono = True
-                logger.info(f"Phase 1.1: Unbalanced channels detected ({level_diff:.1f}dB diff), converting to dual-mono")
-
-        phase1_1_output = working_dir / f"{temp_job_id}_1.1_audio-fixed.mp4"
-
-        if needs_dual_mono:
-            # Convert to dual-mono: mix both channels and output to both L/R
-            dual_mono_cmd = [
-                ffmpeg, "-y",
-                "-i", str(phase1_output),
-                "-c:v", "copy",  # Don't re-encode video
-                "-af", "pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1",  # Mix both channels equally
-                "-c:a", "aac",
-                "-b:a", "192k",
-                str(phase1_1_output)
-            ]
-            subprocess.run(dual_mono_cmd, check=True, capture_output=True)
-            logger.info(f"Phase 1.1 complete: Converted to dual-mono")
-
+        if not has_audio:
+            logger.info(f"Phase 1.1: Skipped (no audio track) for {temp_job_id}")
+            _update_job_status(temp_job_id, 'phase1.1', 'skipped')
+            phase1_1_output = phase1_output
             if asset_id:
                 _update_sot_cue_block(episode, slug, asset_id, {
-                    'ProcessingStatus': 'Phase 1.1 Complete: Dual-Mono Conversion Applied',
-                    'AudioProcessing': 'Dual-mono conversion (unbalanced channels detected)'
+                    'ProcessingStatus': 'Phase 1.1 Skipped: No Audio Track',
+                    'AudioProcessing': 'No audio track'
                 })
         else:
-            # Channels are balanced, just copy
-            import shutil
-            shutil.copy2(phase1_output, phase1_1_output)
-            logger.info(f"Phase 1.1 complete: Channels balanced, no conversion needed")
+            logger.info(f"Phase 1.1: Audio channel analysis for {temp_job_id}")
+            _update_job_status(temp_job_id, 'phase1.1', 'processing')
 
-            if asset_id:
-                _update_sot_cue_block(episode, slug, asset_id, {
-                    'ProcessingStatus': 'Phase 1.1 Complete: Audio Channels OK',
-                    'AudioProcessing': 'Channels balanced'
-                })
+            # Analyze audio channels with volumedetect and astats
+            analyze_cmd = [
+                ffmpeg,
+                "-i", str(phase1_output),
+                "-map", "0:a:0",
+                "-af", "astats=measure_overall=Peak_level:measure_perchannel=Peak_level",
+                "-f", "null",
+                "-"
+            ]
+            analyze_result = subprocess.run(analyze_cmd, capture_output=True, text=True)
+            astats_output = analyze_result.stderr
+
+            # Parse channel levels from astats output
+            # Look for lines like: [Parsed_astats_0 @ ...] Peak level dB: -12.34
+            import re
+            channel_levels = []
+            for line in astats_output.split('\n'):
+                if 'Peak level dB' in line:
+                    # Handle -inf (silence), inf, and regular dB values
+                    if '-inf' in line.lower():
+                        channel_levels.append(-96.0)  # Treat -inf as very quiet
+                    elif 'inf' in line.lower():
+                        channel_levels.append(0.0)  # Treat inf as 0 dB
+                    else:
+                        match = re.search(r'Peak level dB:\s*([-]?\d+\.?\d*)', line)
+                        if match:
+                            try:
+                                channel_levels.append(float(match.group(1)))
+                            except ValueError:
+                                logger.warning(f"Could not parse dB level from: {line}")
+                                channel_levels.append(-96.0)  # Default to very quiet
+
+            logger.info(f"Phase 1.1: Channel levels: {channel_levels}")
+
+            # Determine if dual-mono conversion is needed
+            needs_dual_mono = False
+            if len(channel_levels) >= 2:
+                left_level = channel_levels[0]
+                right_level = channel_levels[1]
+
+                # If one channel is significantly quieter (>10dB difference), convert to dual-mono
+                level_diff = abs(left_level - right_level)
+                if level_diff > 10:
+                    needs_dual_mono = True
+                    logger.info(f"Phase 1.1: Unbalanced channels detected ({level_diff:.1f}dB diff), converting to dual-mono")
+
+            phase1_1_output = working_dir / f"{temp_job_id}_1.1_audio-fixed.mp4"
+
+            if needs_dual_mono:
+                # Convert to dual-mono: mix both channels and output to both L/R
+                dual_mono_cmd = [
+                    ffmpeg, "-y",
+                    "-i", str(phase1_output),
+                    "-c:v", "copy",  # Don't re-encode video
+                    "-af", "pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1",  # Mix both channels equally
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    str(phase1_1_output)
+                ]
+                subprocess.run(dual_mono_cmd, check=True, capture_output=True)
+                logger.info(f"Phase 1.1 complete: Converted to dual-mono")
+
+                if asset_id:
+                    _update_sot_cue_block(episode, slug, asset_id, {
+                        'ProcessingStatus': 'Phase 1.1 Complete: Dual-Mono Conversion Applied',
+                        'AudioProcessing': 'Dual-mono conversion (unbalanced channels detected)'
+                    })
+            else:
+                # Channels are balanced, just copy
+                import shutil
+                shutil.copy2(phase1_output, phase1_1_output)
+                logger.info(f"Phase 1.1 complete: Channels balanced, no conversion needed")
+
+                if asset_id:
+                    _update_sot_cue_block(episode, slug, asset_id, {
+                        'ProcessingStatus': 'Phase 1.1 Complete: Audio Channels OK',
+                        'AudioProcessing': 'Channels balanced'
+                    })
 
         # ================================================================
         # 🧪 TESTING MODE DISABLED: Full pipeline enabled
@@ -2493,28 +2525,38 @@ def process_sot_video_multi_phase(
         # - EBU R128 loudness normalization (-23 LUFS target)
         # - Dynamic range compression
         # - Peak limiting to -1dB
+        # Skipped entirely when the source has no audio track.
         # ================================================================
-        logger.info(f"Phase 2: Audio normalization for {temp_job_id}")
-        _update_job_status(temp_job_id, 'phase2', 'processing')
+        if not has_audio:
+            logger.info(f"Phase 2: Skipped (no audio track) for {temp_job_id}")
+            _update_job_status(temp_job_id, 'phase2', 'skipped')
+            phase2_output = phase1_1_output
+            if asset_id:
+                _update_sot_cue_block(episode, slug, asset_id, {
+                    'ProcessingStatus': 'Phase 2 Skipped: No Audio Track'
+                })
+        else:
+            logger.info(f"Phase 2: Audio normalization for {temp_job_id}")
+            _update_job_status(temp_job_id, 'phase2', 'processing')
 
-        phase2_output = working_dir / f"{temp_job_id}_2_audio-normalized.mp4"
-        phase2_cmd = [
-            ffmpeg, "-y",
-            "-i", str(phase1_1_output),
-            "-c:v", "copy",  # Don't re-encode video
-            "-af", "loudnorm=I=-23:TP=-1:LRA=11,acompressor=threshold=-18dB:ratio=4:attack=5:release=50",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            str(phase2_output)
-        ]
-        subprocess.run(phase2_cmd, check=True, capture_output=True)
-        logger.info(f"Phase 2 complete: {phase2_output}")
+            phase2_output = working_dir / f"{temp_job_id}_2_audio-normalized.mp4"
+            phase2_cmd = [
+                ffmpeg, "-y",
+                "-i", str(phase1_1_output),
+                "-c:v", "copy",  # Don't re-encode video
+                "-af", "loudnorm=I=-23:TP=-1:LRA=11,acompressor=threshold=-18dB:ratio=4:attack=5:release=50",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                str(phase2_output)
+            ]
+            subprocess.run(phase2_cmd, check=True, capture_output=True)
+            logger.info(f"Phase 2 complete: {phase2_output}")
 
-        # Update cue block with Phase 2 completion
-        if asset_id:
-            _update_sot_cue_block(episode, slug, asset_id, {
-                'ProcessingStatus': 'Phase 2 Complete: Audio Normalized'
-            })
+            # Update cue block with Phase 2 completion
+            if asset_id:
+                _update_sot_cue_block(episode, slug, asset_id, {
+                    'ProcessingStatus': 'Phase 2 Complete: Audio Normalized'
+                })
 
 
         # ================================================================
@@ -2664,10 +2706,21 @@ def process_sot_video_multi_phase(
                 str(thumb_file)
             ]
             subprocess.run(thumb_cmd, check=True, capture_output=True)
-            phase4_thumbs.append(thumb_file)
 
-            # Calculate sharpness score - also validates file exists and is valid image
-            sharpness = calculate_sharpness_simple(str(thumb_file))
+            # Calculate sharpness score - also validates the file is a real PNG.
+            # If validation fails, drop the bad frame and keep going — one
+            # corrupt thumbnail shouldn't kill an otherwise successful job.
+            try:
+                sharpness = calculate_sharpness_simple(str(thumb_file))
+            except (ValueError, FileNotFoundError) as e:
+                logger.warning(f"Phase 4: skipping thumbnail {i}/{num_thumbnails} at {time_point:.1f}s ({e})")
+                try:
+                    thumb_file.unlink()
+                except FileNotFoundError:
+                    pass
+                continue
+
+            phase4_thumbs.append(thumb_file)
             thumbnail_data.append({
                 'filename': f"{temp_job_id}_4_thumb_{i:02d}.png",
                 'sharpness': sharpness,
@@ -2722,23 +2775,29 @@ def process_sot_video_multi_phase(
         elif avg_sharpness < SHARPNESS_THRESHOLD_WARNING:
             processing_report["warnings"].append(f"moderate_blur: Thumbnails below average sharpness (avg: {avg_sharpness:.1f})")
 
-        # Audio extract (full segment)
-        phase4_audio = working_dir / f"{temp_job_id}_4_audio.mp3"
-        audio_cmd = [
-            ffmpeg, "-y",
-            "-i", str(phase3_output),
-            "-vn",
-            "-acodec", "libmp3lame",
-            "-ab", "192k",
-            str(phase4_audio)
-        ]
-        subprocess.run(audio_cmd, check=True, capture_output=True)
-        logger.info(f"Phase 4 complete: 5 thumbnails + audio")
+        # Audio extract (full segment) — skipped when source has no audio track
+        if has_audio:
+            phase4_audio = working_dir / f"{temp_job_id}_4_audio.mp3"
+            audio_cmd = [
+                ffmpeg, "-y",
+                "-i", str(phase3_output),
+                "-vn",
+                "-acodec", "libmp3lame",
+                "-ab", "192k",
+                str(phase4_audio)
+            ]
+            subprocess.run(audio_cmd, check=True, capture_output=True)
+            logger.info(f"Phase 4 complete: thumbnails + audio")
+            phase4_status = 'Phase 4 Complete: Thumbnails + MP3 Generated'
+        else:
+            phase4_audio = None
+            logger.info(f"Phase 4 complete: thumbnails only (no audio track)")
+            phase4_status = 'Phase 4 Complete: Thumbnails Only (No Audio Track)'
 
         # Update cue block with Phase 4 completion
         if asset_id:
             _update_sot_cue_block(episode, slug, asset_id, {
-                'ProcessingStatus': 'Phase 4 Complete: 5 Thumbnails + MP3 Generated'
+                'ProcessingStatus': phase4_status
             })
 
         # ================================================================
@@ -2760,11 +2819,12 @@ def process_sot_video_multi_phase(
 
         # Move and rename files
         final_video = final_video_dir / f"{normalized_slug}.mp4"
-        final_audio = final_video_dir / f"{normalized_slug}.mp3"
+        final_audio = final_video_dir / f"{normalized_slug}.mp3" if has_audio else None
 
         import shutil
         shutil.move(str(phase3_output), str(final_video))
-        shutil.move(str(phase4_audio), str(final_audio))
+        if has_audio and phase4_audio is not None:
+            shutil.move(str(phase4_audio), str(final_audio))
 
         # Move all 15 thumbnails to thumbnails directory (PNG format)
         final_thumbs = []
@@ -2798,7 +2858,7 @@ def process_sot_video_multi_phase(
                 job.current_phase = 'completed'
                 job.status = 'completed'
                 job.final_video_path = str(final_video.relative_to(episodes_root))
-                job.final_audio_path = str(final_audio.relative_to(episodes_root))
+                job.final_audio_path = str(final_audio.relative_to(episodes_root)) if final_audio else None
                 job.final_thumbnail_path = str(final_thumbs[0].relative_to(episodes_root))  # Store first thumbnail as primary
                 db.commit()
 
@@ -2889,16 +2949,18 @@ def process_sot_video_multi_phase(
             import json
             # Derive outcue if we have valid transcription
             final_outcue = derive_outcue(transcription_text) if transcription_text else ''
-            _update_sot_cue_block(episode, slug, asset_id, {
+            cue_updates = {
                 'ProcessingStatus': 'Complete',
                 'MediaURL': f"/episodes/{episode}/assets/video/{normalized_slug}.mp4",
                 'ThumbnailURL': thumbnail_urls[7],  # Middle thumbnail (8/15) as primary
                 'ThumbnailOptions': json.dumps(thumbnail_urls),  # All 15 thumbnail URLs as JSON string
-                'AudioURL': f"/episodes/{episode}/assets/video/{normalized_slug}.mp3",
                 'Duration': duration_formatted,
                 'Transcription': transcription_text or '',  # Include transcription in final cue update
                 'Outcue': final_outcue  # Last 5 words of transcription
-            })
+            }
+            if has_audio:
+                cue_updates['AudioURL'] = f"/episodes/{episode}/assets/video/{normalized_slug}.mp3"
+            _update_sot_cue_block(episode, slug, asset_id, cue_updates)
 
         # Replace source AssetID with final AssetID in cue block
         with db_session() as db:
@@ -2936,7 +2998,7 @@ def process_sot_video_multi_phase(
             "slug": normalized_slug,
             "asset_id": asset_id,
             "video_path": str(final_video.relative_to(episodes_root)),
-            "audio_path": str(final_audio.relative_to(episodes_root)),
+            "audio_path": str(final_audio.relative_to(episodes_root)) if final_audio else None,
             "thumbnail_path": str(final_thumbs[7].relative_to(episodes_root)),  # Primary (middle) thumbnail
             "thumbnail_options": [str(t.relative_to(episodes_root)) for t in final_thumbs],
             "duration": duration,
@@ -3386,10 +3448,21 @@ def process_vo_video(
                 str(thumb_file)
             ]
             subprocess.run(thumb_cmd, check=True, capture_output=True)
-            phase3_thumbs.append(thumb_file)
 
-            # Calculate sharpness score - also validates file exists and is valid image
-            sharpness = calculate_sharpness_simple(str(thumb_file))
+            # Calculate sharpness score - also validates the file is a real PNG.
+            # If validation fails, drop the bad frame and keep going — one
+            # corrupt thumbnail shouldn't kill an otherwise successful job.
+            try:
+                sharpness = calculate_sharpness_simple(str(thumb_file))
+            except (ValueError, FileNotFoundError) as e:
+                logger.warning(f"Phase 3: skipping thumbnail {i}/{num_thumbnails} at {time_point:.1f}s ({e})")
+                try:
+                    thumb_file.unlink()
+                except FileNotFoundError:
+                    pass
+                continue
+
+            phase3_thumbs.append(thumb_file)
             thumbnail_data.append({
                 'filename': f"{temp_job_id}_thumb_{i:02d}.png",
                 'sharpness': sharpness,

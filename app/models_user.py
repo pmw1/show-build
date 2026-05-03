@@ -30,6 +30,15 @@ class User(Base):
     email = Column(String(255), nullable=True, default="")
     phone = Column(String(20), nullable=True, default="")
     profile_picture = Column(String(500), nullable=True, default="")
+    # Display + presence (added g011_user_messaging migration)
+    display_name = Column(String(100), nullable=True)        # Pretty name shown in messages/presence; falls back to first/last/username
+    chip_color = Column(String(40), nullable=True)           # Vuetify color name or hex used for the user's chip
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)  # Updated by auth deps; powers "online" indicator
+
+    # Current location — public presence (added g012_user_location migration)
+    # Shape: {view: 'content-editor', episode_number: '0271', segment_title?: '...', mode?: 'script'}
+    current_location = Column(JSON, nullable=True)
+    location_updated_at = Column(DateTime(timezone=True), nullable=True)
     
     # Test data flag
     is_test_data = Column(Boolean, default=False, nullable=False)  # True for test/dummy user accounts

@@ -1,5 +1,5 @@
 <template>
-  <div class="clock-display" :class="{ clickable: editable }" @click="editable && toggleDropdown()">
+  <div ref="rootRef" class="clock-display" :class="{ clickable: editable }" @click="editable && toggleDropdown()">
     <div class="label-primary">{{ editable ? activeTzShortLabel : label }}</div>
     <div class="time">{{ currentTime }}</div>
     <div class="label-secondary" v-if="!editable">{{ timezoneLabel }}</div>
@@ -8,52 +8,60 @@
       <span class="tz-caret">&#9662;</span>
     </div>
 
-    <!-- Dropdown panel -->
-    <div v-if="showDropdown" class="tz-dropdown" @click.stop>
-      <!-- Timezone search -->
-      <div class="tz-search-row">
-        <input
-          ref="tzSearchRef"
-          v-model="tzSearch"
-          class="tz-search-input"
-          placeholder="Search timezones..."
-          spellcheck="false"
-          @keydown.escape="showDropdown = false"
-        />
-      </div>
-
-      <!-- Common timezones -->
-      <div class="tz-section-label">TIMEZONES</div>
-      <div class="tz-list">
-        <div
-          v-for="tz in filteredTimezones"
-          :key="tz.value"
-          class="tz-item"
-          :class="{ active: tz.value === activeTz }"
-          @click="selectTimezone(tz.value)"
-        >
-          <span class="tz-item-label">{{ tz.label }}</span>
-          <span class="tz-item-time">{{ tz.currentTime }}</span>
+    <!-- Dropdown panel — teleported to <body> so it escapes the app-bar
+         stacking context and renders above everything else. -->
+    <Teleport to="body">
+      <div
+        v-if="showDropdown"
+        class="tz-dropdown"
+        :style="dropdownStyle"
+        @click.stop
+      >
+        <!-- Timezone search -->
+        <div class="tz-search-row">
+          <input
+            ref="tzSearchRef"
+            v-model="tzSearch"
+            class="tz-search-input"
+            placeholder="Search timezones..."
+            spellcheck="false"
+            @keydown.escape="showDropdown = false"
+          />
         </div>
-      </div>
 
-      <!-- Guest timezones (if provided) -->
-      <template v-if="guests && guests.length">
-        <div class="tz-section-label" style="margin-top: 4px;">EPISODE GUESTS</div>
+        <!-- Common timezones -->
+        <div class="tz-section-label">TIMEZONES</div>
         <div class="tz-list">
           <div
-            v-for="guest in guests"
-            :key="guest.name"
-            class="tz-item guest-item"
-            @click="guest.timezone && selectTimezone(guest.timezone)"
+            v-for="tz in filteredTimezones"
+            :key="tz.value"
+            class="tz-item"
+            :class="{ active: tz.value === activeTz }"
+            @click="selectTimezone(tz.value)"
           >
-            <span class="tz-item-label">{{ guest.name }}</span>
-            <span class="tz-item-time" v-if="guest.timezone">{{ guest.timezone.replace(/_/g, ' ') }}</span>
-            <span class="tz-item-time" v-else style="color: #aaa;">No TZ set</span>
+            <span class="tz-item-label">{{ tz.label }}</span>
+            <span class="tz-item-time">{{ tz.currentTime }}</span>
           </div>
         </div>
-      </template>
-    </div>
+
+        <!-- Guest timezones (if provided) -->
+        <template v-if="guests && guests.length">
+          <div class="tz-section-label" style="margin-top: 4px;">EPISODE GUESTS</div>
+          <div class="tz-list">
+            <div
+              v-for="guest in guests"
+              :key="guest.name"
+              class="tz-item guest-item"
+              @click="guest.timezone && selectTimezone(guest.timezone)"
+            >
+              <span class="tz-item-label">{{ guest.name }}</span>
+              <span class="tz-item-time" v-if="guest.timezone">{{ guest.timezone.replace(/_/g, ' ') }}</span>
+              <span class="tz-item-time" v-else style="color: #aaa;">No TZ set</span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -75,7 +83,32 @@ const activeTz = ref('UTC')
 const showDropdown = ref(false)
 const tzSearch = ref('')
 const tzSearchRef = ref(null)
+const rootRef = ref(null)
+const dropdownPos = ref({ top: 0, left: 0, width: 260 })  // updated when dropdown opens
 let clockInterval = null
+
+const dropdownStyle = computed(() => ({
+  top: `${dropdownPos.value.top}px`,
+  left: `${dropdownPos.value.left}px`,
+  minWidth: `${dropdownPos.value.width}px`
+}))
+
+function recomputeDropdownPosition() {
+  const el = rootRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const minWidth = Math.max(rect.width, 260)
+  // Default: open below the activator, left-aligned. If there's no room
+  // below, open above instead so the menu doesn't run off-screen.
+  const dropdownEstimatedHeight = 360
+  const spaceBelow = window.innerHeight - rect.bottom
+  const top = (spaceBelow < dropdownEstimatedHeight && rect.top > dropdownEstimatedHeight)
+    ? Math.max(8, rect.top - dropdownEstimatedHeight)
+    : rect.bottom
+  // Keep it within the viewport horizontally.
+  const left = Math.min(Math.max(8, rect.left), window.innerWidth - minWidth - 8)
+  dropdownPos.value = { top, left, width: minWidth }
+}
 
 const commonTimezones = [
   { label: 'US Eastern (New York)', value: 'America/New_York' },
@@ -147,6 +180,7 @@ const toggleDropdown = async () => {
   showDropdown.value = !showDropdown.value
   if (showDropdown.value) {
     tzSearch.value = ''
+    recomputeDropdownPosition()
     await nextTick()
     if (tzSearchRef.value) tzSearchRef.value.focus()
   }
@@ -183,15 +217,15 @@ const updateTime = () => {
   }
 }
 
-// Close dropdown on outside click
+// Close dropdown on outside click. Use the local rootRef for the activator
+// so clicks on OTHER editable clocks correctly close this one.
 const handleOutsideClick = (e) => {
-  if (showDropdown.value) {
-    const el = document.querySelector('.tz-dropdown')
-    const clock = document.querySelector('.clock-display.clickable')
-    if (el && !el.contains(e.target) && clock && !clock.contains(e.target)) {
-      showDropdown.value = false
-    }
-  }
+  if (!showDropdown.value) return
+  const dropdownEl = document.querySelector('.tz-dropdown')
+  const activator = rootRef.value
+  if (dropdownEl && dropdownEl.contains(e.target)) return
+  if (activator && activator.contains(e.target)) return
+  showDropdown.value = false
 }
 
 watch(() => props.timezone, (newTz) => {
@@ -199,15 +233,23 @@ watch(() => props.timezone, (newTz) => {
   updateTime()
 }, { immediate: true })
 
+function handleViewportChange() {
+  if (showDropdown.value) recomputeDropdownPosition()
+}
+
 onMounted(() => {
   updateTime()
   clockInterval = setInterval(updateTime, 1000)
   document.addEventListener('mousedown', handleOutsideClick)
+  window.addEventListener('resize', handleViewportChange)
+  window.addEventListener('scroll', handleViewportChange, true)
 })
 
 onUnmounted(() => {
   if (clockInterval) clearInterval(clockInterval)
   document.removeEventListener('mousedown', handleOutsideClick)
+  window.removeEventListener('resize', handleViewportChange)
+  window.removeEventListener('scroll', handleViewportChange, true)
 })
 </script>
 
@@ -284,28 +326,30 @@ onUnmounted(() => {
   opacity: 0.5;
 }
 
-/* Dropdown panel */
+/* Dropdown panel styles live in the non-scoped block below because
+   the dropdown is teleported to <body> and scoped styles don't follow it. */
+</style>
+
+<style>
+/* Non-scoped: targets the teleported .tz-dropdown that lives directly under <body>. */
 .tz-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  min-width: 260px;
+  position: fixed;
   max-height: 360px;
   overflow-y: auto;
   background: white;
   border: 1px solid rgba(0, 0, 0, 0.15);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 9999;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  /* Vuetify's overlay layer caps around 2400; menus sit at 2002. Sit above all. */
+  z-index: 99999;
   border-radius: 0 0 4px 4px;
 }
 
-.tz-search-row {
+.tz-dropdown .tz-search-row {
   padding: 6px 8px;
   border-bottom: 1px solid #eee;
 }
 
-.tz-search-input {
+.tz-dropdown .tz-search-input {
   width: 100%;
   font-size: 0.75rem;
   border: 1px solid #ddd;
@@ -314,11 +358,11 @@ onUnmounted(() => {
   outline: none;
 }
 
-.tz-search-input:focus {
+.tz-dropdown .tz-search-input:focus {
   border-color: #1976d2;
 }
 
-.tz-section-label {
+.tz-dropdown .tz-section-label {
   font-size: 0.6rem;
   font-weight: bold;
   color: #888;
@@ -328,12 +372,12 @@ onUnmounted(() => {
   background: #f5f5f5;
 }
 
-.tz-list {
+.tz-dropdown .tz-list {
   max-height: 240px;
   overflow-y: auto;
 }
 
-.tz-item {
+.tz-dropdown .tz-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -343,16 +387,16 @@ onUnmounted(() => {
   border-bottom: 1px solid #f5f5f5;
 }
 
-.tz-item:hover {
+.tz-dropdown .tz-item:hover {
   background: #e3f2fd;
 }
 
-.tz-item.active {
+.tz-dropdown .tz-item.active {
   background: #e3f2fd;
   font-weight: bold;
 }
 
-.tz-item-label {
+.tz-dropdown .tz-item-label {
   color: #333;
   flex: 1;
   white-space: nowrap;
@@ -361,7 +405,7 @@ onUnmounted(() => {
   margin-right: 8px;
 }
 
-.tz-item-time {
+.tz-dropdown .tz-item-time {
   font-family: 'Courier New', Courier, monospace;
   font-size: 0.7rem;
   color: #666;
@@ -369,7 +413,7 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.guest-item .tz-item-label {
+.tz-dropdown .guest-item .tz-item-label {
   color: #1976d2;
 }
 </style>

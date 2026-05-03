@@ -227,176 +227,173 @@
   </v-dialog>
 </template>
 
-<script>
-export default {
-  name: 'CueModal',
-  emits: ['update:show', 'submit'],
-  props: {
-    show: {
-      type: Boolean,
-      default: false
-    },
-    cueType: {
-      type: String,
-      required: true,
-      validator: (value) => ['fsq', 'sot', 'vo', 'nat', 'pkg', 'dir'].includes(value)
-    }
-  },
-  data() {
-    return {
-      formValid: false,
-      slug: '',
-      duration: '',
-      description: '',
-      // SOT specific
-      sourceFile: '',
-      timecode: '',
-      // VO specific
-      voScript: '',
-      // FSQ specific
-      quoteText: '',
-      attribution: '',
-      fontStyle: 'normal',
-      // NAT specific
-      location: '',
-      ambientType: 'outdoor',
-      // PKG specific
-      reporter: '',
-      pkgDuration: '',
-      packageNotes: '',
-      // DIR specific
-      noteText: '',
+<script setup>
+import { ref, computed, watch } from 'vue'
 
-      // Validation rules
-      slugRules: [
-        v => !!v || 'Slug is required',
-        v => (v && v.length >= 2) || 'Slug must be at least 2 characters'
-      ],
-      descriptionRules: [
-        v => !!v || 'Description is required',
-        v => (v && v.length >= 5) || 'Description must be at least 5 characters'
-      ],
-      durationRules: [
-        v => !v || /^\d{1,2}:\d{2}$/.test(v) || 'Duration must be in MM:SS format'
-      ],
-      quoteRules: [
-        v => !!v || 'Quote text is required'
-      ],
-      noteRules: [
-        v => !!v || 'Director note is required'
-      ],
-      
-      // Select options
-      fontStyles: [
-        'normal',
-        'bold',
-        'italic',
-        'large',
-        'small'
-      ],
-      ambientTypes: [
-        'outdoor',
-        'indoor',
-        'crowd',
-        'traffic',
-        'nature',
-        'office',
-        'restaurant',
-        'street',
-        'other'
-      ]
-    }
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
   },
-  computed: {
-    cueTypeLabel() {
-      const labels = {
-        fsq: 'Full Screen Quote',
-        sot: 'Sound on Tape',
-        vo: 'Voice Over',
-        nat: 'Natural Sound',
-        pkg: 'Package',
-        dir: 'Director Note'
-      }
-      return labels[this.cueType] || this.cueType
-    },
-    cueColor() {
-      const colors = {
-        fsq: 'green-darken-3',
-        sot: 'purple-darken-3',
-        vo: 'deep-orange-darken-3',
-        nat: 'teal-darken-3',
-        pkg: 'red-darken-3',
-        dir: 'amber-darken-3'
-      }
-      return colors[this.cueType] || 'grey'
-    }
-  },
-  methods: {
-    submit() {
-      const baseData = {
-        type: this.cueType,
-        slug: this.slug,
-        duration: this.duration,
-        description: this.description
-      }
-      
-      // Add type-specific data
-      const typeSpecificData = {}
-      
-      if (this.cueType === 'sot') {
-        typeSpecificData.sourceFile = this.sourceFile
-        typeSpecificData.timecode = this.timecode
-      } else if (this.cueType === 'vo') {
-        typeSpecificData.script = this.voScript
-      } else if (this.cueType === 'fsq') {
-        typeSpecificData.quoteText = this.quoteText
-        typeSpecificData.attribution = this.attribution
-        typeSpecificData.fontStyle = this.fontStyle
-      } else if (this.cueType === 'nat') {
-        typeSpecificData.location = this.location
-        typeSpecificData.ambientType = this.ambientType
-      } else if (this.cueType === 'pkg') {
-        typeSpecificData.reporter = this.reporter
-        typeSpecificData.pkgDuration = this.pkgDuration
-        typeSpecificData.notes = this.packageNotes
-      } else if (this.cueType === 'dir') {
-        typeSpecificData.noteText = this.noteText
-      }
-      
-      this.$emit('submit', { ...baseData, ...typeSpecificData })
-      this.reset()
-    },
-    cancel() {
-      this.$emit('update:show', false)
-      this.reset()
-    },
-    reset() {
-      this.slug = ''
-      this.duration = ''
-      this.description = ''
-      this.sourceFile = ''
-      this.timecode = ''
-      this.voScript = ''
-      this.quoteText = ''
-      this.attribution = ''
-      this.fontStyle = 'normal'
-      this.location = ''
-      this.ambientType = 'outdoor'
-      this.reporter = ''
-      this.pkgDuration = ''
-      this.packageNotes = ''
-      this.noteText = ''
-      this.formValid = false
-    }
-  },
-  watch: {
-    show(newVal) {
-      if (!newVal) {
-        this.reset()
-      }
-    }
+  cueType: {
+    type: String,
+    required: true,
+    validator: (value) => ['fsq', 'sot', 'vo', 'nat', 'pkg', 'dir'].includes(value)
   }
+})
+
+const emit = defineEmits(['update:show', 'submit'])
+
+const formValid = ref(false)
+const slug = ref('')
+const duration = ref('')
+const description = ref('')
+// SOT specific
+const sourceFile = ref('')
+const timecode = ref('')
+// VO specific
+const voScript = ref('')
+// FSQ specific
+const quoteText = ref('')
+const attribution = ref('')
+const fontStyle = ref('normal')
+// NAT specific
+const location = ref('')
+const ambientType = ref('outdoor')
+// PKG specific
+const reporter = ref('')
+const pkgDuration = ref('')
+const packageNotes = ref('')
+// DIR specific
+const noteText = ref('')
+
+// Validation rules
+const slugRules = [
+  v => !!v || 'Slug is required',
+  v => (v && v.length >= 2) || 'Slug must be at least 2 characters'
+]
+const descriptionRules = [
+  v => !!v || 'Description is required',
+  v => (v && v.length >= 5) || 'Description must be at least 5 characters'
+]
+const durationRules = [
+  v => !v || /^\d{1,2}:\d{2}$/.test(v) || 'Duration must be in MM:SS format'
+]
+const quoteRules = [
+  v => !!v || 'Quote text is required'
+]
+const noteRules = [
+  v => !!v || 'Director note is required'
+]
+
+// Select options
+const fontStyles = [
+  'normal',
+  'bold',
+  'italic',
+  'large',
+  'small'
+]
+const ambientTypes = [
+  'outdoor',
+  'indoor',
+  'crowd',
+  'traffic',
+  'nature',
+  'office',
+  'restaurant',
+  'street',
+  'other'
+]
+
+const cueTypeLabel = computed(() => {
+  const labels = {
+    fsq: 'Full Screen Quote',
+    sot: 'Sound on Tape',
+    vo: 'Voice Over',
+    nat: 'Natural Sound',
+    pkg: 'Package',
+    dir: 'Director Note'
+  }
+  return labels[props.cueType] || props.cueType
+})
+
+const cueColor = computed(() => {
+  const colors = {
+    fsq: 'green-darken-3',
+    sot: 'purple-darken-3',
+    vo: 'deep-orange-darken-3',
+    nat: 'teal-darken-3',
+    pkg: 'red-darken-3',
+    dir: 'amber-darken-3'
+  }
+  return colors[props.cueType] || 'grey'
+})
+
+function reset() {
+  slug.value = ''
+  duration.value = ''
+  description.value = ''
+  sourceFile.value = ''
+  timecode.value = ''
+  voScript.value = ''
+  quoteText.value = ''
+  attribution.value = ''
+  fontStyle.value = 'normal'
+  location.value = ''
+  ambientType.value = 'outdoor'
+  reporter.value = ''
+  pkgDuration.value = ''
+  packageNotes.value = ''
+  noteText.value = ''
+  formValid.value = false
 }
+
+function submit() {
+  const baseData = {
+    type: props.cueType,
+    slug: slug.value,
+    duration: duration.value,
+    description: description.value
+  }
+
+  // Add type-specific data
+  const typeSpecificData = {}
+
+  if (props.cueType === 'sot') {
+    typeSpecificData.sourceFile = sourceFile.value
+    typeSpecificData.timecode = timecode.value
+  } else if (props.cueType === 'vo') {
+    typeSpecificData.script = voScript.value
+  } else if (props.cueType === 'fsq') {
+    typeSpecificData.quoteText = quoteText.value
+    typeSpecificData.attribution = attribution.value
+    typeSpecificData.fontStyle = fontStyle.value
+  } else if (props.cueType === 'nat') {
+    typeSpecificData.location = location.value
+    typeSpecificData.ambientType = ambientType.value
+  } else if (props.cueType === 'pkg') {
+    typeSpecificData.reporter = reporter.value
+    typeSpecificData.pkgDuration = pkgDuration.value
+    typeSpecificData.notes = packageNotes.value
+  } else if (props.cueType === 'dir') {
+    typeSpecificData.noteText = noteText.value
+  }
+
+  emit('submit', { ...baseData, ...typeSpecificData })
+  reset()
+}
+
+function cancel() {
+  emit('update:show', false)
+  reset()
+}
+
+watch(() => props.show, (newVal) => {
+  if (!newVal) {
+    reset()
+  }
+})
 </script>
 
 <style scoped>

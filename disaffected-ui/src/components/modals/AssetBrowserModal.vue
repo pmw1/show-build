@@ -54,47 +54,27 @@
   </v-dialog>
 </template>
 
-<script>
-export default {
-  name: 'AssetBrowserModal',
-  props: {
-    show: { type: Boolean, required: true },
-    availableAssets: { type: Array, default: () => [] },
-    selectedFiles: { type: Array, default: () => [] },
-  },
-  emits: ['update:show', 'update:selectedFiles', 'upload', 'insert-asset'],
-  methods: {
-    getAssetTypeColor(type) {
-      const colors = {
-        video: 'blue',
-        audio: 'green',
-        other: 'grey',
-      };
-      return colors[type] || colors.other;
-    },
-    getAssetTypeIcon(type) {
-      const icons = {
-        video: 'mdi-movie',
-        audio: 'mdi-music-note',
-        other: 'mdi-file-document',
-      };
-      return icons[type] || icons.other;
-    },
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.$emit('update:show', false);
-      }
-    },
-  },
-  mounted() {
-    document.addEventListener('keydown', this.handleKeydown);
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown);
-  },
-};
+<script setup>
+import { onMounted, onBeforeUnmount } from 'vue'
+
+const props = defineProps({
+  show: { type: Boolean, required: true },
+  availableAssets: { type: Array, default: () => [] },
+  selectedFiles: { type: Array, default: () => [] },
+})
+defineEmits(['update:show', 'update:selectedFiles', 'upload', 'insert-asset'])
+
+function getAssetTypeColor(type) {
+  return ({ video: 'blue', audio: 'green' })[type] || 'grey'
+}
+function getAssetTypeIcon(type) {
+  return ({ video: 'mdi-movie', audio: 'mdi-music-note' })[type] || 'mdi-file-document'
+}
+function handleKeydown(event) {
+  if (event.key === 'Escape' && props.show) { event.preventDefault(); event.stopPropagation() }
+}
+onMounted(() => document.addEventListener('keydown', handleKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
 </script>
 
 <style scoped>

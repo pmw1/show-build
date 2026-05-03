@@ -95,202 +95,188 @@
   </v-card>
 </template>
 
-<script>
+<script setup>
 import { ref, onUnmounted } from 'vue'
 
-export default {
-  name: 'LEDMeter',
-  props: {
-    audioStream: {
-      type: MediaStream,
-      default: null
-    }
-  },
-  setup() {
-    // Create LED segments (bottom to top) - 8-bit style with fewer, chunkier segments
-    const ledSegments = []
-    for (let i = 0; i <= 100; i += 5) { // Bigger steps for 8-bit look
-      ledSegments.push({ value: i })
-    }
+defineProps({
+  audioStream: {
+    type: MediaStream,
+    default: null
+  }
+})
 
-    const tracks = ref([
-      { label: 'Track 1', level: 0, peak: 0 },
-      { label: 'Track 2', level: 0, peak: 0 },
-      { label: 'Track 3', level: 0, peak: 0 },
-      { label: 'Track 4', level: 0, peak: 0 }
-    ])
+// Create LED segments (bottom to top) - 8-bit style with fewer, chunkier segments
+const ledSegments = []
+for (let i = 0; i <= 100; i += 5) { // Bigger steps for 8-bit look
+  ledSegments.push({ value: i })
+}
 
-    const testing = ref(false)
-    let testInterval = null
-    let peakDecayInterval = null
-    let audioContext = null
-    let analyser = null
-    let dataArray = null
-    let animationFrameId = null
+const tracks = ref([
+  { label: 'Track 1', level: 0, peak: 0 },
+  { label: 'Track 2', level: 0, peak: 0 },
+  { label: 'Track 3', level: 0, peak: 0 },
+  { label: 'Track 4', level: 0, peak: 0 }
+])
 
-    const startRealAudio = async () => {
-      try {
-        // Get microphone access
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+const testing = ref(false)
+let testInterval = null
+let peakDecayInterval = null
+let audioContext = null
+let analyser = null
+let dataArray = null
+let animationFrameId = null
 
-        // Create audio context and analyser
-        audioContext = new (window.AudioContext || window.webkitAudioContext)()
-        analyser = audioContext.createAnalyser()
-        analyser.fftSize = 2048
-        const bufferLength = analyser.frequencyBinCount
-        dataArray = new Uint8Array(bufferLength)
+const startRealAudio = async () => {
+  try {
+    // Get microphone access
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
 
-        // Connect stream to analyser
-        const source = audioContext.createMediaStreamSource(stream)
-        source.connect(analyser)
+    // Create audio context and analyser
+    audioContext = new (window.AudioContext || window.webkitAudioContext)()
+    analyser = audioContext.createAnalyser()
+    analyser.fftSize = 2048
+    const bufferLength = analyser.frequencyBinCount
+    dataArray = new Uint8Array(bufferLength)
 
-        testing.value = true
+    // Connect stream to analyser
+    const source = audioContext.createMediaStreamSource(stream)
+    source.connect(analyser)
 
-        // Analyze audio in real-time
-        const updateLevels = () => {
-          if (!testing.value) return
+    testing.value = true
 
-          analyser.getByteFrequencyData(dataArray)
+    // Analyze audio in real-time
+    const updateLevels = () => {
+      if (!testing.value) return
 
-          // Split frequency spectrum into 4 bands (like a graphic equalizer)
-          const bandSize = Math.floor(bufferLength / 4)
+      analyser.getByteFrequencyData(dataArray)
 
-          for (let i = 0; i < 4; i++) {
-            const start = i * bandSize
-            const end = start + bandSize
+      // Split frequency spectrum into 4 bands (like a graphic equalizer)
+      const bandSize = Math.floor(bufferLength / 4)
 
-            // Calculate average level for this frequency band
-            let sum = 0
-            for (let j = start; j < end; j++) {
-              sum += dataArray[j]
-            }
-            const average = sum / bandSize
+      for (let i = 0; i < 4; i++) {
+        const start = i * bandSize
+        const end = start + bandSize
 
-            // Convert to 0-100 scale (255 -> 100)
-            const level = (average / 255) * 100
-
-            tracks.value[i].level = level
-
-            // Update peak
-            if (level > tracks.value[i].peak) {
-              tracks.value[i].peak = level
-            }
-          }
-
-          animationFrameId = requestAnimationFrame(updateLevels)
+        // Calculate average level for this frequency band
+        let sum = 0
+        for (let j = start; j < end; j++) {
+          sum += dataArray[j]
         }
+        const average = sum / bandSize
 
-        updateLevels()
+        // Convert to 0-100 scale (255 -> 100)
+        const level = (average / 255) * 100
 
-        // Peak decay
-        peakDecayInterval = setInterval(() => {
-          tracks.value.forEach(track => {
-            if (track.peak > 0) {
-              track.peak = Math.max(0, track.peak - 0.5)
-            }
-          })
-        }, 100)
+        tracks.value[i].level = level
 
-        // Update track labels to show frequency bands
-        tracks.value[0].label = 'Bass (20-250Hz)'
-        tracks.value[1].label = 'Low-Mid (250-2kHz)'
-        tracks.value[2].label = 'Mid-High (2k-8kHz)'
-        tracks.value[3].label = 'Treble (8k-20kHz)'
-
-      } catch (error) {
-        console.error('Failed to access microphone:', error)
-        alert('Microphone access denied. Please grant permission to use audio meters.')
-      }
-    }
-
-    const startTest = () => {
-      testing.value = true
-
-      testInterval = setInterval(() => {
-        tracks.value.forEach((track, index) => {
-          // Simulate audio levels with some variation
-          const base = 30 + Math.sin(Date.now() / 1000 + index) * 20
-          const noise = Math.random() * 30
-          track.level = Math.max(0, Math.min(100, base + noise))
-
-          // Update peak
-          if (track.level > track.peak) {
-            track.peak = track.level
-          }
-        })
-      }, 50)
-
-      // Peak decay
-      peakDecayInterval = setInterval(() => {
-        tracks.value.forEach(track => {
-          if (track.peak > 0) {
-            track.peak = Math.max(0, track.peak - 0.5)
-          }
-        })
-      }, 100)
-    }
-
-    const stopTest = () => {
-      testing.value = false
-
-      if (testInterval) {
-        clearInterval(testInterval)
-        testInterval = null
-      }
-      if (peakDecayInterval) {
-        clearInterval(peakDecayInterval)
-        peakDecayInterval = null
-      }
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId)
-        animationFrameId = null
-      }
-      if (audioContext) {
-        audioContext.close()
-        audioContext = null
-      }
-
-      // Decay to zero
-      const decayInterval = setInterval(() => {
-        let allZero = true
-        tracks.value.forEach(track => {
-          if (track.level > 0) {
-            track.level = Math.max(0, track.level - 2)
-            allZero = false
-          }
-        })
-        if (allZero) {
-          clearInterval(decayInterval)
+        // Update peak
+        if (level > tracks.value[i].peak) {
+          tracks.value[i].peak = level
         }
-      }, 50)
+      }
 
-      // Reset labels
-      tracks.value.forEach((track, i) => {
-        track.label = `Track ${i + 1}`
-      })
+      animationFrameId = requestAnimationFrame(updateLevels)
     }
 
-    const resetPeaks = () => {
+    updateLevels()
+
+    // Peak decay
+    peakDecayInterval = setInterval(() => {
       tracks.value.forEach(track => {
-        track.peak = 0
+        if (track.peak > 0) {
+          track.peak = Math.max(0, track.peak - 0.5)
+        }
       })
-    }
+    }, 100)
 
-    onUnmounted(() => {
-      stopTest()
-    })
+    // Update track labels to show frequency bands
+    tracks.value[0].label = 'Bass (20-250Hz)'
+    tracks.value[1].label = 'Low-Mid (250-2kHz)'
+    tracks.value[2].label = 'Mid-High (2k-8kHz)'
+    tracks.value[3].label = 'Treble (8k-20kHz)'
 
-    return {
-      ledSegments,
-      tracks,
-      testing,
-      startRealAudio,
-      startTest,
-      stopTest,
-      resetPeaks
-    }
+  } catch (error) {
+    console.error('Failed to access microphone:', error)
+    alert('Microphone access denied. Please grant permission to use audio meters.')
   }
 }
+
+const startTest = () => {
+  testing.value = true
+
+  testInterval = setInterval(() => {
+    tracks.value.forEach((track, index) => {
+      // Simulate audio levels with some variation
+      const base = 30 + Math.sin(Date.now() / 1000 + index) * 20
+      const noise = Math.random() * 30
+      track.level = Math.max(0, Math.min(100, base + noise))
+
+      // Update peak
+      if (track.level > track.peak) {
+        track.peak = track.level
+      }
+    })
+  }, 50)
+
+  // Peak decay
+  peakDecayInterval = setInterval(() => {
+    tracks.value.forEach(track => {
+      if (track.peak > 0) {
+        track.peak = Math.max(0, track.peak - 0.5)
+      }
+    })
+  }, 100)
+}
+
+const stopTest = () => {
+  testing.value = false
+
+  if (testInterval) {
+    clearInterval(testInterval)
+    testInterval = null
+  }
+  if (peakDecayInterval) {
+    clearInterval(peakDecayInterval)
+    peakDecayInterval = null
+  }
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId)
+    animationFrameId = null
+  }
+  if (audioContext) {
+    audioContext.close()
+    audioContext = null
+  }
+
+  // Decay to zero
+  const decayInterval = setInterval(() => {
+    let allZero = true
+    tracks.value.forEach(track => {
+      if (track.level > 0) {
+        track.level = Math.max(0, track.level - 2)
+        allZero = false
+      }
+    })
+    if (allZero) {
+      clearInterval(decayInterval)
+    }
+  }, 50)
+
+  // Reset labels
+  tracks.value.forEach((track, i) => {
+    track.label = `Track ${i + 1}`
+  })
+}
+
+const resetPeaks = () => {
+  tracks.value.forEach(track => {
+    track.peak = 0
+  })
+}
+
+onUnmounted(() => {
+  stopTest()
+})
 </script>
 
 <style scoped>

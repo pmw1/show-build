@@ -4,6 +4,10 @@
  */
 
 export class CueParser {
+  // Last cue-loss report from reconstructContent. Populated as a side effect
+  // each time reconstructContent runs. Read by useScriptCore's emit guard.
+  static lastReconstructLossReport = { totalCueSegments: 0, droppedCues: [] };
+
 
   /**
    * Parse content and extract cue blocks along with text segments
@@ -16,20 +20,32 @@ export class CueParser {
     }
 
     const segments = [];
-    const cueBlockPattern = /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g;
+    // CRITICAL: do not use a lazy regex like /<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->/g.
+    // If a cue is missing its End marker (e.g. broken Google Docs paste), the lazy match
+    // walks forward to the *next* cue's End and silently merges two cues. Scan imperatively
+    // and reject any Begin without a matching End before the next Begin — treat such
+    // malformed blocks as text so the user can see and repair them.
+    const BEGIN = '<!-- Begin Cue -->';
+    const END = '<!-- End Cue -->';
     let lastIndex = 0;
-    let match;
-
-    while ((match = cueBlockPattern.exec(content)) !== null) {
-      // Add text content before this cue block
-      const textBefore = content.slice(lastIndex, match.index);
-      if (textBefore.trim()) {
-        const textSegments = this.parseTextSegments(textBefore);
-        segments.push(...textSegments);
+    let i = 0;
+    while (i < content.length) {
+      const beginIdx = content.indexOf(BEGIN, i);
+      if (beginIdx === -1) break;
+      const endIdx = content.indexOf(END, beginIdx + BEGIN.length);
+      const nextBeginIdx = content.indexOf(BEGIN, beginIdx + BEGIN.length);
+      const malformed = endIdx === -1 || (nextBeginIdx !== -1 && nextBeginIdx < endIdx);
+      if (malformed) {
+        // Skip past this Begin marker only — do NOT consume the next cue's content.
+        i = beginIdx + BEGIN.length;
+        continue;
       }
-
-      // Parse the cue block
-      const cueContent = match[1];
+      // Well-formed cue: emit text-before, then the cue segment.
+      const textBefore = content.slice(lastIndex, beginIdx);
+      if (textBefore.trim()) {
+        segments.push(...this.parseTextSegments(textBefore));
+      }
+      const cueContent = content.slice(beginIdx + BEGIN.length, endIdx);
       const cueData = this.parseCueBlock(cueContent);
       if (cueData) {
         segments.push({
@@ -38,8 +54,8 @@ export class CueParser {
           data: cueData
         });
       }
-
-      lastIndex = match.index + match[0].length;
+      lastIndex = endIdx + END.length;
+      i = lastIndex;
     }
 
     // Add any remaining text after the last cue block
@@ -178,32 +194,27 @@ export class CueParser {
 
     const cueData = {};
 
-    // Parse field lines [Field: Value]
-    // Use a more sophisticated pattern that handles JSON arrays containing brackets
-    // Pattern matches: [FieldName: value] where value can contain balanced brackets
-    const lines = cueContent.split('\n');
+    // Parse fields [FieldName: value] where value may contain ] characters
+    // and may span multiple lines. Terminator is ] followed by either the next
+    // field marker (\n[), end-cue marker (\n<!--), or end of content.
+    // [\s\S] matches any character including newlines (JS has no DOTALL flag).
+    const fieldRegex = /\[([^:\n[\]]+):\s*([\s\S]*?)\](?=\s*(?:\n\s*\[|\n\s*<!--|$))/g;
 
-    for (const line of lines) {
-      // Match field pattern [FieldName: Value]
-      const fieldMatch = line.match(/^\s*\[([^:]+):\s*(.*)\]\s*$/);
-      if (!fieldMatch) continue;
-
-      const fieldName = fieldMatch[1].trim();
-      let fieldValue = fieldMatch[2].trim();
+    let match;
+    while ((match = fieldRegex.exec(cueContent)) !== null) {
+      const fieldName = match[1].trim();
+      let fieldValue = match[2].trim();
 
       // Strip surrounding quotes from Quote field (both single and double)
       if (fieldName.toLowerCase() === 'quote' && fieldValue) {
-        // Remove leading quote
         if (fieldValue.startsWith('"') || fieldValue.startsWith("'")) {
           fieldValue = fieldValue.substring(1);
         }
-        // Remove trailing quote
         if (fieldValue.endsWith('"') || fieldValue.endsWith("'")) {
           fieldValue = fieldValue.substring(0, fieldValue.length - 1);
         }
       }
 
-      // Convert field names to camelCase and store values
       const camelFieldName = this.toCamelCase(fieldName);
       cueData[camelFieldName] = fieldValue || '';
     }
@@ -414,9 +425,16 @@ export class CueParser {
    * Convert text segments back to properly formatted content
    * @param {Array} segments - Array of content segments
    * @returns {string} Formatted content with proper paragraph tags
+   *
+   * Side effect: populates `CueParser.lastReconstructLossReport` with any
+   * cue segments that were dropped because their `data.rawData` was missing
+   * or formatCueToMarkdown returned an empty string. Callers should inspect
+   * this report immediately after reconstruction to decide whether to abort
+   * the resulting save (see useScriptCore.safeEmitScriptContent).
    */
   static reconstructContent(segments) {
     const result = [];
+    const lossReport = { totalCueSegments: 0, droppedCues: [] };
     let i = 0;
 
     while (i < segments.length) {
@@ -431,22 +449,39 @@ export class CueParser {
         i++;
       } else if (segment.type === 'text') {
         if (segment.hasStructuredParagraphs) {
-          // Already has proper paragraph structure
           result.push(segment.content);
         } else {
-          // Fallback to plain text
           result.push(segment.content);
         }
         i++;
       } else if (segment.type === 'cue') {
-        // Convert cue data back to cue block format
-        result.push(this.formatCueToMarkdown(segment.data.rawData));
+        lossReport.totalCueSegments++;
+        const md = this.formatCueToMarkdown(segment.data?.rawData);
+        if (md) {
+          result.push(md);
+        } else {
+          // CUE LOSS TRIPWIRE — segment claims cue type but rawData is missing/empty.
+          // Previously this was a silent drop and is the suspected source of the
+          // ~7K-char autosave shrink seen in episode 272.
+          const dropEntry = {
+            index: i,
+            cueType: segment.cueType || segment.data?.type || null,
+            slug: segment.data?.slug || segment.data?.rawData?.slug || null,
+            assetId: segment.data?.assetId || segment.data?.rawData?.assetId || null,
+            hasData: !!segment.data,
+            hasRawData: !!segment.data?.rawData,
+            dataKeys: segment.data ? Object.keys(segment.data).slice(0, 20) : null
+          };
+          lossReport.droppedCues.push(dropEntry);
+          console.error('🚨 CUE LOSS TRIPWIRE — cue segment has no rawData, would be dropped:', dropEntry, segment);
+        }
         i++;
       } else {
         i++;
       }
     }
 
+    this.lastReconstructLossReport = lossReport;
     return result.join('\n\n');
   }
 

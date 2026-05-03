@@ -48,7 +48,24 @@ class AssetIDService:
         "whiteboard_image": "WTB",
         "whiteboard_video": "WTB",
         "whiteboard_audio": "WTB",
-        "whiteboard_document": "WTB"
+        "whiteboard_document": "WTB",
+        # Per-cue-type prefixes (added 2026-05 — see plan: legacy cue convert).
+        # Existing AST<random> IDs in the wild remain valid. Only NEW IDs
+        # generated for these entity_types now produce typed prefixes.
+        "sot":   "SOT",
+        "vo":    "VO",
+        "fsq":   "FSQ",
+        "gfx":   "GFX",
+        "img":   "IMG",
+        "pkg":   "PKG",
+        "nat":   "NAT",
+        "bump":  "BMP",
+        "sting": "STG",
+        "vox":   "VOX",
+        "mus":   "MUS",
+        "live":  "LIV",
+        "note":  "NOT",
+        "rif":   "RIF",
     }
     
     @classmethod

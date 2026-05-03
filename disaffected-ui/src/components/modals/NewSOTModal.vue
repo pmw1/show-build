@@ -284,8 +284,9 @@
             class="mb-3"
           />
 
-          <!-- Transcription -->
+          <!-- Transcription (only shown if transcript exists) -->
           <v-textarea
+            v-if="formData.transcription"
             v-model="formData.transcription"
             label="Transcription"
             placeholder="Full transcription of the video content"
@@ -328,410 +329,415 @@
   </v-dialog>
 </template>
 
-<script>
-export default {
-  name: 'NewSOTModal',
-  emits: ['update:show', 'submit'],
-  props: {
-    show: {
-      type: Boolean,
-      default: false
-    }
-  },
-  data() {
-    return {
-      formValid: false,
-      loading: false,
-      error: '',
-      videoError: '',
-      videoPreviewUrl: null,
-      videoFileName: '',
-      videoBlob: null,
-      currentTimecodeDisplay: '00:00:00:00',
-      videoSpecs: {
-        duration: 0,
-        durationDisplay: '00:00:00:00',
-        resolution: 'Unknown',
-        framerate: 30,
-        width: 0,
-        height: 0
-      },
-      cutData: {
-        start: '',
-        end: ''
-      },
-      formData: {
-        slug: '',
-        title: '',
-        duration: '00:00:00:00',
-        description: '',
-        transcription: '',
-        type: 'sot',
-        status: 'draft',
-        cuts: {}, // Dictionary of cut information: { "cutName": { start: "00:00:10:00", end: "00:00:20:00" } }
-        credits: {} // Dictionary of credits: { "Name": "John Doe", "Title": "Expert" }
-      }
-    }
-  },
-  computed: {
-    hasVideo() {
-      return !!this.videoBlob
-    },
-    slugRules() {
-      return [
-        v => !!v || 'Slug is required'
-      ]
-    },
-    durationRules() {
-      return [
-        v => !v || /^\d{2}:\d{2}:\d{2}:\d{2}$/.test(v) || 'Duration must be in HH:MM:SS:FF format'
-      ]
-    }
-  },
-  watch: {
-    show(newVal) {
-      if (!newVal) {
-        this.resetForm()
-      }
-    }
-  },
-  beforeUnmount() {
-    // Clean up video URL
-    if (this.videoPreviewUrl) {
-      URL.revokeObjectURL(this.videoPreviewUrl)
-    }
-  },
-  methods: {
-    // Video handling methods
-    handleVideoSelect(event) {
-      const file = event.target.files[0]
-      if (!file) return
-      
-      this.videoError = ''
-      
-      if (!file.type.startsWith('video/')) {
-        this.videoError = 'Please select a video file'
-        return
-      }
-      
-      // Clean up previous video URL
-      if (this.videoPreviewUrl) {
-        URL.revokeObjectURL(this.videoPreviewUrl)
-      }
-      
-      this.videoBlob = file
-      this.videoFileName = file.name
-      this.videoPreviewUrl = URL.createObjectURL(file)
-      
-      console.log(`Video selected: ${file.name}`)
-      // this.$toast?.success(`Video selected: ${file.name}`)
-    },
+<script setup>
+import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
 
-    clearVideo() {
-      if (this.videoPreviewUrl) {
-        URL.revokeObjectURL(this.videoPreviewUrl)
-      }
-      
-      this.videoBlob = null
-      this.videoFileName = ''
-      this.videoPreviewUrl = null
-      this.formData.duration = '00:00:00:00'
-      this.videoSpecs = {
-        duration: 0,
-        durationDisplay: '00:00:00:00',
-        resolution: 'Unknown',
-        framerate: 30,
-        width: 0,
-        height: 0
-      }
-      this.formData.cuts = {}
-      this.cutData = { start: '', end: '' }
-      
-      // Reset file input
-      if (this.$refs.sotFileInput) {
-        this.$refs.sotFileInput.value = ''
-      }
-      
-      console.log('Video cleared')
-      // this.$toast?.success('Video cleared')
-    },
-
-    handleVideoMetadata() {
-      const video = this.$refs.videoPlayer
-      if (!video) return
-      
-      const duration = video.duration
-      this.videoSpecs.duration = duration
-      this.videoSpecs.durationDisplay = this.secondsToTimecode(duration)
-      this.videoSpecs.width = video.videoWidth
-      this.videoSpecs.height = video.videoHeight
-      this.videoSpecs.resolution = `${video.videoWidth}×${video.videoHeight}`
-      
-      // Auto-detect framerate (assume 30fps, could be enhanced)
-      this.videoSpecs.framerate = 30
-      
-      // Set form duration
-      this.formData.duration = this.secondsToTimecode(duration)
-      
-      console.log('Video metadata loaded:', this.videoSpecs)
-    },
-
-    handleTimeUpdate() {
-      const video = this.$refs.videoPlayer
-      if (!video) return
-      
-      this.currentTimecodeDisplay = this.secondsToTimecode(video.currentTime)
-    },
-
-    // Timecode utilities
-    secondsToTimecode(seconds, showFrames = true) {
-      if (!seconds || isNaN(seconds)) return '00:00:00:00'
-      
-      const hours = Math.floor(seconds / 3600)
-      const minutes = Math.floor((seconds % 3600) / 60)
-      const secs = Math.floor(seconds % 60)
-      const frames = Math.floor((seconds % 1) * this.videoSpecs.framerate)
-      
-      const h = hours.toString().padStart(2, '0')
-      const m = minutes.toString().padStart(2, '0')
-      const s = secs.toString().padStart(2, '0')
-      const f = frames.toString().padStart(2, '0')
-      
-      return showFrames ? `${h}:${m}:${s}:${f}` : `${h}:${m}:${s}`
-    },
-
-    timecodeToSeconds(timecode) {
-      if (!timecode || typeof timecode !== 'string') return 0
-      
-      const parts = timecode.split(':')
-      if (parts.length !== 4) return 0
-      
-      const hours = parseInt(parts[0]) || 0
-      const minutes = parseInt(parts[1]) || 0
-      const seconds = parseInt(parts[2]) || 0
-      const frames = parseInt(parts[3]) || 0
-      
-      return hours * 3600 + minutes * 60 + seconds + (frames / this.videoSpecs.framerate)
-    },
-
-    // Video control methods
-    markIn() {
-      const video = this.$refs.videoPlayer
-      if (!video) return
-      
-      this.cutData.start = this.secondsToTimecode(video.currentTime)
-    },
-
-    markOut() {
-      const video = this.$refs.videoPlayer
-      if (!video) return
-      
-      this.cutData.end = this.secondsToTimecode(video.currentTime)
-    },
-
-    goToMarkIn() {
-      const video = this.$refs.videoPlayer
-      if (!video || !this.cutData.start) return
-      
-      video.currentTime = this.timecodeToSeconds(this.cutData.start)
-    },
-
-    goToMarkOut() {
-      const video = this.$refs.videoPlayer
-      if (!video || !this.cutData.end) return
-      
-      video.currentTime = this.timecodeToSeconds(this.cutData.end)
-    },
-
-    async previewCut() {
-      const video = this.$refs.videoPlayer
-      if (!video || !this.cutData.start || !this.cutData.end) {
-        console.error('Please set both Mark In and Mark Out points')
-        // this.$toast?.error('Please set both Mark In and Mark Out points')
-        return
-      }
-      
-      const startTime = this.timecodeToSeconds(this.cutData.start)
-      const endTime = this.timecodeToSeconds(this.cutData.end)
-      
-      if (startTime >= endTime) {
-        console.error('Mark In must be before Mark Out')
-        // this.$toast?.error('Mark In must be before Mark Out')
-        return
-      }
-      
-      // Go to start and play
-      video.currentTime = startTime
-      await video.play()
-      
-      // Set timeout to pause at end
-      const duration = (endTime - startTime) * 1000
-      setTimeout(() => {
-        video.pause()
-        console.log('Preview complete')
-        // this.$toast?.success('Preview complete')
-      }, duration)
-      
-      console.log('Playing preview...')
-      // this.$toast?.info('Playing preview...')
-    },
-
-    // Cut management methods
-    addCut() {
-      if (!this.cutData.start || !this.cutData.end) {
-        console.error('Please set both Mark In and Mark Out points')
-        // this.$toast?.error('Please set both Mark In and Mark Out points')
-        return
-      }
-      
-      const startTime = this.timecodeToSeconds(this.cutData.start)
-      const endTime = this.timecodeToSeconds(this.cutData.end)
-      
-      if (startTime >= endTime) {
-        console.error('Mark In must be before Mark Out')
-        // this.$toast?.error('Mark In must be before Mark Out')
-        return
-      }
-      
-      // Generate cut name
-      const cutNumber = Object.keys(this.formData.cuts).length + 1
-      const cutName = `Cut ${cutNumber}`
-      
-      // Add cut to dictionary (Vue 3 syntax)
-      this.formData.cuts[cutName] = {
-        start: this.cutData.start,
-        end: this.cutData.end
-      }
-      
-      // Clear current cut data
-      this.cutData = { start: '', end: '' }
-      
-      console.log(`${cutName} added`)
-      // this.$toast?.success(`${cutName} added`)
-    },
-
-    updateCutKey(oldKey, newKey, cutData) {
-      if (oldKey === newKey) return
-      
-      // Remove old key and add new key (Vue 3 syntax)
-      delete this.formData.cuts[oldKey]
-      this.formData.cuts[newKey] = cutData
-    },
-
-    removeCut(cutName) {
-      delete this.formData.cuts[cutName]
-      console.log(`${cutName} removed`)
-      // this.$toast?.success(`${cutName} removed`)
-    },
-
-    calculateCutDuration(cut) {
-      if (!cut.start || !cut.end) return '00:00:00:00'
-      
-      const startSeconds = this.timecodeToSeconds(cut.start)
-      const endSeconds = this.timecodeToSeconds(cut.end)
-      const duration = endSeconds - startSeconds
-      
-      return this.secondsToTimecode(Math.max(0, duration))
-    },
-
-    // Credits management methods
-    addCredit() {
-      const creditNumber = Object.keys(this.formData.credits).length + 1
-      const creditKey = `Credit ${creditNumber}`
-      
-      this.formData.credits[creditKey] = ''
-    },
-
-    updateCreditKey(oldKey, newKey) {
-      if (oldKey === newKey) return
-      
-      const value = this.formData.credits[oldKey]
-      delete this.formData.credits[oldKey]
-      this.formData.credits[newKey] = value
-    },
-
-    removeCredit(creditKey) {
-      delete this.formData.credits[creditKey]
-      console.log(`${creditKey} removed`)
-      // this.$toast?.success(`${creditKey} removed`)
-    },
-
-    // Main creation method
-    async createSOTItem() {
-      if (!this.$refs.sotFormRef.validate()) {
-        return
-      }
-      
-      if (!this.hasVideo) {
-        this.error = 'Please select a video file'
-        return
-      }
-      
-      this.loading = true
-      this.error = ''
-      
-      try {
-        // Create the SOT item data
-        const sotItem = {
-          ...this.formData,
-          // Video will be handled by the parent component
-          videoBlob: this.videoBlob,
-          videoFileName: this.videoFileName,
-          videoSpecs: this.videoSpecs,
-          // Additional fields for SOT items
-          subtitle: '',
-          airdate: '',
-          priority: '',
-          guests: '',
-          tags: '',
-          server_message: '',
-          customer: '',
-          link: ''
-        }
-        
-        console.log('Creating SOT item with cuts:', sotItem.cuts)
-        console.log('Creating SOT item with credits:', sotItem.credits)
-        
-        // Emit the item creation
-        this.$emit('submit', sotItem)
-        
-        // Reset form
-        this.resetForm()
-        
-        // Close modal
-        this.cancel()
-        
-      } catch (error) {
-        console.error('Error creating SOT item:', error)
-        this.error = 'Failed to create SOT item. Please try again.'
-      } finally {
-        this.loading = false
-      }
-    },
-    
-    resetForm() {
-      this.formData = {
-        slug: '',
-        title: '',
-        duration: '00:00:00:00',
-        description: '',
-        transcription: '',
-        type: 'sot',
-        status: 'draft',
-        cuts: {},
-        credits: {}
-      }
-      this.clearVideo()
-      this.error = ''
-      this.videoError = ''
-      this.cutData = { start: '', end: '' }
-    },
-
-    cancel() {
-      this.resetForm()
-      this.$emit('update:show', false)
-    }
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
   }
+})
+
+const emit = defineEmits(['update:show', 'submit'])
+
+// Template refs
+const sotFormRef = ref(null)
+const sotFileInput = ref(null)
+const videoPlayer = ref(null)
+
+// Data
+const formValid = ref(false)
+const loading = ref(false)
+const error = ref('')
+const videoError = ref('')
+const videoPreviewUrl = ref(null)
+const videoFileName = ref('')
+const videoBlob = ref(null)
+const currentTimecodeDisplay = ref('00:00:00:00')
+const videoSpecs = reactive({
+  duration: 0,
+  durationDisplay: '00:00:00:00',
+  resolution: 'Unknown',
+  framerate: 30,
+  width: 0,
+  height: 0
+})
+const cutData = reactive({
+  start: '',
+  end: ''
+})
+const formData = reactive({
+  slug: '',
+  title: '',
+  duration: '00:00:00:00',
+  description: '',
+  transcription: '',
+  type: 'sot',
+  status: 'draft',
+  cuts: {}, // Dictionary of cut information: { "cutName": { start: "00:00:10:00", end: "00:00:20:00" } }
+  credits: {} // Dictionary of credits: { "Name": "John Doe", "Title": "Expert" }
+})
+
+// Computed
+const hasVideo = computed(() => {
+  return !!videoBlob.value
+})
+
+const slugRules = computed(() => {
+  return [
+    v => !!v || 'Slug is required'
+  ]
+})
+
+const durationRules = computed(() => {
+  return [
+    v => !v || /^\d{2}:\d{2}:\d{2}:\d{2}$/.test(v) || 'Duration must be in HH:MM:SS:FF format'
+  ]
+})
+
+// Watch
+watch(() => props.show, (newVal) => {
+  if (!newVal) {
+    resetForm()
+  }
+})
+
+// Lifecycle
+onBeforeUnmount(() => {
+  // Clean up video URL
+  if (videoPreviewUrl.value) {
+    URL.revokeObjectURL(videoPreviewUrl.value)
+  }
+})
+
+// Timecode utilities
+function secondsToTimecode(seconds, showFrames = true) {
+  if (!seconds || isNaN(seconds)) return '00:00:00:00'
+
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = Math.floor(seconds % 60)
+  const frames = Math.floor((seconds % 1) * videoSpecs.framerate)
+
+  const h = hours.toString().padStart(2, '0')
+  const m = minutes.toString().padStart(2, '0')
+  const s = secs.toString().padStart(2, '0')
+  const f = frames.toString().padStart(2, '0')
+
+  return showFrames ? `${h}:${m}:${s}:${f}` : `${h}:${m}:${s}`
+}
+
+function timecodeToSeconds(timecode) {
+  if (!timecode || typeof timecode !== 'string') return 0
+
+  const parts = timecode.split(':')
+  if (parts.length !== 4) return 0
+
+  const hours = parseInt(parts[0]) || 0
+  const minutes = parseInt(parts[1]) || 0
+  const seconds = parseInt(parts[2]) || 0
+  const frames = parseInt(parts[3]) || 0
+
+  return hours * 3600 + minutes * 60 + seconds + (frames / videoSpecs.framerate)
+}
+
+// Video handling methods
+function handleVideoSelect(event) {
+  const file = event.target.files[0]
+  if (!file) return
+
+  videoError.value = ''
+
+  if (!file.type.startsWith('video/')) {
+    videoError.value = 'Please select a video file'
+    return
+  }
+
+  // Clean up previous video URL
+  if (videoPreviewUrl.value) {
+    URL.revokeObjectURL(videoPreviewUrl.value)
+  }
+
+  videoBlob.value = file
+  videoFileName.value = file.name
+  videoPreviewUrl.value = URL.createObjectURL(file)
+
+  console.log(`Video selected: ${file.name}`)
+  // $toast?.success(`Video selected: ${file.name}`)
+}
+
+function clearVideo() {
+  if (videoPreviewUrl.value) {
+    URL.revokeObjectURL(videoPreviewUrl.value)
+  }
+
+  videoBlob.value = null
+  videoFileName.value = ''
+  videoPreviewUrl.value = null
+  formData.duration = '00:00:00:00'
+  videoSpecs.duration = 0
+  videoSpecs.durationDisplay = '00:00:00:00'
+  videoSpecs.resolution = 'Unknown'
+  videoSpecs.framerate = 30
+  videoSpecs.width = 0
+  videoSpecs.height = 0
+  formData.cuts = {}
+  cutData.start = ''
+  cutData.end = ''
+
+  // Reset file input
+  if (sotFileInput.value) {
+    sotFileInput.value.value = ''
+  }
+
+  console.log('Video cleared')
+  // $toast?.success('Video cleared')
+}
+
+function handleVideoMetadata() {
+  const video = videoPlayer.value
+  if (!video) return
+
+  const duration = video.duration
+  videoSpecs.duration = duration
+  videoSpecs.durationDisplay = secondsToTimecode(duration)
+  videoSpecs.width = video.videoWidth
+  videoSpecs.height = video.videoHeight
+  videoSpecs.resolution = `${video.videoWidth}×${video.videoHeight}`
+
+  // Auto-detect framerate (assume 30fps, could be enhanced)
+  videoSpecs.framerate = 30
+
+  // Set form duration
+  formData.duration = secondsToTimecode(duration)
+
+  console.log('Video metadata loaded:', videoSpecs)
+}
+
+function handleTimeUpdate() {
+  const video = videoPlayer.value
+  if (!video) return
+
+  currentTimecodeDisplay.value = secondsToTimecode(video.currentTime)
+}
+
+// Video control methods
+function markIn() {
+  const video = videoPlayer.value
+  if (!video) return
+
+  cutData.start = secondsToTimecode(video.currentTime)
+}
+
+function markOut() {
+  const video = videoPlayer.value
+  if (!video) return
+
+  cutData.end = secondsToTimecode(video.currentTime)
+}
+
+function goToMarkIn() {
+  const video = videoPlayer.value
+  if (!video || !cutData.start) return
+
+  video.currentTime = timecodeToSeconds(cutData.start)
+}
+
+function goToMarkOut() {
+  const video = videoPlayer.value
+  if (!video || !cutData.end) return
+
+  video.currentTime = timecodeToSeconds(cutData.end)
+}
+
+async function previewCut() {
+  const video = videoPlayer.value
+  if (!video || !cutData.start || !cutData.end) {
+    console.error('Please set both Mark In and Mark Out points')
+    // $toast?.error('Please set both Mark In and Mark Out points')
+    return
+  }
+
+  const startTime = timecodeToSeconds(cutData.start)
+  const endTime = timecodeToSeconds(cutData.end)
+
+  if (startTime >= endTime) {
+    console.error('Mark In must be before Mark Out')
+    // $toast?.error('Mark In must be before Mark Out')
+    return
+  }
+
+  // Go to start and play
+  video.currentTime = startTime
+  await video.play()
+
+  // Set timeout to pause at end
+  const duration = (endTime - startTime) * 1000
+  setTimeout(() => {
+    video.pause()
+    console.log('Preview complete')
+    // $toast?.success('Preview complete')
+  }, duration)
+
+  console.log('Playing preview...')
+  // $toast?.info('Playing preview...')
+}
+
+// Cut management methods
+function addCut() {
+  if (!cutData.start || !cutData.end) {
+    console.error('Please set both Mark In and Mark Out points')
+    // $toast?.error('Please set both Mark In and Mark Out points')
+    return
+  }
+
+  const startTime = timecodeToSeconds(cutData.start)
+  const endTime = timecodeToSeconds(cutData.end)
+
+  if (startTime >= endTime) {
+    console.error('Mark In must be before Mark Out')
+    // $toast?.error('Mark In must be before Mark Out')
+    return
+  }
+
+  // Generate cut name
+  const cutNumber = Object.keys(formData.cuts).length + 1
+  const cutName = `Cut ${cutNumber}`
+
+  // Add cut to dictionary (Vue 3 syntax)
+  formData.cuts[cutName] = {
+    start: cutData.start,
+    end: cutData.end
+  }
+
+  // Clear current cut data
+  cutData.start = ''
+  cutData.end = ''
+
+  console.log(`${cutName} added`)
+  // $toast?.success(`${cutName} added`)
+}
+
+function updateCutKey(oldKey, newKey, cutDataVal) {
+  if (oldKey === newKey) return
+
+  // Remove old key and add new key (Vue 3 syntax)
+  delete formData.cuts[oldKey]
+  formData.cuts[newKey] = cutDataVal
+}
+
+function removeCut(cutName) {
+  delete formData.cuts[cutName]
+  console.log(`${cutName} removed`)
+  // $toast?.success(`${cutName} removed`)
+}
+
+function calculateCutDuration(cut) {
+  if (!cut.start || !cut.end) return '00:00:00:00'
+
+  const startSeconds = timecodeToSeconds(cut.start)
+  const endSeconds = timecodeToSeconds(cut.end)
+  const duration = endSeconds - startSeconds
+
+  return secondsToTimecode(Math.max(0, duration))
+}
+
+// Credits management methods
+function addCredit() {
+  const creditNumber = Object.keys(formData.credits).length + 1
+  const creditKey = `Credit ${creditNumber}`
+
+  formData.credits[creditKey] = ''
+}
+
+function updateCreditKey(oldKey, newKey) {
+  if (oldKey === newKey) return
+
+  const value = formData.credits[oldKey]
+  delete formData.credits[oldKey]
+  formData.credits[newKey] = value
+}
+
+function removeCredit(creditKey) {
+  delete formData.credits[creditKey]
+  console.log(`${creditKey} removed`)
+  // $toast?.success(`${creditKey} removed`)
+}
+
+// Main creation method
+async function createSOTItem() {
+  if (!sotFormRef.value.validate()) {
+    return
+  }
+
+  if (!hasVideo.value) {
+    error.value = 'Please select a video file'
+    return
+  }
+
+  loading.value = true
+  error.value = ''
+
+  try {
+    // Create the SOT item data
+    const sotItem = {
+      ...formData,
+      // Video will be handled by the parent component
+      videoBlob: videoBlob.value,
+      videoFileName: videoFileName.value,
+      videoSpecs: { ...videoSpecs },
+      // Additional fields for SOT items
+      subtitle: '',
+      airdate: '',
+      priority: '',
+      guests: '',
+      tags: '',
+      server_message: '',
+      customer: '',
+      link: ''
+    }
+
+    console.log('Creating SOT item with cuts:', sotItem.cuts)
+    console.log('Creating SOT item with credits:', sotItem.credits)
+
+    // Emit the item creation
+    emit('submit', sotItem)
+
+    // Reset form
+    resetForm()
+
+    // Close modal
+    cancel()
+
+  } catch (err) {
+    console.error('Error creating SOT item:', err)
+    error.value = 'Failed to create SOT item. Please try again.'
+  } finally {
+    loading.value = false
+  }
+}
+
+function resetForm() {
+  formData.slug = ''
+  formData.title = ''
+  formData.duration = '00:00:00:00'
+  formData.description = ''
+  formData.transcription = ''
+  formData.type = 'sot'
+  formData.status = 'draft'
+  formData.cuts = {}
+  formData.credits = {}
+  clearVideo()
+  error.value = ''
+  videoError.value = ''
+  cutData.start = ''
+  cutData.end = ''
+}
+
+function cancel() {
+  resetForm()
+  emit('update:show', false)
 }
 </script>
 

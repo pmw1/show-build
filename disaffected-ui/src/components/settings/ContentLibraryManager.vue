@@ -448,408 +448,403 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 import { getColorValue } from '@/utils/themeColorMap.js';
 
-export default {
-  name: 'ContentLibraryManager',
+// Template refs
+const formRef = ref(null);
+const customTypeFormRef = ref(null);
 
-  data() {
-    return {
-      activeTab: 'library',
+// Reactive state
+const activeTab = ref('library');
 
-      // Library items
-      libraryItems: [],
-      loadingLibrary: false,
-      filterType: null,
-      filterStatus: 'active',
-      searchQuery: '',
+// Library items
+const libraryItems = ref([]);
+const loadingLibrary = ref(false);
+const filterType = ref(null);
+const filterStatus = ref('active');
+const searchQuery = ref('');
 
-      // Type settings
-      typeSettings: [],
-      loadingTypeSettings: false,
-      seeding: false,
+// Type settings
+const typeSettings = ref([]);
+const loadingTypeSettings = ref(false);
+const seeding = ref(false);
 
-      // Create/Edit dialog
-      showCreateDialog: false,
-      editingItem: null,
-      saving: false,
-      formData: {
-        item_type: '',
-        title: '',
-        customer_name: '',
-        duration: '',
-        priority: 'normal',
-        valid_from: '',
-        valid_until: '',
-        script_content: ''
-      },
+// Create/Edit dialog
+const showCreateDialog = ref(false);
+const editingItem = ref(null);
+const saving = ref(false);
+const formData = ref({
+  item_type: '',
+  title: '',
+  customer_name: '',
+  duration: '',
+  priority: 'normal',
+  valid_from: '',
+  valid_until: '',
+  script_content: ''
+});
 
-      // Usage dialog
-      showUsageDialog: false,
-      usageItem: null,
-      usageHistory: [],
+// Usage dialog
+const showUsageDialog = ref(false);
+const usageItem = ref(null);
+const usageHistory = ref([]);
 
-      // Custom type dialog
-      showCustomTypeDialog: false,
-      creatingCustomType: false,
-      customTypeForm: {
-        type_name: '',
-        display_name: '',
-        description: '',
-        color: 'grey',
-        icon: 'mdi-shape',
-        default_duration: '00:00:30',
-        is_reusable: false
-      },
+// Custom type dialog
+const showCustomTypeDialog = ref(false);
+const creatingCustomType = ref(false);
+const customTypeForm = ref({
+  type_name: '',
+  display_name: '',
+  description: '',
+  color: 'grey',
+  icon: 'mdi-shape',
+  default_duration: '00:00:30',
+  is_reusable: false
+});
 
-      // Color options for custom types
-      colorOptions: [
-        { title: 'Grey', value: 'grey' },
-        { title: 'Blue Grey', value: 'blue-grey' },
-        { title: 'Blue', value: 'blue' },
-        { title: 'Indigo', value: 'indigo' },
-        { title: 'Deep Purple', value: 'deep-purple' },
-        { title: 'Purple', value: 'purple' },
-        { title: 'Pink', value: 'pink' },
-        { title: 'Red', value: 'red' },
-        { title: 'Deep Orange', value: 'deep-orange' },
-        { title: 'Orange', value: 'orange' },
-        { title: 'Amber', value: 'amber' },
-        { title: 'Yellow', value: 'yellow' },
-        { title: 'Lime', value: 'lime' },
-        { title: 'Light Green', value: 'light-green' },
-        { title: 'Green', value: 'green' },
-        { title: 'Teal', value: 'teal' },
-        { title: 'Cyan', value: 'cyan' },
-        { title: 'Light Blue', value: 'light-blue' },
-        { title: 'Brown', value: 'brown' }
-      ],
+// Color options for custom types
+const colorOptions = [
+  { title: 'Grey', value: 'grey' },
+  { title: 'Blue Grey', value: 'blue-grey' },
+  { title: 'Blue', value: 'blue' },
+  { title: 'Indigo', value: 'indigo' },
+  { title: 'Deep Purple', value: 'deep-purple' },
+  { title: 'Purple', value: 'purple' },
+  { title: 'Pink', value: 'pink' },
+  { title: 'Red', value: 'red' },
+  { title: 'Deep Orange', value: 'deep-orange' },
+  { title: 'Orange', value: 'orange' },
+  { title: 'Amber', value: 'amber' },
+  { title: 'Yellow', value: 'yellow' },
+  { title: 'Lime', value: 'lime' },
+  { title: 'Light Green', value: 'light-green' },
+  { title: 'Green', value: 'green' },
+  { title: 'Teal', value: 'teal' },
+  { title: 'Cyan', value: 'cyan' },
+  { title: 'Light Blue', value: 'light-blue' },
+  { title: 'Brown', value: 'brown' }
+];
 
-      // Table headers
-      libraryHeaders: [
-        { title: 'Type', key: 'item_type', width: '100px' },
-        { title: 'Title', key: 'title' },
-        { title: 'Customer', key: 'customer_name' },
-        { title: 'Duration', key: 'duration', width: '80px' },
-        { title: 'Valid Range', key: 'valid_range', width: '180px' },
-        { title: 'Placements', key: 'placement_count', width: '100px', align: 'center' },
-        { title: 'Active', key: 'is_active', width: '70px', align: 'center' },
-        { title: 'Actions', key: 'actions', width: '120px', align: 'center', sortable: false }
-      ],
+// Table headers
+const libraryHeaders = [
+  { title: 'Type', key: 'item_type', width: '100px' },
+  { title: 'Title', key: 'title' },
+  { title: 'Customer', key: 'customer_name' },
+  { title: 'Duration', key: 'duration', width: '80px' },
+  { title: 'Valid Range', key: 'valid_range', width: '180px' },
+  { title: 'Placements', key: 'placement_count', width: '100px', align: 'center' },
+  { title: 'Active', key: 'is_active', width: '70px', align: 'center' },
+  { title: 'Actions', key: 'actions', width: '120px', align: 'center', sortable: false }
+];
 
-      typeSettingsHeaders: [
-        { title: 'Type', key: 'type_name' },
-        { title: 'Display Name', key: 'display_name' },
-        { title: 'Reusable', key: 'is_reusable', width: '100px' },
-        { title: 'Color', key: 'color', width: '100px' },
-        { title: 'Default Duration', key: 'default_duration', width: '120px' },
-        { title: 'Active', key: 'is_active', width: '70px', align: 'center' }
-      ],
+const typeSettingsHeaders = [
+  { title: 'Type', key: 'type_name' },
+  { title: 'Display Name', key: 'display_name' },
+  { title: 'Reusable', key: 'is_reusable', width: '100px' },
+  { title: 'Color', key: 'color', width: '100px' },
+  { title: 'Default Duration', key: 'default_duration', width: '120px' },
+  { title: 'Active', key: 'is_active', width: '70px', align: 'center' }
+];
 
-      customTypeHeaders: [
-        { title: 'Type ID', key: 'type_name' },
-        { title: 'Display Name', key: 'display_name' },
-        { title: 'Description', key: 'description' },
-        { title: 'Reusable', key: 'is_reusable', width: '100px' },
-        { title: 'Color', key: 'color', width: '100px' },
-        { title: 'Icon', key: 'icon', width: '70px', align: 'center' },
-        { title: 'Actions', key: 'actions', width: '80px', align: 'center', sortable: false }
-      ],
+const customTypeHeaders = [
+  { title: 'Type ID', key: 'type_name' },
+  { title: 'Display Name', key: 'display_name' },
+  { title: 'Description', key: 'description' },
+  { title: 'Reusable', key: 'is_reusable', width: '100px' },
+  { title: 'Color', key: 'color', width: '100px' },
+  { title: 'Icon', key: 'icon', width: '70px', align: 'center' },
+  { title: 'Actions', key: 'actions', width: '80px', align: 'center', sortable: false }
+];
 
-      typeOptions: [
-        { title: 'All Types', value: null },
-        { title: 'Advertisement', value: 'advertisement' },
-        { title: 'Promo', value: 'promo' },
-        { title: 'CTA', value: 'cta' }
-      ],
+const typeOptions = [
+  { title: 'All Types', value: null },
+  { title: 'Advertisement', value: 'advertisement' },
+  { title: 'Promo', value: 'promo' },
+  { title: 'CTA', value: 'cta' }
+];
 
-      statusOptions: [
-        { title: 'Active Only', value: 'active' },
-        { title: 'All Items', value: 'all' },
-        { title: 'Inactive Only', value: 'inactive' }
-      ]
-    }
-  },
+const statusOptions = [
+  { title: 'Active Only', value: 'active' },
+  { title: 'All Items', value: 'all' },
+  { title: 'Inactive Only', value: 'inactive' }
+];
 
-  computed: {
-    filteredLibraryItems() {
-      let items = this.libraryItems;
+// Computed
+const filteredLibraryItems = computed(() => {
+  let items = libraryItems.value;
 
-      if (this.filterType) {
-        items = items.filter(item => item.item_type === this.filterType);
-      }
+  if (filterType.value) {
+    items = items.filter(item => item.item_type === filterType.value);
+  }
 
-      if (this.filterStatus === 'active') {
-        items = items.filter(item => item.is_active);
-      } else if (this.filterStatus === 'inactive') {
-        items = items.filter(item => !item.is_active);
-      }
+  if (filterStatus.value === 'active') {
+    items = items.filter(item => item.is_active);
+  } else if (filterStatus.value === 'inactive') {
+    items = items.filter(item => !item.is_active);
+  }
 
-      if (this.searchQuery) {
-        const query = this.searchQuery.toLowerCase();
-        items = items.filter(item =>
-          item.title?.toLowerCase().includes(query) ||
-          item.customer_name?.toLowerCase().includes(query)
-        );
-      }
+  if (searchQuery.value) {
+    const query = searchQuery.value.toLowerCase();
+    items = items.filter(item =>
+      item.title?.toLowerCase().includes(query) ||
+      item.customer_name?.toLowerCase().includes(query)
+    );
+  }
 
-      return items;
-    },
+  return items;
+});
 
-    reusableTypes() {
-      return this.typeSettings
-        .filter(s => s.is_reusable)
-        .map(s => ({ title: s.display_name, value: s.type_name }));
-    },
+const reusableTypes = computed(() => {
+  return typeSettings.value
+    .filter(s => s.is_reusable)
+    .map(s => ({ title: s.display_name, value: s.type_name }));
+});
 
-    coreTypeSettings() {
-      return this.typeSettings.filter(s => s.is_core === true);
-    },
+const coreTypeSettings = computed(() => {
+  return typeSettings.value.filter(s => s.is_core === true);
+});
 
-    customTypeSettings() {
-      return this.typeSettings.filter(s => s.is_core === false);
-    }
-  },
+const customTypeSettings = computed(() => {
+  return typeSettings.value.filter(s => s.is_core === false);
+});
 
-  mounted() {
-    this.loadLibraryItems();
-    this.loadTypeSettings();
-  },
-
-  methods: {
-    async loadLibraryItems() {
-      this.loadingLibrary = true;
-      try {
-        const token = localStorage.getItem('auth-token');
-        const response = await axios.get('/api/content-library/?include_test_data=false&limit=500', {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        });
-        this.libraryItems = response.data.items || [];
-      } catch (error) {
-        console.error('Error loading library items:', error);
-      } finally {
-        this.loadingLibrary = false;
-      }
-    },
-
-    async loadTypeSettings() {
-      this.loadingTypeSettings = true;
-      try {
-        const token = localStorage.getItem('auth-token');
-        const response = await axios.get('/api/content-library/type-settings/', {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        });
-        this.typeSettings = response.data.settings || [];
-        console.log('Type settings loaded:', this.typeSettings.length, 'items');
-        console.log('Core types:', this.typeSettings.filter(s => s.is_core === true).length);
-        console.log('Custom types:', this.typeSettings.filter(s => s.is_core === false).length);
-      } catch (error) {
-        console.error('Error loading type settings:', error);
-      } finally {
-        this.loadingTypeSettings = false;
-      }
-    },
-
-    async seedTypeSettings() {
-      this.seeding = true;
-      try {
-        const token = localStorage.getItem('auth-token');
-        await axios.post('/api/content-library/type-settings/seed', {}, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        });
-        await this.loadTypeSettings();
-      } catch (error) {
-        console.error('Error seeding type settings:', error);
-      } finally {
-        this.seeding = false;
-      }
-    },
-
-    async updateTypeSetting(setting) {
-      try {
-        const token = localStorage.getItem('auth-token');
-        await axios.patch(`/api/content-library/type-settings/${setting.type_name}`, {
-          is_reusable: setting.is_reusable
-        }, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        });
-      } catch (error) {
-        console.error('Error updating type setting:', error);
-        // Revert the change
-        setting.is_reusable = !setting.is_reusable;
-      }
-    },
-
-    editItem(item) {
-      this.editingItem = item;
-      this.formData = {
-        item_type: item.item_type,
-        title: item.title,
-        customer_name: item.customer_name || '',
-        duration: item.duration || '',
-        priority: item.priority || 'normal',
-        valid_from: item.valid_from ? item.valid_from.split('T')[0] : '',
-        valid_until: item.valid_until ? item.valid_until.split('T')[0] : '',
-        script_content: item.script_content || ''
-      };
-      this.showCreateDialog = true;
-    },
-
-    async viewUsage(item) {
-      this.usageItem = item;
-      this.usageHistory = [];
-      this.showUsageDialog = true;
-
-      try {
-        const response = await axios.get(`/api/content-library/${item.asset_id}/usage`);
-        this.usageHistory = response.data.placements || [];
-      } catch (error) {
-        console.error('Error loading usage history:', error);
-      }
-    },
-
-    async toggleItemActive(item) {
-      try {
-        await axios.patch(`/api/content-library/${item.asset_id}`, {
-          is_active: !item.is_active
-        });
-        item.is_active = !item.is_active;
-      } catch (error) {
-        console.error('Error toggling item status:', error);
-      }
-    },
-
-    async saveItem() {
-      const { valid } = await this.$refs.formRef.validate();
-      if (!valid) return;
-
-      this.saving = true;
-      try {
-        const data = {
-          ...this.formData,
-          valid_from: this.formData.valid_from ? new Date(this.formData.valid_from).toISOString() : null,
-          valid_until: this.formData.valid_until ? new Date(this.formData.valid_until).toISOString() : null
-        };
-
-        if (this.editingItem) {
-          await axios.patch(`/api/content-library/${this.editingItem.asset_id}`, data);
-        } else {
-          await axios.post('/api/content-library/', data);
-        }
-
-        await this.loadLibraryItems();
-        this.closeDialog();
-      } catch (error) {
-        console.error('Error saving library item:', error);
-      } finally {
-        this.saving = false;
-      }
-    },
-
-    closeDialog() {
-      this.showCreateDialog = false;
-      this.editingItem = null;
-      this.formData = {
-        item_type: '',
-        title: '',
-        customer_name: '',
-        duration: '',
-        priority: 'normal',
-        valid_from: '',
-        valid_until: '',
-        script_content: ''
-      };
-    },
-
-    getTypeColor(type) {
-      return getColorValue(type);
-    },
-
-    formatDate(dateStr) {
-      if (!dateStr) return '-';
-      try {
-        return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      } catch {
-        return dateStr;
-      }
-    },
-
-    formatDateTime(dateStr) {
-      if (!dateStr) return '-';
-      try {
-        return new Date(dateStr).toLocaleString('en-US', {
-          month: 'short', day: 'numeric', year: 'numeric',
-          hour: '2-digit', minute: '2-digit'
-        });
-      } catch {
-        return dateStr;
-      }
-    },
-
-    // Custom type management methods
-    async createCustomType() {
-      const formRef = this.$refs.customTypeFormRef;
-      if (formRef) {
-        const { valid } = await formRef.validate();
-        if (!valid) return;
-      }
-
-      this.creatingCustomType = true;
-      try {
-        const token = localStorage.getItem('auth-token');
-        await axios.post('/api/content-library/custom-types/', this.customTypeForm, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        });
-        await this.loadTypeSettings();
-        this.closeCustomTypeDialog();
-      } catch (error) {
-        console.error('Error creating custom type:', error);
-        const message = error.response?.data?.detail || 'Failed to create custom type';
-        alert(message);
-      } finally {
-        this.creatingCustomType = false;
-      }
-    },
-
-    async deleteCustomType(typeItem) {
-      if (!confirm(`Are you sure you want to delete the custom type "${typeItem.display_name}"? This action cannot be undone.`)) {
-        return;
-      }
-
-      try {
-        const token = localStorage.getItem('auth-token');
-        await axios.delete(`/api/content-library/custom-types/${typeItem.type_name}`, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        });
-        await this.loadTypeSettings();
-      } catch (error) {
-        console.error('Error deleting custom type:', error);
-        const message = error.response?.data?.detail || 'Failed to delete custom type';
-        alert(message);
-      }
-    },
-
-    closeCustomTypeDialog() {
-      this.showCustomTypeDialog = false;
-      this.customTypeForm = {
-        type_name: '',
-        display_name: '',
-        description: '',
-        color: 'grey',
-        icon: 'mdi-shape',
-        default_duration: '00:00:30',
-        is_reusable: false
-      };
-      // Reset form validation
-      const formRef = this.$refs.customTypeFormRef;
-      if (formRef) {
-        formRef.resetValidation();
-      }
-    }
+// Methods
+async function loadLibraryItems() {
+  loadingLibrary.value = true;
+  try {
+    const token = localStorage.getItem('auth-token');
+    const response = await axios.get('/api/content-library/?include_test_data=false&limit=500', {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    libraryItems.value = response.data.items || [];
+  } catch (error) {
+    console.error('Error loading library items:', error);
+  } finally {
+    loadingLibrary.value = false;
   }
 }
+
+async function loadTypeSettings() {
+  loadingTypeSettings.value = true;
+  try {
+    const token = localStorage.getItem('auth-token');
+    const response = await axios.get('/api/content-library/type-settings/', {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    typeSettings.value = response.data.settings || [];
+    console.log('Type settings loaded:', typeSettings.value.length, 'items');
+    console.log('Core types:', typeSettings.value.filter(s => s.is_core === true).length);
+    console.log('Custom types:', typeSettings.value.filter(s => s.is_core === false).length);
+  } catch (error) {
+    console.error('Error loading type settings:', error);
+  } finally {
+    loadingTypeSettings.value = false;
+  }
+}
+
+async function seedTypeSettings() {
+  seeding.value = true;
+  try {
+    const token = localStorage.getItem('auth-token');
+    await axios.post('/api/content-library/type-settings/seed', {}, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    await loadTypeSettings();
+  } catch (error) {
+    console.error('Error seeding type settings:', error);
+  } finally {
+    seeding.value = false;
+  }
+}
+
+async function updateTypeSetting(setting) {
+  try {
+    const token = localStorage.getItem('auth-token');
+    await axios.patch(`/api/content-library/type-settings/${setting.type_name}`, {
+      is_reusable: setting.is_reusable
+    }, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+  } catch (error) {
+    console.error('Error updating type setting:', error);
+    // Revert the change
+    setting.is_reusable = !setting.is_reusable;
+  }
+}
+
+function editItem(item) {
+  editingItem.value = item;
+  formData.value = {
+    item_type: item.item_type,
+    title: item.title,
+    customer_name: item.customer_name || '',
+    duration: item.duration || '',
+    priority: item.priority || 'normal',
+    valid_from: item.valid_from ? item.valid_from.split('T')[0] : '',
+    valid_until: item.valid_until ? item.valid_until.split('T')[0] : '',
+    script_content: item.script_content || ''
+  };
+  showCreateDialog.value = true;
+}
+
+async function viewUsage(item) {
+  usageItem.value = item;
+  usageHistory.value = [];
+  showUsageDialog.value = true;
+
+  try {
+    const response = await axios.get(`/api/content-library/${item.asset_id}/usage`);
+    usageHistory.value = response.data.placements || [];
+  } catch (error) {
+    console.error('Error loading usage history:', error);
+  }
+}
+
+async function toggleItemActive(item) {
+  try {
+    await axios.patch(`/api/content-library/${item.asset_id}`, {
+      is_active: !item.is_active
+    });
+    item.is_active = !item.is_active;
+  } catch (error) {
+    console.error('Error toggling item status:', error);
+  }
+}
+
+async function saveItem() {
+  const { valid } = await formRef.value.validate();
+  if (!valid) return;
+
+  saving.value = true;
+  try {
+    const data = {
+      ...formData.value,
+      valid_from: formData.value.valid_from ? new Date(formData.value.valid_from).toISOString() : null,
+      valid_until: formData.value.valid_until ? new Date(formData.value.valid_until).toISOString() : null
+    };
+
+    if (editingItem.value) {
+      await axios.patch(`/api/content-library/${editingItem.value.asset_id}`, data);
+    } else {
+      await axios.post('/api/content-library/', data);
+    }
+
+    await loadLibraryItems();
+    closeDialog();
+  } catch (error) {
+    console.error('Error saving library item:', error);
+  } finally {
+    saving.value = false;
+  }
+}
+
+function closeDialog() {
+  showCreateDialog.value = false;
+  editingItem.value = null;
+  formData.value = {
+    item_type: '',
+    title: '',
+    customer_name: '',
+    duration: '',
+    priority: 'normal',
+    valid_from: '',
+    valid_until: '',
+    script_content: ''
+  };
+}
+
+function getTypeColor(type) {
+  return getColorValue(type);
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '-';
+  try {
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+}
+
+function formatDateTime(dateStr) {
+  if (!dateStr) return '-';
+  try {
+    return new Date(dateStr).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+// Custom type management methods
+async function createCustomType() {
+  if (customTypeFormRef.value) {
+    const { valid } = await customTypeFormRef.value.validate();
+    if (!valid) return;
+  }
+
+  creatingCustomType.value = true;
+  try {
+    const token = localStorage.getItem('auth-token');
+    await axios.post('/api/content-library/custom-types/', customTypeForm.value, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    await loadTypeSettings();
+    closeCustomTypeDialog();
+  } catch (error) {
+    console.error('Error creating custom type:', error);
+    const message = error.response?.data?.detail || 'Failed to create custom type';
+    alert(message);
+  } finally {
+    creatingCustomType.value = false;
+  }
+}
+
+async function deleteCustomType(typeItem) {
+  if (!confirm(`Are you sure you want to delete the custom type "${typeItem.display_name}"? This action cannot be undone.`)) {
+    return;
+  }
+
+  try {
+    const token = localStorage.getItem('auth-token');
+    await axios.delete(`/api/content-library/custom-types/${typeItem.type_name}`, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+    await loadTypeSettings();
+  } catch (error) {
+    console.error('Error deleting custom type:', error);
+    const message = error.response?.data?.detail || 'Failed to delete custom type';
+    alert(message);
+  }
+}
+
+function closeCustomTypeDialog() {
+  showCustomTypeDialog.value = false;
+  customTypeForm.value = {
+    type_name: '',
+    display_name: '',
+    description: '',
+    color: 'grey',
+    icon: 'mdi-shape',
+    default_duration: '00:00:30',
+    is_reusable: false
+  };
+  // Reset form validation
+  if (customTypeFormRef.value) {
+    customTypeFormRef.value.resetValidation();
+  }
+}
+
+// Lifecycle
+onMounted(() => {
+  loadLibraryItems();
+  loadTypeSettings();
+});
 </script>
 
 <style scoped>

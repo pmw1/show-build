@@ -564,6 +564,86 @@
           </tbody>
         </table>
       </div>
+
+      <!-- General UI Colors Table -->
+      <div class="color-table-section">
+        <h2 v-if="!compact" class="section-title">General UI</h2>
+        <h3 v-else class="text-subtitle-2 mb-2">General UI</h3>
+        <table class="color-config-table">
+          <thead>
+            <tr>
+              <th class="type-header">Element</th>
+              <th class="color-header">Base Color</th>
+              <th class="color-header">Variant</th>
+              <th class="preview-header">Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="type in generalUiTypes" :key="type">
+              <td class="type-cell">{{ formatGeneralUiName(type) }}</td>
+              <td class="color-cell">
+                <v-select
+                  v-model="baseColor[type + '-ui']"
+                  :items="baseColorOptions"
+                  dense
+                  outlined
+                  hide-details
+                  class="cell-fill-select"
+                  @change="onBaseChange(type + '-ui')"
+                  item-title="title"
+                  item-value="value"
+                >
+                  <template #item="{ item, props }">
+                    <v-list-item v-if="item && item.value" v-bind="props">
+                      <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                      <span>{{ item.title }}</span>
+                    </v-list-item>
+                  </template>
+                  <template #selection="{ item }">
+                    <div class="color-swatch-container" :style="{ backgroundColor: resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify), width: '100%', height: '28px', display: 'inline-block', borderRadius: '2px', position: 'relative' }">
+                      <span class="color-label-overlay" :style="{ color: getTextColor(resolveVuetifyColor(vuetifyColorNameToThemeKey(item.value), $vuetify)) }">{{ item.title }}</span>
+                    </div>
+                  </template>
+                </v-select>
+              </td>
+              <td class="color-cell">
+                <v-select
+                  v-model="variant[type + '-ui']"
+                  :items="variantOptions(baseColor[type + '-ui'])"
+                  dense
+                  outlined
+                  hide-details
+                  class="cell-fill-select"
+                  :disabled="!baseColor[type + '-ui']"
+                >
+                  <template #item="{ item, props }">
+                    <v-list-item v-if="item" v-bind="props">
+                      <span class="color-swatch" :style="{ backgroundColor: resolveVuetifyColor((baseColor[type + '-ui'] || '') + (item.value ? '-' + item.value : ''), $vuetify), width: '24px', height: '24px', display: 'inline-block', borderRadius: '2px', marginRight: '8px' }"></span>
+                      <span>{{ item.title }}</span>
+                    </v-list-item>
+                  </template>
+                  <template #selection="{ item }">
+                    <div class="color-swatch-container" :style="{ backgroundColor: resolveVuetifyColor((baseColor[type + '-ui'] || '') + (item.value ? '-' + item.value : ''), $vuetify), width: '100%', height: '28px', display: 'inline-block', borderRadius: '2px', position: 'relative' }">
+                      <span class="color-label-overlay" :style="{ color: getTextColor(resolveVuetifyColor((baseColor[type + '-ui'] || '') + (item.value ? '-' + item.value : ''), $vuetify)) }">{{ item.title }}</span>
+                    </div>
+                  </template>
+                </v-select>
+              </td>
+              <td class="preview-cell">
+                <div
+                  class="preview-box-fill"
+                  :style="{
+                    backgroundColor: resolveVuetifyColor(getFullColor(type + '-ui'), $vuetify),
+                    color: getTextColor(resolveVuetifyColor(getFullColor(type + '-ui'), $vuetify))
+                  }"
+                >
+                  {{ formatGeneralUiName(type) }}
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Save Button -->
@@ -617,427 +697,308 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'; // eslint-disable-line no-unused-vars
+import { useTheme } from 'vuetify';
 import { resolveVuetifyColor, updateColor, getColorValue, getTextColorForBackground } from '../utils/themeColorMap';
 import { debounce } from 'lodash-es';
 
-export default {
-  emits: ['colors-changed', 'colors-saved'],
-  props: {
-    compact: {
-      type: Boolean,
-      default: false
-    },
-    hideSaveButton: {
-      type: Boolean,
-      default: false
-    }
+defineProps({
+  compact: {
+    type: Boolean,
+    default: false
   },
-  data() {
-    // Initialize with all possible types for reactivity
-    const allTypes = [
-      'segment', 'ad', 'promo', 'cta', 'trans',
-      'break', 'block', 'block-a', 'block-b', 'block-c', 'block-d', 'block-e', 'block-f', 'block-g', 'block-h',
-      'Selection-interface', 'Hover-interface', 'Highlight-interface',
-      'Dropline-interface', 'DragLight-interface', 'LocatorFlash-interface',
-      'Draft-script', 'Approved-script', 'Production-script', 'Completed-script'
+  hideSaveButton: {
+    type: Boolean,
+    default: false
+  }
+});
+
+const emit = defineEmits(['colors-changed', 'colors-saved']);
+
+// Vuetify theme instance (for themeColors computed; template still uses $vuetify directly)
+// eslint-disable-next-line no-unused-vars
+const theme = useTheme();
+
+// Initialize with all possible types for reactivity
+const initAllTypes = [
+  'segment', 'ad', 'promo', 'cta', 'trans',
+  'break', 'block', 'block-a', 'block-b', 'block-c', 'block-d', 'block-e', 'block-f', 'block-g', 'block-h',
+  'Selection-interface', 'Hover-interface', 'Highlight-interface',
+  'Dropline-interface', 'DragLight-interface', 'LocatorFlash-interface',
+  'Draft-script', 'Approved-script', 'Production-script', 'Completed-script'
+];
+
+const initBaseColor = {};
+const initVariant = {};
+
+// Initialize all types to ensure reactivity
+initAllTypes.forEach(type => {
+  initBaseColor[type] = null;
+  initVariant[type] = null;
+});
+
+// Data properties
+// Core Rundown Items (hardcoded)
+const rundownTypes = ref(['segment', 'ad', 'promo', 'cta', 'live', 'tease', 'tag']);
+// Custom Rundown Items (loaded from API)
+const customRundownTypes = ref([]);
+const rundownRegionsTypes = ref(['break', 'block', 'block-a', 'block-b', 'block-c', 'block-d', 'block-e', 'block-f', 'block-g', 'block-h']);
+const elementsCuesTypes = ref(['trans', 'pkg', 'vo', 'sot', 'interview', 'music', 'reader', 'gfx', 'fsq', 'nat', 'img', 'dir', 'bump', 'sting']);
+const interfaceTypes = ref(['Selection', 'Hover', 'Highlight', 'Dropline', 'DragLight', 'LocatorFlash']);
+const scriptStatusTypes = ref(['Scheduled', 'Draft', 'Production', 'Running', 'Completed']);
+const globalActionTypes = ref(['AutoSave', 'Needs-Attention']);
+const generalUiTypes = ref(['Block-Header']);
+const typeColors = ref({}); // eslint-disable-line no-unused-vars
+const showConfirmation = ref(false);
+const isSaving = ref(false);
+const baseColor = reactive(initBaseColor);
+const variant = reactive(initVariant);
+const isInitializing = ref(true); // Flag to prevent watcher events during initialization
+const snackbar = reactive({
+  show: false,
+  message: '',
+  color: 'error',
+  timeout: 5000
+});
+
+// Computed
+const themeColors = computed(() => { // eslint-disable-line no-unused-vars
+  const lightTheme = theme?.themes?.value?.light;
+  return lightTheme ? Object.keys(lightTheme.colors || {}) : [];
+});
+
+const baseColorOptions = computed(() => {
+  // Official Vuetify Material Design color palette + theme colors
+  const materialColors = [
+    'red', 'pink', 'purple', 'deep-purple', 'indigo', 'blue',
+    'light-blue', 'cyan', 'teal', 'green', 'light-green', 'lime',
+    'yellow', 'amber', 'orange', 'deep-orange', 'brown',
+    'blue-grey', 'grey', 'black', 'white'
+  ];
+
+  const themeColorsList = [
+    'primary', 'secondary', 'accent', 'error', 'info', 'success', 'warning'
+  ];
+
+  const allColors = [...materialColors, ...themeColorsList];
+
+  return allColors.map(color => ({
+    title: color.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+    value: color,
+  }));
+});
+
+const variantOptions = computed(() => {
+  // Returns a function to get variant options for a base color
+  return (baseColorVal) => {
+    if (!baseColorVal) return [{ title: 'Base', value: '' }];
+
+    const variants = [
+      { title: 'Base', value: '' }
     ];
-    
-    const baseColor = {};
-    const variant = {};
-    
-    // Initialize all types to ensure reactivity
-    allTypes.forEach(type => {
-      baseColor[type] = null;
-      variant[type] = null;
-    });
-    
-    return {
-      // Core Rundown Items (hardcoded)
-      rundownTypes: ['segment', 'ad', 'promo', 'cta', 'live', 'tease', 'tag'],
-      // Custom Rundown Items (loaded from API)
-      customRundownTypes: [],
-      rundownRegionsTypes: ['break', 'block', 'block-a', 'block-b', 'block-c', 'block-d', 'block-e', 'block-f', 'block-g', 'block-h'],
-      elementsCuesTypes: ['trans', 'pkg', 'vo', 'sot', 'interview', 'music', 'reader', 'gfx', 'fsq', 'nat', 'img', 'dir', 'bump', 'sting'],
-      interfaceTypes: ['Selection', 'Hover', 'Highlight', 'Dropline', 'DragLight', 'LocatorFlash'],
-      scriptStatusTypes: ['Draft', 'Approved', 'Production', 'Promotion', 'Completed'],
-      globalActionTypes: ['AutoSave', 'Needs-Attention'],
-      typeColors: {},
-      showConfirmation: false,
-      isSaving: false,
-      baseColor,
-      variant,
-      isInitializing: true, // Flag to prevent watcher events during initialization
-      snackbar: {
-        show: false,
-        message: '',
-        color: 'error',
-        timeout: 5000
+
+    // Theme colors have limited variants
+    const themeColorsList = ['primary', 'secondary', 'accent', 'error', 'info', 'success', 'warning'];
+    const specialColors = ['black', 'white'];
+
+    if (themeColorsList.includes(baseColorVal)) {
+      // Theme colors typically have lighten/darken variants
+      for (let i = 4; i >= 1; i--) {
+        variants.push({ title: `Lighten ${i}`, value: `lighten-${i}` });
+      }
+      for (let i = 1; i <= 4; i++) {
+        variants.push({ title: `Darken ${i}`, value: `darken-${i}` });
+      }
+    } else if (specialColors.includes(baseColorVal)) {
+      // Black and white don't have variants
+      return variants;
+    } else {
+      // Material colors - check what variants actually exist
+
+      // Define color-specific variant availability
+      const colorVariants = {
+        'red': { lighten: 4, darken: 4, accent: false },
+        'pink': { lighten: 4, darken: 4, accent: false },
+        'purple': { lighten: 5, darken: 4, accent: false },
+        'deep-purple': { lighten: 5, darken: 4, accent: false },
+        'indigo': { lighten: 5, darken: 4, accent: false },
+        'blue': { lighten: 5, darken: 4, accent: false },
+        'light-blue': { lighten: 5, darken: 4, accent: false },
+        'cyan': { lighten: 4, darken: 4, accent: false },
+        'teal': { lighten: 5, darken: 4, accent: false },
+        'green': { lighten: 4, darken: 4, accent: true },
+        'light-green': { lighten: 5, darken: 4, accent: false },
+        'lime': { lighten: 5, darken: 4, accent: false },
+        'yellow': { lighten: 4, darken: 4, accent: true },
+        'amber': { lighten: 4, darken: 4, accent: false },
+        'orange': { lighten: 5, darken: 4, accent: false },
+        'deep-orange': { lighten: 5, darken: 4, accent: false },
+        'brown': { lighten: 5, darken: 4, accent: false },
+        'blue-grey': { lighten: 5, darken: 4, accent: false },
+        'grey': { lighten: 4, darken: 4, accent: false }
+      };
+
+      const colorConfig = colorVariants[baseColorVal] || { lighten: 4, darken: 4, accent: false };
+
+      // Add lighten variants
+      for (let i = colorConfig.lighten; i >= 1; i--) {
+        variants.push({ title: `Lighten ${i}`, value: `lighten-${i}` });
+      }
+
+      // Add darken variants
+      for (let i = 1; i <= colorConfig.darken; i++) {
+        variants.push({ title: `Darken ${i}`, value: `darken-${i}` });
+      }
+
+      // Add accent variant only if available
+      if (colorConfig.accent) {
+        variants.push({ title: `Accent`, value: `accent` });
       }
     }
-  },
-  computed: {
-    themeColors() {
-      const theme = this.$vuetify?.theme?.themes?.light;
-      return theme ? Object.keys(theme.colors || {}) : [];
-    },
-    baseColorOptions() {
-      // Official Vuetify Material Design color palette + theme colors
-      const materialColors = [
-        'red', 'pink', 'purple', 'deep-purple', 'indigo', 'blue',
-        'light-blue', 'cyan', 'teal', 'green', 'light-green', 'lime',
-        'yellow', 'amber', 'orange', 'deep-orange', 'brown',
-        'blue-grey', 'grey', 'black', 'white'
-      ];
 
-      const themeColors = [
-        'primary', 'secondary', 'accent', 'error', 'info', 'success', 'warning'
-      ];
+    return variants;
+  };
+});
 
-      const allColors = [...materialColors, ...themeColors];
+// Methods
+function getRundownTypeValues() { // eslint-disable-line no-unused-vars
+  // Hardcoded rundown types to avoid circular import issues
+  return ['segment', 'ad', 'promo', 'cta', 'trans', 'pkg', 'vo', 'sot', 'interview', 'live', 'tease', 'tag', 'music', 'reader'];
+}
 
-      return allColors.map(color => ({
-        title: color.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-        value: color,
-      }));
-    },
-    variantOptions() {
-      // Returns a function to get variant options for a base color
-      return (baseColor) => {
-        if (!baseColor) return [{ title: 'Base', value: '' }];
+function formatGlobalActionName(type) {
+  // Format global action type names for display
+  const nameMap = {
+    'AutoSave': 'Auto Save Indicator'
+  };
+  return nameMap[type] || type.replace(/([A-Z])/g, ' $1').trim();
+}
 
-        const variants = [
-          { title: 'Base', value: '' }
-        ];
+function formatGeneralUiName(type) {
+  // 'Block-Header' -> 'Block Header'
+  return String(type).replace(/-/g, ' ');
+}
 
-        // Theme colors have limited variants
-        const themeColors = ['primary', 'secondary', 'accent', 'error', 'info', 'success', 'warning'];
-        const specialColors = ['black', 'white'];
-
-        if (themeColors.includes(baseColor)) {
-          // Theme colors typically have lighten/darken variants
-          for (let i = 4; i >= 1; i--) {
-            variants.push({ title: `Lighten ${i}`, value: `lighten-${i}` });
+async function loadCustomTypes() {
+  // Load custom rundown types from API
+  try {
+    const response = await fetch('/api/content-library/custom-types/', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (data.custom_types && data.custom_types.length > 0) {
+        // Extract type names for color configuration
+        customRundownTypes.value = data.custom_types.map(ct => ct.type_name);
+        // Initialize baseColor and variant for custom types
+        customRundownTypes.value.forEach(type => {
+          if (baseColor[type] === undefined) {
+            baseColor[type] = null;
+            variant[type] = null;
           }
-          for (let i = 1; i <= 4; i++) {
-            variants.push({ title: `Darken ${i}`, value: `darken-${i}` });
-          }
-        } else if (specialColors.includes(baseColor)) {
-          // Black and white don't have variants
-          return variants;
-        } else {
-          // Material colors - check what variants actually exist
-
-          // Define color-specific variant availability
-          const colorVariants = {
-            'red': { lighten: 4, darken: 4, accent: false },
-            'pink': { lighten: 4, darken: 4, accent: false },
-            'purple': { lighten: 5, darken: 4, accent: false },
-            'deep-purple': { lighten: 5, darken: 4, accent: false },
-            'indigo': { lighten: 5, darken: 4, accent: false },
-            'blue': { lighten: 5, darken: 4, accent: false },
-            'light-blue': { lighten: 5, darken: 4, accent: false },
-            'cyan': { lighten: 4, darken: 4, accent: false },
-            'teal': { lighten: 5, darken: 4, accent: false },
-            'green': { lighten: 4, darken: 4, accent: true },
-            'light-green': { lighten: 5, darken: 4, accent: false },
-            'lime': { lighten: 5, darken: 4, accent: false },
-            'yellow': { lighten: 4, darken: 4, accent: true },
-            'amber': { lighten: 4, darken: 4, accent: false },
-            'orange': { lighten: 5, darken: 4, accent: false },
-            'deep-orange': { lighten: 5, darken: 4, accent: false },
-            'brown': { lighten: 5, darken: 4, accent: false },
-            'blue-grey': { lighten: 5, darken: 4, accent: false },
-            'grey': { lighten: 4, darken: 4, accent: false }
-          };
-
-          const colorConfig = colorVariants[baseColor] || { lighten: 4, darken: 4, accent: false };
-
-          // Add lighten variants
-          for (let i = colorConfig.lighten; i >= 1; i--) {
-            variants.push({ title: `Lighten ${i}`, value: `lighten-${i}` });
-          }
-
-          // Add darken variants
-          for (let i = 1; i <= colorConfig.darken; i++) {
-            variants.push({ title: `Darken ${i}`, value: `darken-${i}` });
-          }
-
-          // Add accent variant only if available
-          if (colorConfig.accent) {
-            variants.push({ title: `Accent`, value: `accent` });
-          }
-        }
-
-        return variants;
-      };
-    },
-  },
-  methods: {
-    getRundownTypeValues() {
-      // Hardcoded rundown types to avoid circular import issues
-      return ['segment', 'ad', 'promo', 'cta', 'trans', 'pkg', 'vo', 'sot', 'interview', 'live', 'tease', 'tag', 'music', 'reader'];
-    },
-    formatGlobalActionName(type) {
-      // Format global action type names for display
-      const nameMap = {
-        'AutoSave': 'Auto Save Indicator'
-      };
-      return nameMap[type] || type.replace(/([A-Z])/g, ' $1').trim();
-    },
-    async loadCustomTypes() {
-      // Load custom rundown types from API
-      try {
-        const response = await fetch('/api/content-library/custom-types/', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          // Apply default color from custom type if available
+          const customType = data.custom_types.find(ct => ct.type_name === type);
+          if (customType && customType.color && !baseColor[type]) {
+            const parsed = parseColorValue(customType.color);
+            baseColor[type] = parsed.base;
+            variant[type] = parsed.variant || '';
           }
         });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.custom_types && data.custom_types.length > 0) {
-            // Extract type names for color configuration
-            this.customRundownTypes = data.custom_types.map(ct => ct.type_name);
-            // Initialize baseColor and variant for custom types
-            this.customRundownTypes.forEach(type => {
-              if (this.baseColor[type] === undefined) {
-                this.baseColor[type] = null;
-                this.variant[type] = null;
-              }
-              // Apply default color from custom type if available
-              const customType = data.custom_types.find(ct => ct.type_name === type);
-              if (customType && customType.color && !this.baseColor[type]) {
-                const parsed = this.parseColorValue(customType.color);
-                this.baseColor[type] = parsed.base;
-                this.variant[type] = parsed.variant || '';
-              }
-            });
-          }
-        }
-      } catch (error) {
-        console.log('Could not load custom types:', error);
       }
-    },
-    resolveVuetifyColor,
-    parseColorValue(colorValue) {
-      if (!colorValue) return { base: null, variant: null };
-      
-      // Known variant patterns to look for at the end (order matters - check longer patterns first)
-      const variantPatterns = [
-        'lighten-5', 'lighten-4', 'lighten-3', 'lighten-2', 'lighten-1',
-        'darken-4', 'darken-3', 'darken-2', 'darken-1',
-        'accent-4', 'accent-3', 'accent-2', 'accent-1', 'accent',
-        'base', 'dark', 'light'
-      ];
-      
-      // Try to find a variant pattern at the end
-      for (const pattern of variantPatterns) {
-        if (colorValue.endsWith('-' + pattern)) {
-          const base = colorValue.slice(0, -(pattern.length + 1));
-          return { base, variant: pattern };
-        }
+    }
+  } catch (error) {
+    console.log('Could not load custom types:', error);
+  }
+}
+
+function parseColorValue(colorValue) {
+  if (!colorValue) return { base: null, variant: null };
+
+  // Known variant patterns to look for at the end (order matters - check longer patterns first)
+  const variantPatterns = [
+    'lighten-5', 'lighten-4', 'lighten-3', 'lighten-2', 'lighten-1',
+    'darken-4', 'darken-3', 'darken-2', 'darken-1',
+    'accent-4', 'accent-3', 'accent-2', 'accent-1', 'accent',
+    'base', 'dark', 'light'
+  ];
+
+  // Try to find a variant pattern at the end
+  for (const pattern of variantPatterns) {
+    if (colorValue.endsWith('-' + pattern)) {
+      const base = colorValue.slice(0, -(pattern.length + 1));
+      return { base, variant: pattern };
+    }
+  }
+
+  // No variant found, entire string is the base color
+  return { base: colorValue, variant: '' };
+}
+
+function vuetifyColorNameToThemeKey(name) {
+  if (!name) return '';
+  const parts = name.toLowerCase().split(' ');
+  const base = parts[0];
+  const variantPart = parts.length > 1 ? parts.slice(1).join('-') : '';
+  return variantPart ? `${base}-${variantPart}` : base;
+}
+
+function onBaseChange(type) {
+  // When base color changes, reset the variant to empty string (Base)
+  variant[type] = '';
+}
+
+function getFullColor(type) {
+  const base = baseColor[type];
+  const v = variant[type];
+  if (!base) return null;
+  return v ? `${base}-${v}` : base;
+}
+
+function getTextColor(bgColor) {
+  // Use the enhanced contrast logic from themeColorMap
+  if (!bgColor) return '#000000';
+  return getTextColorForBackground(bgColor);
+}
+
+function showSnackbar(message, color = 'error') {
+  snackbar.message = message;
+  snackbar.color = color;
+  snackbar.show = true;
+}
+
+async function initializeColors() {
+  const allTypes = [
+    ...rundownTypes.value,
+    ...customRundownTypes.value,
+    ...rundownRegionsTypes.value,
+    ...elementsCuesTypes.value,
+    ...interfaceTypes.value.map(t => t + '-interface'),
+    ...scriptStatusTypes.value.map(t => t + '-script'),
+    ...globalActionTypes.value.map(t => t + '-global'),
+    ...generalUiTypes.value.map(t => t + '-ui'),
+  ];
+
+  // Load from database (new endpoint)
+  try {
+    const response = await fetch('/api/settings/colors?profile=default', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
       }
-      
-      // No variant found, entire string is the base color
-      return { base: colorValue, variant: '' };
-    },
-    vuetifyColorNameToThemeKey(name) {
-      if (!name) return '';
-      const parts = name.toLowerCase().split(' ');
-      const base = parts[0];
-      const variant = parts.length > 1 ? parts.slice(1).join('-') : '';
-      return variant ? `${base}-${variant}` : base;
-    },
-    onBaseChange(type) {
-      // When base color changes, reset the variant to empty string (Base)
-      this.variant[type] = '';
-    },
-    getFullColor(type) {
-      const base = this.baseColor[type];
-      const variant = this.variant[type];
-      if (!base) return null;
-      return variant ? `${base}-${variant}` : base;
-    },
-    getTextColor(bgColor) {
-      // Use the enhanced contrast logic from themeColorMap
-      if (!bgColor) return '#000000';
-      return getTextColorForBackground(bgColor);
-    },
-    showSnackbar(message, color = 'error') {
-      this.snackbar.message = message;
-      this.snackbar.color = color;
-      this.snackbar.show = true;
-    },
-    async initializeColors() {
-      const allTypes = [
-        ...this.rundownTypes,
-        ...this.customRundownTypes,
-        ...this.rundownRegionsTypes,
-        ...this.elementsCuesTypes,
-        ...this.interfaceTypes.map(t => t + '-interface'),
-        ...this.scriptStatusTypes.map(t => t + '-script'),
-        ...this.globalActionTypes.map(t => t + '-global'),
-      ];
+    });
 
-      // Load from database (new endpoint)
-      try {
-        const response = await fetch('/api/settings/colors?profile=default', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          }
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.colors) {
-            const dbColors = data.colors;
-            
-            // Apply database colors
-            allTypes.forEach(type => {
-              let lookupKey = type;
-              
-              // Map interface and script types to their base color keys
-              if (type.endsWith('-interface')) {
-                const baseType = type.replace('-interface', '').toLowerCase();
-                // Map interface types to their base colors
-                const interfaceMapping = {
-                  'selection': 'selection',
-                  'hover': 'hover',
-                  'highlight': 'highlight',
-                  'dropline': 'dropline',
-                  'draglight': 'draglight',
-                  'locatorflash': 'locatorflash'
-                };
-                lookupKey = interfaceMapping[baseType] || baseType;
-              } else if (type.endsWith('-script')) {
-                const baseType = type.replace('-script', '').toLowerCase();
-                // Map script status types to their base colors
-                const scriptMapping = {
-                  'draft': 'draft',
-                  'approved': 'approved',
-                  'production': 'production',
-                  'completed': 'completed'
-                };
-                lookupKey = scriptMapping[baseType] || baseType;
-              } else if (type.endsWith('-global')) {
-                const baseType = type.replace('-global', '').toLowerCase();
-                // Map global action types to their base colors
-                const globalMapping = {
-                  'autosave': 'autosave'
-                };
-                lookupKey = globalMapping[baseType] || baseType;
-              }
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.colors) {
+        const dbColors = data.colors;
 
-              const colorValue = dbColors[lookupKey];
-              if (colorValue) {
-                const parsed = this.parseColorValue(colorValue);
-                // Set the reactive properties (Vue 3 compatible)
-                this.baseColor[type] = parsed.base || null;
-                this.variant[type] = parsed.variant || '';
-                // Update local storage as backup
-                updateColor(type, colorValue);
-              }
-            });
-            
-            // Set initialization complete
-            this.$nextTick(() => {
-              this.isInitializing = false;
-            });
-            return; // Exit early if database load succeeds
-          }
-        }
-      } catch (error) {
-        // Fallback to localStorage if database fails
-      }
-
-      // Fallback to local storage if database fails
-      allTypes.forEach(type => {
-        if (!this.baseColor[type]) {
+        // Apply database colors
+        allTypes.forEach(type => {
           let lookupKey = type;
-          
+
           // Map interface and script types to their base color keys
-          if (type.endsWith('-interface')) {
-            const baseType = type.replace('-interface', '').toLowerCase();
-            const interfaceMapping = {
-              'selection': 'selection',
-              'hover': 'hover',
-              'highlight': 'highlight',
-              'dropline': 'dropline',
-              'draglight': 'draglight',
-              'locatorflash': 'locatorflash'
-            };
-            lookupKey = interfaceMapping[baseType] || baseType;
-          } else if (type.endsWith('-script')) {
-            const baseType = type.replace('-script', '').toLowerCase();
-            const scriptMapping = {
-              'draft': 'draft',
-              'approved': 'approved',
-              'production': 'production',
-              'completed': 'completed'
-            };
-            lookupKey = scriptMapping[baseType] || baseType;
-          } else if (type.endsWith('-global')) {
-            const baseType = type.replace('-global', '').toLowerCase();
-            const globalMapping = {
-              'autosave': 'autosave'
-            };
-            lookupKey = globalMapping[baseType] || baseType;
-          }
-
-          const colorValue = getColorValue(lookupKey); // Get color from local storage using mapped key
-          if (colorValue) {
-            // localStorage might use space or dash format, try both
-            const spaceParts = colorValue.split(' ');
-            if (spaceParts.length > 1) {
-              // Space format: "blue lighten-4"
-              this.baseColor[type] = spaceParts[0] || null;
-              this.variant[type] = spaceParts[1] || null;
-            } else {
-              // Dash format: "blue-lighten-4"
-              const parsed = this.parseColorValue(colorValue);
-              this.baseColor[type] = parsed.base;
-              this.variant[type] = parsed.variant;
-            }
-          } else {
-            this.baseColor[type] = null;
-            this.variant[type] = null;
-          }
-        }
-      });
-      
-      // Set initialization complete for fallback case too
-      this.$nextTick(() => {
-        this.isInitializing = false;
-      });
-    },
-    saveColors: debounce(async function () {
-      this.isSaving = true;
-      const allTypes = [
-        ...this.rundownTypes,
-        ...this.customRundownTypes,
-        ...this.rundownRegionsTypes,
-        ...this.elementsCuesTypes,
-        ...this.interfaceTypes.map(t => t + '-interface'),
-        ...this.scriptStatusTypes.map(t => t + '-script'),
-        ...this.globalActionTypes.map(t => t + '-global'),
-      ];
-
-      // Build colors object
-      const colors = {};
-      allTypes.forEach(type => {
-        const fullColor = this.getFullColor(type);
-        if (fullColor) {
-          colors[type] = fullColor;
-          updateColor(type, fullColor); // Update local storage as backup
-          
-          // For script status types, also save base keys for content editor
-          if (type.endsWith('-script')) {
-            const baseKey = type.replace('-script', '').toLowerCase();
-            colors[baseKey] = fullColor;
-            updateColor(baseKey, fullColor);
-          }
-          
-          // For interface types, also save base keys for content editor
           if (type.endsWith('-interface')) {
             const baseType = type.replace('-interface', '').toLowerCase();
             // Map interface types to their base colors
@@ -1049,103 +1010,253 @@ export default {
               'draglight': 'draglight',
               'locatorflash': 'locatorflash'
             };
-            const baseKey = interfaceMapping[baseType] || baseType;
-            colors[baseKey] = fullColor;
-            updateColor(baseKey, fullColor);
-          }
-
-          // For global action types, also save base keys for content editor
-          if (type.endsWith('-global')) {
+            lookupKey = interfaceMapping[baseType] || baseType;
+          } else if (type.endsWith('-script')) {
+            const baseType = type.replace('-script', '').toLowerCase();
+            // Map script status types to their base colors
+            const scriptMapping = {
+              'scheduled': 'scheduled',
+              'draft': 'draft',
+              'production': 'production',
+              'running': 'running',
+              'completed': 'completed'
+            };
+            lookupKey = scriptMapping[baseType] || baseType;
+          } else if (type.endsWith('-global')) {
             const baseType = type.replace('-global', '').toLowerCase();
             // Map global action types to their base colors
             const globalMapping = {
               'autosave': 'autosave'
             };
-            const baseKey = globalMapping[baseType] || baseType;
-            colors[baseKey] = fullColor;
-            updateColor(baseKey, fullColor);
+            lookupKey = globalMapping[baseType] || baseType;
+          } else if (type.endsWith('-ui')) {
+            // General UI section: 'block-header-ui' -> DB key 'block-header'
+            lookupKey = type.replace('-ui', '').toLowerCase();
           }
-        }
-      });
 
-      // Save to database (new endpoint with profile support)
-      try {
-        const token = localStorage.getItem('auth-token');
-        
-        // Build headers - only add Authorization if token exists
-        const headers = {
-          'Content-Type': 'application/json'
-        };
-        
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-        
-        console.log('Saving colors to database:', colors);
-        console.log('Using headers:', headers);
-        
-        const response = await fetch('/api/settings/colors', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ 
-            colors, 
-            category: 'colors', 
-            profile: 'default' 
-          })
+          const colorValue = dbColors[lookupKey];
+          if (colorValue) {
+            const parsed = parseColorValue(colorValue);
+            // Set the reactive properties (Vue 3 compatible)
+            baseColor[type] = parsed.base || null;
+            variant[type] = parsed.variant || '';
+            // Update local storage as backup
+            updateColor(type, colorValue);
+          }
         });
 
-        if (response.ok) {
-          const result = await response.json();
-          console.log('Colors saved successfully:', result);
-          this.isSaving = false;
-          this.showConfirmation = true;
-          this.$emit('colors-saved');
-        } else {
-          const errorText = await response.text();
-          console.error('Failed to save colors to database. Response:', response.status, response.statusText, errorText);
-          console.error('Request body was:', JSON.stringify({ 
-            colors, 
-            category: 'colors', 
-            profile: 'default' 
-          }));
-          this.showSnackbar(`Failed to save colors: ${response.status} ${response.statusText} - ${errorText}`);
-          this.isSaving = false;
-        }
-      } catch (error) {
-        console.error('Error saving colors:', error);
-        this.showSnackbar(`Error saving colors: ${error.message}`);
-        this.isSaving = false;
+        // Set initialization complete
+        nextTick(() => {
+          isInitializing.value = false;
+        });
+        return; // Exit early if database load succeeds
       }
-    }, 1000),
-  },
-  async created() {
-    await this.loadCustomTypes();
-    this.initializeColors();
-  },
-  mounted() {
-    // this.initializeColors();
-  },
-  watch: {
-    baseColor: {
-      handler() {
-        if (this.isInitializing) {
-          return;
-        }
-        this.$emit('colors-changed');
-      },
-      deep: true
-    },
-    variant: {
-      handler() {
-        if (this.isInitializing) {
-          return;
-        }
-        this.$emit('colors-changed');
-      },
-      deep: true
     }
-  },
-};
+  } catch (error) {
+    // Fallback to localStorage if database fails
+  }
+
+  // Fallback to local storage if database fails
+  allTypes.forEach(type => {
+    if (!baseColor[type]) {
+      let lookupKey = type;
+
+      // Map interface and script types to their base color keys
+      if (type.endsWith('-interface')) {
+        const baseType = type.replace('-interface', '').toLowerCase();
+        const interfaceMapping = {
+          'selection': 'selection',
+          'hover': 'hover',
+          'highlight': 'highlight',
+          'dropline': 'dropline',
+          'draglight': 'draglight',
+          'locatorflash': 'locatorflash'
+        };
+        lookupKey = interfaceMapping[baseType] || baseType;
+      } else if (type.endsWith('-script')) {
+        const baseType = type.replace('-script', '').toLowerCase();
+        const scriptMapping = {
+          'scheduled': 'scheduled',
+          'draft': 'draft',
+          'production': 'production',
+          'running': 'running',
+          'completed': 'completed'
+        };
+        lookupKey = scriptMapping[baseType] || baseType;
+      } else if (type.endsWith('-global')) {
+        const baseType = type.replace('-global', '').toLowerCase();
+        const globalMapping = {
+          'autosave': 'autosave'
+        };
+        lookupKey = globalMapping[baseType] || baseType;
+      }
+
+      const colorValue = getColorValue(lookupKey); // Get color from local storage using mapped key
+      if (colorValue) {
+        // localStorage might use space or dash format, try both
+        const spaceParts = colorValue.split(' ');
+        if (spaceParts.length > 1) {
+          // Space format: "blue lighten-4"
+          baseColor[type] = spaceParts[0] || null;
+          variant[type] = spaceParts[1] || null;
+        } else {
+          // Dash format: "blue-lighten-4"
+          const parsed = parseColorValue(colorValue);
+          baseColor[type] = parsed.base;
+          variant[type] = parsed.variant;
+        }
+      } else {
+        baseColor[type] = null;
+        variant[type] = null;
+      }
+    }
+  });
+
+  // Set initialization complete for fallback case too
+  nextTick(() => {
+    isInitializing.value = false;
+  });
+}
+
+const saveColors = debounce(async function () {
+  isSaving.value = true;
+  const allTypes = [
+    ...rundownTypes.value,
+    ...customRundownTypes.value,
+    ...rundownRegionsTypes.value,
+    ...elementsCuesTypes.value,
+    ...interfaceTypes.value.map(t => t + '-interface'),
+    ...scriptStatusTypes.value.map(t => t + '-script'),
+    ...globalActionTypes.value.map(t => t + '-global'),
+    ...generalUiTypes.value.map(t => t + '-ui'),
+  ];
+
+  // Build colors object
+  const colors = {};
+  allTypes.forEach(type => {
+    const fullColor = getFullColor(type);
+    if (fullColor) {
+      colors[type] = fullColor;
+      updateColor(type, fullColor); // Update local storage as backup
+
+      // For script status types, also save base keys for content editor
+      if (type.endsWith('-script')) {
+        const baseKey = type.replace('-script', '').toLowerCase();
+        colors[baseKey] = fullColor;
+        updateColor(baseKey, fullColor);
+      }
+
+      // For interface types, also save base keys for content editor
+      if (type.endsWith('-interface')) {
+        const baseType = type.replace('-interface', '').toLowerCase();
+        // Map interface types to their base colors
+        const interfaceMapping = {
+          'selection': 'selection',
+          'hover': 'hover',
+          'highlight': 'highlight',
+          'dropline': 'dropline',
+          'draglight': 'draglight',
+          'locatorflash': 'locatorflash'
+        };
+        const baseKey = interfaceMapping[baseType] || baseType;
+        colors[baseKey] = fullColor;
+        updateColor(baseKey, fullColor);
+      }
+
+      // For global action types, also save base keys for content editor
+      if (type.endsWith('-global')) {
+        const baseType = type.replace('-global', '').toLowerCase();
+        // Map global action types to their base colors
+        const globalMapping = {
+          'autosave': 'autosave'
+        };
+        const baseKey = globalMapping[baseType] || baseType;
+        colors[baseKey] = fullColor;
+        updateColor(baseKey, fullColor);
+      }
+
+      // For general UI types, also save the base key
+      if (type.endsWith('-ui')) {
+        const baseKey = type.replace('-ui', '').toLowerCase();
+        colors[baseKey] = fullColor;
+        updateColor(baseKey, fullColor);
+      }
+    }
+  });
+
+  // Save to database (new endpoint with profile support)
+  try {
+    const token = localStorage.getItem('auth-token');
+
+    // Build headers - only add Authorization if token exists
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    console.log('Saving colors to database:', colors);
+    console.log('Using headers:', headers);
+
+    const response = await fetch('/api/settings/colors', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        colors,
+        category: 'colors',
+        profile: 'default'
+      })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      console.log('Colors saved successfully:', result);
+      isSaving.value = false;
+      showConfirmation.value = true;
+      emit('colors-saved');
+    } else {
+      const errorText = await response.text();
+      console.error('Failed to save colors to database. Response:', response.status, response.statusText, errorText);
+      console.error('Request body was:', JSON.stringify({
+        colors,
+        category: 'colors',
+        profile: 'default'
+      }));
+      showSnackbar(`Failed to save colors: ${response.status} ${response.statusText} - ${errorText}`);
+      isSaving.value = false;
+    }
+  } catch (error) {
+    console.error('Error saving colors:', error);
+    showSnackbar(`Error saving colors: ${error.message}`);
+    isSaving.value = false;
+  }
+}, 1000);
+
+// Watchers
+watch(baseColor, () => {
+  if (isInitializing.value) {
+    return;
+  }
+  emit('colors-changed');
+}, { deep: true });
+
+watch(variant, () => {
+  if (isInitializing.value) {
+    return;
+  }
+  emit('colors-changed');
+}, { deep: true });
+
+// Created lifecycle (runs immediately in script setup)
+(async () => {
+  await loadCustomTypes();
+  initializeColors();
+})();
+
+// Expose resolveVuetifyColor for template usage
+// (imported function needs to be accessible in template with script setup)
 </script>
 
 <style scoped>

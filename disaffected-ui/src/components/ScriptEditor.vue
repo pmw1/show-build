@@ -136,270 +136,235 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 
-export default {
-  name: 'ScriptEditor',
-  props: {
-    modelValue: {
-      type: String,
-      default: ''
-    },
-    segmentId: {
-      type: String,
-      required: true
-    }
+const props = defineProps({
+  modelValue: {
+    type: String,
+    default: ''
   },
-  emits: ['update:modelValue', 'save', 'cue-inserted'],
-  setup(props, { emit }) {
-    // Editor state
-    const editor = ref(null);
-    const content = ref(props.modelValue);
-    const viewMode = ref('edit');
-    const formatting = ref([]);
-    
-    // Cue management
-    const cueDialog = ref(false);
-    const currentCueType = ref('');
-    const cueData = ref({
-      assetId: '',
-      duration: '',
-      text: '',
-      notes: ''
-    });
-    
-    const cueTypes = [
-      { type: 'VO', color: 'blue', name: 'Voice Over' },
-      { type: 'NAT', color: 'green', name: 'Natural Sound' },
-      { type: 'SOT', color: 'orange', name: 'Sound on Tape' },
-      { type: 'PKG', color: 'purple', name: 'Package' },
-      { type: 'GFX', color: 'pink', name: 'Graphics' },
-      { type: 'FSQ', color: 'red', name: 'Full Screen' }
-    ];
-    
-    // Teleprompter state
-    const teleprompter = ref(null);
-    const isScrolling = ref(false);
-    const scrollSpeed = ref(5);
-    const teleprompterFontSize = ref(32);
-    let scrollInterval = null;
-    
-    // Computed properties
-    const wordCount = computed(() => {
-      const text = content.value.replace(/<[^>]*>/g, '').replace(/<!-- (?:Begin|End) Cue -->/g, '');
-      return text.split(/\s+/).filter(word => word.length > 0).length;
-    });
-    
-    const estimatedDuration = computed(() => {
-      // Average reading speed: 150 words per minute
-      const minutes = Math.ceil(wordCount.value / 150);
-      return `${minutes} min`;
-    });
-    
-    const cueCount = computed(() => {
-      const matches = content.value.match(/\[[A-Z]+:.*?\]/g);
-      return matches ? matches.length : 0;
-    });
-    
-    const formattedContent = computed(() => {
-      let formatted = content.value;
-      
-      // Format cues as styled spans
-      formatted = formatted.replace(
-        /\[([A-Z]+):([^\]]+)\]/g,
-        '<span class="cue-marker cue-$1" contenteditable="false">[$1: $2]</span>'
-      );
-      
-      return formatted;
-    });
-    
-    const previewContent = computed(() => {
-      let preview = content.value;
-      
-      // Convert cues to preview boxes
-      preview = preview.replace(
-        /\[([A-Z]+):([^\]]+)\]/g,
-        `<div class="cue-box cue-$1">
-          <span class="cue-type">$1</span>
-          <span class="cue-details">$2</span>
-        </div>`
-      );
-      
-      // Convert line breaks
-      preview = preview.replace(/\n/g, '<br>');
-      
-      return preview;
-    });
-    
-    const teleprompterContent = computed(() => {
-      let prompter = content.value;
-      
-      // Convert cues to teleprompter format
-      prompter = prompter.replace(
-        /\[([A-Z]+):([^\]]+)\]/g,
-        '<div class="teleprompter-cue">[[ $1 - $2 ]]</div>'
-      );
-      
-      // Add line breaks and styling
-      prompter = prompter.replace(/\n/g, '<br>');
-      
-      return `<div class="teleprompter-text">${prompter}</div>`;
-    });
-    
-    // Methods
-    const handleInput = (event) => {
-      content.value = event.target.innerHTML
-        .replace(/<div>/g, '\n')
-        .replace(/<\/div>/g, '')
-        .replace(/<br>/g, '\n')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/<span[^>]*class="cue-marker[^>]*>(\[[^\]]+\])<\/span>/g, '$1');
-      
-      emit('update:modelValue', content.value);
-    };
-    
-    const handleKeydown = (event) => {
-      // Auto-save on Ctrl+S
-      if (event.ctrlKey && event.key === 's') {
-        event.preventDefault();
-        emit('save');
-      }
-    };
-    
-    const handlePaste = (event) => {
-      event.preventDefault();
-      const text = event.clipboardData.getData('text/plain');
-      document.execCommand('insertText', false, text);
-    };
-    
-    const toggleBold = () => {
-      document.execCommand('bold');
-    };
-    
-    const toggleItalic = () => {
-      document.execCommand('italic');
-    };
-    
-    const toggleUnderline = () => {
-      document.execCommand('underline');
-    };
-    
-    const insertCue = (type) => {
-      currentCueType.value = type;
-      cueData.value = {
-        assetId: '',
-        duration: '',
-        text: '',
-        notes: ''
-      };
-      cueDialog.value = true;
-    };
-    
-    const confirmCueInsert = () => {
-      let cueString = `[${currentCueType.value}: ${cueData.value.assetId}`;
-      
-      if (cueData.value.duration) {
-        cueString += ` ${cueData.value.duration}`;
-      }
-      
-      if (cueData.value.text && currentCueType.value === 'GFX') {
-        cueString += ` "${cueData.value.text}"`;
-      }
-      
-      cueString += ']';
-      
-      // Insert at cursor position
-      const selection = window.getSelection();
-      const range = selection.getRangeAt(0);
-      const cueNode = document.createTextNode(cueString);
-      range.insertNode(cueNode);
-      range.collapse(false);
-      
-      // Update content
-      content.value = editor.value.innerText;
-      emit('update:modelValue', content.value);
-      emit('cue-inserted', {
-        type: currentCueType.value,
-        data: cueData.value
-      });
-      
-      cueDialog.value = false;
-    };
-    
-    const startTeleprompter = () => {
-      isScrolling.value = true;
-      scrollInterval = setInterval(() => {
-        if (teleprompter.value) {
-          teleprompter.value.scrollTop += scrollSpeed.value;
-        }
-      }, 50);
-    };
-    
-    const pauseTeleprompter = () => {
-      isScrolling.value = false;
-      if (scrollInterval) {
-        clearInterval(scrollInterval);
-        scrollInterval = null;
-      }
-    };
-    
-    const stopTeleprompter = () => {
-      pauseTeleprompter();
-      if (teleprompter.value) {
-        teleprompter.value.scrollTop = 0;
-      }
-    };
-    
-    // Lifecycle
-    onMounted(() => {
-      if (editor.value) {
-        editor.value.innerHTML = formattedContent.value;
-      }
-    });
-    
-    watch(() => props.modelValue, (newValue) => {
-      if (newValue !== content.value) {
-        content.value = newValue;
-        if (editor.value) {
-          editor.value.innerHTML = formattedContent.value;
-        }
-      }
-    });
-    
-    return {
-      editor,
-      content,
-      viewMode,
-      formatting,
-      cueDialog,
-      currentCueType,
-      cueData,
-      cueTypes,
-      teleprompter,
-      isScrolling,
-      scrollSpeed,
-      teleprompterFontSize,
-      wordCount,
-      estimatedDuration,
-      cueCount,
-      formattedContent,
-      previewContent,
-      teleprompterContent,
-      handleInput,
-      handleKeydown,
-      handlePaste,
-      toggleBold,
-      toggleItalic,
-      toggleUnderline,
-      insertCue,
-      confirmCueInsert,
-      startTeleprompter,
-      pauseTeleprompter,
-      stopTeleprompter
-    };
+  segmentId: {
+    type: String,
+    required: true
+  }
+});
+
+const emit = defineEmits(['update:modelValue', 'save', 'cue-inserted']);
+
+// Editor state
+const editor = ref(null);
+const content = ref(props.modelValue);
+const viewMode = ref('edit');
+const formatting = ref([]);
+
+// Cue management
+const cueDialog = ref(false);
+const currentCueType = ref('');
+const cueData = ref({
+  assetId: '',
+  duration: '',
+  text: '',
+  notes: ''
+});
+
+const cueTypes = [
+  { type: 'VO', color: 'blue', name: 'Voice Over' },
+  { type: 'NAT', color: 'green', name: 'Natural Sound' },
+  { type: 'SOT', color: 'orange', name: 'Sound on Tape' },
+  { type: 'PKG', color: 'purple', name: 'Package' },
+  { type: 'GFX', color: 'pink', name: 'Graphics' },
+  { type: 'FSQ', color: 'red', name: 'Full Screen' }
+];
+
+// Teleprompter state
+const teleprompter = ref(null);
+const isScrolling = ref(false);
+const scrollSpeed = ref(5);
+const teleprompterFontSize = ref(32);
+let scrollInterval = null;
+
+// Computed properties
+const wordCount = computed(() => {
+  const text = content.value.replace(/<[^>]*>/g, '').replace(/<!-- (?:Begin|End) Cue -->/g, '');
+  return text.split(/\s+/).filter(word => word.length > 0).length;
+});
+
+const estimatedDuration = computed(() => {
+  // Average reading speed: 150 words per minute
+  const minutes = Math.ceil(wordCount.value / 150);
+  return `${minutes} min`;
+});
+
+const cueCount = computed(() => {
+  const matches = content.value.match(/\[[A-Z]+:.*?\]/g);
+  return matches ? matches.length : 0;
+});
+
+const formattedContent = computed(() => {
+  let formatted = content.value;
+
+  // Format cues as styled spans
+  formatted = formatted.replace(
+    /\[([A-Z]+):([^\]]+)\]/g,
+    '<span class="cue-marker cue-$1" contenteditable="false">[$1: $2]</span>'
+  );
+
+  return formatted;
+});
+
+const previewContent = computed(() => {
+  let preview = content.value;
+
+  // Convert cues to preview boxes
+  preview = preview.replace(
+    /\[([A-Z]+):([^\]]+)\]/g,
+    `<div class="cue-box cue-$1">
+      <span class="cue-type">$1</span>
+      <span class="cue-details">$2</span>
+    </div>`
+  );
+
+  // Convert line breaks
+  preview = preview.replace(/\n/g, '<br>');
+
+  return preview;
+});
+
+const teleprompterContent = computed(() => {
+  let prompter = content.value;
+
+  // Convert cues to teleprompter format
+  prompter = prompter.replace(
+    /\[([A-Z]+):([^\]]+)\]/g,
+    '<div class="teleprompter-cue">[[ $1 - $2 ]]</div>'
+  );
+
+  // Add line breaks and styling
+  prompter = prompter.replace(/\n/g, '<br>');
+
+  return `<div class="teleprompter-text">${prompter}</div>`;
+});
+
+// Methods
+const handleInput = (event) => {
+  content.value = event.target.innerHTML
+    .replace(/<div>/g, '\n')
+    .replace(/<\/div>/g, '')
+    .replace(/<br>/g, '\n')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/<span[^>]*class="cue-marker[^>]*>(\[[^\]]+\])<\/span>/g, '$1');
+
+  emit('update:modelValue', content.value);
+};
+
+const handleKeydown = (event) => {
+  // Auto-save on Ctrl+S
+  if (event.ctrlKey && event.key === 's') {
+    event.preventDefault();
+    emit('save');
   }
 };
+
+const handlePaste = (event) => {
+  event.preventDefault();
+  const text = event.clipboardData.getData('text/plain');
+  document.execCommand('insertText', false, text);
+};
+
+const toggleBold = () => {
+  document.execCommand('bold');
+};
+
+const toggleItalic = () => {
+  document.execCommand('italic');
+};
+
+const toggleUnderline = () => {
+  document.execCommand('underline');
+};
+
+const insertCue = (type) => {
+  currentCueType.value = type;
+  cueData.value = {
+    assetId: '',
+    duration: '',
+    text: '',
+    notes: ''
+  };
+  cueDialog.value = true;
+};
+
+const confirmCueInsert = () => {
+  let cueString = `[${currentCueType.value}: ${cueData.value.assetId}`;
+
+  if (cueData.value.duration) {
+    cueString += ` ${cueData.value.duration}`;
+  }
+
+  if (cueData.value.text && currentCueType.value === 'GFX') {
+    cueString += ` "${cueData.value.text}"`;
+  }
+
+  cueString += ']';
+
+  // Insert at cursor position
+  const selection = window.getSelection();
+  const range = selection.getRangeAt(0);
+  const cueNode = document.createTextNode(cueString);
+  range.insertNode(cueNode);
+  range.collapse(false);
+
+  // Update content
+  content.value = editor.value.innerText;
+  emit('update:modelValue', content.value);
+  emit('cue-inserted', {
+    type: currentCueType.value,
+    data: cueData.value
+  });
+
+  cueDialog.value = false;
+};
+
+const startTeleprompter = () => {
+  isScrolling.value = true;
+  scrollInterval = setInterval(() => {
+    if (teleprompter.value) {
+      teleprompter.value.scrollTop += scrollSpeed.value;
+    }
+  }, 50);
+};
+
+const pauseTeleprompter = () => {
+  isScrolling.value = false;
+  if (scrollInterval) {
+    clearInterval(scrollInterval);
+    scrollInterval = null;
+  }
+};
+
+const stopTeleprompter = () => {
+  pauseTeleprompter();
+  if (teleprompter.value) {
+    teleprompter.value.scrollTop = 0;
+  }
+};
+
+// Lifecycle
+onMounted(() => {
+  if (editor.value) {
+    editor.value.innerHTML = formattedContent.value;
+  }
+});
+
+watch(() => props.modelValue, (newValue) => {
+  if (newValue !== content.value) {
+    content.value = newValue;
+    if (editor.value) {
+      editor.value.innerHTML = formattedContent.value;
+    }
+  }
+});
 </script>
 
 <style scoped>

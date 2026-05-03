@@ -130,211 +130,209 @@
   </v-dialog>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import axios from 'axios';
 import { getColorValue } from '@/utils/themeColorMap.js';
 
-export default {
-  name: 'ContentLibraryPickerModal',
-  emits: ['update:show', 'select', 'create-new'],
-  props: {
-    show: {
-      type: Boolean,
-      default: false
-    },
-    itemType: {
-      type: String,
-      required: true
-    },
-    episodeNumber: {
-      type: String,
-      default: ''
-    }
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
   },
-  data() {
-    return {
-      libraryItems: [],
-      selectedItem: null,
-      loading: false,
-      loadingMore: false,
-      searchQuery: '',
-      priorityFilter: null,
-      totalItems: 0,
-      offset: 0,
-      limit: 20,
-      searchTimeout: null,
-      priorityOptions: [
-        { title: 'All Priorities', value: null },
-        { title: 'High Priority', value: 'high' },
-        { title: 'Normal Priority', value: 'normal' },
-        { title: 'Low Priority', value: 'low' }
-      ]
-    }
+  itemType: {
+    type: String,
+    required: true
   },
-  computed: {
-    displayTypeName() {
-      const typeNames = {
-        'advertisement': 'Advertisement',
-        'ad': 'Advertisement',
-        'promo': 'Promo',
-        'cta': 'Call to Action',
-        'transition': 'Transition',
-        'stinger': 'Stinger'
-      };
-      return typeNames[this.itemType] || this.itemType;
-    }
-  },
-  watch: {
-    show(newVal) {
-      if (newVal) {
-        this.loadLibraryItems();
-      } else {
-        this.reset();
-      }
-    },
-    priorityFilter() {
-      this.offset = 0;
-      this.libraryItems = [];
-      this.loadLibraryItems();
-    }
-  },
-  mounted() {
-    document.addEventListener('keydown', this.handleKeydown);
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown);
-    if (this.searchTimeout) {
-      clearTimeout(this.searchTimeout);
-    }
-  },
-  methods: {
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        this.cancel();
-      }
-    },
+  episodeNumber: {
+    type: String,
+    default: ''
+  }
+});
 
-    reset() {
-      this.libraryItems = [];
-      this.selectedItem = null;
-      this.searchQuery = '';
-      this.priorityFilter = null;
-      this.offset = 0;
-    },
+const emit = defineEmits(['update:show', 'select', 'create-new']);
 
-    async loadLibraryItems() {
-      this.loading = true;
+// Data
+const libraryItems = ref([]);
+const selectedItem = ref(null);
+const loading = ref(false);
+const loadingMore = ref(false);
+const searchQuery = ref('');
+const priorityFilter = ref(null);
+const totalItems = ref(0);
+const offset = ref(0);
+const limit = ref(20);
+let searchTimeout = null;
+const priorityOptions = ref([
+  { title: 'All Priorities', value: null },
+  { title: 'High Priority', value: 'high' },
+  { title: 'Normal Priority', value: 'normal' },
+  { title: 'Low Priority', value: 'low' }
+]);
 
-      try {
-        // Map type names to backend expected values
-        const typeMapping = {
-          'ad': 'advertisement'
-        };
-        const queryType = typeMapping[this.itemType] || this.itemType;
+// Computed
+const displayTypeName = computed(() => {
+  const typeNames = {
+    'advertisement': 'Advertisement',
+    'ad': 'Advertisement',
+    'promo': 'Promo',
+    'cta': 'Call to Action',
+    'transition': 'Transition',
+    'stinger': 'Stinger'
+  };
+  return typeNames[props.itemType] || props.itemType;
+});
 
-        const params = new URLSearchParams({
-          item_type: queryType,
-          is_active: 'true',
-          limit: this.limit.toString(),
-          offset: this.offset.toString()
-        });
-
-        if (this.searchQuery) {
-          params.append('search', this.searchQuery);
-        }
-
-        // Add date filter for currently valid items
-        const today = new Date().toISOString();
-        params.append('valid_on', today);
-
-        const response = await axios.get(`/api/content-library/?${params.toString()}`);
-
-        if (response.data) {
-          if (this.offset === 0) {
-            this.libraryItems = response.data.items || [];
-          } else {
-            this.libraryItems = [...this.libraryItems, ...(response.data.items || [])];
-          }
-          this.totalItems = response.data.total || 0;
-        }
-      } catch (error) {
-        console.error('Error loading library items:', error);
-        // Show error toast or notification
-      } finally {
-        this.loading = false;
-        this.loadingMore = false;
-      }
-    },
-
-    loadMore() {
-      this.loadingMore = true;
-      this.offset += this.limit;
-      this.loadLibraryItems();
-    },
-
-    debouncedSearch() {
-      if (this.searchTimeout) {
-        clearTimeout(this.searchTimeout);
-      }
-      this.searchTimeout = setTimeout(() => {
-        this.offset = 0;
-        this.libraryItems = [];
-        this.loadLibraryItems();
-      }, 300);
-    },
-
-    selectItem(item) {
-      this.selectedItem = item;
-    },
-
-    confirmSelection() {
-      if (this.selectedItem) {
-        this.$emit('select', {
-          libraryItem: this.selectedItem,
-          itemType: this.itemType
-        });
-        this.cancel();
-      }
-    },
-
-    createNew() {
-      this.$emit('create-new', {
-        itemType: this.itemType
-      });
-      this.cancel();
-    },
-
-    cancel() {
-      this.$emit('update:show', false);
-    },
-
-    getTypeColor(type) {
-      return getColorValue(type);
-    },
-
-    getTypeIcon(type) {
-      const icons = {
-        'advertisement': 'mdi-currency-usd',
-        'ad': 'mdi-currency-usd',
-        'promo': 'mdi-bullhorn',
-        'cta': 'mdi-hand-pointing-right',
-        'transition': 'mdi-swap-horizontal',
-        'stinger': 'mdi-flash'
-      };
-      return icons[type] || 'mdi-file-document';
-    },
-
-    formatDate(dateStr) {
-      if (!dateStr) return 'No limit';
-      try {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      } catch {
-        return dateStr;
-      }
-    }
+// Methods
+function handleKeydown(event) {
+  if (event.key === 'Escape' && props.show) {
+    cancel();
   }
 }
+
+function reset() {
+  libraryItems.value = [];
+  selectedItem.value = null;
+  searchQuery.value = '';
+  priorityFilter.value = null;
+  offset.value = 0;
+}
+
+async function loadLibraryItems() {
+  loading.value = true;
+
+  try {
+    const typeMapping = {
+      'ad': 'advertisement'
+    };
+    const queryType = typeMapping[props.itemType] || props.itemType;
+
+    const params = new URLSearchParams({
+      item_type: queryType,
+      is_active: 'true',
+      limit: limit.value.toString(),
+      offset: offset.value.toString()
+    });
+
+    if (searchQuery.value) {
+      params.append('search', searchQuery.value);
+    }
+
+    const today = new Date().toISOString();
+    params.append('valid_on', today);
+
+    const response = await axios.get(`/api/content-library/?${params.toString()}`);
+
+    if (response.data) {
+      if (offset.value === 0) {
+        libraryItems.value = response.data.items || [];
+      } else {
+        libraryItems.value = [...libraryItems.value, ...(response.data.items || [])];
+      }
+      totalItems.value = response.data.total || 0;
+    }
+  } catch (error) {
+    console.error('Error loading library items:', error);
+  } finally {
+    loading.value = false;
+    loadingMore.value = false;
+  }
+}
+
+function loadMore() {
+  loadingMore.value = true;
+  offset.value += limit.value;
+  loadLibraryItems();
+}
+
+function debouncedSearch() {
+  if (searchTimeout) {
+    clearTimeout(searchTimeout);
+  }
+  searchTimeout = setTimeout(() => {
+    offset.value = 0;
+    libraryItems.value = [];
+    loadLibraryItems();
+  }, 300);
+}
+
+function selectItem(item) {
+  selectedItem.value = item;
+}
+
+function confirmSelection() {
+  if (selectedItem.value) {
+    emit('select', {
+      libraryItem: selectedItem.value,
+      itemType: props.itemType
+    });
+    cancel();
+  }
+}
+
+function createNew() {
+  emit('create-new', {
+    itemType: props.itemType
+  });
+  cancel();
+}
+
+function cancel() {
+  emit('update:show', false);
+}
+
+function getTypeColor(type) {
+  return getColorValue(type);
+}
+
+function getTypeIcon(type) {
+  const icons = {
+    'advertisement': 'mdi-currency-usd',
+    'ad': 'mdi-currency-usd',
+    'promo': 'mdi-bullhorn',
+    'cta': 'mdi-hand-pointing-right',
+    'transition': 'mdi-swap-horizontal',
+    'stinger': 'mdi-flash'
+  };
+  return icons[type] || 'mdi-file-document';
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return 'No limit';
+  try {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+}
+
+// Watchers
+watch(() => props.show, (newVal) => {
+  if (newVal) {
+    loadLibraryItems();
+  } else {
+    reset();
+  }
+});
+
+watch(priorityFilter, () => {
+  offset.value = 0;
+  libraryItems.value = [];
+  loadLibraryItems();
+});
+
+// Lifecycle
+onMounted(() => {
+  document.addEventListener('keydown', handleKeydown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleKeydown);
+  if (searchTimeout) {
+    clearTimeout(searchTimeout);
+  }
+});
 </script>
 
 <style scoped>

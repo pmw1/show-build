@@ -97,6 +97,74 @@ services:
   # mqtt-broker service removed 2026-01-01 - archived in app/backup/mqtt_archived_2026-01-01/
   # All async task processing now handled by Celery + Redis (see app/celery_app.py)
 
+  llm-content-worker:
+    build:
+      context: .
+    container_name: show-build-llm-content-worker
+    user: "1000:1001"
+    command: >
+      celery -A celery_app worker
+      -Q llm_content
+      --hostname=llm-content-worker@prefect
+      --concurrency=1
+      --max-tasks-per-child=10
+      --loglevel=info
+    volumes:
+      - ./app:/app
+      - ./app/storage:/app/storage
+      - ${EPISODES_PATH:-/data/sync/disaffected/episodes}:/home/episodes
+      - ${REPO_PATH:-/data/sync/disaffected/repo}:/home/repo
+    networks:
+      - video-post
+    environment:
+      - TZ=America/New_York
+      - REDIS_URL=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  celery-beat:
+    build:
+      context: .
+    container_name: show-build-celery-beat
+    user: "1000:1001"
+    command: >
+      celery -A celery_app beat
+      --loglevel=info
+      --schedule=/tmp/celerybeat-schedule
+    volumes:
+      - ./app:/app
+    networks:
+      - video-post
+    environment:
+      - TZ=America/New_York
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  sot-trace:
+    build:
+      context: ./tools/sot-trace
+    container_name: show-build-sot-trace
+    command: ["sot-trace", "daemon"]
+    networks:
+      - video-post
+    environment:
+      - TZ=America/New_York
+      - PYTHONUNBUFFERED=1
+      - SOT_TRACE_DSN=host=show-build-postgres port=5432 dbname=showbuild user=showbuild password=showbuild
+      - SOT_TRACE_BROKER=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
+      - SOT_TRACE_FS_ROOT=/shared_media/preproc/working
+      - SOT_TRACE_DATA_DIR=/var/log/sot-trace
+    volumes:
+      - ${SHARED_MEDIA_PATH:-/data/sync/shared_media}:/shared_media:ro
+      - ./tools/sot-trace/data:/var/log/sot-trace
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
 volumes:
   postgres_data:
 

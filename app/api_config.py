@@ -110,13 +110,16 @@ class APIConfigManager:
                     except Exception as e:
                         logger.warning(f"Failed to decrypt {workflow}.{category}.{service}.{key}: {e}")
 
+                # The 'enabled' state is stored as is_enabled on every row
+                # for the service (set during save). Derive it from any row.
+                if 'enabled' not in config[workflow][category][service]:
+                    config[workflow][category][service]['enabled'] = bool(is_enabled)
+
                 # Convert snake_case to camelCase for frontend compatibility
                 camel_key = self._to_camel_case(key)
 
-                # Store value
-                if key == 'enabled':
-                    config[workflow][category][service]['enabled'] = is_enabled
-                else:
+                # Store value (skip 'enabled' key rows — enabled is derived from is_enabled column)
+                if key != 'enabled':
                     config[workflow][category][service][camel_key] = value or ""
 
             return config

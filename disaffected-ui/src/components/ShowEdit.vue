@@ -353,274 +353,283 @@
   </v-container>
 </template>
 
-<script>
+<script setup>
+import { ref, reactive, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useAuth } from '@/composables/useAuth'
 
-export default {
-  name: 'ShowEdit',
-  data() {
-    return {
-      loading: true,
-      saving: false,
-      creating: false,
-      error: null,
-      formValid: false,
-      show: null,
-      originalData: null,
-      showSuccessMessage: false,
-      allShows: [],
-      selectedShowId: null,
-      isAdmin: false,
-      showNewShowDialog: false,
-      newShowValid: false,
-      newShowName: '',
-      newShowDescription: '',
-      form: {
-        name: '',
-        description: '',
-        format: '',
-        logo: '',
-        poster: '',
-        host: '',
-        schedule: '',
-        category: '',
-        trailer: '',
-        website: '',
-        contact_name: '',
-        contact_phone: '',
-        contact_email: '',
-        social_links: {},
-        api_keys: {},
-        settings: {}
-      },
-      formatOptions: [
-        'Talk Show',
-        'News',
-        'Music',
-        'Podcast',
-        'Interview',
-        'Documentary',
-        'Live',
-        'Other'
-      ],
-      categoryOptions: [
-        'Entertainment',
-        'News & Politics',
-        'Sports',
-        'Music',
-        'Technology',
-        'Business',
-        'Comedy',
-        'Education',
-        'Health',
-        'Other'
-      ]
-    }
+const emit = defineEmits(['error'])
+
+// Template refs
+const showFormRef = ref(null)
+const newShowForm = ref(null)
+
+// Reactive state
+const loading = ref(true)
+const saving = ref(false)
+const creating = ref(false)
+const error = ref(null)
+const formValid = ref(false)
+const show = ref(null)
+const originalData = ref(null)
+const showSuccessMessage = ref(false)
+const allShows = ref([])
+const selectedShowId = ref(null)
+const isAdmin = ref(false)
+const showNewShowDialog = ref(false)
+const newShowValid = ref(false)
+const newShowName = ref('')
+const newShowDescription = ref('')
+
+const form = reactive({
+  name: '',
+  description: '',
+  format: '',
+  logo: '',
+  poster: '',
+  host: '',
+  schedule: '',
+  category: '',
+  trailer: '',
+  website: '',
+  contact_name: '',
+  contact_phone: '',
+  contact_email: '',
+  social_links: {},
+  api_keys: {},
+  settings: {}
+})
+
+const formatOptions = [
+  'Talk Show',
+  'News',
+  'Music',
+  'Podcast',
+  'Interview',
+  'Documentary',
+  'Live',
+  'Other'
+]
+
+const categoryOptions = [
+  'Entertainment',
+  'News & Politics',
+  'Sports',
+  'Music',
+  'Technology',
+  'Business',
+  'Comedy',
+  'Education',
+  'Health',
+  'Other'
+]
+
+// Computed
+const hasChanges = computed(() => {
+  if (!originalData.value) return false
+  return JSON.stringify(form) !== JSON.stringify(originalData.value)
+})
+
+const settingsJson = computed({
+  get() {
+    return JSON.stringify(form.settings || {}, null, 2)
   },
-  computed: {
-    hasChanges() {
-      if (!this.originalData) return false
-      return JSON.stringify(this.form) !== JSON.stringify(this.originalData)
-    },
-    settingsJson: {
-      get() {
-        return JSON.stringify(this.form.settings || {}, null, 2)
-      },
-      set(value) {
-        try {
-          this.form.settings = value ? JSON.parse(value) : {}
-        } catch (e) {
-          // Keep the text as is if it's invalid JSON
-        }
-      }
-    },
-    apiKeysJson: {
-      get() {
-        return JSON.stringify(this.form.api_keys || {}, null, 2)
-      },
-      set(value) {
-        try {
-          this.form.api_keys = value ? JSON.parse(value) : {}
-        } catch (e) {
-          // Keep the text as is if it's invalid JSON
-        }
-      }
-    },
-    socialLinksJson: {
-      get() {
-        return JSON.stringify(this.form.social_links || {}, null, 2)
-      },
-      set(value) {
-        try {
-          this.form.social_links = value ? JSON.parse(value) : {}
-        } catch (e) {
-          // Keep the text as is if it's invalid JSON
-        }
-      }
-    }
-  },
-  async mounted() {
-    // Check if user is admin
-    const { currentUser } = useAuth()
-    this.isAdmin = currentUser.value?.access_level === 'admin'
-    
-    await this.loadShows()
-  },
-  methods: {
-    async loadShows() {
-      try {
-        this.loading = true
-        this.error = null
-        
-        const response = await axios.get('/api/shows/')
-        
-        if (response.data && response.data.length > 0) {
-          this.allShows = response.data
-          
-          // Load the first show (user's own for regular users, first available for admins)
-          this.show = response.data[0]
-          this.selectedShowId = this.show.id
-          this.populateForm()
-        } else {
-          this.error = 'No shows found'
-        }
-      } catch (error) {
-        console.error('Failed to load shows:', error)
-        this.error = error.response?.data?.detail || 'Failed to load shows'
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async switchShow() {
-      if (!this.isAdmin) return
-      
-      try {
-        this.loading = true
-        this.error = null
-        
-        const selectedShow = this.allShows.find(show => show.id === this.selectedShowId)
-        if (selectedShow) {
-          this.show = selectedShow
-          this.populateForm()
-        }
-      } catch (error) {
-        console.error('Failed to switch show:', error)
-        this.error = error.response?.data?.detail || 'Failed to switch show'
-      } finally {
-        this.loading = false
-      }
-    },
-
-    populateForm() {
-      // Populate form with show data
-      this.form.name = this.show.name || ''
-      this.form.description = this.show.description || ''
-      this.form.format = this.show.format || ''
-      this.form.logo = this.show.logo || ''
-      this.form.poster = this.show.poster || ''
-      this.form.host = this.show.host || ''
-      this.form.schedule = this.show.schedule || ''
-      this.form.category = this.show.category || ''
-      this.form.trailer = this.show.trailer || ''
-      this.form.website = this.show.website || ''
-      this.form.contact_name = this.show.contact_name || ''
-      this.form.contact_phone = this.show.contact_phone || ''
-      this.form.contact_email = this.show.contact_email || ''
-      this.form.social_links = this.show.social_links || {}
-      this.form.api_keys = this.show.api_keys || {}
-      this.form.settings = this.show.settings || {}
-      
-      // Store original data for change detection
-      this.originalData = { ...this.form }
-    },
-
-    async saveShow() {
-      if (!this.$refs.form.validate()) return
-      
-      try {
-        this.saving = true
-        
-        // Only send changed fields
-        const changes = {}
-        Object.keys(this.form).forEach(key => {
-          if (JSON.stringify(this.form[key]) !== JSON.stringify(this.originalData[key])) {
-            changes[key] = this.form[key]
-          }
-        })
-        
-        if (Object.keys(changes).length === 0) {
-          return // No changes to save
-        }
-        
-        const response = await axios.put(
-          `/api/shows/${this.show.id}`,
-          changes
-        )
-        
-        this.show = response.data
-        this.populateForm() // Update form with latest data
-        this.showSuccessMessage = true
-        
-      } catch (error) {
-        console.error('Failed to save show:', error)
-        this.$emit('error', error.response?.data?.detail || 'Failed to save show')
-      } finally {
-        this.saving = false
-      }
-    },
-
-    resetForm() {
-      this.populateForm()
-    },
-
-    async createNewShow() {
-      if (!this.$refs.newShowForm.validate()) return
-      
-      try {
-        this.creating = true
-        
-        const newShowData = {
-          name: this.newShowName,
-          description: this.newShowDescription || ''
-        }
-        
-        const response = await axios.post('/api/shows/', newShowData)
-        
-        // Add the new show to the list
-        this.allShows.push(response.data)
-        
-        // Switch to the new show
-        this.show = response.data
-        this.selectedShowId = response.data.id
-        this.populateForm()
-        
-        // Close the dialog and reset form
-        this.closeNewShowDialog()
-        
-        // Show success message
-        this.showSuccessMessage = true
-        
-      } catch (error) {
-        console.error('Failed to create show:', error)
-        this.error = error.response?.data?.detail || 'Failed to create show'
-      } finally {
-        this.creating = false
-      }
-    },
-
-    closeNewShowDialog() {
-      this.showNewShowDialog = false
-      this.newShowName = ''
-      this.newShowDescription = ''
-      this.newShowValid = false
-      if (this.$refs.newShowForm) {
-        this.$refs.newShowForm.resetValidation()
-      }
+  set(value) {
+    try {
+      form.settings = value ? JSON.parse(value) : {}
+    } catch (e) {
+      // Keep the text as is if it's invalid JSON
     }
   }
+})
+
+const apiKeysJson = computed({
+  get() {
+    return JSON.stringify(form.api_keys || {}, null, 2)
+  },
+  set(value) {
+    try {
+      form.api_keys = value ? JSON.parse(value) : {}
+    } catch (e) {
+      // Keep the text as is if it's invalid JSON
+    }
+  }
+})
+
+const socialLinksJson = computed({
+  get() {
+    return JSON.stringify(form.social_links || {}, null, 2)
+  },
+  set(value) {
+    try {
+      form.social_links = value ? JSON.parse(value) : {}
+    } catch (e) {
+      // Keep the text as is if it's invalid JSON
+    }
+  }
+})
+
+// Methods
+async function loadShows() {
+  try {
+    loading.value = true
+    error.value = null
+
+    const response = await axios.get('/api/shows/')
+
+    if (response.data && response.data.length > 0) {
+      allShows.value = response.data
+
+      // Load the first show (user's own for regular users, first available for admins)
+      show.value = response.data[0]
+      selectedShowId.value = show.value.id
+      populateForm()
+    } else {
+      error.value = 'No shows found'
+    }
+  } catch (err) {
+    console.error('Failed to load shows:', err)
+    error.value = err.response?.data?.detail || 'Failed to load shows'
+  } finally {
+    loading.value = false
+  }
 }
+
+async function switchShow() {
+  if (!isAdmin.value) return
+
+  try {
+    loading.value = true
+    error.value = null
+
+    const selectedShow = allShows.value.find(s => s.id === selectedShowId.value)
+    if (selectedShow) {
+      show.value = selectedShow
+      populateForm()
+    }
+  } catch (err) {
+    console.error('Failed to switch show:', err)
+    error.value = err.response?.data?.detail || 'Failed to switch show'
+  } finally {
+    loading.value = false
+  }
+}
+
+function populateForm() {
+  // Populate form with show data
+  form.name = show.value.name || ''
+  form.description = show.value.description || ''
+  form.format = show.value.format || ''
+  form.logo = show.value.logo || ''
+  form.poster = show.value.poster || ''
+  form.host = show.value.host || ''
+  form.schedule = show.value.schedule || ''
+  form.category = show.value.category || ''
+  form.trailer = show.value.trailer || ''
+  form.website = show.value.website || ''
+  form.contact_name = show.value.contact_name || ''
+  form.contact_phone = show.value.contact_phone || ''
+  form.contact_email = show.value.contact_email || ''
+  form.social_links = show.value.social_links || {}
+  form.api_keys = show.value.api_keys || {}
+  form.settings = show.value.settings || {}
+
+  // Store original data for change detection
+  originalData.value = { ...form }
+}
+
+async function saveShow() {
+  if (!showFormRef.value.validate()) return
+
+  try {
+    saving.value = true
+
+    // Only send changed fields
+    const changes = {}
+    Object.keys(form).forEach(key => {
+      if (JSON.stringify(form[key]) !== JSON.stringify(originalData.value[key])) {
+        changes[key] = form[key]
+      }
+    })
+
+    if (Object.keys(changes).length === 0) {
+      return // No changes to save
+    }
+
+    const response = await axios.put(
+      `/api/shows/${show.value.id}`,
+      changes
+    )
+
+    show.value = response.data
+    populateForm() // Update form with latest data
+    showSuccessMessage.value = true
+
+  } catch (err) {
+    console.error('Failed to save show:', err)
+    emit('error', err.response?.data?.detail || 'Failed to save show')
+  } finally {
+    saving.value = false
+  }
+}
+
+function resetForm() {
+  populateForm()
+}
+
+async function createNewShow() {
+  if (!newShowForm.value.validate()) return
+
+  try {
+    creating.value = true
+
+    const newShowData = {
+      name: newShowName.value,
+      description: newShowDescription.value || ''
+    }
+
+    const response = await axios.post('/api/shows/', newShowData)
+
+    // Add the new show to the list
+    allShows.value.push(response.data)
+
+    // Switch to the new show
+    show.value = response.data
+    selectedShowId.value = response.data.id
+    populateForm()
+
+    // Close the dialog and reset form
+    closeNewShowDialog()
+
+    // Show success message
+    showSuccessMessage.value = true
+
+  } catch (err) {
+    console.error('Failed to create show:', err)
+    error.value = err.response?.data?.detail || 'Failed to create show'
+  } finally {
+    creating.value = false
+  }
+}
+
+function closeNewShowDialog() {
+  showNewShowDialog.value = false
+  newShowName.value = ''
+  newShowDescription.value = ''
+  newShowValid.value = false
+  if (newShowForm.value) {
+    newShowForm.value.resetValidation()
+  }
+}
+
+// Lifecycle
+onMounted(async () => {
+  // Check if user is admin
+  const { currentUser } = useAuth()
+  isAdmin.value = currentUser.value?.access_level === 'admin'
+
+  await loadShows()
+})
 </script>
 
 <style scoped>

@@ -39,8 +39,13 @@
             <v-icon size="48" color="grey-darken-1">mdi-video-outline</v-icon>
             <span class="sot-placeholder-text">No Thumbnail</span>
           </div>
+          <!-- Processing overlay with spinner -->
+          <div v-if="jobStatus && jobStatus.status === 'processing'" class="sot-processing-overlay">
+            <v-progress-circular indeterminate size="36" width="3" color="white"></v-progress-circular>
+            <span class="sot-processing-overlay-text">{{ jobStatus.current_phase || 'Processing...' }}</span>
+          </div>
           <!-- Play overlay icon -->
-          <div v-if="currentSotThumbnailUrl" class="sot-play-overlay" @click.stop="$emit('open-sot-preview')">
+          <div v-if="currentSotThumbnailUrl && !(jobStatus && jobStatus.status === 'processing')" class="sot-play-overlay" @click.stop="$emit('open-sot-preview')">
             <v-icon size="48" color="white">mdi-play-circle</v-icon>
           </div>
           <!-- VO Badge (VO only) -->
@@ -100,9 +105,9 @@
 
         <!-- Processing Status -->
         <div v-if="displayProcessingStatus" class="sot-info-row">
-          <v-icon size="small" :color="isJobCompleted ? 'success' : 'info'">{{ isJobCompleted ? 'mdi-check-circle' : 'mdi-progress-clock' }}</v-icon>
-          <span class="sot-info-label">Status:</span>
-          <span class="sot-info-value">{{ displayProcessingStatus }}</span>
+          <v-icon size="small" :color="displayProcessingStatus.startsWith('FAILED') ? 'error' : isJobCompleted ? 'success' : 'info'">{{ displayProcessingStatus.startsWith('FAILED') ? 'mdi-alert-circle' : isJobCompleted ? 'mdi-check-circle' : 'mdi-progress-clock' }}</v-icon>
+          <span class="sot-info-label" style="font-weight: 700;">Status:</span>
+          <span class="sot-info-value" :style="{ color: displayProcessingStatus.startsWith('FAILED') ? '#D32F2F' : displayProcessingStatus === 'Completed' ? '#2E7D32' : '#1565C0' }">{{ displayProcessingStatus }}</span>
         </div>
 
         <!-- SOT-only: Transcription Preview -->
@@ -112,6 +117,17 @@
           <v-tooltip activator="parent" location="top" max-width="400">
             <span style="white-space: pre-wrap;">{{ sotTranscription }}</span>
           </v-tooltip>
+          <v-btn
+            icon
+            size="x-small"
+            variant="text"
+            color="primary"
+            class="sot-transcription-copy-btn"
+            :title="transcriptionCopied ? 'Copied!' : 'Copy full transcript'"
+            @click.stop="copyTranscription"
+          >
+            <v-icon size="small">{{ transcriptionCopied ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
+          </v-btn>
         </div>
 
         <!-- SOT-only: Enhanced Video Specs -->
@@ -174,10 +190,11 @@
 
     <!-- Processing In Progress (no thumbnail yet) -->
     <div v-else-if="jobStatus && jobStatus.status === 'processing'" class="sot-processing-layout">
-      <v-progress-circular indeterminate size="40" width="3" color="primary"></v-progress-circular>
-      <div class="sot-processing-info">
-        <div class="sot-processing-phase">{{ jobStatus.current_phase || 'Processing...' }}</div>
-        <div class="sot-processing-message">{{ isVO ? 'B-Roll video is being processed' : 'Video is being processed' }}</div>
+      <div class="sot-processing-placeholder">
+        <div class="sot-processing-overlay" style="position: relative; border-radius: 8px;">
+          <v-progress-circular indeterminate size="40" width="3" color="white"></v-progress-circular>
+          <span class="sot-processing-overlay-text">{{ jobStatus.current_phase || 'Processing...' }}</span>
+        </div>
       </div>
     </div>
 
@@ -189,147 +206,174 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: 'SotCueContent',
-  emits: ['open-sot-preview', 'update-meta'],
-  props: {
-    cueData: {
-      type: Object,
-      required: true
-    },
-    variant: {
-      type: String,
-      default: 'SOT',
-      validator: (v) => ['SOT', 'VO'].includes(v)
-    },
-    jobStatus: {
-      type: Object,
-      default: null
-    },
-    sotThumbnailUrl: {
-      type: String,
-      default: ''
-    },
-    sotThumbnailOptions: {
-      type: Array,
-      default: () => []
-    },
-    currentSotThumbnailUrl: {
-      type: String,
-      default: ''
-    },
-    sotVideoUrl: {
-      type: String,
-      default: ''
-    },
-    sotTranscription: {
-      type: String,
-      default: ''
-    },
-    sotOutcue: {
-      type: String,
-      default: ''
-    },
-    isJobCompleted: {
-      type: Boolean,
-      default: false
-    },
-    displayDuration: {
-      type: String,
-      default: null
-    },
-    displayVideoPath: {
-      type: String,
-      default: null
-    },
-    displayProcessingStatus: {
-      type: String,
-      default: null
-    },
-    currentThumbnailSharpness: {
-      type: Number,
-      default: null
-    },
-    sharpnessColor: {
-      type: String,
-      default: 'grey'
-    },
-    initialThumbnailIndex: {
-      type: Number,
-      default: 7
-    }
+<script setup>
+import { ref, computed, watch } from 'vue';
+
+const props = defineProps({
+  cueData: {
+    type: Object,
+    required: true
   },
-  data() {
-    return {
-      showInlinePlayer: false,
-      currentThumbnailIndex: this.initialThumbnailIndex
+  variant: {
+    type: String,
+    default: 'SOT',
+    validator: (v) => ['SOT', 'VO'].includes(v)
+  },
+  jobStatus: {
+    type: Object,
+    default: null
+  },
+  sotThumbnailUrl: {
+    type: String,
+    default: ''
+  },
+  sotThumbnailOptions: {
+    type: Array,
+    default: () => []
+  },
+  currentSotThumbnailUrl: {
+    type: String,
+    default: ''
+  },
+  sotVideoUrl: {
+    type: String,
+    default: ''
+  },
+  sotTranscription: {
+    type: String,
+    default: ''
+  },
+  sotOutcue: {
+    type: String,
+    default: ''
+  },
+  isJobCompleted: {
+    type: Boolean,
+    default: false
+  },
+  displayDuration: {
+    type: String,
+    default: null
+  },
+  displayVideoPath: {
+    type: String,
+    default: null
+  },
+  displayProcessingStatus: {
+    type: String,
+    default: null
+  },
+  currentThumbnailSharpness: {
+    type: Number,
+    default: null
+  },
+  sharpnessColor: {
+    type: String,
+    default: 'grey'
+  },
+  initialThumbnailIndex: {
+    type: Number,
+    default: 7
+  }
+});
+
+const emit = defineEmits(['open-sot-preview', 'update-meta']);
+
+// data
+const showInlinePlayer = ref(false);
+const currentThumbnailIndex = ref(props.initialThumbnailIndex);
+const transcriptionCopied = ref(false);
+
+// Template ref
+const inlineVideoPlayerRef = ref(null); // eslint-disable-line no-unused-vars
+
+// computed
+const isVO = computed(() => {
+  return props.variant === 'VO';
+});
+
+// watch
+watch(() => props.initialThumbnailIndex, (newVal) => {
+  currentThumbnailIndex.value = newVal;
+});
+
+// methods
+function formatMediaPath(path) {
+  if (!path) return '';
+  const parts = path.split('/');
+  return parts[parts.length - 1] || path;
+}
+
+function formatWarningLabel(warning) {
+  if (!warning) return '';
+  if (warning.includes(':')) {
+    const type = warning.split(':')[0];
+    const typeLabels = {
+      'low_sharpness': 'Blurry',
+      'moderate_blur': 'Low Quality',
+      'unbalanced_audio': 'Audio Issue',
+      'large_file': 'Large File'
     };
-  },
-  computed: {
-    isVO() {
-      return this.variant === 'VO';
+    return typeLabels[type] || type;
+  }
+  return warning.length > 20 ? warning.substring(0, 20) + '...' : warning;
+}
+
+function truncateTranscription(text) {
+  if (!text) return '';
+  if (text.length <= 100) return text;
+  return text.substring(0, 100) + '...';
+}
+
+async function copyTranscription() {
+  const text = props.sotTranscription;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    transcriptionCopied.value = true;
+    if (typeof window.notifyUserStandard === 'function') {
+      window.notifyUserStandard('Transcript copied to clipboard', '#4CAF50', 2000);
     }
-  },
-  methods: {
-    formatMediaPath(path) {
-      if (!path) return '';
-      const parts = path.split('/');
-      return parts[parts.length - 1] || path;
-    },
-    formatWarningLabel(warning) {
-      if (!warning) return '';
-      if (warning.includes(':')) {
-        const type = warning.split(':')[0];
-        const typeLabels = {
-          'low_sharpness': 'Blurry',
-          'moderate_blur': 'Low Quality',
-          'unbalanced_audio': 'Audio Issue',
-          'large_file': 'Large File'
-        };
-        return typeLabels[type] || type;
-      }
-      return warning.length > 20 ? warning.substring(0, 20) + '...' : warning;
-    },
-    truncateTranscription(text) {
-      if (!text) return '';
-      if (text.length <= 100) return text;
-      return text.substring(0, 100) + '...';
-    },
-    handleSotThumbnailError() {
-      console.warn('SOT thumbnail failed to load:', this.currentSotThumbnailUrl);
-    },
-    onVideoLoaded() {
-      console.log('Inline video loaded:', this.sotVideoUrl);
-    },
-    prevThumbnail() {
-      if (this.currentThumbnailIndex > 0) {
-        this.currentThumbnailIndex--;
-        this.emitSelectedThumbnail();
-      }
-    },
-    nextThumbnail() {
-      if (this.currentThumbnailIndex < this.sotThumbnailOptions.length - 1) {
-        this.currentThumbnailIndex++;
-        this.emitSelectedThumbnail();
-      }
-    },
-    emitSelectedThumbnail() {
-      const selectedUrl = this.currentSotThumbnailUrl;
-      console.log(`Selected thumbnail ${this.currentThumbnailIndex + 1}: ${selectedUrl}`);
-      this.$emit('update-meta', {
-        assetId: this.cueData.assetId || this.cueData.assetid,
-        field: 'thumbnailUrl',
-        value: selectedUrl
-      });
-    }
-  },
-  watch: {
-    initialThumbnailIndex(newVal) {
-      this.currentThumbnailIndex = newVal;
+    setTimeout(() => { transcriptionCopied.value = false; }, 2000);
+  } catch (err) {
+    console.error('Failed to copy transcript:', err);
+    if (typeof window.notifyUserStandard === 'function') {
+      window.notifyUserStandard('Failed to copy transcript', '#F44336', 3000);
     }
   }
-};
+}
+
+function handleSotThumbnailError() {
+  console.warn('SOT thumbnail failed to load:', props.currentSotThumbnailUrl);
+}
+
+function onVideoLoaded() {
+  console.log('Inline video loaded:', props.sotVideoUrl);
+}
+
+function prevThumbnail() {
+  if (currentThumbnailIndex.value > 0) {
+    currentThumbnailIndex.value--;
+    emitSelectedThumbnail();
+  }
+}
+
+function nextThumbnail() {
+  if (currentThumbnailIndex.value < props.sotThumbnailOptions.length - 1) {
+    currentThumbnailIndex.value++;
+    emitSelectedThumbnail();
+  }
+}
+
+function emitSelectedThumbnail() {
+  const selectedUrl = props.currentSotThumbnailUrl;
+  console.log(`Selected thumbnail ${currentThumbnailIndex.value + 1}: ${selectedUrl}`);
+  emit('update-meta', {
+    assetId: props.cueData.assetId || props.cueData.assetid,
+    field: 'thumbnailUrl',
+    value: selectedUrl
+  });
+}
 </script>
 
 <style scoped>
@@ -569,12 +613,45 @@ export default {
   font-style: italic;
 }
 
+.sot-processing-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  z-index: 5;
+  border-radius: inherit;
+}
+
+.sot-processing-overlay-text {
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.sot-processing-placeholder {
+  width: 100%;
+  min-height: 120px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .sot-processing-layout {
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 24px;
-  background-color: rgba(33, 150, 243, 0.05);
   border-radius: 4px;
 }
 

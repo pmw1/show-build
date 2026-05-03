@@ -103,6 +103,9 @@ class Episode(Base):
     tiktok_caption = Column(Text, nullable=True)  # TikTok video caption
     tiktok_schedule_datetime = Column(DateTime(timezone=True), nullable=True)  # Override schedule (NULL = use master)
 
+    # --- Auto-generation ---
+    auto_generate_enabled = Column(Boolean, default=True, nullable=False, server_default="true")  # Kill switch for background description/tone sweeper
+
     # Relationships
     season = relationship("Season", back_populates="episodes")
     breaks = relationship("Break", back_populates="episode", cascade="all, delete-orphan")
@@ -265,6 +268,18 @@ class RundownItem(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # --- Tone classification (LLM first-pass) ---
+    tone = Column(String(32), nullable=True)  # e.g. 'sarcastic', 'serious' — from tone palette
+    tone_rationale = Column(Text, nullable=True)  # One-sentence explanation from classifier
+    tone_confidence = Column(Float, nullable=True)  # 0.0-1.0
+
+    # --- Auto-generation bookkeeping ---
+    llm_generated_fields = Column(JSON, nullable=True, default=list)  # ['description','tone',...] — drives purple highlight in sidebar
+    auto_generate_attempts = Column(Integer, nullable=False, default=0, server_default="0")  # Bounded retries; reset on human edit
+    description_gen_history = Column(JSON, nullable=True, default=list)  # [{role:'llm'|'user', text:str, ts:str}, ...] — full regen conversation
+    auto_description_enabled = Column(Boolean, default=True, nullable=False, server_default="true")  # Per-segment opt-in/out for auto-description sweeper
+    description_model = Column(String(100), nullable=True)  # LLM model name used to generate the description
 
     # Relationships
     rundown = relationship("Rundown", back_populates="rundown_items")

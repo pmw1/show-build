@@ -75,134 +75,105 @@
   </v-dialog>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 
-export default {
-  name: 'LoginModal',
-  props: {
-    modelValue: {
-      type: Boolean,
-      default: false
-    }
-  },
-  emits: ['update:modelValue', 'login-success'],
-  data() {
-    return {
-      formValid: false,
-      showPassword: false,
-      isLoading: false,
-      errorMessage: '',
-      credentials: {
-        username: '',
-        password: ''
-      },
-      fieldErrors: {
-        username: [],
-        password: []
-      },
-      usernameRules: [
-        v => !!v || 'Username is required',
-        v => (v && v.length >= 3) || 'Username must be at least 3 characters'
-      ],
-      passwordRules: [
-        v => !!v || 'Password is required',
-        v => (v && v.length >= 4) || 'Password must be at least 4 characters'
-      ]
-    }
-  },
-  computed: {
-    isVisible: {
-      get() {
-        return this.modelValue
-      },
-      set(value) {
-        this.$emit('update:modelValue', value)
-      }
-    }
-  },
-  methods: {
-    handleEscapeKey(event) {
-      if (event.key === 'Escape' && this.isVisible) {
-        this.isVisible = false
-      }
-    },
-    async handleLogin() {
-      if (!this.formValid) return
+const props = defineProps({
+  modelValue: { type: Boolean, default: false }
+})
+const emit = defineEmits(['update:modelValue', 'login-success'])
 
-      this.isLoading = true
-      this.errorMessage = ''
-      this.fieldErrors = { username: [], password: [] }
+const formValid = ref(false)
+const showPassword = ref(false)
+const isLoading = ref(false)
+const errorMessage = ref('')
+const credentials = ref({ username: '', password: '' })
+const fieldErrors = ref({ username: [], password: [] })
+const loginForm = ref(null)
 
-      try {
-        // Send JSON data to login endpoint
-        const response = await axios.post(
-          '/api/auth/login',
-          {
-            username: this.credentials.username,
-            password: this.credentials.password
-          }
-        )
+const usernameRules = [
+  v => !!v || 'Username is required',
+  v => (v && v.length >= 3) || 'Username must be at least 3 characters'
+]
+const passwordRules = [
+  v => !!v || 'Password is required',
+  v => (v && v.length >= 4) || 'Password must be at least 4 characters'
+]
 
-        if (response.data.access_token) {
-          // Store token with 48-hour expiration
-          const expirationTime = Date.now() + (48 * 60 * 60 * 1000) // 48 hours
-          localStorage.setItem('auth-token', response.data.access_token)
-          localStorage.setItem('auth-token-expiry', expirationTime.toString())
-          localStorage.setItem('user-data', JSON.stringify(response.data.user))
+const isVisible = computed({
+  get: () => props.modelValue,
+  set: (value) => emit('update:modelValue', value)
+})
 
-          // Set default auth header for future requests
-          axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.access_token}`
+function resetForm() {
+  credentials.value = { username: '', password: '' }
+  errorMessage.value = ''
+  fieldErrors.value = { username: [], password: [] }
+  showPassword.value = false
+  loginForm.value?.reset()
+}
 
-          // Emit success event with user data
-          this.$emit('login-success', {
-            token: response.data.access_token,
-            user: response.data.user,
-            expiry: expirationTime
-          })
-
-          // Close modal and reset form
-          this.isVisible = false
-          this.resetForm()
-        }
-      } catch (error) {        
-        if (error.response?.status === 401) {
-          this.errorMessage = 'Invalid username or password'
-        } else if (error.response?.status === 422) {
-          this.errorMessage = 'Please check your input'
-        } else {
-          this.errorMessage = 'Login failed. Please try again.'
-        }
-      } finally {
-        this.isLoading = false
-      }
-    },
-    resetForm() {
-      this.credentials = { username: '', password: '' }
-      this.errorMessage = ''
-      this.fieldErrors = { username: [], password: [] }
-      this.showPassword = false
-      if (this.$refs.loginForm) {
-        this.$refs.loginForm.reset()
-      }
-    }
-  },
-  watch: {
-    isVisible(newValue) {
-      if (newValue) {
-        // Reset form and add escape key listener when modal opens
-        this.resetForm()
-        document.addEventListener('keydown', this.handleEscapeKey)
-      } else {
-        // Remove escape key listener when modal closes
-        document.removeEventListener('keydown', this.handleEscapeKey)
-      }
-    }
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleEscapeKey)
+function handleEscapeKey(event) {
+  if (event.key === 'Escape' && isVisible.value) {
+    isVisible.value = false
   }
 }
+
+async function handleLogin() {
+  if (!formValid.value) return
+
+  isLoading.value = true
+  errorMessage.value = ''
+  fieldErrors.value = { username: [], password: [] }
+
+  try {
+    const response = await axios.post('/api/auth/login', {
+      username: credentials.value.username,
+      password: credentials.value.password
+    })
+
+    if (response.data.access_token) {
+      const expirationTime = Date.now() + (48 * 60 * 60 * 1000)
+      localStorage.setItem('auth-token', response.data.access_token)
+      localStorage.setItem('auth-token-expiry', expirationTime.toString())
+      localStorage.setItem('user-data', JSON.stringify(response.data.user))
+      axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.access_token}`
+
+      emit('login-success', {
+        token: response.data.access_token,
+        user: response.data.user,
+        expiry: expirationTime
+      })
+
+      isVisible.value = false
+      resetForm()
+    }
+  } catch (error) {
+    if (error.response?.status === 401) {
+      errorMessage.value = 'Invalid username or password'
+    } else if (error.response?.status === 422) {
+      errorMessage.value = 'Please check your input'
+    } else {
+      errorMessage.value = 'Login failed. Please try again.'
+    }
+  } finally {
+    isLoading.value = false
+  }
+}
+
+watch(isVisible, (newValue) => {
+  if (newValue) {
+    resetForm()
+    document.addEventListener('keydown', handleEscapeKey)
+  } else {
+    document.removeEventListener('keydown', handleEscapeKey)
+  }
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleEscapeKey)
+})
 </script>
 
 <style scoped>

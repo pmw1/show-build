@@ -19,45 +19,30 @@
   </v-menu>
 </template>
 
-<script>
-export default {
-  name: 'EpisodeSelector',
-  props: {
-    episodes: {
-      type: Array,
-      required: true,
-    },
-    currentEpisode: {
-      type: String,
-      // Can be null initially, so not required
-      default: null,
-    },
-    buttonClass: {
-      type: String,
-      default: ''
-    },
-    buttonStyle: {
-      type: Object,
-      default: () => ({})
-    }
-  },
-  computed: {
-    currentEpisodeLabel() {
-      const savedEpisode = sessionStorage.getItem('selectedEpisode');
-      if (savedEpisode) {
-        const episode = this.episodes.find(e => e.value === savedEpisode);
-        if (episode) return episode.title;
-      }
-      return this.currentEpisode
-        ? this.episodes.find(e => e.value === this.currentEpisode)?.title || 'Select Episode'
-        : 'Select Episode';
-    },
-  },
-  methods: {
-    selectEpisode(episode) {
-      sessionStorage.setItem('selectedEpisode', episode.value);
-      this.$emit('episode-changed', episode);
-    },
-  },
-};
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({
+  episodes: { type: Array, required: true },
+  currentEpisode: { type: String, default: null },
+  buttonClass: { type: String, default: '' },
+  buttonStyle: { type: Object, default: () => ({}) }
+})
+const emit = defineEmits(['episode-changed'])
+
+const currentEpisodeLabel = computed(() => {
+  const savedEpisode = sessionStorage.getItem('selectedEpisode')
+  if (savedEpisode) {
+    const episode = props.episodes.find(e => e.value === savedEpisode)
+    if (episode) return episode.title
+  }
+  return props.currentEpisode
+    ? props.episodes.find(e => e.value === props.currentEpisode)?.title || 'Select Episode'
+    : 'Select Episode'
+})
+
+function selectEpisode(episode) {
+  sessionStorage.setItem('selectedEpisode', episode.value)
+  emit('episode-changed', episode)
+}
 </script>

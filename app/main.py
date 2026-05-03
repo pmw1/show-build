@@ -26,6 +26,7 @@ try:
     from routers.upload_router import router as upload_router
     from routers.legacy_router import router as legacy_router
     from routers.misc_router import router as misc_router
+    from routers.comfyui_router import router as comfyui_router
 
     # Authentication & Authorization
     from auth.router import router as auth_router
@@ -35,6 +36,8 @@ try:
     from api_config_router import router as api_config_router
     from settings_router import router as settings_router
     from settings_colors_router import router as settings_colors_router
+    from routers.user_prefs_router import router as user_prefs_router
+    from routers.messages_router import router as messages_router
     from setup_router import router as setup_router
 
     # Episodes & Content
@@ -58,6 +61,9 @@ try:
     from gfx_asset_router import router as gfx_asset_router
     from sot_router import router as sot_router
     from vo_router import router as vo_router
+
+    # Legacy Cue Convert module (find-media endpoint for the /modules/legacyCueConvert frontend)
+    from routers.legacy_cue_convert_router import router as legacy_cue_convert_router
 
     # Audio & Voice
     from speakers_router import router as speakers_router
@@ -155,6 +161,7 @@ app.include_router(health_router)
 app.include_router(upload_router)
 app.include_router(legacy_router)
 app.include_router(misc_router)
+app.include_router(comfyui_router)
 
 # Authentication & Authorization
 app.include_router(auth_router, prefix="/api")
@@ -164,6 +171,8 @@ app.include_router(rbac_router, prefix="/api")
 app.include_router(api_config_router)
 app.include_router(settings_router, prefix="/api")
 app.include_router(settings_colors_router)
+app.include_router(user_prefs_router)
+app.include_router(messages_router)
 app.include_router(setup_router, prefix="/api")
 
 # Episodes & Content
@@ -187,6 +196,9 @@ app.include_router(fsq_asset_router, prefix="/api/fsq", tags=["fsq"])
 app.include_router(gfx_asset_router, prefix="/api/gfx", tags=["gfx"])
 app.include_router(sot_router)
 app.include_router(vo_router)
+
+# Legacy Cue Convert (find-media endpoint for the /modules/legacyCueConvert frontend)
+app.include_router(legacy_cue_convert_router)
 
 # Audio & Voice
 app.include_router(speakers_router)

@@ -293,439 +293,394 @@
   </v-container>
 </template>
 
-<script>
+<script setup>
 import axios from 'axios'
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import LEDMeter from '@/components/LEDMeter.vue'
+import LEDMeter from '@/components/LEDMeter.vue' // eslint-disable-line no-unused-vars
 import { UserAgent, Inviter, SessionState } from 'sip.js'
 
-export default {
-  name: 'VoiceMeetingView',
-  components: {
-    LEDMeter
-  },
-  setup() {
-    // State
-    const activeConference = ref(null)
-    const participants = ref([])
-    const recentConferences = ref([])
-    const episodeOptions = ref([])
-    const conferenceFormRef = ref(null)
+// State
+const activeConference = ref(null)
+const participants = ref([])
+const recentConferences = ref([])
+const episodeOptions = ref([])
+const conferenceFormRef = ref(null) // eslint-disable-line no-unused-vars
 
-    // Form data
-    const newConference = ref({
-      episodeId: null,
-      title: ''
-    })
+// Form data
+const newConference = ref({
+  episodeId: null,
+  title: ''
+})
 
-    // Loading states
-    const creatingConference = ref(false)
-    const endingConference = ref(false)
-    const joiningConference = ref(false)
-    const identifyingParticipant = ref(false)
+// Loading states
+const creatingConference = ref(false)
+const endingConference = ref(false)
+const joiningConference = ref(false)
+const identifyingParticipant = ref(false)
 
-    // WebRTC state
-    const userAgent = ref(null)
-    const session = ref(null)
-    const isConnected = ref(false)
-    const isMuted = ref(false)
+// WebRTC state
+const userAgent = ref(null)
+const session = ref(null)
+const isConnected = ref(false)
+const isMuted = ref(false)
 
-    // Identify dialog
-    const identifyDialog = ref(false)
-    const identifyForm = ref({
-      participant_id: null,
-      name: '',
-      caller_id: ''
-    })
+// Identify dialog
+const identifyDialog = ref(false)
+const identifyForm = ref({
+  participant_id: null,
+  name: '',
+  caller_id: ''
+})
 
-    // Snackbar
-    const snackbar = ref({
-      show: false,
-      message: '',
-      color: 'info'
-    })
+// Snackbar
+const snackbar = ref({
+  show: false,
+  message: '',
+  color: 'info'
+})
 
-    // Methods
-    const showSnackbar = (message, color = 'info') => {
-      snackbar.value = {
-        show: true,
-        message,
-        color
-      }
-    }
-
-    const loadEpisodes = async () => {
-      try {
-        const response = await axios.get('/episodes', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          }
-        })
-        if (response.data.episodes) {
-          episodeOptions.value = response.data.episodes.map(ep => ({
-            label: `Episode ${ep.episode_number} - ${ep.title}`,
-            value: ep.episode_number
-          }))
-        }
-      } catch (error) {
-        console.error('Failed to load episodes:', error)
-        showSnackbar('Failed to load episodes', 'error')
-      }
-    }
-
-    const loadActiveConferences = async () => {
-      try {
-        const response = await axios.get('/api/voice/conference/', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          }
-        })
-        if (response.data.success && response.data.conferences.length > 0) {
-          // Load details of first active conference
-          const conf = response.data.conferences[0]
-          await loadConferenceDetails(conf.conference_id)
-        }
-      } catch (error) {
-        console.error('Failed to load active conferences:', error)
-      }
-    }
-
-    const loadConferenceDetails = async (conferenceId) => {
-      try {
-        const response = await axios.get(`/api/voice/conference/${conferenceId}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          }
-        })
-        if (response.data.success) {
-          activeConference.value = response.data.conference
-          participants.value = response.data.conference.participants || []
-        }
-      } catch (error) {
-        console.error('Failed to load conference details:', error)
-      }
-    }
-
-    const loadRecentConferences = async () => {
-      try {
-        const response = await axios.get('/api/voice/conference/', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          }
-        })
-        if (response.data.success) {
-          recentConferences.value = response.data.conferences
-        }
-      } catch (error) {
-        console.error('Failed to load recent conferences:', error)
-      }
-    }
-
-    const createConference = async () => {
-      if (!newConference.value.episodeId) {
-        showSnackbar('Please select an episode', 'warning')
-        return
-      }
-
-      creatingConference.value = true
-      try {
-        const response = await axios.post('/api/voice/conference/create', {
-          episode_id: newConference.value.episodeId,
-          title: newConference.value.title || null
-        }, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
-            'Content-Type': 'application/json'
-          }
-        })
-
-        if (response.data.success) {
-          activeConference.value = response.data.conference
-          participants.value = []
-          showSnackbar('Conference created successfully', 'success')
-
-          // Reset form
-          newConference.value = {
-            episodeId: null,
-            title: ''
-          }
-        }
-      } catch (error) {
-        console.error('Failed to create conference:', error)
-        showSnackbar(error.response?.data?.detail || 'Failed to create conference', 'error')
-      } finally {
-        creatingConference.value = false
-      }
-    }
-
-    const joinFromBrowser = async () => {
-      if (!activeConference.value) return
-
-      joiningConference.value = true
-      try {
-        const response = await axios.post(
-          `/api/voice/conference/${activeConference.value.conference_id}/join`,
-          { join_method: 'webrtc' },
-          {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
-              'Content-Type': 'application/json'
-            }
-          }
-        )
-
-        if (response.data.success) {
-          showSnackbar('Connecting to conference...', 'info')
-
-          // Initialize WebRTC SIP client
-          const config = response.data.webrtc_config
-          // Use proxy path - Vue dev server will forward to Asterisk ws://192.168.51.223:8088/ws
-          const server = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/asterisk-ws`
-          const conferenceUri = `sip:${activeConference.value.conference_id}@192.168.51.223`
-
-          // Create SIP.js UserAgent
-          const uri = UserAgent.makeURI(`sip:${config.username}@192.168.51.223`)
-          userAgent.value = new UserAgent({
-            uri: uri,
-            transportOptions: {
-              server: server
-            },
-            authorizationUsername: config.username,
-            authorizationPassword: '',
-            displayName: config.display_name || 'Show-Build User',
-            sessionDescriptionHandlerFactoryOptions: {
-              constraints: {
-                audio: true,
-                video: false
-              }
-            }
-          })
-
-          // Start the UserAgent
-          await userAgent.value.start()
-
-          // Create outgoing call to conference
-          const target = UserAgent.makeURI(conferenceUri)
-          const inviter = new Inviter(userAgent.value, target)
-          session.value = inviter
-
-          // Setup session state change handler
-          inviter.stateChange.addListener((state) => {
-            console.log('Session state:', state)
-            switch (state) {
-              case SessionState.Established:
-                isConnected.value = true
-                showSnackbar('Connected to conference', 'success')
-                // Setup remote audio
-                setupRemoteAudio(inviter)
-                break
-              case SessionState.Terminated:
-                isConnected.value = false
-                showSnackbar('Disconnected from conference', 'info')
-                cleanup()
-                break
-            }
-          })
-
-          // Send INVITE
-          await inviter.invite()
-
-          // Reload participants
-          await loadConferenceDetails(activeConference.value.conference_id)
-        }
-      } catch (error) {
-        console.error('Failed to join conference:', error)
-        showSnackbar(error.response?.data?.detail || 'Failed to join conference', 'error')
-        cleanup()
-      } finally {
-        joiningConference.value = false
-      }
-    }
-
-    const setupRemoteAudio = (session) => {
-      const remoteStream = new MediaStream()
-      const pc = session.sessionDescriptionHandler.peerConnection
-
-      pc.getReceivers().forEach((receiver) => {
-        if (receiver.track) {
-          remoteStream.addTrack(receiver.track)
-        }
-      })
-
-      // Create audio element for remote audio
-      const audioElement = new Audio()
-      audioElement.srcObject = remoteStream
-      audioElement.play().catch(e => console.error('Audio play failed:', e))
-    }
-
-    const toggleMute = () => {
-      if (!session.value) return
-
-      const pc = session.value.sessionDescriptionHandler.peerConnection
-      const senders = pc.getSenders()
-
-      senders.forEach((sender) => {
-        if (sender.track && sender.track.kind === 'audio') {
-          sender.track.enabled = !sender.track.enabled
-          isMuted.value = !sender.track.enabled
-        }
-      })
-
-      showSnackbar(isMuted.value ? 'Microphone muted' : 'Microphone unmuted', 'info')
-    }
-
-    const hangup = async () => {
-      if (!session.value) return
-
-      try {
-        await session.value.bye()
-        cleanup()
-        showSnackbar('Left conference', 'info')
-      } catch (error) {
-        console.error('Hangup error:', error)
-        cleanup()
-      }
-    }
-
-    const cleanup = () => {
-      if (userAgent.value) {
-        userAgent.value.stop()
-        userAgent.value = null
-      }
-      session.value = null
-      isConnected.value = false
-      isMuted.value = false
-    }
-
-    const endConference = async () => {
-      if (!activeConference.value) return
-
-      if (!confirm('Are you sure you want to end this conference? Recording will be processed for transcription.')) {
-        return
-      }
-
-      endingConference.value = true
-      try {
-        const response = await axios.post(
-          `/api/voice/conference/${activeConference.value.conference_id}/end`,
-          {},
-          {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-            }
-          }
-        )
-
-        if (response.data.success) {
-          showSnackbar('Conference ended. Recording will be transcribed.', 'success')
-          activeConference.value = null
-          participants.value = []
-          await loadRecentConferences()
-        }
-      } catch (error) {
-        console.error('Failed to end conference:', error)
-        showSnackbar(error.response?.data?.detail || 'Failed to end conference', 'error')
-      } finally {
-        endingConference.value = false
-      }
-    }
-
-    const openIdentifyDialog = (participant) => {
-      identifyForm.value = {
-        participant_id: participant.participant_id,
-        name: '',
-        caller_id: participant.caller_id
-      }
-      identifyDialog.value = true
-    }
-
-    const identifyParticipant = async () => {
-      if (!identifyForm.value.name || !activeConference.value) return
-
-      identifyingParticipant.value = true
-      try {
-        const response = await axios.post(
-          `/api/voice/conference/${activeConference.value.conference_id}/identify`,
-          {
-            participant_id: identifyForm.value.participant_id,
-            name: identifyForm.value.name
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
-              'Content-Type': 'application/json'
-            }
-          }
-        )
-
-        if (response.data.success) {
-          showSnackbar('Participant identified successfully', 'success')
-          identifyDialog.value = false
-          await loadConferenceDetails(activeConference.value.conference_id)
-        }
-      } catch (error) {
-        console.error('Failed to identify participant:', error)
-        showSnackbar(error.response?.data?.detail || 'Failed to identify participant', 'error')
-      } finally {
-        identifyingParticipant.value = false
-      }
-    }
-
-    const formatTime = (timestamp) => {
-      if (!timestamp) return ''
-      const date = new Date(timestamp)
-      return date.toLocaleString()
-    }
-
-    // Lifecycle
-    onMounted(async () => {
-      await loadEpisodes()
-      await loadActiveConferences()
-      await loadRecentConferences()
-    })
-
-    onBeforeUnmount(() => {
-      cleanup()
-    })
-
-    return {
-      // State
-      activeConference,
-      participants,
-      recentConferences,
-      episodeOptions,
-      conferenceFormRef,
-      newConference,
-
-      // Loading states
-      creatingConference,
-      endingConference,
-      joiningConference,
-      identifyingParticipant,
-
-      // WebRTC state
-      isConnected,
-      isMuted,
-
-      // Identify dialog
-      identifyDialog,
-      identifyForm,
-
-      // Snackbar
-      snackbar,
-
-      // Methods
-      createConference,
-      joinFromBrowser,
-      endConference,
-      openIdentifyDialog,
-      identifyParticipant,
-      formatTime,
-      toggleMute,
-      hangup
-    }
+// Methods
+const showSnackbar = (message, color = 'info') => {
+  snackbar.value = {
+    show: true,
+    message,
+    color
   }
 }
+
+const loadEpisodes = async () => {
+  try {
+    const response = await axios.get('/episodes', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    })
+    if (response.data.episodes) {
+      episodeOptions.value = response.data.episodes.map(ep => ({
+        label: `Episode ${ep.episode_number} - ${ep.title}`,
+        value: ep.episode_number
+      }))
+    }
+  } catch (error) {
+    console.error('Failed to load episodes:', error)
+    showSnackbar('Failed to load episodes', 'error')
+  }
+}
+
+const loadActiveConferences = async () => {
+  try {
+    const response = await axios.get('/api/voice/conference/', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    })
+    if (response.data.success && response.data.conferences.length > 0) {
+      // Load details of first active conference
+      const conf = response.data.conferences[0]
+      await loadConferenceDetails(conf.conference_id)
+    }
+  } catch (error) {
+    console.error('Failed to load active conferences:', error)
+  }
+}
+
+const loadConferenceDetails = async (conferenceId) => {
+  try {
+    const response = await axios.get(`/api/voice/conference/${conferenceId}`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    })
+    if (response.data.success) {
+      activeConference.value = response.data.conference
+      participants.value = response.data.conference.participants || []
+    }
+  } catch (error) {
+    console.error('Failed to load conference details:', error)
+  }
+}
+
+const loadRecentConferences = async () => {
+  try {
+    const response = await axios.get('/api/voice/conference/', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    })
+    if (response.data.success) {
+      recentConferences.value = response.data.conferences
+    }
+  } catch (error) {
+    console.error('Failed to load recent conferences:', error)
+  }
+}
+
+const createConference = async () => {
+  if (!newConference.value.episodeId) {
+    showSnackbar('Please select an episode', 'warning')
+    return
+  }
+
+  creatingConference.value = true
+  try {
+    const response = await axios.post('/api/voice/conference/create', {
+      episode_id: newConference.value.episodeId,
+      title: newConference.value.title || null
+    }, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
+        'Content-Type': 'application/json'
+      }
+    })
+
+    if (response.data.success) {
+      activeConference.value = response.data.conference
+      participants.value = []
+      showSnackbar('Conference created successfully', 'success')
+
+      // Reset form
+      newConference.value = {
+        episodeId: null,
+        title: ''
+      }
+    }
+  } catch (error) {
+    console.error('Failed to create conference:', error)
+    showSnackbar(error.response?.data?.detail || 'Failed to create conference', 'error')
+  } finally {
+    creatingConference.value = false
+  }
+}
+
+const joinFromBrowser = async () => {
+  if (!activeConference.value) return
+
+  joiningConference.value = true
+  try {
+    const response = await axios.post(
+      `/api/voice/conference/${activeConference.value.conference_id}/join`,
+      { join_method: 'webrtc' },
+      {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+
+    if (response.data.success) {
+      showSnackbar('Connecting to conference...', 'info')
+
+      // Initialize WebRTC SIP client
+      const config = response.data.webrtc_config
+      // Use proxy path - Vue dev server will forward to Asterisk ws://192.168.51.223:8088/ws
+      const server = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/asterisk-ws`
+      const conferenceUri = `sip:${activeConference.value.conference_id}@192.168.51.223`
+
+      // Create SIP.js UserAgent
+      const uri = UserAgent.makeURI(`sip:${config.username}@192.168.51.223`)
+      userAgent.value = new UserAgent({
+        uri: uri,
+        transportOptions: {
+          server: server
+        },
+        authorizationUsername: config.username,
+        authorizationPassword: '',
+        displayName: config.display_name || 'Show-Build User',
+        sessionDescriptionHandlerFactoryOptions: {
+          constraints: {
+            audio: true,
+            video: false
+          }
+        }
+      })
+
+      // Start the UserAgent
+      await userAgent.value.start()
+
+      // Create outgoing call to conference
+      const target = UserAgent.makeURI(conferenceUri)
+      const inviter = new Inviter(userAgent.value, target)
+      session.value = inviter
+
+      // Setup session state change handler
+      inviter.stateChange.addListener((state) => {
+        console.log('Session state:', state)
+        switch (state) {
+          case SessionState.Established:
+            isConnected.value = true
+            showSnackbar('Connected to conference', 'success')
+            // Setup remote audio
+            setupRemoteAudio(inviter)
+            break
+          case SessionState.Terminated:
+            isConnected.value = false
+            showSnackbar('Disconnected from conference', 'info')
+            cleanup()
+            break
+        }
+      })
+
+      // Send INVITE
+      await inviter.invite()
+
+      // Reload participants
+      await loadConferenceDetails(activeConference.value.conference_id)
+    }
+  } catch (error) {
+    console.error('Failed to join conference:', error)
+    showSnackbar(error.response?.data?.detail || 'Failed to join conference', 'error')
+    cleanup()
+  } finally {
+    joiningConference.value = false
+  }
+}
+
+const setupRemoteAudio = (sessionObj) => {
+  const remoteStream = new MediaStream()
+  const pc = sessionObj.sessionDescriptionHandler.peerConnection
+
+  pc.getReceivers().forEach((receiver) => {
+    if (receiver.track) {
+      remoteStream.addTrack(receiver.track)
+    }
+  })
+
+  // Create audio element for remote audio
+  const audioElement = new Audio()
+  audioElement.srcObject = remoteStream
+  audioElement.play().catch(e => console.error('Audio play failed:', e))
+}
+
+const toggleMute = () => {
+  if (!session.value) return
+
+  const pc = session.value.sessionDescriptionHandler.peerConnection
+  const senders = pc.getSenders()
+
+  senders.forEach((sender) => {
+    if (sender.track && sender.track.kind === 'audio') {
+      sender.track.enabled = !sender.track.enabled
+      isMuted.value = !sender.track.enabled
+    }
+  })
+
+  showSnackbar(isMuted.value ? 'Microphone muted' : 'Microphone unmuted', 'info')
+}
+
+const hangup = async () => {
+  if (!session.value) return
+
+  try {
+    await session.value.bye()
+    cleanup()
+    showSnackbar('Left conference', 'info')
+  } catch (error) {
+    console.error('Hangup error:', error)
+    cleanup()
+  }
+}
+
+const cleanup = () => {
+  if (userAgent.value) {
+    userAgent.value.stop()
+    userAgent.value = null
+  }
+  session.value = null
+  isConnected.value = false
+  isMuted.value = false
+}
+
+const endConference = async () => {
+  if (!activeConference.value) return
+
+  if (!confirm('Are you sure you want to end this conference? Recording will be processed for transcription.')) {
+    return
+  }
+
+  endingConference.value = true
+  try {
+    const response = await axios.post(
+      `/api/voice/conference/${activeConference.value.conference_id}/end`,
+      {},
+      {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        }
+      }
+    )
+
+    if (response.data.success) {
+      showSnackbar('Conference ended. Recording will be transcribed.', 'success')
+      activeConference.value = null
+      participants.value = []
+      await loadRecentConferences()
+    }
+  } catch (error) {
+    console.error('Failed to end conference:', error)
+    showSnackbar(error.response?.data?.detail || 'Failed to end conference', 'error')
+  } finally {
+    endingConference.value = false
+  }
+}
+
+const openIdentifyDialog = (participant) => {
+  identifyForm.value = {
+    participant_id: participant.participant_id,
+    name: '',
+    caller_id: participant.caller_id
+  }
+  identifyDialog.value = true
+}
+
+const identifyParticipant = async () => {
+  if (!identifyForm.value.name || !activeConference.value) return
+
+  identifyingParticipant.value = true
+  try {
+    const response = await axios.post(
+      `/api/voice/conference/${activeConference.value.conference_id}/identify`,
+      {
+        participant_id: identifyForm.value.participant_id,
+        name: identifyForm.value.name
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+
+    if (response.data.success) {
+      showSnackbar('Participant identified successfully', 'success')
+      identifyDialog.value = false
+      await loadConferenceDetails(activeConference.value.conference_id)
+    }
+  } catch (error) {
+    console.error('Failed to identify participant:', error)
+    showSnackbar(error.response?.data?.detail || 'Failed to identify participant', 'error')
+  } finally {
+    identifyingParticipant.value = false
+  }
+}
+
+const formatTime = (timestamp) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  return date.toLocaleString()
+}
+
+// Lifecycle
+onMounted(async () => {
+  await loadEpisodes()
+  await loadActiveConferences()
+  await loadRecentConferences()
+})
+
+onBeforeUnmount(() => {
+  cleanup()
+})
 </script>
 
 <style scoped>

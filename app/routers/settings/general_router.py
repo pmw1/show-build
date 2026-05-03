@@ -6,6 +6,8 @@ from typing import Dict, Any, Optional
 import os
 import logging
 
+from database import SessionLocal
+from sqlalchemy import text
 from auth.utils import get_current_user_or_key
 from ._shared import (
     load_settings, save_settings, derive_paths,
@@ -158,3 +160,60 @@ async def reset_settings(
         }
     else:
         raise HTTPException(status_code=500, detail="Failed to reset settings")
+
+
+# ---------------------------------------------------------------------------
+# Generation prompt storage (api_configs table)
+# ---------------------------------------------------------------------------
+
+@router.get("/generation-prompts")
+async def get_generation_prompts():
+    """Read all generation prompts from api_configs."""
+    db = SessionLocal()
+    try:
+        rows = db.execute(text(
+            "SELECT service, config_key, config_value FROM api_configs "
+            "WHERE workflow = 'generation' AND category = 'llm'"
+        )).fetchall()
+        prompts = {}
+        for row in rows:
+            service = row[0]
+            if service not in prompts:
+                prompts[service] = {}
+            prompts[service][row[1]] = row[2]
+        return {"prompts": prompts}
+    finally:
+        db.close()
+
+
+@router.put("/generation-prompts/{service}/{config_key}")
+async def save_generation_prompt(service: str, config_key: str, request: Request):
+    """Save a generation prompt to api_configs (upsert)."""
+    body = await request.json()
+    value = body.get("value", "")
+    db = SessionLocal()
+    try:
+        existing = db.execute(text(
+            "SELECT id FROM api_configs WHERE workflow = 'generation' "
+            "AND category = 'llm' AND service = :svc AND config_key = :key"
+        ), {"svc": service, "key": config_key}).fetchone()
+
+        if existing:
+            db.execute(text(
+                "UPDATE api_configs SET config_value = :val, updated_at = NOW() "
+                "WHERE workflow = 'generation' AND category = 'llm' "
+                "AND service = :svc AND config_key = :key"
+            ), {"val": value, "svc": service, "key": config_key})
+        else:
+            db.execute(text(
+                "INSERT INTO api_configs (workflow, category, service, config_key, config_value, is_enabled) "
+                "VALUES ('generation', 'llm', :svc, :key, :val, true)"
+            ), {"svc": service, "key": config_key, "val": value})
+        db.commit()
+        logger.info(f"Saved generation prompt: {service}/{config_key} ({len(value)} chars)")
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()

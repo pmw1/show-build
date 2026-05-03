@@ -137,185 +137,109 @@
   </v-card>
 </template>
 
-<script>
+<script setup>
 import { ref, onUnmounted } from 'vue'
 
-export default {
-  name: 'VUMeter',
-  setup() {
-    const meterWidth = 200
-    const meterHeight = 150
-    const centerX = meterWidth / 2
-    const centerY = meterHeight - 20
-    const radius = 70
-    const arcWidth = 15
-    const startAngle = -135 // degrees
-    const endAngle = 135 // degrees
+const meterWidth = 200
+const meterHeight = 150
+const centerX = meterWidth / 2
+const centerY = meterHeight - 20
+const radius = 70
+const arcWidth = 15
+const startAngle = -135
+const endAngle = 135
 
-    const tracks = ref([
-      { label: 'Track 1', level: 0, peak: 0 },
-      { label: 'Track 2', level: 0, peak: 0 },
-      { label: 'Track 3', level: 0, peak: 0 },
-      { label: 'Track 4', level: 0, peak: 0 }
-    ])
+const tracks = ref([
+  { label: 'Track 1', level: 0, peak: 0 },
+  { label: 'Track 2', level: 0, peak: 0 },
+  { label: 'Track 3', level: 0, peak: 0 },
+  { label: 'Track 4', level: 0, peak: 0 }
+])
 
-    const scaleMarks = [
-      { value: 0, label: '-∞', major: true },
-      { value: 20, label: '-20', major: true },
-      { value: 40, label: '-10', major: true },
-      { value: 60, label: '0', major: true },
-      { value: 80, label: '+3', major: true },
-      { value: 100, label: '+6', major: true },
-      { value: 10, major: false },
-      { value: 30, major: false },
-      { value: 50, major: false },
-      { value: 70, major: false },
-      { value: 90, major: false }
-    ]
+const scaleMarks = [
+  { value: 0, label: '-\u221E', major: true },
+  { value: 20, label: '-20', major: true },
+  { value: 40, label: '-10', major: true },
+  { value: 60, label: '0', major: true },
+  { value: 80, label: '+3', major: true },
+  { value: 100, label: '+6', major: true },
+  { value: 10, major: false },
+  { value: 30, major: false },
+  { value: 50, major: false },
+  { value: 70, major: false },
+  { value: 90, major: false }
+]
 
-    const testing = ref(false)
-    let testInterval = null
-    let peakDecayInterval = null
+const testing = ref(false)
+let testInterval = null
+let peakDecayInterval = null
 
-    const polarToCartesian = (angle, r) => {
-      const rad = (angle - 90) * Math.PI / 180
-      return {
-        x: centerX + r * Math.cos(rad),
-        y: centerY + r * Math.sin(rad)
-      }
-    }
-
-    const getArcPath = (startPercent = 0, endPercent = 100) => {
-      const actualStartAngle = startAngle + (endAngle - startAngle) * (startPercent / 100)
-      const actualEndAngle = startAngle + (endAngle - startAngle) * (endPercent / 100)
-
-      const start = polarToCartesian(actualStartAngle, radius)
-      const end = polarToCartesian(actualEndAngle, radius)
-
-      const largeArcFlag = actualEndAngle - actualStartAngle <= 180 ? '0' : '1'
-
-      return [
-        'M', start.x, start.y,
-        'A', radius, radius, 0, largeArcFlag, 1, end.x, end.y
-      ].join(' ')
-    }
-
-    const getMarkPosition = (value) => {
-      const angle = startAngle + (endAngle - startAngle) * (value / 100)
-      const innerPoint = polarToCartesian(angle, radius - arcWidth / 2 - 5)
-      const outerPoint = polarToCartesian(angle, radius - arcWidth / 2 - 12)
-      const textPoint = polarToCartesian(angle, radius - arcWidth / 2 - 22)
-
-      return {
-        x1: innerPoint.x,
-        y1: innerPoint.y,
-        x2: outerPoint.x,
-        y2: outerPoint.y,
-        tx: textPoint.x,
-        ty: textPoint.y
-      }
-    }
-
-    const getNeedleAngle = (level) => {
-      const percent = Math.min(100, Math.max(0, level))
-      return startAngle + (endAngle - startAngle) * (percent / 100)
-    }
-
-    const getPeakPosition = (peak) => {
-      const angle = getNeedleAngle(peak)
-      return polarToCartesian(angle, radius - arcWidth / 2)
-    }
-
-    const getNeedleColor = (level) => {
-      if (level > 85) return '#F44336'
-      if (level > 60) return '#FFC107'
-      return '#4CAF50'
-    }
-
-    const startTest = () => {
-      testing.value = true
-
-      testInterval = setInterval(() => {
-        tracks.value.forEach((track, index) => {
-          // Simulate audio levels with some variation
-          const base = 30 + Math.sin(Date.now() / 1000 + index) * 20
-          const noise = Math.random() * 30
-          track.level = Math.max(0, Math.min(100, base + noise))
-
-          // Update peak
-          if (track.level > track.peak) {
-            track.peak = track.level
-          }
-        })
-      }, 50)
-
-      // Peak decay
-      peakDecayInterval = setInterval(() => {
-        tracks.value.forEach(track => {
-          if (track.peak > 0) {
-            track.peak = Math.max(0, track.peak - 0.5)
-          }
-        })
-      }, 100)
-    }
-
-    const stopTest = () => {
-      testing.value = false
-      if (testInterval) {
-        clearInterval(testInterval)
-        testInterval = null
-      }
-      if (peakDecayInterval) {
-        clearInterval(peakDecayInterval)
-        peakDecayInterval = null
-      }
-
-      // Decay to zero
-      const decayInterval = setInterval(() => {
-        let allZero = true
-        tracks.value.forEach(track => {
-          if (track.level > 0) {
-            track.level = Math.max(0, track.level - 2)
-            allZero = false
-          }
-        })
-        if (allZero) {
-          clearInterval(decayInterval)
-        }
-      }, 50)
-    }
-
-    const resetPeaks = () => {
-      tracks.value.forEach(track => {
-        track.peak = 0
-      })
-    }
-
-    onUnmounted(() => {
-      stopTest()
-    })
-
-    return {
-      meterWidth,
-      meterHeight,
-      centerX,
-      centerY,
-      radius,
-      arcWidth,
-      tracks,
-      scaleMarks,
-      testing,
-      getArcPath,
-      getMarkPosition,
-      getNeedleAngle,
-      getPeakPosition,
-      getNeedleColor,
-      startTest,
-      stopTest,
-      resetPeaks
-    }
-  }
+function polarToCartesian(angle, r) {
+  const rad = (angle - 90) * Math.PI / 180
+  return { x: centerX + r * Math.cos(rad), y: centerY + r * Math.sin(rad) }
 }
+
+function getArcPath(startPercent = 0, endPercent = 100) {
+  const a1 = startAngle + (endAngle - startAngle) * (startPercent / 100)
+  const a2 = startAngle + (endAngle - startAngle) * (endPercent / 100)
+  const s = polarToCartesian(a1, radius)
+  const e = polarToCartesian(a2, radius)
+  const large = a2 - a1 <= 180 ? '0' : '1'
+  return `M ${s.x} ${s.y} A ${radius} ${radius} 0 ${large} 1 ${e.x} ${e.y}`
+}
+
+function getMarkPosition(value) {
+  const angle = startAngle + (endAngle - startAngle) * (value / 100)
+  const inner = polarToCartesian(angle, radius - arcWidth / 2 - 5)
+  const outer = polarToCartesian(angle, radius - arcWidth / 2 - 12)
+  const text = polarToCartesian(angle, radius - arcWidth / 2 - 22)
+  return { x1: inner.x, y1: inner.y, x2: outer.x, y2: outer.y, tx: text.x, ty: text.y }
+}
+
+function getNeedleAngle(level) {
+  return startAngle + (endAngle - startAngle) * (Math.min(100, Math.max(0, level)) / 100)
+}
+
+function getPeakPosition(peak) {
+  return polarToCartesian(getNeedleAngle(peak), radius - arcWidth / 2)
+}
+
+function getNeedleColor(level) {
+  if (level > 85) return '#F44336'
+  if (level > 60) return '#FFC107'
+  return '#4CAF50'
+}
+
+function startTest() {
+  testing.value = true
+  testInterval = setInterval(() => {
+    tracks.value.forEach((track, index) => {
+      const base = 30 + Math.sin(Date.now() / 1000 + index) * 20
+      track.level = Math.max(0, Math.min(100, base + Math.random() * 30))
+      if (track.level > track.peak) track.peak = track.level
+    })
+  }, 50)
+  peakDecayInterval = setInterval(() => {
+    tracks.value.forEach(track => { if (track.peak > 0) track.peak = Math.max(0, track.peak - 0.5) })
+  }, 100)
+}
+
+function stopTest() {
+  testing.value = false
+  if (testInterval) { clearInterval(testInterval); testInterval = null }
+  if (peakDecayInterval) { clearInterval(peakDecayInterval); peakDecayInterval = null }
+  const decayInterval = setInterval(() => {
+    let allZero = true
+    tracks.value.forEach(track => { if (track.level > 0) { track.level = Math.max(0, track.level - 2); allZero = false } })
+    if (allZero) clearInterval(decayInterval)
+  }, 50)
+}
+
+function resetPeaks() {
+  tracks.value.forEach(track => { track.peak = 0 })
+}
+
+onUnmounted(stopTest)
 </script>
 
 <style scoped>

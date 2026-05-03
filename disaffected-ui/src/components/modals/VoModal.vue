@@ -491,29 +491,27 @@
   </v-dialog>
 </template>
 
-<script>
+<script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useToast } from 'vue-toastification'
 import axios from 'axios'
-import { cueModalMixin } from '@/mixins/cueModalMixin'
 
-export default {
-  name: 'VoModal',
-  mixins: [cueModalMixin],
-  props: {
-    show: Boolean,
-    episode: String,
-    duplicateSlugs: {
-      type: Array,
-      default: () => []
-    },
-    cueType: {
-      type: String,
-      default: 'vo'
-    }
+const props = defineProps({
+  show: Boolean,
+  episode: String,
+  duplicateSlugs: {
+    type: Array,
+    default: () => []
   },
-  setup(props, { emit }) {
-    const toast = useToast()
+  cueType: {
+    type: String,
+    default: 'vo'
+  }
+})
+
+const emit = defineEmits(['update:show', 'submit'])
+
+const toast = useToast()
 
     // Form refs
     const voFormRef = ref(null)
@@ -540,7 +538,7 @@ export default {
     const step1fForwardBtn = ref(null)
 
     // Form data
-    const assetId = ref('Generated on save')
+    const assetId = ref('Generated on save') // eslint-disable-line no-unused-vars
     const slug = ref('')
     const mediaUrl = ref('')
     const duration = ref('')
@@ -1327,73 +1325,6 @@ export default {
       }
     })
 
-    return {
-      voFormRef,
-      fileInputRef,
-      videoPlayerRef,
-      topErrorEl,
-      timecodeDisplay,
-      videoInfoOverlay,
-      slugField,
-      markInBtn,
-      markOutBtn,
-      goToInBtn,
-      goToOutBtn,
-      playPauseBtn,
-      previewBtn,
-      addClipBtn,
-      step10sBackBtn,
-      step1sBackBtn,
-      step1fBackBtn,
-      step10sForwardBtn,
-      step1sForwardBtn,
-      step1fForwardBtn,
-      assetId,
-      slug,
-      mediaUrl,
-      duration,
-      trimStart,
-      trimEnd,
-      clips,
-      uploadProgress,
-      tempJobId,
-      uploadComplete,
-      currentFramerate,
-      isPlaying,
-      currentTimecode,
-      durationTimecode,
-      remainingTimecode,
-      currentActionDisplay,
-      thumbnailTimecode,
-      triggerFileInput,
-      handleFileUpload,
-      clearVideo,
-      handleAddClip,
-      removeClip,
-      handleSubmit,
-      cancel,
-      hoverButton,
-      unhoverButton,
-      performMarkInAction,
-      performMarkOutAction,
-      performGoToInAction,
-      performGoToOutAction,
-      performPlayPauseAction,
-      performPreviewAction,
-      performStepBackFrame,
-      performStepForwardFrame,
-      performStepBackSecond,
-      performStepForwardSecond,
-      performJumpBackTenSeconds,
-      performJumpForwardTenSeconds,
-      setThumbnailTimecode,
-      scrollToBottomOfModal,
-      updateTimecode,
-      updatePlayPauseState,
-      handleVideoMetadataLoaded
-    }
-  }
-}
 </script>
 
 <style scoped>

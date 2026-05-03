@@ -22,106 +22,94 @@ router = APIRouter()
 async def get_episode_script(
     episode_number: str,
     format: str = "markdown",  # markdown, html, text
-    current_user: Optional[dict] = None
+    current_user: Optional[dict] = None,
+    db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
-    Get the compiled script for an episode.
+    Get the compiled script for an episode from database.
 
     Script Storage Strategy:
-    - Individual segments are stored in rundown/*.md files
-    - Each segment has its own script section
-    - The full script is compiled from all segments in order
-    - Can be cached in info.md or a separate compiled_script.md
+    - Individual segments are stored in rundown_items.script_content (database)
+    - The full script is compiled from all segments in order_in_rundown order
     """
+    from models_v2 import Episode, Rundown, RundownItem
 
-    episode_dir = EPISODES_ROOT / episode_number
-    if not episode_dir.exists():
-        raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+    try:
+        episode_num_int = int(episode_number)
+        episode = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
 
-    rundown_dir = episode_dir / "rundown"
-    if not rundown_dir.exists():
+        # Get rundown items from database
+        rundowns = db.query(Rundown).filter(Rundown.episode_id == episode.id).all()
+        if not rundowns:
+            return {
+                "episode_number": episode_number,
+                "script": "",
+                "segments": [],
+                "format": format,
+                "total_segments": 0,
+                "word_count": 0
+            }
+
+        segments = []
+        compiled_script = []
+
+        for rundown in rundowns:
+            items = db.query(RundownItem).filter(
+                RundownItem.rundown_id == rundown.id
+            ).order_by(RundownItem.order_in_rundown).all()
+
+            for item in items:
+                script_text = item.script_content or ""
+                segment_info = {
+                    "asset_id": item.asset_id,
+                    "order": item.order_in_rundown or 0,
+                    "type": item.item_type or "segment",
+                    "title": item.title or "Untitled",
+                    "duration": item.duration or "00:00:00",
+                    "script": script_text
+                }
+                segments.append(segment_info)
+
+                if script_text:
+                    compiled_script.append(f"### {segment_info['title']}\n\n{script_text}")
+
+        # Sort by order
+        segments.sort(key=lambda x: x["order"])
+
+        # Join all scripts
+        full_script = "\n\n---\n\n".join(compiled_script)
+
+        # Convert format if needed
+        if format == "html":
+            try:
+                import markdown
+                full_script = markdown.markdown(full_script)
+            except ImportError:
+                logger.warning("markdown module not available, returning raw markdown")
+        elif format == "text":
+            full_script = re.sub(r'#{1,6}\s+', '', full_script)
+            full_script = re.sub(r'\*\*(.+?)\*\*', r'\1', full_script)
+            full_script = re.sub(r'\*(.+?)\*', r'\1', full_script)
+            full_script = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', full_script)
+
         return {
             "episode_number": episode_number,
-            "script": "",
-            "segments": [],
-            "format": format
+            "script": full_script,
+            "segments": segments,
+            "format": format,
+            "total_segments": len(segments),
+            "word_count": len(full_script.split())
         }
 
-    # Compile script from rundown segments
-    segments = []
-    compiled_script = []
-
-    # Get all markdown files in rundown directory
-    rundown_files = sorted(rundown_dir.glob("*.md"))
-
-    for file_path in rundown_files:
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            # Parse frontmatter and content
-            if content.startswith('---'):
-                parts = content.split('---', 2)
-                if len(parts) >= 3:
-                    frontmatter_text = parts[1].strip()
-                    body = parts[2].strip()
-
-                    frontmatter = yaml.safe_load(frontmatter_text) or {}
-
-                    # Extract script section from body
-                    script_text = ""
-                    if "## Script" in body:
-                        script_start = body.find("## Script")
-                        script_section = body[script_start:]
-                        # Find the next section or end of file
-                        next_section = script_section.find("\n## ", 1)
-                        if next_section > 0:
-                            script_text = script_section[10:next_section].strip()
-                        else:
-                            script_text = script_section[10:].strip()
-
-                    segment_info = {
-                        "file": file_path.name,
-                        "order": frontmatter.get("order", 999),
-                        "type": frontmatter.get("type", "segment"),
-                        "title": frontmatter.get("title", "Untitled"),
-                        "duration": frontmatter.get("duration", "00:00:00"),
-                        "script": script_text
-                    }
-                    segments.append(segment_info)
-
-                    if script_text:
-                        compiled_script.append(f"### {segment_info['title']}\n\n{script_text}")
-
-        except Exception as e:
-            logger.warning(f"Could not process rundown file {file_path}: {e}")
-
-    # Sort segments by order
-    segments.sort(key=lambda x: x["order"])
-
-    # Join all scripts
-    full_script = "\n\n---\n\n".join(compiled_script)
-
-    # Convert format if needed
-    if format == "html":
-        import markdown
-        full_script = markdown.markdown(full_script)
-    elif format == "text":
-        # Strip markdown formatting for plain text
-        import re
-        full_script = re.sub(r'#{1,6}\s+', '', full_script)  # Remove headers
-        full_script = re.sub(r'\*\*(.+?)\*\*', r'\1', full_script)  # Remove bold
-        full_script = re.sub(r'\*(.+?)\*', r'\1', full_script)  # Remove italic
-        full_script = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', full_script)  # Remove links
-
-    return {
-        "episode_number": episode_number,
-        "script": full_script,
-        "segments": segments,
-        "format": format,
-        "total_segments": len(segments),
-        "word_count": len(full_script.split())
-    }
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid episode number format")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error compiling script from database: {e}")
+        raise HTTPException(status_code=500, detail=f"Error compiling script: {str(e)}")
 
 
 @router.get("/{episode_number}/info")
@@ -235,73 +223,69 @@ async def update_episode_script(
     episode_number: str,
     segment_file: str = Body(..., description="Rundown file name (e.g., '10 Opening.md')"),
     script_content: str = Body(..., description="New script content for the segment"),
-    current_user: dict = Depends(get_current_user_or_key)
+    asset_id: Optional[str] = Body(None, description="Asset ID of the segment (preferred lookup)"),
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
-    Update the script content for a specific segment.
+    LEGACY: Update the script content for a specific segment.
+    Prefer PUT /api/episodes/{ep}/save-rundown from rundown_router instead.
 
-    Note: Scripts are stored in individual rundown segment files,
-    not as a single monolithic script file.
+    Updates database first, then optionally writes to filesystem if it exists.
     """
+    from models_v2 import RundownItem
 
-    episode_dir = EPISODES_ROOT / episode_number
-    if not episode_dir.exists():
-        raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+    # Try database update first (authoritative)
+    db_updated = False
+    if asset_id:
+        item = db.query(RundownItem).filter(RundownItem.asset_id == asset_id).first()
+        if item:
+            item.script_content = script_content
+            item.updated_at = datetime.now()
+            db.commit()
+            db_updated = True
+            logger.info(f"Updated script_content in DB for asset_id {asset_id}")
 
-    rundown_file = episode_dir / "rundown" / segment_file
-    if not rundown_file.exists():
-        raise HTTPException(status_code=404, detail=f"Segment file {segment_file} not found")
-
+    # Also try to update filesystem if it exists (backward compat)
     try:
-        # Read existing file
-        with open(rundown_file, 'r', encoding='utf-8') as f:
-            content = f.read()
+        episode_dir = EPISODES_ROOT / episode_number
+        rundown_file = episode_dir / "rundown" / segment_file
+        if rundown_file.exists():
+            with open(rundown_file, 'r', encoding='utf-8') as f:
+                content = f.read()
 
-        # Parse frontmatter and body
-        if content.startswith('---'):
-            parts = content.split('---', 2)
-            if len(parts) >= 3:
-                frontmatter = parts[1]
-                body = parts[2]
+            if content.startswith('---'):
+                parts = content.split('---', 2)
+                if len(parts) >= 3:
+                    frontmatter = parts[1]
+                    body = parts[2]
 
-                # Find and replace script section
-                if "## Script" in body:
-                    script_start = body.find("## Script")
-                    before_script = body[:script_start]
-
-                    # Find the next section
-                    remaining = body[script_start:]
-                    next_section = remaining.find("\n## ", 1)
-                    if next_section > 0:
-                        after_script = remaining[next_section:]
+                    if "## Script" in body:
+                        script_start = body.find("## Script")
+                        before_script = body[:script_start]
+                        remaining = body[script_start:]
+                        next_section = remaining.find("\n## ", 1)
+                        after_script = remaining[next_section:] if next_section > 0 else ""
+                        new_body = f"{before_script}## Script\n\n{script_content}\n{after_script}"
                     else:
-                        after_script = ""
+                        new_body = f"{body}\n\n## Script\n\n{script_content}"
 
-                    # Rebuild body with new script
-                    new_body = f"{before_script}## Script\n\n{script_content}\n{after_script}"
-                else:
-                    # Add script section if it doesn't exist
-                    new_body = f"{body}\n\n## Script\n\n{script_content}"
+                    new_content = f"---{frontmatter}---{new_body}"
+                    with open(rundown_file, 'w', encoding='utf-8') as f:
+                        f.write(new_content)
+    except Exception as fs_err:
+        logger.warning(f"Filesystem write skipped for {segment_file}: {fs_err}")
 
-                # Rebuild complete file
-                new_content = f"---{frontmatter}---{new_body}"
+    if not db_updated:
+        logger.warning(f"update_episode_script: no DB record found for asset_id={asset_id}, segment_file={segment_file}")
 
-                # Write back
-                with open(rundown_file, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
-
-                return {
-                    "success": True,
-                    "message": f"Script updated for segment {segment_file}",
-                    "episode_number": episode_number,
-                    "segment_file": segment_file
-                }
-        else:
-            raise HTTPException(status_code=400, detail="Invalid file format - missing frontmatter")
-
-    except Exception as e:
-        logger.error(f"Failed to update script: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update script: {str(e)}")
+    return {
+        "success": True,
+        "message": f"Script updated for segment {segment_file}",
+        "episode_number": episode_number,
+        "segment_file": segment_file,
+        "db_updated": db_updated
+    }
 
 
 @router.put("/{episode_number}/info")
@@ -319,27 +303,28 @@ async def update_episode_info(episode_number: str, info_data: dict, current_user
     try:
         info_path = EPISODES_ROOT / episode_number / "info.md"
 
-        # Update the info.md file first
-        existing_body = ""
-        if info_path.exists():
-            with open(info_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+        # Update info.md if the directory exists (optional — DB is authoritative)
+        if info_path.parent.exists():
+            existing_body = ""
+            if info_path.exists():
+                with open(info_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
 
-            if content.startswith('---'):
-                parts = content.split('---', 2)
-                if len(parts) >= 3:
-                    existing_body = parts[2].strip()
+                if content.startswith('---'):
+                    parts = content.split('---', 2)
+                    if len(parts) >= 3:
+                        existing_body = parts[2].strip()
 
-        # Create new content with updated frontmatter
-        import yaml
-        frontmatter_yaml = yaml.dump(info_data, default_flow_style=False, allow_unicode=True)
-        new_content = f"---\n{frontmatter_yaml}---\n{existing_body}"
+            import yaml
+            frontmatter_yaml = yaml.dump(info_data, default_flow_style=False, allow_unicode=True)
+            new_content = f"---\n{frontmatter_yaml}---\n{existing_body}"
 
-        # Write back to file
-        with open(info_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
+            with open(info_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+        else:
+            logging.info(f"No episode directory for {episode_number}, skipping info.md write")
 
-        # Update database record if it exists
+        # Update database record
         try:
             episode_num = int(episode_number)
             db_episode = db.query(Episode).filter(Episode.episode_number == episode_num).first()

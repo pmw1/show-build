@@ -1,240 +1,104 @@
 <template>
   <v-card>
-    <v-card-title class="d-flex align-center">
-      <v-icon start>mdi-clipboard-check</v-icon>
-      Todo Lists
+    <v-card-title class="d-flex align-center dash-title dash-drag-handle">
+      <v-icon size="small" class="me-2">mdi-clipboard-check</v-icon>
+      <span>Task List</span>
       <v-spacer></v-spacer>
+      <v-btn
+        icon="mdi-plus"
+        variant="text"
+        size="x-small"
+        color="white"
+        @click="openAddModal"
+      ></v-btn>
       <v-btn
         icon="mdi-refresh"
         variant="text"
-        size="small"
+        size="x-small"
+        color="white"
         @click="refreshTodos"
         :loading="loading"
       ></v-btn>
     </v-card-title>
 
-    <v-tabs v-model="activeTab" density="compact">
-      <v-tab value="claude">Claude</v-tab>
-      <v-tab value="user">User Items</v-tab>
-      <v-tab value="completed">Completed</v-tab>
-    </v-tabs>
+    <v-card-text class="pa-2">
+      <!-- Show completed toggle -->
+      <div class="d-flex align-center mb-2">
+        <v-switch
+          v-model="showCompleted"
+          density="compact"
+          hide-details
+          color="primary"
+          label="Show completed"
+          class="todo-toggle"
+        ></v-switch>
+      </div>
 
-    <v-card-text class="pa-0">
-      <v-window v-model="activeTab">
-        <!-- Claude Todos Tab -->
-        <v-window-item value="claude">
-          <div class="pa-3">
-            <v-list v-if="activeClaudeTodos.length > 0" density="compact">
-              <v-list-item
-                v-for="(todo, index) in activeClaudeTodos"
-                :key="index"
-                class="todo-item"
-                :class="index % 2 === 0 ? 'todo-row-blue' : 'todo-row-white'"
-              >
-                <template v-slot:prepend>
-                  <v-icon :color="getStatusColor(todo.status)">
-                    {{ getStatusIcon(todo.status) }}
-                  </v-icon>
-                </template>
+      <!-- Unified task list (drag to reorder priority) -->
+      <draggable
+        v-if="visibleTodos.length > 0"
+        :list="visibleTodos"
+        item-key="id"
+        handle=".todo-drag-handle"
+        ghost-class="todo-ghost"
+        @end="onDragEnd"
+        class="todo-draggable pa-0"
+      >
+        <template #item="{ element: todo, index }">
+        <div
+          class="todo-item d-flex align-center"
+          :class="index % 2 === 0 ? 'todo-row-blue' : 'todo-row-white'"
+        >
+          <v-icon size="x-small" class="todo-drag-handle me-1" style="cursor: grab;">mdi-drag-vertical</v-icon>
+          <span class="todo-rank me-1">{{ index + 1 }}.</span>
+          <v-checkbox
+            :model-value="todo.status === 'completed'"
+            @update:model-value="toggleTodoStatus(todo)"
+            hide-details
+            density="compact"
+            class="todo-checkbox"
+          ></v-checkbox>
 
-                <v-list-item-title class="todo-text-truncate" @click="showFullText(todo.content)">{{ todo.content }}</v-list-item-title>
-                <v-list-item-subtitle v-if="todo.status === 'in_progress'">
-                  {{ todo.activeForm }}
-                </v-list-item-subtitle>
-
-                <template v-slot:append>
-                  <v-chip
-                    :color="getStatusColor(todo.status)"
-                    size="x-small"
-                    variant="flat"
-                  >
-                    {{ formatStatus(todo.status) }}
-                  </v-chip>
-                </template>
-              </v-list-item>
-            </v-list>
-
-            <div v-else class="text-center text-grey py-4">
-              No active Claude todos
-            </div>
+          <div
+            class="todo-text-truncate flex-grow-1"
+            :class="todo.status === 'completed' ? 'text-decoration-line-through text-grey' : ''"
+            @click="showFullText(todo)"
+          >
+            {{ todo.content }}
           </div>
-        </v-window-item>
 
-        <!-- User Todos Tab -->
-        <v-window-item value="user">
-          <div class="pa-3">
-            <!-- Add new todo -->
-            <v-form @submit.prevent="addUserTodo" class="mb-3">
-              <v-textarea
-                v-model="newTodoContent"
-                label="Add high-level task or idea"
-                rows="2"
-                density="compact"
-                variant="outlined"
-                hide-details
-                class="mb-2"
-              ></v-textarea>
-              <div class="d-flex gap-2">
-                <v-select
-                  v-model="newTodoPriority"
-                  :items="priorityOptions"
-                  label="Priority"
-                  density="compact"
-                  variant="outlined"
-                  hide-details
-                  style="max-width: 150px;"
-                ></v-select>
-                <v-spacer></v-spacer>
-                <v-btn
-                  type="submit"
-                  color="primary"
-                  size="small"
-                  :disabled="!newTodoContent.trim()"
-                >
-                  Add
-                </v-btn>
-              </div>
-            </v-form>
-
-            <!-- User todos list (active only) -->
-            <v-list v-if="activeUserTodos.length > 0" density="compact">
-              <v-list-item
-                v-for="(todo, index) in activeUserTodos"
-                :key="todo.id"
-                class="todo-item"
-                :class="index % 2 === 0 ? 'todo-row-blue' : 'todo-row-white'"
-              >
-                <template v-slot:prepend>
-                  <v-checkbox
-                    :model-value="todo.status === 'completed'"
-                    @update:model-value="toggleUserTodoStatus(todo)"
-                    hide-details
-                    density="compact"
-                  ></v-checkbox>
-                </template>
-
-                <v-list-item-title class="todo-text-truncate" @click="showFullText(todo.content)">
-                  {{ todo.content }}
-                </v-list-item-title>
-
-                <template v-slot:append>
-                  <v-chip
-                    v-if="todo.created_by"
-                    size="x-small"
-                    variant="tonal"
-                    color="secondary"
-                    class="me-2"
-                    prepend-icon="mdi-account"
-                  >
-                    {{ todo.created_by }}
-                  </v-chip>
-                  <v-chip
-                    :color="getPriorityColor(todo.priority)"
-                    size="x-small"
-                    variant="flat"
-                    class="me-2"
-                  >
-                    {{ todo.priority }}
-                  </v-chip>
-                  <v-btn
-                    icon="mdi-delete"
-                    variant="text"
-                    size="x-small"
-                    @click="deleteUserTodo(todo.id)"
-                  ></v-btn>
-                </template>
-              </v-list-item>
-            </v-list>
-
-            <div v-else class="text-center text-grey py-4">
-              No active todos
-            </div>
+          <div class="d-flex align-center">
+            <v-chip
+              :color="getPriorityColor(todo.priority)"
+              size="x-small"
+              variant="flat"
+              class="me-1 todo-priority-chip justify-center"
+            >
+              {{ todo.priority }}
+            </v-chip>
+            <v-chip
+              :color="todo.created_by === 'claude' ? 'deep-purple' : 'secondary'"
+              size="x-small"
+              variant="tonal"
+              class="me-1 todo-user-chip"
+              :prepend-icon="todo.created_by === 'claude' ? 'mdi-robot' : 'mdi-account'"
+            >
+              <span class="todo-user-label">{{ todo.created_by || 'unknown' }}</span>
+            </v-chip>
+            <v-btn
+              icon="mdi-delete"
+              variant="text"
+              size="x-small"
+              @click="deleteTodo(todo.id)"
+            ></v-btn>
           </div>
-        </v-window-item>
+        </div>
+        </template>
+      </draggable>
 
-        <!-- Completed Todos Tab -->
-        <v-window-item value="completed">
-          <div class="pa-3">
-            <!-- Completed Claude Todos -->
-            <div v-if="completedClaudeTodos.length > 0" class="mb-3">
-              <div class="text-caption text-grey mb-2">Claude Tasks</div>
-              <v-list density="compact">
-                <v-list-item
-                  v-for="(todo, index) in completedClaudeTodos"
-                  :key="'claude-' + index"
-                  class="todo-item"
-                  :class="index % 2 === 0 ? 'todo-row-blue' : 'todo-row-white'"
-                >
-                  <template v-slot:prepend>
-                    <v-icon color="success">mdi-check-circle</v-icon>
-                  </template>
-
-                  <v-list-item-title class="text-decoration-line-through text-grey todo-text-truncate" @click="showFullText(todo.content)">
-                    {{ todo.content }}
-                  </v-list-item-title>
-                </v-list-item>
-              </v-list>
-            </div>
-
-            <!-- Completed User Todos -->
-            <div v-if="completedUserTodos.length > 0">
-              <div class="text-caption text-grey mb-2">User Items</div>
-              <v-list density="compact">
-                <v-list-item
-                  v-for="(todo, index) in completedUserTodos"
-                  :key="'user-' + todo.id"
-                  class="todo-item"
-                  :class="index % 2 === 0 ? 'todo-row-blue' : 'todo-row-white'"
-                >
-                  <template v-slot:prepend>
-                    <v-checkbox
-                      :model-value="true"
-                      @update:model-value="toggleUserTodoStatus(todo)"
-                      hide-details
-                      density="compact"
-                    ></v-checkbox>
-                  </template>
-
-                  <v-list-item-title class="text-decoration-line-through text-grey todo-text-truncate" @click="showFullText(todo.content)">
-                    {{ todo.content }}
-                  </v-list-item-title>
-
-                  <template v-slot:append>
-                    <v-chip
-                      v-if="todo.created_by"
-                      size="x-small"
-                      variant="tonal"
-                      color="secondary"
-                      class="me-2"
-                      prepend-icon="mdi-account"
-                    >
-                      {{ todo.created_by }}
-                    </v-chip>
-                    <v-chip
-                      :color="getPriorityColor(todo.priority)"
-                      size="x-small"
-                      variant="flat"
-                      class="me-2"
-                    >
-                      {{ todo.priority }}
-                    </v-chip>
-                    <v-btn
-                      icon="mdi-delete"
-                      variant="text"
-                      size="x-small"
-                      @click="deleteUserTodo(todo.id)"
-                    ></v-btn>
-                  </template>
-                </v-list-item>
-              </v-list>
-            </div>
-
-            <div v-if="completedClaudeTodos.length === 0 && completedUserTodos.length === 0" class="text-center text-grey py-4">
-              No completed todos
-            </div>
-          </div>
-        </v-window-item>
-      </v-window>
+      <div v-else class="text-center text-grey py-4 text-caption">
+        No tasks
+      </div>
     </v-card-text>
   </v-card>
 
@@ -243,236 +107,271 @@
     <v-card>
       <v-card-title class="d-flex align-center">
         <span>Full Text</span>
-        <v-spacer />
-        <v-btn icon="mdi-close" variant="text" size="small" @click="textModalOpen = false" />
+        <v-spacer></v-spacer>
+        <v-btn icon="mdi-close" variant="text" size="small" @click="textModalOpen = false"></v-btn>
       </v-card-title>
-      <v-divider />
-      <v-card-text class="pa-4" style="white-space: pre-wrap; word-break: break-word;">
-        {{ textModalContent }}
+      <v-divider></v-divider>
+      <v-card-text style="white-space: pre-wrap; word-break: break-word;">
+        <div class="text-body-1 font-weight-medium mb-2">{{ textModalTitle }}</div>
+        <div v-if="textModalDescription" class="text-body-2 text-grey-darken-1">{{ textModalDescription }}</div>
+        <div v-else class="text-caption text-grey">No description</div>
       </v-card-text>
+    </v-card>
+  </v-dialog>
+
+  <!-- Add Todo Modal -->
+  <v-dialog v-model="showAddModal" max-width="480" @keydown.esc="showAddModal = false">
+    <v-card>
+      <v-card-title class="d-flex align-center">
+        <v-icon start>mdi-plus-circle</v-icon>
+        Add Task
+        <v-spacer></v-spacer>
+        <v-chip
+          :color="isKnownUser ? 'secondary' : 'grey'"
+          size="small"
+          variant="tonal"
+          prepend-icon="mdi-account"
+          class="me-2"
+        >
+          {{ currentUsername }}
+        </v-chip>
+        <v-btn icon="mdi-close" variant="text" size="small" @click="closeAddModal"></v-btn>
+      </v-card-title>
+      <v-divider></v-divider>
+      <v-card-text class="pa-4">
+        <div v-if="!isKnownUser" class="text-caption text-warning mb-2">
+          <v-icon size="x-small" class="me-1">mdi-alert</v-icon>
+          Not logged in — task will be filed as "unknown"
+        </div>
+        <v-form ref="addFormRef" @submit.prevent="submitNewTodo">
+          <v-text-field
+            v-model="newTodo.content"
+            label="Task Name"
+            variant="outlined"
+            density="compact"
+            :rules="[v => !!v || 'Task name is required']"
+            class="mb-3"
+            autofocus
+          ></v-text-field>
+
+          <v-textarea
+            v-model="newTodo.description"
+            label="Description (optional)"
+            variant="outlined"
+            density="compact"
+            rows="3"
+            auto-grow
+            class="mb-3"
+          ></v-textarea>
+
+          <v-select
+            v-model="newTodo.priority"
+            :items="priorityOptions"
+            label="Priority"
+            variant="outlined"
+            density="compact"
+            hide-details
+          ></v-select>
+        </v-form>
+      </v-card-text>
+      <v-divider></v-divider>
+      <v-card-actions class="pa-3">
+        <v-spacer></v-spacer>
+        <v-btn variant="text" @click="closeAddModal">Cancel</v-btn>
+        <v-btn color="primary" variant="flat" :loading="submitting" @click="submitNewTodo">
+          Add Task
+        </v-btn>
+      </v-card-actions>
     </v-card>
   </v-dialog>
 </template>
 
-<script>
-export default {
-  name: 'TodoPanel',
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import draggable from 'vuedraggable'
 
-  data() {
-    return {
-      activeTab: 'user',
-      loading: false,
-      claudeTodos: [],
-      userTodos: [],
-      newTodoContent: '',
-      newTodoPriority: 'normal',
-      textModalOpen: false,
-      textModalContent: '',
-      priorityOptions: [
-        { title: 'Low', value: 'low' },
-        { title: 'Normal', value: 'normal' },
-        { title: 'High', value: 'high' },
-        { title: 'Critical', value: 'critical' }
-      ]
-    }
-  },
+const loading = ref(false)
+const todos = ref([])
+const showCompleted = ref(false)
+const textModalOpen = ref(false)
+const textModalTitle = ref('')
+const textModalDescription = ref('')
+const showAddModal = ref(false)
+const submitting = ref(false)
+const newTodo = ref({ content: '', description: '', priority: 'normal' })
+const priorityOptions = ['low', 'normal', 'high', 'critical']
+const addFormRef = ref(null)
 
-  mounted() {
-    this.refreshTodos()
+// Writable list bound to draggable (mirrors the filtered view of todos).
+const visibleTodos = ref([])
 
-    // Auto-refresh every 30 seconds
-    this.refreshInterval = setInterval(() => {
-      this.refreshTodos()
-    }, 30000)
-  },
+function rebuildVisible() {
+  visibleTodos.value = showCompleted.value
+    ? [...todos.value]
+    : todos.value.filter(t => t.status !== 'completed')
+}
 
-  beforeUnmount() {
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval)
-    }
-  },
+watch([todos, showCompleted], rebuildVisible, { immediate: true })
 
-  computed: {
-    activeClaudeTodos() {
-      return this.claudeTodos.filter(todo => todo.status !== 'completed')
-    },
-    completedClaudeTodos() {
-      return this.claudeTodos.filter(todo => todo.status === 'completed')
-    },
-    activeUserTodos() {
-      return this.userTodos.filter(todo => todo.status !== 'completed')
-    },
-    completedUserTodos() {
-      return this.userTodos.filter(todo => todo.status === 'completed')
-    }
-  },
+function getToken() {
+  return localStorage.getItem('auth-token') || localStorage.getItem('token')
+}
 
-  methods: {
-    async refreshTodos() {
-      this.loading = true
-      await Promise.all([
-        this.fetchClaudeTodos(),
-        this.fetchUserTodos()
-      ])
-      this.loading = false
-    },
-
-    async fetchClaudeTodos() {
-      try {
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-        const response = await fetch('/api/todos/claude', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        })
-
-        if (response.ok) {
-          this.claudeTodos = await response.json()
-        }
-      } catch (error) {
-        console.error('Error fetching Claude todos:', error)
-      }
-    },
-
-    async fetchUserTodos() {
-      try {
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-        const response = await fetch('/api/todos/user', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        })
-
-        if (response.ok) {
-          this.userTodos = await response.json()
-        }
-      } catch (error) {
-        console.error('Error fetching user todos:', error)
-      }
-    },
-
-    async addUserTodo() {
-      if (!this.newTodoContent.trim()) return
-
-      try {
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-        const response = await fetch('/api/todos/user', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            content: this.newTodoContent,
-            priority: this.newTodoPriority
-          })
-        })
-
-        if (response.ok) {
-          this.newTodoContent = ''
-          this.newTodoPriority = 'normal'
-          await this.fetchUserTodos()
-        }
-      } catch (error) {
-        console.error('Error adding user todo:', error)
-      }
-    },
-
-    async toggleUserTodoStatus(todo) {
-      try {
-        const newStatus = todo.status === 'completed' ? 'pending' : 'completed'
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-
-        const response = await fetch(`/api/todos/user/${todo.id}`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            status: newStatus
-          })
-        })
-
-        if (response.ok) {
-          await this.fetchUserTodos()
-        }
-      } catch (error) {
-        console.error('Error toggling todo status:', error)
-      }
-    },
-
-    async deleteUserTodo(todoId) {
-      try {
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-        const response = await fetch(`/api/todos/user/${todoId}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        })
-
-        if (response.ok) {
-          await this.fetchUserTodos()
-        }
-      } catch (error) {
-        console.error('Error deleting user todo:', error)
-      }
-    },
-
-    getStatusIcon(status) {
-      switch (status) {
-        case 'completed':
-          return 'mdi-check-circle'
-        case 'in_progress':
-          return 'mdi-progress-clock'
-        case 'pending':
-        default:
-          return 'mdi-circle-outline'
-      }
-    },
-
-    getStatusColor(status) {
-      switch (status) {
-        case 'completed':
-          return 'success'
-        case 'in_progress':
-          return 'primary'
-        case 'pending':
-        default:
-          return 'grey'
-      }
-    },
-
-    getPriorityColor(priority) {
-      switch (priority) {
-        case 'critical':
-          return 'error'
-        case 'high':
-          return 'warning'
-        case 'normal':
-          return 'info'
-        case 'low':
-        default:
-          return 'grey'
-      }
-    },
-
-    formatStatus(status) {
-      return status.replace('_', ' ').toUpperCase()
-    },
-
-    showFullText(text) {
-      this.textModalContent = text
-      this.textModalOpen = true
+function getCurrentUsername() {
+  // Try to decode the JWT; fall back to stored user object or 'unknown'
+  const token = getToken()
+  if (token) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]))
+      if (payload.sub) return payload.sub
+      if (payload.username) return payload.username
+    } catch (e) {
+      // ignore, fall through
     }
   }
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || 'null')
+    if (user?.username) return user.username
+  } catch (e) { /* ignore */ }
+  return 'unknown'
 }
+
+// Reactive current username for template bindings (re-read whenever the
+// add-task modal opens so a login during the session is reflected).
+const currentUsername = ref(getCurrentUsername())
+const isKnownUser = computed(() => currentUsername.value && currentUsername.value !== 'unknown')
+
+async function fetchTodos() {
+  try {
+    const response = await fetch('/api/todos', {
+      headers: { 'Authorization': `Bearer ${getToken()}` }
+    })
+    if (response.ok) {
+      todos.value = await response.json()
+    }
+  } catch (error) {
+    console.error('Error fetching todos:', error)
+  }
+}
+
+async function refreshTodos() {
+  loading.value = true
+  await fetchTodos()
+  loading.value = false
+}
+
+async function submitNewTodo() {
+  const { valid } = await addFormRef.value.validate()
+  if (!valid) return
+  submitting.value = true
+  try {
+    const response = await fetch('/api/todos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+      body: JSON.stringify({
+        content: newTodo.value.content,
+        description: newTodo.value.description || null,
+        priority: newTodo.value.priority,
+        created_by: getCurrentUsername()
+      })
+    })
+    if (response.ok) {
+      closeAddModal()
+      await fetchTodos()
+    }
+  } catch (error) {
+    console.error('Error adding todo:', error)
+  } finally {
+    submitting.value = false
+  }
+}
+
+function openAddModal() {
+  // Re-read the username each time the modal opens so a login during
+  // the session is reflected immediately.
+  currentUsername.value = getCurrentUsername()
+  showAddModal.value = true
+}
+
+function closeAddModal() {
+  showAddModal.value = false
+  newTodo.value = { content: '', description: '', priority: 'normal' }
+}
+
+async function toggleTodoStatus(todo) {
+  try {
+    const newStatus = todo.status === 'completed' ? 'pending' : 'completed'
+    const response = await fetch(`/api/todos/${todo.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+      body: JSON.stringify({ status: newStatus })
+    })
+    if (response.ok) await fetchTodos()
+  } catch (error) {
+    console.error('Error toggling todo status:', error)
+  }
+}
+
+async function onDragEnd() {
+  // visibleTodos reflects the new order; persist to backend.
+  // Merge visible order back into the full todos list so hidden
+  // (completed) items keep their relative positions at the tail.
+  const visibleIds = visibleTodos.value.map(t => t.id)
+  const hiddenTodos = todos.value.filter(t => !visibleIds.includes(t.id))
+  const newOrder = [...visibleTodos.value, ...hiddenTodos]
+  // Optimistically reflect new sort_order locally
+  newOrder.forEach((t, i) => { t.sort_order = i + 1 })
+  todos.value = newOrder
+  try {
+    await fetch('/api/todos/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+      body: JSON.stringify({ ids: newOrder.map(t => t.id) })
+    })
+  } catch (error) {
+    console.error('Error reordering todos:', error)
+    await fetchTodos()
+  }
+}
+
+async function deleteTodo(todoId) {
+  try {
+    const response = await fetch(`/api/todos/${todoId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${getToken()}` }
+    })
+    if (response.ok) await fetchTodos()
+  } catch (error) {
+    console.error('Error deleting todo:', error)
+  }
+}
+
+function getPriorityColor(priority) {
+  const map = { critical: 'error', high: 'warning', normal: 'info' }
+  return map[priority] || 'grey'
+}
+
+function showFullText(todo) {
+  textModalTitle.value = todo.content
+  textModalDescription.value = todo.description || ''
+  textModalOpen.value = true
+}
+
+let refreshInterval
+onMounted(() => {
+  refreshTodos()
+  refreshInterval = setInterval(refreshTodos, 30000)
+})
+onBeforeUnmount(() => {
+  if (refreshInterval) clearInterval(refreshInterval)
+})
 </script>
 
 <style scoped>
 .todo-item {
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  min-height: 32px !important;
+  padding-inline: 6px !important;
 }
 
 .todo-item:last-child {
@@ -480,11 +379,11 @@ export default {
 }
 
 .todo-row-blue {
-  background-color: #e3f2fd !important;
+  background-color: #e3f2fd;
 }
 
 .todo-row-white {
-  background-color: #ffffff !important;
+  background-color: #ffffff;
 }
 
 .todo-text-truncate {
@@ -492,13 +391,66 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
+  font-size: 0.8rem !important;
 }
 
 .todo-text-truncate:hover {
   text-decoration: underline;
 }
 
-.gap-2 {
-  gap: 8px;
+.todo-checkbox {
+  flex: 0 0 auto;
+}
+
+.todo-checkbox :deep(.v-selection-control) {
+  min-height: 28px;
+}
+
+.todo-priority-chip {
+  width: 64px;
+  min-width: 64px;
+  max-width: 64px;
+}
+
+.todo-priority-chip :deep(.v-chip__content) {
+  width: 100%;
+  justify-content: center;
+  text-transform: capitalize;
+}
+
+.todo-user-chip {
+  width: 96px;
+  min-width: 96px;
+  max-width: 96px;
+}
+
+.todo-user-chip :deep(.v-chip__content) {
+  width: 100%;
+  overflow: hidden;
+}
+
+.todo-user-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.todo-rank {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.6);
+  min-width: 18px;
+  text-align: right;
+}
+
+.todo-ghost {
+  opacity: 0.5;
+  background: #ffe082 !important;
+}
+
+.todo-toggle :deep(.v-label) {
+  font-size: 0.75rem !important;
 }
 </style>

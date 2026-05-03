@@ -45,416 +45,135 @@
 
     <v-row>
       <v-col>
-        <h2 class="text-h4 font-weight-bold mb-4">Dashboard</h2>
+        <div class="d-flex align-center mb-2">
+          <h2 class="text-h5 font-weight-bold">Dashboard</h2>
+          <v-spacer />
+          <v-btn size="x-small" variant="text" color="grey" @click="resetLayout">
+            <v-icon size="small" start>mdi-restore</v-icon>
+            Reset Layout
+          </v-btn>
+        </div>
 
-        <!-- All Dashboard Panels - True Masonry Grid -->
-        <div class="masonry-grid">
-          <!-- Next Show Panel - Featured -->
-          <div class="masonry-item masonry-item-wide">
-            <NextShowPanel />
-          </div>
+        <!-- Draggable block columns (headers are drag handles) -->
+        <div class="dashboard-columns dashboard-compact">
+          <div
+            v-for="(col, colIndex) in columns"
+            :key="`col-wrap-${colIndex}`"
+            class="dashboard-column"
+          >
+            <!-- Next Show Panel pinned at top of first column (not draggable) -->
+            <NextShowPanel v-if="colIndex === 0" />
 
-          <!-- Active Tools Panel -->
-          <div class="masonry-item">
-            <v-card class="elevation-4">
-              <v-card-title class="d-flex align-center bg-primary text-white">
-                <v-icon class="me-2">mdi-star-circle</v-icon>
-                <span>Active Tools</span>
-              </v-card-title>
-              <v-card-text class="pa-2">
-                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/consolidation')">
-                  <v-card-text class="d-flex align-center pa-3">
-                    <v-icon color="primary" size="32" class="me-3">mdi-folder-sync</v-icon>
-                    <div>
-                      <div class="text-subtitle-1 font-weight-bold">Episode Consolidation</div>
-                      <div class="text-caption text-grey">Sync Drive & Syncthing</div>
-                    </div>
+          <draggable
+            :list="col"
+            group="dashboard-blocks"
+            :item-key="el => el"
+            class="dashboard-column-inner"
+            handle=".dash-drag-handle"
+            animation="180"
+            ghost-class="drag-ghost"
+            @end="saveLayout"
+          >
+            <template #item="{ element }">
+              <div class="block-wrap" :class="`block-${BLOCK_COLORS[element] || 'grey'}`">
+
+                <!-- Current Show (in-production episode) -->
+                <CurrentShowPanel v-if="element === 'current-show'" class="dash-drag-handle-wrap" />
+
+                <!-- Tools & Actions (merged Active Tools + Quick Actions) -->
+                <v-card v-else-if="element === 'tools-actions'" elevation="2">
+                  <v-card-title class="dash-title dash-drag-handle">
+                    <v-icon size="small" class="me-2">mdi-lightning-bolt</v-icon>
+                    <span>Tools &amp; Actions</span>
+                  </v-card-title>
+                  <v-card-text class="pa-2">
+                    <v-btn block variant="outlined" class="dash-row-btn mb-1" @click="createNewEpisode">
+                      <v-icon start size="small">mdi-plus-circle</v-icon>
+                      New Episode
+                    </v-btn>
+                    <v-btn block variant="outlined" class="dash-row-btn mb-1" @click="$router.push('/consolidation')">
+                      <v-icon start size="small">mdi-folder-sync</v-icon>
+                      Episode Consolidation
+                    </v-btn>
+                    <v-btn block variant="outlined" class="dash-row-btn mb-1" to="/assets">
+                      <v-icon start size="small">mdi-cloud-upload</v-icon>
+                      Upload Assets
+                    </v-btn>
+                    <v-btn block variant="outlined" class="dash-row-btn mb-1" to="/templates">
+                      <v-icon start size="small">mdi-file-document</v-icon>
+                      Manage Templates
+                    </v-btn>
+                    <v-btn block variant="outlined" class="dash-row-btn mb-1" @click="openVoiceTest">
+                      <v-icon start size="small">mdi-microphone</v-icon>
+                      Test Voice Synthesis
+                    </v-btn>
+                    <v-btn block variant="outlined" class="dash-row-btn mb-1" @click="exportData">
+                      <v-icon start size="small">mdi-download</v-icon>
+                      Export Data
+                    </v-btn>
+                    <v-btn block variant="outlined" class="dash-row-btn mb-1" to="/settings">
+                      <v-icon start size="small">mdi-cog</v-icon>
+                      System Settings
+                    </v-btn>
+                    <v-btn block variant="outlined" class="dash-row-btn" @click="$router.push('/tools')">
+                      <v-icon start size="small">mdi-dots-horizontal-circle-outline</v-icon>
+                      More Tools
+                    </v-btn>
                   </v-card-text>
                 </v-card>
-                <v-card variant="outlined" class="hover-card" @click="$router.push('/tools')">
-                  <v-card-text class="d-flex align-center pa-3">
-                    <v-icon color="grey" size="32" class="me-3">mdi-dots-horizontal-circle-outline</v-icon>
-                    <div>
-                      <div class="text-subtitle-1 font-weight-bold">More Tools</div>
-                      <div class="text-caption text-grey">View all available tools</div>
-                    </div>
+
+                <!-- Announcements -->
+                <AnnouncementsPanel v-else-if="element === 'announcements'" class="dash-drag-handle-wrap" />
+
+                <!-- Todo Panel -->
+                <TodoPanel v-else-if="element === 'todo'" class="dash-drag-handle-wrap" />
+
+                <!-- Preproduction -->
+                <v-card v-else-if="element === 'preproduction'" elevation="2">
+                  <v-card-title class="dash-title dash-drag-handle">
+                    <v-icon size="small" class="me-2">mdi-lightbulb-on</v-icon>
+                    <span>Preproduction</span>
+                  </v-card-title>
+                  <v-card-text class="pa-2">
+                    <v-btn block variant="outlined" color="purple" class="dash-row-btn mb-1" @click="$router.push('/whiteboard')">
+                      <v-icon start size="small">mdi-notebook-edit</v-icon>
+                      Whiteboard
+                    </v-btn>
+                    <v-btn block variant="outlined" color="purple" class="dash-row-btn mb-1" @click="$router.push('/generator')">
+                      <v-icon start size="small">mdi-creation</v-icon>
+                      Generator
+                    </v-btn>
+                    <v-btn block variant="outlined" color="purple" class="dash-row-btn" @click="$router.push('/voice-meeting')">
+                      <v-icon start size="small">mdi-microphone</v-icon>
+                      Production Meeting
+                    </v-btn>
                   </v-card-text>
                 </v-card>
-              </v-card-text>
-            </v-card>
-          </div>
 
-          <!-- Announcements -->
-          <div class="masonry-item">
-            <AnnouncementsPanel />
-          </div>
-
-          <!-- Todo Panel -->
-          <div class="masonry-item">
-            <TodoPanel />
-          </div>
-
-          <!-- Quick Actions Panel -->
-          <div class="masonry-item">
-            <v-card class="quick-actions-card" elevation="3">
-              <v-card-title class="d-flex align-center">
-                <v-icon color="primary" class="me-2">mdi-lightning-bolt</v-icon>
-                <span>Quick Actions</span>
-              </v-card-title>
-
-              <v-card-text class="pb-4">
-                <v-list class="pa-0">
-                  <v-list-item
-                    @click="createNewEpisode"
-                    prepend-icon="mdi-plus-circle"
-                    title="New Episode"
-                    subtitle="Create a new episode from template"
-                    class="action-item"
-                  />
-                  <v-list-item
-                    @click="openVoiceTest"
-                    prepend-icon="mdi-microphone"
-                    title="Test Voice Synthesis"
-                    subtitle="Quick XTTS voice test"
-                    class="action-item"
-                  />
-                  <v-list-item
-                    to="/assets"
-                    prepend-icon="mdi-cloud-upload"
-                    title="Upload Assets"
-                    subtitle="Add images, videos, or audio"
-                    class="action-item"
-                  />
-                  <v-list-item
-                    to="/templates"
-                    prepend-icon="mdi-file-document"
-                    title="Manage Templates"
-                    subtitle="Create or edit episode templates"
-                    class="action-item"
-                  />
-                  <v-list-item
-                    @click="exportData"
-                    prepend-icon="mdi-download"
-                    title="Export Data"
-                    subtitle="Download episode data or scripts"
-                    class="action-item"
-                  />
-                  <v-list-item
-                    to="/settings"
-                    prepend-icon="mdi-cog"
-                    title="System Settings"
-                    subtitle="Configure Show Builder"
-                    class="action-item"
-                  />
-                </v-list>
-              </v-card-text>
-            </v-card>
-          </div>
-
-          <!-- Upcoming Episodes Section - Only show if episodes exist -->
-          <div v-if="upcomingEpisodes.length > 0" class="masonry-item">
-            <v-card class="current-episode-card" elevation="3">
-              <v-card-title class="d-flex align-center">
-                <v-icon color="primary" class="me-2">mdi-television-classic</v-icon>
-                <span>Upcoming Episodes</span>
-                <v-spacer />
-                <v-chip
-                  v-if="upcomingEpisodes.length > 0"
-                  color="primary"
-                  size="small"
-                  variant="flat"
-                >
-                  {{ upcomingEpisodes.length }} Shows
-                </v-chip>
-              </v-card-title>
-
-              <v-card-text v-if="loadingEpisodes">
-                <v-skeleton-loader type="article" />
-              </v-card-text>
-
-              <v-card-text v-else-if="episodeError" class="text-center">
-                <v-icon color="grey" size="48" class="mb-2">mdi-television-off</v-icon>
-                <p class="text-grey">{{ episodeError }}</p>
-              </v-card-text>
-
-              <v-card-text v-else-if="upcomingEpisodes.length === 0" class="text-center">
-                <v-icon color="grey" size="48" class="mb-2">mdi-calendar-clock</v-icon>
-                <p class="text-grey">No upcoming episodes scheduled</p>
-              </v-card-text>
-
-              <v-card-text v-else class="pa-2">
-                <v-expansion-panels variant="accordion">
-                  <v-expansion-panel
-                    v-for="episodeData in upcomingEpisodes.slice(0, 5)"
-                    :key="episodeData.episode.number"
-                  >
-                    <v-expansion-panel-title class="py-2">
-                      <div class="d-flex align-center justify-space-between w-100 me-2">
-                        <div class="d-flex align-center">
-                          <span class="text-body-2 font-weight-bold text-primary me-2">
-                            {{ episodeData.episode.number }}
-                          </span>
-                          <span v-if="episodeData.episode.title" class="text-body-2 me-2">
-                            {{ episodeData.episode.title }}
-                          </span>
-                        </div>
-                        <div class="d-flex align-center ga-2">
-                          <span class="text-caption text-grey">
-                            {{ formatAirDateShort(episodeData.episode.air_date) }}
-                          </span>
-                          <v-chip
-                            :color="getStatusColor(episodeData.episode.status)"
-                            size="x-small"
-                            variant="flat"
-                          >
-                            {{ episodeData.episode.status?.toUpperCase() || 'DRAFT' }}
-                          </v-chip>
-                        </div>
+                <!-- System Health -->
+                <v-card v-else-if="element === 'system-health'" elevation="2">
+                  <v-card-title class="dash-title dash-drag-handle">
+                    <v-icon size="small" class="me-2">mdi-heart-pulse</v-icon>
+                    <span>System Health</span>
+                  </v-card-title>
+                  <v-card-text class="pa-2">
+                    <div class="health-grid">
+                      <div
+                        v-for="row in healthRows"
+                        :key="row.key"
+                        class="health-row"
+                        :class="row.healthy ? 'health-row-ok' : 'health-row-error'"
+                      >
+                        <v-icon size="small" class="me-1">{{ row.icon }}</v-icon>
+                        <span class="health-label">{{ row.label }}</span>
                       </div>
-                    </v-expansion-panel-title>
-
-                    <v-expansion-panel-text>
-                      <!-- Dummy Episode Banner -->
-                      <div v-if="episodeData.episode.is_dummy" class="dummy-banner dummy-banner-top mb-2">
-                        DUMMY EPISODE
-                      </div>
-
-                      <!-- Episode Statistics -->
-                      <v-row v-if="episodeData.statistics" dense class="mb-2">
-                        <v-col cols="3">
-                          <div class="stat-item-small">
-                            <div class="stat-number-small">{{ episodeData.statistics.total_items }}</div>
-                            <div class="stat-label-small">Items</div>
-                          </div>
-                        </v-col>
-                        <v-col cols="3">
-                          <div class="stat-item-small">
-                            <div class="stat-number-small">{{ episodeData.statistics.by_status?.draft || 0 }}</div>
-                            <div class="stat-label-small">Draft</div>
-                          </div>
-                        </v-col>
-                        <v-col cols="3">
-                          <div class="stat-item-small">
-                            <div class="stat-number-small">{{ (episodeData.statistics.by_status?.approved || 0) + (episodeData.statistics.by_status?.completed || 0) }}</div>
-                            <div class="stat-label-small">Ready</div>
-                          </div>
-                        </v-col>
-                        <v-col cols="3">
-                          <div class="stat-item-small">
-                            <div class="stat-number-small">{{ episodeData.statistics.progress_percentage || 0 }}%</div>
-                            <div class="stat-label-small">Progress</div>
-                          </div>
-                        </v-col>
-                      </v-row>
-
-                      <!-- Progress Bar -->
-                      <v-progress-linear
-                        :model-value="episodeData.statistics?.progress_percentage || 0"
-                        color="primary"
-                        height="4"
-                        rounded
-                        class="mb-2"
-                      />
-
-                      <!-- Guest Information -->
-                      <div v-if="episodeData.episode.guest?.name" class="guest-info mb-2">
-                        <v-icon size="small" color="primary" class="me-1">mdi-account</v-icon>
-                        <span class="text-body-2 font-weight-medium">{{ episodeData.episode.guest.name }}</span>
-                      </div>
-
-                      <!-- Quick Actions -->
-                      <div class="episode-actions">
-                        <v-btn
-                          size="small"
-                          color="primary"
-                          variant="outlined"
-                          :to="`/content-editor/${episodeData.episode.number}`"
-                          class="me-2"
-                        >
-                          Content Editor
-                        </v-btn>
-                        <v-btn
-                          size="small"
-                          color="secondary"
-                          variant="outlined"
-                          :to="`/stack/${episodeData.episode.number}`"
-                        >
-                          Timing
-                        </v-btn>
-                      </div>
-                    </v-expansion-panel-text>
-                  </v-expansion-panel>
-                </v-expansion-panels>
-
-                <!-- Show more link -->
-                <div v-if="upcomingEpisodes.length > 5" class="text-center mt-3">
-                  <v-btn
-                    variant="text"
-                    :to="`/episodes`"
-                    append-icon="mdi-arrow-right"
-                    size="small"
-                  >
-                    View All {{ upcomingEpisodes.length }} Upcoming
-                  </v-btn>
-                </div>
-              </v-card-text>
-            </v-card>
-          </div>
-
-          <!-- Preproduction Panel -->
-          <div class="masonry-item">
-            <v-card class="elevation-4">
-              <v-card-title class="d-flex align-center bg-purple text-white">
-                <v-icon class="me-2">mdi-lightbulb-on</v-icon>
-                <span>Preproduction</span>
-              </v-card-title>
-              <v-card-text class="pa-2">
-                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/whiteboard')">
-                  <v-card-text class="d-flex align-center pa-3">
-                    <v-icon color="purple" size="32" class="me-3">mdi-notebook-edit</v-icon>
-                    <div>
-                      <div class="text-subtitle-1 font-weight-bold">Whiteboard</div>
-                      <div class="text-caption text-grey">Brainstorm ideas and links</div>
                     </div>
                   </v-card-text>
                 </v-card>
-                <v-card variant="outlined" class="hover-card mb-2" @click="$router.push('/generator')">
-                  <v-card-text class="d-flex align-center pa-3">
-                    <v-icon color="purple" size="32" class="me-3">mdi-creation</v-icon>
-                    <div>
-                      <div class="text-subtitle-1 font-weight-bold">Generator</div>
-                      <div class="text-caption text-grey">AI content generation</div>
-                    </div>
-                  </v-card-text>
-                </v-card>
-                <v-card variant="outlined" class="hover-card" @click="$router.push('/voice-meeting')">
-                  <v-card-text class="d-flex align-center pa-3">
-                    <v-icon color="purple" size="32" class="me-3">mdi-microphone</v-icon>
-                    <div>
-                      <div class="text-subtitle-1 font-weight-bold">Production Meeting</div>
-                      <div class="text-caption text-grey">Voice conference call</div>
-                    </div>
-                  </v-card-text>
-                </v-card>
-              </v-card-text>
-            </v-card>
-          </div>
 
-          <!-- System Health -->
-          <div class="masonry-item">
-            <v-card>
-              <v-card-title>System Health</v-card-title>
-              <v-card-text>
-                <!-- Database -->
-                <div class="d-flex align-center justify-space-between mb-3">
-                  <div class="d-flex align-center">
-                    <v-icon :color="health.services?.database === 'connected' ? 'green' : 'red'" class="me-2">
-                      mdi-database
-                    </v-icon>
-                    <span>Database</span>
-                  </div>
-                  <v-chip size="x-small" :color="health.services?.database === 'connected' ? 'green' : 'red'">
-                    {{ health.services?.database || 'unknown' }}
-                  </v-chip>
-                </div>
-
-                <!-- Redis -->
-                <div class="d-flex align-center justify-space-between mb-3">
-                  <div class="d-flex align-center">
-                    <v-icon :color="health.services?.redis?.connected ? 'green' : 'red'" class="me-2">
-                      mdi-memory
-                    </v-icon>
-                    <span>Redis</span>
-                  </div>
-                  <v-chip size="x-small" :color="health.services?.redis?.connected ? 'green' : 'red'">
-                    {{ health.services?.redis?.latency ? `${health.services.redis.latency}ms` : 'disconnected' }}
-                  </v-chip>
-                </div>
-
-                <!-- Celery Workers -->
-                <div class="d-flex align-center justify-space-between mb-3">
-                  <div class="d-flex align-center">
-                    <v-icon :color="health.services?.celery?.workers?.length > 0 ? 'green' : 'red'" class="me-2">
-                      mdi-hammer-wrench
-                    </v-icon>
-                    <span>Workers</span>
-                  </div>
-                  <v-chip size="x-small" :color="health.services?.celery?.workers?.length > 0 ? 'green' : 'red'">
-                    {{ health.services?.celery?.workers?.length || 0 }} active
-                  </v-chip>
-                </div>
-
-                <!-- Ollama (if configured) -->
-                <div v-if="health.services?.ollama" class="d-flex align-center justify-space-between mb-3">
-                  <div class="d-flex align-center">
-                    <v-icon :color="health.services?.ollama?.status === 'connected' ? 'green' : 'red'" class="me-2">
-                      mdi-robot
-                    </v-icon>
-                    <span>Ollama</span>
-                  </div>
-                  <v-chip size="x-small" :color="health.services?.ollama?.status === 'connected' ? 'green' : 'red'">
-                    {{ health.services?.ollama?.model || 'offline' }}
-                  </v-chip>
-                </div>
-
-                <!-- XTTS (if configured) -->
-                <div v-if="health.services?.xtts" class="d-flex align-center justify-space-between mb-3">
-                  <div class="d-flex align-center">
-                    <v-icon :color="health.services?.xtts?.connected ? 'green' : 'red'" class="me-2">
-                      mdi-microphone
-                    </v-icon>
-                    <span>XTTS</span>
-                  </div>
-                  <v-chip size="x-small" :color="health.services?.xtts?.connected ? 'green' : 'red'">
-                    {{ health.services?.xtts?.connected ? 'online' : 'offline' }}
-                  </v-chip>
-                </div>
-
-                <!-- NFS -->
-                <div v-if="health.services?.nfs" class="d-flex align-center justify-space-between">
-                  <div class="d-flex align-center">
-                    <v-icon :color="health.services?.nfs?.status === 'connected' ? 'green' : 'red'" class="me-2">
-                      mdi-folder-network
-                    </v-icon>
-                    <span>NFS Storage</span>
-                  </div>
-                  <v-chip size="x-small" :color="health.services?.nfs?.status === 'connected' ? 'green' : 'red'">
-                    {{ health.services?.nfs?.writable ? 'read/write' : 'error' }}
-                  </v-chip>
-                </div>
-              </v-card-text>
-            </v-card>
-          </div>
-
-          <!-- Storage & Usage -->
-          <div class="masonry-item">
-            <v-card>
-              <v-card-title>Storage & Usage</v-card-title>
-              <v-card-text>
-                <div class="mb-3">
-                  <div class="d-flex justify-space-between mb-1">
-                    <span class="text-body-2">Assets Storage</span>
-                    <span class="text-body-2">2.1 GB</span>
-                  </div>
-                  <v-progress-linear
-                    :model-value="30"
-                    color="blue"
-                    height="6"
-                  />
-                </div>
-                <div>
-                  <div class="d-flex justify-space-between mb-1">
-                    <span class="text-body-2">Episodes Created</span>
-                    <span class="text-body-2">247</span>
-                  </div>
-                  <v-progress-linear
-                    :model-value="80"
-                    color="green"
-                    height="6"
-                  />
-                </div>
-              </v-card-text>
-            </v-card>
+              </div>
+            </template>
+          </draggable>
           </div>
         </div>
       </v-col>
@@ -466,25 +185,161 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import draggable from 'vuedraggable'
 import { useSystemHealth } from '@/composables/useSystemHealth'
+import { useUserPrefs } from '@/composables/useUserPrefs'
 import AnnouncementsPanel from '@/components/AnnouncementsPanel.vue'
 import TodoPanel from '@/components/TodoPanel.vue'
 import NextShowPanel from '@/components/NextShowPanel.vue'
+import CurrentShowPanel from '@/components/CurrentShowPanel.vue'
 import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'
 
 const router = useRouter()
+
+// ===== Draggable dashboard layout =====
+// Each block has a stable id and a color name used for the header background.
+const BLOCK_COLORS = {
+  'current-show': 'orange',
+  'tools-actions': 'deep-purple',
+  'announcements': 'amber',
+  'todo': 'teal',
+  'preproduction': 'purple',
+  'system-health': 'green'
+}
+
+const DEFAULT_LAYOUT = [
+  ['current-show', 'tools-actions'],
+  ['announcements', 'preproduction'],
+  ['todo', 'system-health']
+]
+
+// Per-user pref key for the persisted layout. Legacy localStorage key is
+// still read once for migration; new writes go to /api/user/prefs.
+const PREF_KEY = 'dashboard.layout'
+const LEGACY_LAYOUT_KEY = 'dashboard-layout-v3'
+
+const userPrefs = useUserPrefs()
+const columns = ref(structuredClone(DEFAULT_LAYOUT))
+
+function _validateAndApply(parsed) {
+  if (!Array.isArray(parsed) || !parsed.every(Array.isArray)) return false
+  const known = Object.keys(BLOCK_COLORS)
+  const flat = parsed.flat()
+  const missing = known.filter(k => !flat.includes(k))
+  if (missing.length > 0) parsed[0].push(...missing)
+  columns.value = parsed.map(col => col.filter(id => known.includes(id)))
+  return true
+}
+
+function loadLayout() {
+  // 1. Per-user pref (DB) wins.
+  const userValue = userPrefs.get(PREF_KEY, null)
+  if (userValue && _validateAndApply(structuredClone(userValue))) return
+
+  // 2. Fall back to legacy localStorage (and migrate forward).
+  try {
+    const saved = localStorage.getItem(LEGACY_LAYOUT_KEY)
+    if (!saved) return
+    const parsed = JSON.parse(saved)
+    if (_validateAndApply(parsed)) {
+      // Persist to user prefs so future loads are DB-backed.
+      userPrefs.set(PREF_KEY, columns.value)
+    }
+  } catch (e) {
+    console.warn('Failed to load dashboard layout:', e)
+  }
+}
+
+function saveLayout() {
+  try {
+    localStorage.setItem(LEGACY_LAYOUT_KEY, JSON.stringify(columns.value))  // offline fallback
+    userPrefs.set(PREF_KEY, columns.value)
+  } catch (e) {
+    console.warn('Failed to save dashboard layout:', e)
+  }
+}
+
+function resetLayout() {
+  columns.value = structuredClone(DEFAULT_LAYOUT)
+  localStorage.removeItem(LEGACY_LAYOUT_KEY)
+  userPrefs.remove(PREF_KEY)
+}
 
 // Episode creation modal ref
 const episodeModalRef = ref(null)
 const { health } = useSystemHealth()
 
+// System health rows - computed as a list so the template can iterate
+const healthRows = computed(() => {
+  const s = health.value?.services || {}
+  const rows = [
+    {
+      key: 'database',
+      icon: 'mdi-database',
+      label: 'Database',
+      healthy: s.database === 'connected',
+      status: s.database || 'unknown'
+    },
+    {
+      key: 'redis',
+      icon: 'mdi-memory',
+      label: 'Redis',
+      healthy: !!s.redis?.connected,
+      status: s.redis?.latency ? `${s.redis.latency}ms` : 'disconnected'
+    },
+    {
+      key: 'celery',
+      icon: 'mdi-hammer-wrench',
+      label: 'Workers',
+      healthy: (s.celery?.workers?.length || 0) > 0,
+      status: `${s.celery?.workers?.length || 0} active`
+    }
+  ]
+  if (s.ollama) {
+    rows.push({
+      key: 'ollama',
+      icon: 'mdi-robot',
+      label: 'Ollama',
+      healthy: s.ollama.status === 'connected',
+      status: s.ollama.model || 'offline'
+    })
+  }
+  // Prefer the new "tts" service (Fish Speech / whatever is currently wired up);
+  // fall back to legacy "xtts" only if no "tts" is reported and xtts isn't deprecated.
+  const tts = s.tts
+  if (tts) {
+    rows.push({
+      key: 'tts',
+      icon: 'mdi-microphone',
+      label: tts.label ? `TTS (${tts.label})` : 'TTS',
+      healthy: !!tts.connected,
+      status: tts.connected ? 'online' : (tts.error || 'offline')
+    })
+  } else if (s.xtts && s.xtts.status !== 'deprecated') {
+    rows.push({
+      key: 'xtts',
+      icon: 'mdi-microphone',
+      label: 'TTS',
+      healthy: !!s.xtts.connected,
+      status: s.xtts.connected ? 'online' : 'offline'
+    })
+  }
+  if (s.nfs) {
+    rows.push({
+      key: 'nfs',
+      icon: 'mdi-folder-network',
+      label: 'NFS Storage',
+      healthy: s.nfs.status === 'connected',
+      status: s.nfs.writable ? 'read/write' : 'error'
+    })
+  }
+  return rows
+})
+
 // Reactive data
-const upcomingEpisodes = ref([])
-const loadingEpisodes = ref(true)
-const episodeError = ref('')
 const latestEpisodeNumber = ref(null)
 const productionEpisode = ref(null)
 
@@ -513,57 +368,6 @@ const fetchLatestEpisode = async () => {
   }
 }
 
-// Fetch upcoming episodes data
-const fetchUpcomingEpisodes = async () => {
-  loadingEpisodes.value = true
-  episodeError.value = ''
-
-  try {
-    const response = await axios.get('/api/episodes/upcoming')
-
-    if (response.data.error) {
-      episodeError.value = response.data.error
-      upcomingEpisodes.value = []
-    } else {
-      upcomingEpisodes.value = response.data.episodes || []
-    }
-  } catch (error) {
-    console.error('Failed to fetch upcoming episodes:', error)
-    episodeError.value = 'Failed to load upcoming episodes'
-    upcomingEpisodes.value = []
-  } finally {
-    loadingEpisodes.value = false
-  }
-}
-
-// Format air date short (for collapsed episode rows)
-const formatAirDateShort = (dateString) => {
-  if (!dateString) return 'TBD'
-  const date = new Date(dateString)
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'America/New_York'
-  })
-}
-
-// Get status color for chip
-const getStatusColor = (status) => {
-  switch (status?.toLowerCase()) {
-    case 'completed':
-      return 'green'
-    case 'approved':
-      return 'blue'
-    case 'production':
-    case 'in-progress':
-      return 'orange'
-    case 'draft':
-    default:
-      return 'grey'
-  }
-}
-
-
 // Quick action handlers
 const openEpisodeModal = () => {
   episodeModalRef.value?.open()
@@ -575,8 +379,8 @@ const createNewEpisode = () => {
 
 const onEpisodeCreated = (episode) => {
   console.log('Episode created:', episode)
-  // Optionally refresh dashboard data
-  fetchUpcomingEpisodes()
+  // Refresh latest-episode info for the iPad banner
+  fetchLatestEpisode()
 }
 
 const openVoiceTest = () => {
@@ -591,44 +395,218 @@ const exportData = () => {
 
 // Load data on component mount
 onMounted(() => {
+  loadLayout()
   fetchLatestEpisode()
-  fetchUpcomingEpisodes()
 })
 </script>
 
 <style scoped>
-/* True masonry layout using CSS columns */
-.masonry-grid {
-  column-count: 4;
-  column-gap: 10px;
+/* ===== Compact dashboard style ===== */
+.dash-title {
+  display: flex;
+  align-items: center;
+  font-size: 0.9rem !important;
+  font-weight: 600 !important;
+  padding: 6px 10px !important;
+  min-height: 0 !important;
+  letter-spacing: 0.3px;
 }
 
-.masonry-item {
-  break-inside: avoid;
-  margin-bottom: 10px;
-  display: inline-block;
+.dash-row-btn {
+  justify-content: flex-start !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-size: 0.8rem !important;
+  min-height: 30px !important;
+  height: 30px !important;
+  padding: 0 10px !important;
+}
+
+/* Deep overrides to compact imported panels (NextShowPanel, TodoPanel, AnnouncementsPanel) */
+.dashboard-compact :deep(.v-card-title) {
+  font-size: 0.9rem !important;
+  font-weight: 600 !important;
+  padding: 6px 10px !important;
+  min-height: 0 !important;
+}
+
+.dashboard-compact :deep(.v-card-text) {
+  padding: 8px !important;
+  font-size: 0.8rem !important;
+}
+
+.dashboard-compact :deep(.v-list-item) {
+  min-height: 32px !important;
+  padding-inline: 8px !important;
+}
+
+.dashboard-compact :deep(.v-list-item__content) {
+  padding-block: 2px !important;
+}
+
+.dashboard-compact :deep(.v-list-item-title) {
+  font-size: 0.85rem !important;
+  line-height: 1.2 !important;
+}
+
+.dashboard-compact :deep(.v-list-item-subtitle) {
+  font-size: 0.72rem !important;
+  line-height: 1.2 !important;
+}
+
+.dashboard-compact :deep(.v-btn) {
+  text-transform: none;
+}
+
+/* ===== System Health rows with colored backgrounds ===== */
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.health-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.health-row .health-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-row-ok {
+  background: #2e7d32; /* darker green for contrast with white text */
+  color: #ffffff;
+}
+
+.health-row-error {
+  background: #c62828; /* darker red for contrast with white text */
+  color: #ffffff;
+}
+
+.health-row-ok :deep(.v-icon),
+.health-row-error :deep(.v-icon) {
+  color: #ffffff !important;
+}
+
+.health-label {
+  flex-shrink: 0;
+}
+
+.health-status {
+  font-size: 0.72rem;
+  opacity: 0.95;
+  text-transform: lowercase;
+}
+
+/* ===== Draggable column layout ===== */
+.dashboard-columns {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.dashboard-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashboard-column-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 60px; /* allow drop into empty columns */
+}
+
+.block-wrap {
   width: 100%;
 }
 
-.masonry-item-wide {
-  column-span: all;
+/* Drag handle cursor on headers */
+.dash-drag-handle {
+  cursor: grab;
+  user-select: none;
 }
 
+.dash-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* For imported panels we put the handle class on the wrapper so the title bar is draggable */
+.dash-drag-handle-wrap :deep(.v-card-title) {
+  cursor: grab;
+  user-select: none;
+}
+
+.dash-drag-handle-wrap :deep(.v-card-title:active) {
+  cursor: grabbing;
+}
+
+/* Drag ghost (placeholder where item will land) */
+.drag-ghost {
+  opacity: 0.4;
+  background: rgba(25, 118, 210, 0.1);
+  border: 2px dashed #1976d2;
+  border-radius: 4px;
+}
+
+/* ===== Universal header color for all dashboard blocks (light blue) ===== */
+.block-wrap :deep(.v-card-title),
+.block-wrap .dash-title {
+  background: #64b5f6 !important; /* light blue */
+  color: #ffffff !important;
+}
+.block-wrap :deep(.v-card-title .v-icon),
+.block-wrap .dash-title .v-icon {
+  color: #ffffff !important;
+}
+
+/* ===== Universal button color inside dashboard blocks (blue) ===== */
+.block-wrap :deep(.v-btn),
+.dashboard-compact :deep(.v-btn) {
+  color: #ffffff;
+}
+.block-wrap :deep(.v-card-title .v-btn),
+.block-wrap .dash-title .v-btn {
+  color: #ffffff !important;
+}
+.block-wrap :deep(.v-card-text .v-btn:not(.v-btn--icon)),
+.dashboard-compact :deep(.v-card-text .v-btn:not(.v-btn--icon)) {
+  background-color: #1976d2 !important;
+  color: #ffffff !important;
+}
+
+/* Responsive: collapse columns on smaller screens */
 @media (max-width: 1264px) {
-  .masonry-grid {
-    column-count: 3;
+  .dashboard-columns {
+    flex-wrap: wrap;
+  }
+  .dashboard-column {
+    flex: 1 1 calc(33.333% - 10px);
+    min-width: 220px;
   }
 }
 
 @media (max-width: 960px) {
-  .masonry-grid {
-    column-count: 2;
+  .dashboard-column {
+    flex: 1 1 calc(50% - 10px);
   }
 }
 
 @media (max-width: 600px) {
-  .masonry-grid {
-    column-count: 1;
+  .dashboard-column {
+    flex: 1 1 100%;
   }
 }
 

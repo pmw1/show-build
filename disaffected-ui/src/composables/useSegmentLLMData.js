@@ -125,11 +125,7 @@ export function useSegmentLLMData() {
         })
 
         if (notify) {
-          notifyUserStandard({
-            message: 'Entity extraction completed',
-            color: NOTIFICATION_COLORS.SUCCESS,
-            timeout: 3000
-          })
+          notifyUserStandard('Entity extraction completed', NOTIFICATION_COLORS.SUCCESS, 3000)
         }
 
         return response.data
@@ -141,11 +137,7 @@ export function useSegmentLLMData() {
       error.value = err.message
 
       if (notify) {
-        notifyUserStandard({
-          message: `Extraction failed: ${err.message}`,
-          color: NOTIFICATION_COLORS.ERROR,
-          timeout: 5000
-        })
+        notifyUserStandard(`Extraction failed: ${err.message}`, NOTIFICATION_COLORS.ERROR, 5000)
       }
 
       throw err
@@ -206,11 +198,11 @@ export function useSegmentLLMData() {
       error.value = null
 
       if (notify) {
-        notifyUserStandard({
-          message: `Starting extraction for ${rundownItemIds.length} segments...`,
-          color: NOTIFICATION_COLORS.INFO,
-          timeout: 3000
-        })
+        notifyUserStandard(
+          `Starting extraction for ${rundownItemIds.length} segments...`,
+          NOTIFICATION_COLORS.INFO,
+          3000
+        )
       }
 
       const response = await axios.post(
@@ -229,11 +221,11 @@ export function useSegmentLLMData() {
 
         if (notify) {
           const msg = `Extraction complete: ${results.completed}/${results.total} succeeded`
-          notifyUserStandard({
-            message: msg,
-            color: results.failed > 0 ? NOTIFICATION_COLORS.WARNING : NOTIFICATION_COLORS.SUCCESS,
-            timeout: 5000
-          })
+          notifyUserStandard(
+            msg,
+            results.failed > 0 ? NOTIFICATION_COLORS.WARNING : NOTIFICATION_COLORS.SUCCESS,
+            5000
+          )
         }
 
         return results
@@ -245,11 +237,11 @@ export function useSegmentLLMData() {
       error.value = err.message
 
       if (notify) {
-        notifyUserStandard({
-          message: `Batch extraction failed: ${err.message}`,
-          color: NOTIFICATION_COLORS.ERROR,
-          timeout: 5000
-        })
+        notifyUserStandard(
+          `Batch extraction failed: ${err.message}`,
+          NOTIFICATION_COLORS.ERROR,
+          5000
+        )
       }
 
       throw err

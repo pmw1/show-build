@@ -193,312 +193,322 @@
   </v-dialog>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, nextTick, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { useLLMState } from '@/composables/useLLMState'
 import { useLLM } from '@/composables/useLLM'
 
-export default {
-  name: 'WPMMeasurementTool',
-  props: {
-    modelValue: Boolean
-  },
-  emits: ['update:modelValue', 'speaker-saved', 'show-message'],
-  setup() {
-    const llmState = useLLMState()
-    const { smartCall } = useLLM()
+const props = defineProps({
+  modelValue: Boolean
+})
 
-    return {
-      llmState,
-      smartCall
-    }
-  },
-  data() {
-    return {
-      scriptText: '',
-      measuring: false,
-      completed: false,
-      startTime: null,
-      endTime: null,
-      elapsedSeconds: 0,
-      timerInterval: null,
-      teleprompterFontSize: 24,
-      generatingScript: false,
+const emit = defineEmits(['update:modelValue', 'speaker-saved', 'show-message'])
 
-      // Speaker data
-      speakers: [],
-      loadingSpeakers: false,
-      selectedSpeakerId: null,
-      currentUser: null
-    }
+const llmState = useLLMState()
+const { smartCall } = useLLM()
+
+// Get axios from global properties
+const $axios = getCurrentInstance()?.appContext.config.globalProperties.$axios
+
+// Data
+const scriptText = ref('')
+const measuring = ref(false)
+const completed = ref(false)
+const startTime = ref(null)
+const endTime = ref(null) // eslint-disable-line no-unused-vars
+const elapsedSeconds = ref(0)
+const timerInterval = ref(null)
+const teleprompterFontSize = ref(24) // eslint-disable-line no-unused-vars
+const generatingScript = ref(false)
+const scriptTextareaRef = ref(null) // eslint-disable-line no-unused-vars
+const teleprompterRef = ref(null) // eslint-disable-line no-unused-vars
+
+// Speaker data
+const speakers = ref([])
+const loadingSpeakers = ref(false)
+const selectedSpeakerId = ref(null)
+const currentUser = ref(null)
+
+// Computed
+const show = computed({
+  get() {
+    return props.modelValue
   },
-  computed: {
-    show: {
-      get() {
-        return this.modelValue
-      },
-      set(value) {
-        this.$emit('update:modelValue', value)
+  set(value) {
+    emit('update:modelValue', value)
+  }
+})
+
+const wordCount = computed(() => {
+  if (!scriptText.value) return 0
+  return scriptText.value.trim().split(/\s+/).filter(w => w.length > 0).length
+})
+
+const formattedTime = computed(() => {
+  const minutes = Math.floor(elapsedSeconds.value / 60)
+  const seconds = elapsedSeconds.value % 60
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+})
+
+const calculatedWPM = computed(() => {
+  if (!completed.value || elapsedSeconds.value === 0) return 0
+  const minutes = elapsedSeconds.value / 60
+  return Math.round(wordCount.value / minutes)
+})
+
+const minWPM = computed(() => {
+  return Math.max(100, Math.round(calculatedWPM.value * 0.85))
+})
+
+const maxWPM = computed(() => {
+  return Math.round(calculatedWPM.value * 1.15)
+})
+
+const speakerOptions = computed(() => {
+  if (!currentUser.value) return []
+
+  const isAdmin = currentUser.value.access_level === 'admin' || currentUser.value.access_level === 'super_admin'
+
+  // Find user's own speaker profile
+  const userSpeaker = speakers.value.find(s => s.user_id === currentUser.value.id)
+
+  if (isAdmin) {
+    // Admin can save to any speaker
+    return speakers.value.map(speaker => ({
+      text: speaker.name + (speaker.user_id === currentUser.value.id ? ' (You)' : ''),
+      value: speaker.id,
+      isSelf: speaker.user_id === currentUser.value.id,
+      wpm: speaker.wpm
+    }))
+  } else {
+    // Non-admin can only save to their own profile
+    if (userSpeaker) {
+      return [{
+        text: userSpeaker.name + ' (You)',
+        value: userSpeaker.id,
+        isSelf: true,
+        wpm: userSpeaker.wpm
+      }]
+    } else {
+      // User doesn't have a profile yet - will create on save
+      return [{
+        text: currentUser.value.full_name || currentUser.value.username + ' (You)',
+        value: 'me',
+        isSelf: true,
+        wpm: null
+      }]
+    }
+  }
+})
+
+// Watch
+watch(show, (newVal) => {
+  if (newVal) {
+    fetchSpeakers()
+    fetchCurrentUser()
+  }
+})
+
+// Methods
+async function fetchCurrentUser() {
+  try {
+    const response = await $axios.get('/api/auth/me', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
       }
-    },
-    wordCount() {
-      if (!this.scriptText) return 0
-      return this.scriptText.trim().split(/\s+/).filter(w => w.length > 0).length
-    },
-    formattedTime() {
-      const minutes = Math.floor(this.elapsedSeconds / 60)
-      const seconds = this.elapsedSeconds % 60
-      return `${minutes}:${seconds.toString().padStart(2, '0')}`
-    },
-    calculatedWPM() {
-      if (!this.completed || this.elapsedSeconds === 0) return 0
-      const minutes = this.elapsedSeconds / 60
-      return Math.round(this.wordCount / minutes)
-    },
-    minWPM() {
-      return Math.max(100, Math.round(this.calculatedWPM * 0.85))
-    },
-    maxWPM() {
-      return Math.round(this.calculatedWPM * 1.15)
-    },
-    speakerOptions() {
-      if (!this.currentUser) return []
+    })
+    currentUser.value = response.data
+  } catch (error) {
+    console.error('Error fetching current user:', error)
+  }
+}
 
-      const isAdmin = this.currentUser.access_level === 'admin' || this.currentUser.access_level === 'super_admin'
+async function fetchSpeakers() {
+  try {
+    loadingSpeakers.value = true
+    const response = await $axios.get('/api/speakers/', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    })
+    if (response.data.success) {
+      speakers.value = response.data.data
 
-      // Find user's own speaker profile
-      const userSpeaker = this.speakers.find(s => s.user_id === this.currentUser.id)
-
-      if (isAdmin) {
-        // Admin can save to any speaker
-        return this.speakers.map(speaker => ({
-          text: speaker.name + (speaker.user_id === this.currentUser.id ? ' (You)' : ''),
-          value: speaker.id,
-          isSelf: speaker.user_id === this.currentUser.id,
-          wpm: speaker.wpm
-        }))
-      } else {
-        // Non-admin can only save to their own profile
+      // Auto-select user's own speaker if it exists
+      if (currentUser.value) {
+        const userSpeaker = speakers.value.find(s => s.user_id === currentUser.value.id)
         if (userSpeaker) {
-          return [{
-            text: userSpeaker.name + ' (You)',
-            value: userSpeaker.id,
-            isSelf: true,
-            wpm: userSpeaker.wpm
-          }]
+          selectedSpeakerId.value = userSpeaker.id
         } else {
-          // User doesn't have a profile yet - will create on save
-          return [{
-            text: this.currentUser.full_name || this.currentUser.username + ' (You)',
-            value: 'me',
-            isSelf: true,
-            wpm: null
-          }]
+          selectedSpeakerId.value = 'me'
         }
       }
     }
-  },
-  watch: {
-    show(newVal) {
-      if (newVal) {
-        this.fetchSpeakers()
-        this.fetchCurrentUser()
-      }
+  } catch (error) {
+    console.error('Error fetching speakers:', error)
+  } finally {
+    loadingSpeakers.value = false
+  }
+}
+
+function startMeasurement() {
+  measuring.value = true
+  startTime.value = Date.now()
+  timerInterval.value = setInterval(() => {
+    elapsedSeconds.value = Math.floor((Date.now() - startTime.value) / 1000)
+  }, 100)
+}
+
+function finishMeasurement() {
+  measuring.value = false
+  completed.value = true
+  endTime.value = Date.now()
+  clearInterval(timerInterval.value)
+}
+
+async function saveSpeaker() {
+  try {
+    let response
+
+    if (selectedSpeakerId.value === 'me') {
+      // Create/update user's own speaker profile
+      response = await $axios.post('/api/speakers/me/measure-wpm', {
+        word_count: wordCount.value,
+        elapsed_seconds: elapsedSeconds.value,
+        script_text: scriptText.value
+      }, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        }
+      })
+    } else {
+      // Update existing speaker profile (admin only)
+      const minutes = elapsedSeconds.value / 60
+      const calculatedWpm = Math.round(wordCount.value / minutes)
+      const wpmMin = Math.max(100, Math.round(calculatedWpm * 0.85))
+      const wpmMax = Math.round(calculatedWpm * 1.15)
+
+      response = await $axios.patch(`/api/speakers/${selectedSpeakerId.value}`, {
+        wpm: calculatedWpm,
+        wpm_min: wpmMin,
+        wpm_max: wpmMax
+      }, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        }
+      })
     }
-  },
-  methods: {
-    async fetchCurrentUser() {
-      try {
-        const response = await this.$axios.get('/api/auth/me', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          }
-        })
-        this.currentUser = response.data
-      } catch (error) {
-        console.error('Error fetching current user:', error)
-      }
-    },
-    async fetchSpeakers() {
-      try {
-        this.loadingSpeakers = true
-        const response = await this.$axios.get('/api/speakers/', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          }
-        })
-        if (response.data.success) {
-          this.speakers = response.data.data
 
-          // Auto-select user's own speaker if it exists
-          if (this.currentUser) {
-            const userSpeaker = this.speakers.find(s => s.user_id === this.currentUser.id)
-            if (userSpeaker) {
-              this.selectedSpeakerId = userSpeaker.id
-            } else {
-              this.selectedSpeakerId = 'me'
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching speakers:', error)
-      } finally {
-        this.loadingSpeakers = false
-      }
-    },
-    startMeasurement() {
-      this.measuring = true
-      this.startTime = Date.now()
-      this.timerInterval = setInterval(() => {
-        this.elapsedSeconds = Math.floor((Date.now() - this.startTime) / 1000)
-      }, 100)
-    },
-    finishMeasurement() {
-      this.measuring = false
-      this.completed = true
-      this.endTime = Date.now()
-      clearInterval(this.timerInterval)
-    },
-    async saveSpeaker() {
-      try {
-        let response
+    if (response.data.success) {
+      emit('speaker-saved', response.data.data)
 
-        if (this.selectedSpeakerId === 'me') {
-          // Create/update user's own speaker profile
-          response = await this.$axios.post('/api/speakers/me/measure-wpm', {
-            word_count: this.wordCount,
-            elapsed_seconds: this.elapsedSeconds,
-            script_text: this.scriptText
-          }, {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-            }
-          })
-        } else {
-          // Update existing speaker profile (admin only)
-          const minutes = this.elapsedSeconds / 60
-          const calculatedWpm = Math.round(this.wordCount / minutes)
-          const wpmMin = Math.max(100, Math.round(calculatedWpm * 0.85))
-          const wpmMax = Math.round(calculatedWpm * 1.15)
+      // Show success message
+      emit('show-message', {
+        type: 'success',
+        text: response.data.message || 'Speaker profile updated successfully'
+      })
 
-          response = await this.$axios.patch(`/api/speakers/${this.selectedSpeakerId}`, {
-            wpm: calculatedWpm,
-            wpm_min: wpmMin,
-            wpm_max: wpmMax
-          }, {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-            }
-          })
-        }
+      close()
+    }
+  } catch (error) {
+    console.error('Error saving speaker profile:', error)
+    emit('show-message', {
+      type: 'error',
+      text: error.response?.data?.detail || 'Failed to save speaker profile'
+    })
+  }
+}
 
-        if (response.data.success) {
-          this.$emit('speaker-saved', response.data.data)
+async function generateScript() {
+  try {
+    generatingScript.value = true
+    console.log('🎯 Generate Script clicked - starting LLM operation')
 
-          // Show success message
-          this.$emit('show-message', {
-            type: 'success',
-            text: response.data.message || 'Speaker profile updated successfully'
-          })
-
-          this.close()
-        }
-      } catch (error) {
-        console.error('Error saving speaker profile:', error)
-        this.$emit('show-message', {
-          type: 'error',
-          text: error.response?.data?.detail || 'Failed to save speaker profile'
-        })
-      }
-    },
-    async generateScript() {
-      try {
-        this.generatingScript = true
-        console.log('🎯 Generate Script clicked - starting LLM operation')
-
-        // Use Universal LLM Framework with visual feedback
-        const result = await this.llmState.withLLM(
-          'field',
-          'wpm-script-textarea',
-          'generating',
-          async () => {
-            console.log('📝 Inside withLLM - about to call smartCall')
-            // Generate script using Qwen
-            const prompt = `Generate a natural, conversational broadcast script suitable for reading aloud.
+    // Use Universal LLM Framework with visual feedback
+    const result = await llmState.withLLM(
+      'field',
+      'wpm-script-textarea',
+      'generating',
+      async () => {
+        console.log('📝 Inside withLLM - about to call smartCall')
+        // Generate script using Qwen
+        const prompt = `Generate a natural, conversational broadcast script suitable for reading aloud.
 The script should be between 150-250 words and cover a current events topic or interesting story.
 Write in a friendly, engaging tone as if speaking directly to viewers.
 Do not include any stage directions, just the spoken text.`
 
-            const response = await this.smartCall(
-              prompt,
-              {
-                preferredService: 'ollama',
-                preferredModel: 'qwen2.5-coder:7b'
-              }
-            )
-
-            return response
-          },
+        const response = await smartCall(
+          prompt,
           {
-            state: this.llmState.STATE.GENERATING,  // Blue color for generating
-            message: 'Generating WPM test script with Qwen...',
-            notificationTitle: 'WPM Script Generation',
-            notify: false,  // We'll add custom notification after
-            priority: this.llmState.PRIORITY.NORMAL
+            preferredService: 'ollama',
+            preferredModel: 'qwen2.5-coder:7b'
           }
         )
 
-        if (result) {
-          // smartCall returns the text directly, not wrapped in {response: ...}
-          this.scriptText = typeof result === 'string' ? result.trim() : (result.response || result).toString().trim()
-          console.log('✅ Script generated and inserted:', this.scriptText.substring(0, 100) + '...')
+        return response
+      },
+      {
+        state: llmState.STATE.GENERATING,  // Blue color for generating
+        message: 'Generating WPM test script with Qwen...',
+        notificationTitle: 'WPM Script Generation',
+        notify: false,  // We'll add custom notification after
+        priority: llmState.PRIORITY.NORMAL
+      }
+    )
 
-          // Add custom success notification with word count
-          this.$nextTick(() => {
-            const words = this.wordCount
-            this.llmState.addNotification({
-              title: 'WPM Test Script Generated',
-              message: `Generated ${words} word broadcast script for WPM testing`,
-              priority: this.llmState.PRIORITY.NORMAL,
-              type: 'success',
-              success: true
-            })
-          })
-        }
+    if (result) {
+      // smartCall returns the text directly, not wrapped in {response: ...}
+      scriptText.value = typeof result === 'string' ? result.trim() : (result.response || result).toString().trim()
+      console.log('✅ Script generated and inserted:', scriptText.value.substring(0, 100) + '...')
 
-      } catch (error) {
-        console.error('Error generating script:', error)
-        this.$emit('show-message', {
-          type: 'error',
-          text: error.message || 'Failed to generate script'
+      // Add custom success notification with word count
+      nextTick(() => {
+        const words = wordCount.value
+        llmState.addNotification({
+          title: 'WPM Test Script Generated',
+          message: `Generated ${words} word broadcast script for WPM testing`,
+          priority: llmState.PRIORITY.NORMAL,
+          type: 'success',
+          success: true
         })
-      } finally {
-        this.generatingScript = false
-      }
-    },
-    reset() {
-      this.scriptText = ''
-      this.measuring = false
-      this.completed = false
-      this.startTime = null
-      this.endTime = null
-      this.elapsedSeconds = 0
-      clearInterval(this.timerInterval)
-
-      // Reset speaker selection to user's profile
-      if (this.currentUser) {
-        const userSpeaker = this.speakers.find(s => s.user_id === this.currentUser.id)
-        this.selectedSpeakerId = userSpeaker ? userSpeaker.id : 'me'
-      }
-    },
-    close() {
-      this.reset()
-      this.show = false
+      })
     }
-  },
-  beforeUnmount() {
-    clearInterval(this.timerInterval)
+
+  } catch (error) {
+    console.error('Error generating script:', error)
+    emit('show-message', {
+      type: 'error',
+      text: error.message || 'Failed to generate script'
+    })
+  } finally {
+    generatingScript.value = false
   }
 }
+
+function reset() {
+  scriptText.value = ''
+  measuring.value = false
+  completed.value = false
+  startTime.value = null
+  endTime.value = null
+  elapsedSeconds.value = 0
+  clearInterval(timerInterval.value)
+
+  // Reset speaker selection to user's profile
+  if (currentUser.value) {
+    const userSpeaker = speakers.value.find(s => s.user_id === currentUser.value.id)
+    selectedSpeakerId.value = userSpeaker ? userSpeaker.id : 'me'
+  }
+}
+
+function close() {
+  reset()
+  show.value = false
+}
+
+onBeforeUnmount(() => {
+  clearInterval(timerInterval.value)
+})
 </script>
 
 <style scoped>

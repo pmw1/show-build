@@ -29,6 +29,25 @@ from models_v2 import Episode, Rundown, RundownItem, Season, Show, SOTProcessing
 logger = logging.getLogger(__name__)
 
 
+def _extract_field(cue_content: str, field_pattern: str) -> str:
+    """Extract a field value from cue content.
+
+    Handles multi-line values and ] characters inside the value by anchoring
+    the closing ] at a real field boundary (next [Field: line, end-cue marker,
+    or end of content).
+
+    Args:
+        cue_content: The raw text inside <!-- Begin Cue -->...<!-- End Cue -->
+        field_pattern: Field name regex (e.g. 'Quote', 'Media\\s*[Uu]rl', 'Asset\\s*Id')
+
+    Returns:
+        The captured value with surrounding whitespace stripped, or '' if not found.
+    """
+    pattern = rf'\[{field_pattern}:\s*(.*?)\](?=\s*(?:\n\s*\[|\n\s*<!--|\Z))'
+    match = re.search(pattern, cue_content, re.DOTALL | re.IGNORECASE)
+    return match.group(1).strip() if match else ''
+
+
 class ScriptPreset(Enum):
     """Script generation presets."""
     HOST_FULL = "host_full"        # Everything: text, cues, visuals
@@ -125,8 +144,16 @@ def generate_host_script(
         # Detect blocks
         blocks = _detect_blocks(items)
 
+        # Load settings (for FSQ quote rendering flags, etc.)
+        try:
+            from routers.settings._shared import load_settings
+            settings = load_settings()
+        except Exception as e:
+            logger.warning(f"Failed to load settings, using defaults: {e}")
+            settings = {}
+
         # Generate HTML
-        html_content = _generate_html(episode_info, blocks, script_preset, url_mapping, transcription_cache)
+        html_content = _generate_html(episode_info, blocks, script_preset, url_mapping, transcription_cache, settings)
 
         # Generate filenames with revision numbers
         date_str = datetime.now().strftime("%Y%m%d")
@@ -370,8 +397,7 @@ def _collect_media_resources(
             cue_counter += 10
 
             # Extract slug for filename
-            slug_match = re.search(r'\[Slug:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-            slug = slug_match.group(1).strip() if slug_match else 'media'
+            slug = _extract_field(cue_content, 'Slug') or 'media'
 
             for pattern in media_patterns:
                 for match in pattern.finditer(cue_content):
@@ -464,9 +490,9 @@ def _build_transcription_cache(items: List[RundownItem], db) -> Dict[str, str]:
         # Find all SOT cues and extract Asset IDs
         for cue in re.findall(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', item.script_content, re.DOTALL):
             if '[Type: SOT]' in cue:
-                asset_match = re.search(r'\[Asset\s*Id:\s*([^\]]+)\]', cue, re.IGNORECASE)
-                if asset_match:
-                    asset_ids.add(asset_match.group(1).strip())
+                asset_id = _extract_field(cue, r'Asset\s*Id')
+                if asset_id:
+                    asset_ids.add(asset_id)
 
     if not asset_ids:
         return cache
@@ -492,11 +518,14 @@ def _generate_html(
     blocks: List[Dict[str, Any]],
     preset: ScriptPreset,
     url_mapping: Dict[str, str],
-    transcription_cache: Dict[str, str] = None
+    transcription_cache: Dict[str, str] = None,
+    settings: Dict[str, Any] = None
 ) -> str:
     """Generate the complete HTML document."""
     if transcription_cache is None:
         transcription_cache = {}
+    if settings is None:
+        settings = {}
 
     # Get CSS for the preset
     css = _get_css(preset, episode_info['episode_number'])
@@ -519,7 +548,7 @@ def _generate_html(
 
     # Content blocks
     for block in blocks:
-        html_parts.append(_generate_block(block, preset, url_mapping, transcription_cache))
+        html_parts.append(_generate_block(block, preset, url_mapping, transcription_cache, settings))
 
     html_parts.extend(['</body>', '</html>'])
 
@@ -769,24 +798,14 @@ def _process_cue_markdown(
     if transcription_cache is None:
         transcription_cache = {}
 
-    # Extract cue type
-    type_match = re.search(r'\[Type:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    cue_type = type_match.group(1).strip().upper() if type_match else 'CUE'
-
-    # Extract common fields
-    slug_match = re.search(r'\[Slug:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    duration_match = re.search(r'\[Duration:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    media_url_match = re.search(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    asset_id_match = re.search(r'\[Asset\s*[Ii][Dd]:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    transcription_match = re.search(r'\[Transcription:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    description_match = re.search(r'\[Description:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-
-    slug = slug_match.group(1).strip() if slug_match else ''
-    duration = duration_match.group(1).strip() if duration_match else ''
-    media_url = media_url_match.group(1).strip() if media_url_match else ''
-    asset_id = asset_id_match.group(1).strip() if asset_id_match else ''
-    transcription = transcription_match.group(1).strip() if transcription_match else ''
-    description = description_match.group(1).strip() if description_match else ''
+    # Extract cue fields
+    cue_type = (_extract_field(cue_content, 'Type') or 'CUE').upper()
+    slug = _extract_field(cue_content, 'Slug')
+    duration = _extract_field(cue_content, 'Duration')
+    media_url = _extract_field(cue_content, r'Media\s*[Uu]rl')
+    asset_id = _extract_field(cue_content, r'Asset\s*[Ii][Dd]')
+    transcription = _extract_field(cue_content, 'Transcription')
+    description = _extract_field(cue_content, 'Description')
 
     # Check transcription cache
     if not transcription and asset_id and asset_id in transcription_cache:
@@ -1131,7 +1150,7 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
         .cue-img .cue-label, .cue-gfx .cue-label {{ color: #666; }}
 
         .cue-img img, .cue-gfx img {{
-            max-width: 1180px;
+            max-width: 100%;
             width: 100%;
             border: 1px solid #ccc;
             border-radius: 4px;
@@ -1277,11 +1296,14 @@ def _generate_block(
     block: Dict[str, Any],
     preset: ScriptPreset,
     url_mapping: Dict[str, str],
-    transcription_cache: Dict[str, str] = None
+    transcription_cache: Dict[str, str] = None,
+    settings: Dict[str, Any] = None
 ) -> str:
     """Generate HTML for a single block."""
     if transcription_cache is None:
         transcription_cache = {}
+    if settings is None:
+        settings = {}
 
     parts = []
     letter = block['letter']
@@ -1294,7 +1316,7 @@ def _generate_block(
     # Process each segment in the block
     last_speaker = None
     for item in block['items']:
-        segment_html, last_speaker = _process_segment(item, last_speaker, preset, url_mapping, transcription_cache)
+        segment_html, last_speaker = _process_segment(item, last_speaker, preset, url_mapping, transcription_cache, settings)
         if segment_html:
             parts.append(segment_html)
 
@@ -1335,11 +1357,14 @@ def _process_segment(
     last_speaker: Optional[str],
     preset: ScriptPreset,
     url_mapping: Dict[str, str],
-    transcription_cache: Dict[str, str] = None
+    transcription_cache: Dict[str, str] = None,
+    settings: Dict[str, Any] = None
 ) -> Tuple[str, Optional[str]]:
     """Process a single rundown item (segment)."""
     if transcription_cache is None:
         transcription_cache = {}
+    if settings is None:
+        settings = {}
 
     # Check if item has content
     if not item.script_content or not item.script_content.strip():
@@ -1375,7 +1400,7 @@ def _process_segment(
         parts.append('</div>')
 
     # Process content based on preset
-    content_html, last_speaker = _process_content(content, last_speaker, preset, url_mapping, transcription_cache)
+    content_html, last_speaker = _process_content(content, last_speaker, preset, url_mapping, transcription_cache, settings)
 
     if content_html.strip():
         parts.append('<div class="script-content">')
@@ -1392,11 +1417,14 @@ def _process_content(
     last_speaker: Optional[str],
     preset: ScriptPreset,
     url_mapping: Dict[str, str],
-    transcription_cache: Dict[str, str] = None
+    transcription_cache: Dict[str, str] = None,
+    settings: Dict[str, Any] = None
 ) -> Tuple[str, Optional[str]]:
     """Process script content with cue blocks and paragraphs."""
     if transcription_cache is None:
         transcription_cache = {}
+    if settings is None:
+        settings = {}
 
     parts = []
     current_speaker = last_speaker
@@ -1414,7 +1442,7 @@ def _process_content(
             parts.append(text_html)
 
         # Cue block
-        cue_html = _process_cue(match.group(1), preset, url_mapping, transcription_cache)
+        cue_html = _process_cue(match.group(1), preset, url_mapping, transcription_cache, settings)
         if cue_html:
             parts.append(cue_html)
 
@@ -1487,7 +1515,15 @@ def _process_text(
                 f'{html.escape(speaker_info["name"])}</span>'
             )
 
-        parts.append(html.escape(content))
+        # Preserve safe inline formatting tags (bold, italic, underline, strikethrough)
+        escaped = html.escape(content)
+        # Restore whitelisted tags that were escaped
+        for tag in ('b', 'i', 'u', 's', 'em', 'strong', 'mark', 'sub', 'sup'):
+            escaped = escaped.replace(f'&lt;{tag}&gt;', f'<{tag}>')
+            escaped = escaped.replace(f'&lt;/{tag}&gt;', f'</{tag}>')
+            escaped = escaped.replace(f'&lt;{tag.upper()}&gt;', f'<{tag}>')
+            escaped = escaped.replace(f'&lt;/{tag.upper()}&gt;', f'</{tag}>')
+        parts.append(escaped)
         parts.append('</p>')
 
     return '\n'.join(parts), current_speaker
@@ -1497,22 +1533,22 @@ def _process_cue(
     cue_content: str,
     preset: ScriptPreset,
     url_mapping: Dict[str, str],
-    transcription_cache: Dict[str, str] = None
+    transcription_cache: Dict[str, str] = None,
+    settings: Dict[str, Any] = None
 ) -> str:
     """Process a cue block based on preset."""
     if transcription_cache is None:
         transcription_cache = {}
+    if settings is None:
+        settings = {}
 
     # Extract cue type
-    type_match = re.search(r'\[Type:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    if not type_match:
+    cue_type = _extract_field(cue_content, 'Type').upper()
+    if not cue_type:
         return ''
 
-    cue_type = type_match.group(1).strip().upper()
-
     # Extract slug
-    slug_match = re.search(r'\[Slug:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    slug = slug_match.group(1).strip() if slug_match else 'cue'
+    slug = _extract_field(cue_content, 'Slug') or 'cue'
 
     # HOST_CLEAN: Just show a simple marker
     if preset == ScriptPreset.HOST_CLEAN:
@@ -1524,7 +1560,7 @@ def _process_cue(
 
     # HOST_FULL: Full visual rendering
     if cue_type == 'FSQ':
-        return _format_fsq(cue_content, slug, url_mapping)
+        return _format_fsq(cue_content, slug, url_mapping, settings)
     elif cue_type == 'SOT':
         return _format_sot(cue_content, slug, url_mapping, transcription_cache)
     elif cue_type in ('IMG', 'GFX'):
@@ -1537,13 +1573,8 @@ def _process_cue(
 
 def _format_note(cue_content: str) -> str:
     """Format NOTE cue as inline production note for iPad script view."""
-    # Extract note recipient
-    note_for_match = re.search(r'\[Note For:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    note_for = note_for_match.group(1).strip().upper() if note_for_match else ''
-
-    # Extract note text
-    note_text_match = re.search(r'\[Note Text:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    note_text = note_text_match.group(1).strip() if note_text_match else ''
+    note_for = _extract_field(cue_content, 'Note For').upper()
+    note_text = _extract_field(cue_content, 'Note Text')
 
     if not note_text:
         return ''
@@ -1552,30 +1583,32 @@ def _format_note(cue_content: str) -> str:
     return f'<div class="inline-note">[[{html.escape(label)}--{html.escape(note_text)}]]</div>'
 
 
-def _format_fsq(cue_content: str, slug: str, url_mapping: Dict[str, str]) -> str:
+def _format_fsq(cue_content: str, slug: str, url_mapping: Dict[str, str], settings: Dict[str, Any] = None) -> str:
     """Format Full Screen Quote cue."""
+    settings = settings or {}
+    regenerate_exterior_quotes = bool(
+        settings.get('generation', {}).get('fsq_regenerate_exterior_quotes', False)
+    )
 
-    quote_match = re.search(r'\[Quote:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    quote = quote_match.group(1).strip().strip('"\'') if quote_match else ''
+    quote = _extract_field(cue_content, 'Quote').strip('"\'')
+    attribution = _extract_field(cue_content, 'Attribution')
 
-    attr_match = re.search(r'\[Attribution:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    attribution = attr_match.group(1).strip() if attr_match else ''
-
-    media_match = re.search(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    media_url = ''
-    if media_match:
-        original_url = media_match.group(1).strip()
-        media_url = url_mapping.get(original_url, '')
+    original_url = _extract_field(cue_content, r'Media\s*[Uu]rl')
+    media_url = url_mapping.get(original_url, '') if original_url else ''
 
     parts = [
         '<div class="cue-block cue-fsq">',
         f'<div class="cue-label">FSQ: {html.escape(slug)}</div>',
     ]
 
-    if media_url:
-        parts.append(f'<img src="{html.escape(media_url)}" alt="{html.escape(slug)}" style="max-width:450px; margin-bottom:0.1in;">')
-
-    parts.append(f'<blockquote>"{html.escape(quote)}"</blockquote>')
+    # FSQ already outputs the actual quote text — skip the generated PNG image.
+    # Only wrap in exterior quotation marks when the "Regenerate exterior quotes
+    # at render" setting is on; otherwise emit the stored quote text as-is.
+    escaped_quote = html.escape(quote)
+    if regenerate_exterior_quotes:
+        parts.append(f'<blockquote>"{escaped_quote}"</blockquote>')
+    else:
+        parts.append(f'<blockquote>{escaped_quote}</blockquote>')
 
     if attribution:
         parts.append(f'<div class="attribution">— {html.escape(attribution)}</div>')
@@ -1590,29 +1623,24 @@ def _format_sot(cue_content: str, slug: str, url_mapping: Dict[str, str], transc
     if transcription_cache is None:
         transcription_cache = {}
 
-    duration_match = re.search(r'\[Duration:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    duration = duration_match.group(1).strip() if duration_match else ''
+    duration = _extract_field(cue_content, 'Duration')
 
-    thumb_match = re.search(r'\[Thumbnail\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE) or \
-                  re.search(r'\[ThumbnailURL:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+    original_thumb = _extract_field(cue_content, r'Thumbnail\s*[Uu]rl') or _extract_field(cue_content, 'ThumbnailURL')
     thumbnail_url = ''
-    if thumb_match:
-        original_url = thumb_match.group(1).strip()
+    if original_thumb:
         # Use local copy if available, otherwise use original URL (wkhtmltopdf can fetch HTTP)
-        thumbnail_url = url_mapping.get(original_url, original_url)
+        thumbnail_url = url_mapping.get(original_thumb, original_thumb)
         # Skip blob URLs as they won't work
         if thumbnail_url.startswith('blob:'):
             thumbnail_url = ''
 
     # Get transcription - first check cue block, then transcription cache by Asset ID
-    trans_match = re.search(r'\[Transcription:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    transcription = trans_match.group(1).strip() if trans_match else ''
+    transcription = _extract_field(cue_content, 'Transcription')
 
     if not transcription:
         # Look up by Asset ID in transcription cache
-        asset_match = re.search(r'\[Asset\s*Id:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-        if asset_match:
-            asset_id = asset_match.group(1).strip()
+        asset_id = _extract_field(cue_content, r'Asset\s*Id')
+        if asset_id:
             transcription = transcription_cache.get(asset_id, '')
 
     # Calculate outcue from last 5 words of transcription
@@ -1650,11 +1678,8 @@ def _format_sot(cue_content: str, slug: str, url_mapping: Dict[str, str], transc
 def _format_img(cue_content: str, slug: str, cue_type: str, url_mapping: Dict[str, str]) -> str:
     """Format IMG or GFX cue."""
 
-    media_match = re.search(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    media_url = ''
-    if media_match:
-        original_url = media_match.group(1).strip()
-        media_url = url_mapping.get(original_url, '')
+    original_url = _extract_field(cue_content, r'Media\s*[Uu]rl')
+    media_url = url_mapping.get(original_url, '') if original_url else ''
 
     if not media_url:
         img_match = re.search(r'<img[^>]+src="([^"]+)"', cue_content, re.IGNORECASE)
@@ -1662,8 +1687,7 @@ def _format_img(cue_content: str, slug: str, cue_type: str, url_mapping: Dict[st
             original_url = img_match.group(1)
             media_url = url_mapping.get(original_url, '')
 
-    desc_match = re.search(r'\[Description:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    description = desc_match.group(1).strip() if desc_match else ''
+    description = _extract_field(cue_content, 'Description')
 
     css_class = 'cue-gfx' if cue_type == 'GFX' else 'cue-img'
 
@@ -1692,14 +1716,14 @@ def _format_production_cue(cue_content: str, cue_type: str, slug: str, url_mappi
     parts.append(f'<span class="cue-type">[{cue_type}]</span> <strong>{html.escape(slug)}</strong>')
 
     # Duration
-    duration_match = re.search(r'\[Duration:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    if duration_match:
-        parts.append(f' — {html.escape(duration_match.group(1).strip())}')
+    duration = _extract_field(cue_content, 'Duration')
+    if duration:
+        parts.append(f' — {html.escape(duration)}')
 
     # Media URL
-    media_match = re.search(r'\[Media\s*[Uu]rl:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
-    if media_match:
-        parts.append(f'<br><small>Media: {html.escape(media_match.group(1).strip())}</small>')
+    media_url_raw = _extract_field(cue_content, r'Media\s*[Uu]rl')
+    if media_url_raw:
+        parts.append(f'<br><small>Media: {html.escape(media_url_raw)}</small>')
 
     parts.append('</div>')
 

@@ -131,184 +131,259 @@
   </v-dialog>
 </template>
 
-<script>
-import { cueModalMixin } from '@/mixins/cueModalMixin';
+<script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap';
+import { useScreenFlash } from '@/composables/useScreenFlash';
 
-export default {
-  name: 'StingModal',
-  mixins: [cueModalMixin],
-  props: {
-    show: Boolean,
-    episode: String,
-    duplicateSlugs: {
-      type: Array,
-      default: () => []
-    },
-    cueType: {
-      type: String,
-      default: 'sting'
-    }
+const props = defineProps({
+  show: Boolean,
+  episode: String,
+  duplicateSlugs: {
+    type: Array,
+    default: () => []
   },
-  data() {
-    return {
-      selectedTab: 'existing', // Start with library selection
-      slug: '',
-      assetId: '',
-      name: '',
-      duration: '',
-      mediaUrl: '',
-      alpha: false,
-      audio: true,
-      saveToLibrary: false,
-      libraryItems: [],
-      selectedLibraryItem: null,
-      loadingLibrary: false
-    };
-  },
-  computed: {
-    isValid() {
-      if (this.selectedTab === 'existing') {
-        // For library selection, just need slug and selected item
-        return !!this.slug && !!this.selectedLibraryItem;
-      } else {
-        // For new creation, need all required fields
-        return !!this.slug && !!this.assetId && !!this.name && !!this.duration;
-      }
-    }
-  },
-  methods: {
-    async handleSubmit() {
-      if (!this.isValid) {
-        return;
-      }
-
-      // If using library item, populate fields from selection
-      if (this.selectedTab === 'existing' && this.selectedLibraryItem) {
-        this.assetId = this.selectedLibraryItem.assetId;
-        this.name = this.selectedLibraryItem.name;
-        this.duration = this.selectedLibraryItem.duration;
-        this.mediaUrl = this.selectedLibraryItem.mediaUrl || '';
-        this.alpha = this.selectedLibraryItem.alpha;
-        this.audio = this.selectedLibraryItem.audio;
-      }
-
-      await this.submit();
-    },
-    async submit() {
-      const cueBlockContent = this.buildCueBlock();
-
-      // If creating new and save to library is checked, save to library
-      if (this.selectedTab === 'new' && this.saveToLibrary) {
-        await this.saveToLibraryDatabase();
-      }
-
-      this.$emit('submit', cueBlockContent);
-      this.reset();
-    },
-    async saveToLibraryDatabase() {
-      try {
-        const response = await fetch('/api/repo', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            type: 'sting',
-            assetId: this.assetId,
-            name: this.name,
-            duration: this.duration,
-            mediaUrl: this.mediaUrl,
-            alpha: this.alpha,
-            audio: this.audio
-          })
-        });
-
-        if (response.ok) {
-          console.log('✅ Stinger saved to repository');
-          // Refresh library items
-          await this.fetchLibraryItems();
-        }
-      } catch (error) {
-        console.error('❌ Failed to save to repository:', error);
-      }
-    },
-    async fetchLibraryItems() {
-      this.loadingLibrary = true;
-      try {
-        const response = await fetch('/api/repo?type=sting');
-        if (response.ok) {
-          const data = await response.json();
-          this.libraryItems = data.items || [];
-        }
-      } catch (error) {
-        console.error('❌ Failed to fetch repository items:', error);
-        this.libraryItems = [];
-      } finally {
-        this.loadingLibrary = false;
-      }
-    },
-    onLibraryItemSelected(item) {
-      if (item) {
-        console.log('📚 Library item selected:', item);
-        // No need to populate fields yet - they'll be populated on submit
-      }
-    },
-    buildCueBlock() {
-      let block = '<!-- Begin Cue -->\n';
-      block += `[Type: ${this.cueType}]\n`;
-      block += `[Slug: ${this.slug}]\n`;
-      block += `[AssetID: ${this.assetId}]\n`;
-      block += `[Name: ${this.name}]\n`;
-      block += `[Duration: ${this.duration}]\n`;
-      block += `[Alpha: ${this.alpha}]\n`;
-      block += `[Audio: ${this.audio}]\n`;
-      if (this.mediaUrl) {
-        block += `[Media URL: ${this.mediaUrl}]\n`;
-      }
-      block += '<!-- End Cue -->';
-      return block;
-    },
-    handleAbort() {
-      this.$emit('update:show', false);
-      this.reset();
-    },
-    reset() {
-      this.slug = '';
-      this.assetId = '';
-      this.name = '';
-      this.duration = '';
-      this.mediaUrl = '';
-      this.alpha = false;
-      this.audio = true;
-      this.saveToLibrary = false;
-      this.selectedLibraryItem = null;
-      this.selectedTab = 'existing';
-    },
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.handleAbort();
-      }
-    }
-  },
-  watch: {
-    show(newVal) {
-      if (newVal) {
-        // Fetch library items when modal opens
-        this.fetchLibraryItems();
-      } else {
-        this.reset();
-      }
-    }
-  },
-  mounted() {
-    document.addEventListener('keydown', this.handleKeydown);
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown);
+  cueType: {
+    type: String,
+    default: 'sting'
   }
-};
+});
+
+const emit = defineEmits(['update:show', 'submit', 'abort']);
+
+// Template refs
+const slugField = ref(null);
+
+// Data
+const selectedTab = ref('existing');
+const slug = ref('');
+const assetId = ref('');
+const name = ref('');
+const duration = ref('');
+const mediaUrl = ref('');
+const alpha = ref(false);
+const audio = ref(true);
+const saveToLibrary = ref(false);
+const libraryItems = ref([]);
+const selectedLibraryItem = ref(null);
+const loadingLibrary = ref(false); // eslint-disable-line no-unused-vars
+
+// Mixin: cueModalMixin inlined
+let keydownHandler = null;
+
+const cueColor = computed(() => {
+  const colorName = getColorValue(props.cueType.toLowerCase());
+  return resolveVuetifyColor(colorName);
+});
+
+const cueColorLight = computed(() => { // eslint-disable-line no-unused-vars
+  const color = cueColor.value;
+  if (!color || !color.startsWith('#')) return '#f5f5f5';
+  const hex = color.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  const lighten = (c) => Math.round(c + (255 - c) * 0.8);
+  const newR = lighten(r).toString(16).padStart(2, '0');
+  const newG = lighten(g).toString(16).padStart(2, '0');
+  const newB = lighten(b).toString(16).padStart(2, '0');
+  return `#${newR}${newG}${newB}`;
+});
+
+const modalStyles = computed(() => ({
+  backgroundColor: cueColorLight.value
+}));
+
+const headerStyles = computed(() => ({
+  backgroundColor: cueColor.value,
+  color: 'white'
+}));
+
+const isValid = computed(() => {
+  if (selectedTab.value === 'existing') {
+    return !!slug.value && !!selectedLibraryItem.value;
+  } else {
+    return !!slug.value && !!assetId.value && !!name.value && !!duration.value;
+  }
+});
+
+// Methods
+function focusSlugField() {
+  const field = slugField.value;
+  if (field) {
+    const input = field.$el?.querySelector('input') || field;
+    if (input && input.focus) {
+      input.focus();
+    }
+  }
+}
+
+function setupKeyboardHandlers() {
+  keydownHandler = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      handleAbort();
+      return;
+    }
+    if (event.shiftKey && event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      handleSubmit();
+      return;
+    }
+  };
+  document.addEventListener('keydown', keydownHandler, true);
+}
+
+function removeKeyboardHandlers() {
+  if (keydownHandler) {
+    document.removeEventListener('keydown', keydownHandler, true);
+    keydownHandler = null;
+  }
+}
+
+async function handleSubmit() {
+  if (!isValid.value) {
+    return;
+  }
+
+  if (selectedTab.value === 'existing' && selectedLibraryItem.value) {
+    assetId.value = selectedLibraryItem.value.assetId;
+    name.value = selectedLibraryItem.value.name;
+    duration.value = selectedLibraryItem.value.duration;
+    mediaUrl.value = selectedLibraryItem.value.mediaUrl || '';
+    alpha.value = selectedLibraryItem.value.alpha;
+    audio.value = selectedLibraryItem.value.audio;
+  }
+
+  await submit();
+}
+
+async function submit() {
+  const cueBlockContent = buildCueBlock();
+
+  if (selectedTab.value === 'new' && saveToLibrary.value) {
+    await saveToLibraryDatabase();
+  }
+
+  emit('submit', cueBlockContent);
+  reset();
+}
+
+async function saveToLibraryDatabase() {
+  try {
+    const response = await fetch('/api/repo', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'sting',
+        assetId: assetId.value,
+        name: name.value,
+        duration: duration.value,
+        mediaUrl: mediaUrl.value,
+        alpha: alpha.value,
+        audio: audio.value
+      })
+    });
+
+    if (response.ok) {
+      console.log('Stinger saved to repository');
+      await fetchLibraryItems();
+    }
+  } catch (error) {
+    console.error('Failed to save to repository:', error);
+  }
+}
+
+async function fetchLibraryItems() {
+  loadingLibrary.value = true;
+  try {
+    const response = await fetch('/api/repo?type=sting');
+    if (response.ok) {
+      const data = await response.json();
+      libraryItems.value = data.items || [];
+    }
+  } catch (error) {
+    console.error('Failed to fetch repository items:', error);
+    libraryItems.value = [];
+  } finally {
+    loadingLibrary.value = false;
+  }
+}
+
+function onLibraryItemSelected(item) {
+  if (item) {
+    console.log('Library item selected:', item);
+  }
+}
+
+function buildCueBlock() {
+  let block = '<!-- Begin Cue -->\n';
+  block += `[Type: ${props.cueType}]\n`;
+  block += `[Slug: ${slug.value}]\n`;
+  block += `[AssetID: ${assetId.value}]\n`;
+  block += `[Name: ${name.value}]\n`;
+  block += `[Duration: ${duration.value}]\n`;
+  block += `[Alpha: ${alpha.value}]\n`;
+  block += `[Audio: ${audio.value}]\n`;
+  if (mediaUrl.value) {
+    block += `[Media URL: ${mediaUrl.value}]\n`;
+  }
+  block += '<!-- End Cue -->';
+  return block;
+}
+
+function handleAbort() {
+  const { flashUrgent } = useScreenFlash();
+  flashUrgent('ABORT', '#F44336', 500);
+  emit('update:show', false);
+  emit('abort');
+  reset();
+}
+
+function reset() {
+  slug.value = '';
+  assetId.value = '';
+  name.value = '';
+  duration.value = '';
+  mediaUrl.value = '';
+  alpha.value = false;
+  audio.value = true;
+  saveToLibrary.value = false;
+  selectedLibraryItem.value = null;
+  selectedTab.value = 'existing';
+}
+
+// Watchers
+watch(() => props.show, (newVal) => {
+  if (newVal) {
+    fetchLibraryItems();
+    setupKeyboardHandlers();
+    nextTick(() => {
+      focusSlugField();
+    });
+  } else {
+    removeKeyboardHandlers();
+    reset();
+  }
+}, { immediate: true });
+
+// Lifecycle
+onMounted(() => {
+  if (props.show) {
+    setupKeyboardHandlers();
+    nextTick(() => {
+      focusSlugField();
+    });
+  }
+});
+
+onBeforeUnmount(() => {
+  removeKeyboardHandlers();
+});
 </script>
 
 <style scoped>

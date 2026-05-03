@@ -67,65 +67,64 @@
   </v-dialog>
 </template>
 
-<script>
+<script setup>
+import { onMounted, onBeforeUnmount } from 'vue'
 import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap'
 
-export default {
-  name: 'DeleteCueModal',
-  emits: ['update:show', 'delete', 'cancel'],
-  props: {
-    show: {
-      type: Boolean,
-      default: false
-    },
-    cueData: {
-      type: Object,
-      default: () => ({})
-    },
-    startLine: {
-      type: Number,
-      default: 0
-    },
-    endLine: {
-      type: Number,
-      default: 0
-    }
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
   },
-  mounted() {
-    // Add escape key listener
-    document.addEventListener('keydown', this.handleKeydown)
+  cueData: {
+    type: Object,
+    default: () => ({})
   },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown)
+  startLine: {
+    type: Number,
+    default: 0
   },
-  methods: {
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        this.cancel()
-      }
-    },
-    
-    getCueColor(cueType) {
-      if (!cueType) return '#666'
-      const colorName = getColorValue(cueType.toLowerCase())
-      return resolveVuetifyColor(colorName)
-    },
-    
-    cancel() {
-      this.$emit('update:show', false)
-      this.$emit('cancel')
-    },
-    
-    confirmDelete() {
-      this.$emit('delete', {
-        startLine: this.startLine,
-        endLine: this.endLine,
-        cueData: this.cueData
-      })
-      this.$emit('update:show', false)
-    }
+  endLine: {
+    type: Number,
+    default: 0
+  }
+})
+
+const emit = defineEmits(['update:show', 'delete', 'cancel'])
+
+function handleKeydown(event) {
+  if (event.key === 'Escape' && props.show) {
+    cancel()
   }
 }
+
+function getCueColor(cueType) {
+  if (!cueType) return '#666'
+  const colorName = getColorValue(cueType.toLowerCase())
+  return resolveVuetifyColor(colorName)
+}
+
+function cancel() {
+  emit('update:show', false)
+  emit('cancel')
+}
+
+function confirmDelete() {
+  emit('delete', {
+    startLine: props.startLine,
+    endLine: props.endLine,
+    cueData: props.cueData
+  })
+  emit('update:show', false)
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', handleKeydown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleKeydown)
+})
 </script>
 
 <style scoped>

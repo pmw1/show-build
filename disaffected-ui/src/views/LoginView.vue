@@ -1,117 +1,99 @@
 <template>
-  <div class="login-page" :style="{ backgroundImage: `url(${backgroundImage})` }">
-    <div class="login-overlay"></div>
+  <div class="login-page">
+    <!-- Center icon -->
+    <div class="login-content">
+      <img src="/show-build-logo-medium.png" alt="Show Builder" class="login-icon" :class="{ 'login-icon-raised': showForm }" />
 
-    <!-- Login Button -->
-    <v-btn
-      color="primary"
-      variant="elevated"
-      size="large"
-      @click="openLoginModal"
-      class="login-btn-centered"
-    >
-      Login
-    </v-btn>
+      <!-- Login form overlaid on lower half -->
+      <div class="login-form-area">
+        <v-btn
+          v-if="!showForm"
+          color="white"
+          variant="outlined"
+          size="large"
+          @click="showForm = true"
+          class="login-trigger-btn"
+        >
+          <v-icon start>mdi-login</v-icon>
+          Login
+        </v-btn>
 
-    <!-- Login Modal -->
-    <v-dialog
-      v-model="showLoginModal"
-      max-width="400"
-      persistent
-      :z-index="10000"
-    >
-      <v-card>
-        <v-card-title class="text-h5">Login</v-card-title>
-        <v-card-text>
-          <v-form @submit.prevent="handleLogin">
-            <v-text-field
-              v-model="loginForm.username"
-              label="Username"
-              variant="outlined"
-              required
-              @input="clearError"
-            />
-            <v-text-field
-              v-model="loginForm.password"
-              label="Password"
-              type="password"
-              variant="outlined"
-              required
-              @input="clearError"
-              @keyup.enter="handleLogin"
-              class="password-field"
-            />
-            <v-alert
-              v-if="loginError"
-              type="error"
-              density="compact"
-              class="mt-2"
-            >
-              {{ loginError }}
-            </v-alert>
-          </v-form>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn color="grey" variant="text" @click="showLoginModal = false">
-            Cancel
-          </v-btn>
-          <v-btn
-            color="primary"
-            variant="flat"
-            @click="handleLogin"
-            :loading="loggingIn"
-          >
-            Login
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+        <v-card v-else class="login-card" elevation="0">
+          <v-card-text class="pa-4">
+            <v-form @submit.prevent="handleLogin">
+              <v-text-field
+                v-model="loginForm.username"
+                placeholder="Username"
+                variant="outlined"
+                density="compact"
+                hide-details="auto"
+                bg-color="rgba(255,255,255,0.1)"
+                class="mb-3 login-field"
+                autofocus
+                @input="clearError"
+              />
+              <v-text-field
+                v-model="loginForm.password"
+                placeholder="Password"
+                type="password"
+                variant="outlined"
+                density="compact"
+                hide-details="auto"
+                bg-color="rgba(255,255,255,0.1)"
+                class="mb-3 login-field"
+                @input="clearError"
+                @keyup.enter="handleLogin"
+              />
+              <v-alert
+                v-if="loginError"
+                type="error"
+                density="compact"
+                class="mb-3"
+                style="font-size: 0.8rem;"
+              >
+                {{ loginError }}
+              </v-alert>
+              <v-btn
+                type="submit"
+                color="primary"
+                variant="flat"
+                block
+                :loading="loggingIn"
+              >
+                Login
+              </v-btn>
+            </v-form>
+          </v-card-text>
+        </v-card>
+      </div>
+    </div>
+    <div class="version-label">dev-v2.01.00</div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 
 const router = useRouter()
 const { setAuth } = useAuth()
 
-const showLoginModal = ref(false)
+const showForm = ref(false)
 const loggingIn = ref(false)
 const loginError = ref('')
-const backgroundImage = ref('')
 
 const loginForm = ref({
   username: '',
   password: ''
 })
 
-// Load random background image on mount
-onMounted(() => {
-  backgroundImage.value = `/api/branding/random?t=${Date.now()}`
-})
-
-const openLoginModal = () => {
-  showLoginModal.value = true
-  loginError.value = ''
-}
-
 const clearError = () => {
   loginError.value = ''
 }
 
 const handleLogin = async () => {
-  // Prevent multiple simultaneous login attempts
-  if (loggingIn.value) {
-    console.log('Login already in progress, ignoring')
-    return
-  }
-
-  console.log('Form values:', loginForm.value)
-  console.log('Username:', loginForm.value.username)
-  console.log('Password:', loginForm.value.password)
+  if (loggingIn.value) return
 
   if (!loginForm.value.username || !loginForm.value.password) {
     loginError.value = 'Please enter both username and password'
@@ -121,48 +103,31 @@ const handleLogin = async () => {
   loggingIn.value = true
   loginError.value = ''
 
-  const requestBody = {
-    username: loginForm.value.username,
-    password: loginForm.value.password,
-  }
-
-  console.log('Request body:', requestBody)
-
   try {
     const response = await fetch('/api/auth/login', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: loginForm.value.username,
+        password: loginForm.value.password
+      })
     })
-
-    console.log('Response status:', response.status)
-    console.log('Response headers:', response.headers.get('content-type'))
 
     if (response.ok) {
       const data = await response.json()
-
-      // Calculate expiry time (24 hours from now)
       const expiryTime = Date.now() + (24 * 60 * 60 * 1000)
-
       setAuth(data.access_token, data.user, expiryTime)
-
-      // Redirect to dashboard
       router.push('/dashboard')
     } else {
       const errorText = await response.text()
-      console.log('Error response text:', errorText)
-
       try {
         const errorData = JSON.parse(errorText)
         loginError.value = errorData.detail || 'Login failed'
-      } catch (parseError) {
+      } catch {
         loginError.value = errorText || 'Login failed'
       }
     }
-  } catch (error) {
-    console.error('Login error:', error)
+  } catch {
     loginError.value = 'Network error. Please try again.'
   } finally {
     loggingIn.value = false
@@ -177,63 +142,84 @@ const handleLogin = async () => {
   left: 0;
   height: 100vh;
   width: 100vw;
-  background-color: #000;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
+  background-color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
 }
 
-.login-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 1;
-}
-
-.login-btn-centered {
+.login-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   position: relative;
-  z-index: 2;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
 }
 
-/* Ensure modal renders above the fixed login page */
-:deep(.v-overlay--active) {
-  z-index: 10001 !important;
+.login-icon {
+  width: min(420px, 80vw);
+  height: min(420px, 80vw);
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Ensure text field labels have proper positioning */
-:deep(.v-text-field .v-field__input) {
-  padding-top: 20px !important;
-  padding-bottom: 8px !important;
+.login-icon-raised {
+  transform: translateY(-200px);
 }
 
-/* Center the floating labels vertically in the input field */
-:deep(.v-field__label) {
-  top: 50% !important;
-  transform: translateY(-50%) !important;
+.login-form-area {
+  position: absolute;
+  bottom: calc(40px - 2em);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(300px, 70vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-/* Add left padding to password field */
-:deep(.password-field .v-field__input) {
-  padding-left: 16px !important;
+.login-trigger-btn {
+  border-color: rgba(0, 0, 0, 0.25) !important;
+  color: rgba(0, 0, 0, 0.7) !important;
+  text-transform: none !important;
+  font-weight: 500 !important;
+  letter-spacing: 1px !important;
 }
 
-@media (max-width: 768px) {
-  .app-title {
-    font-size: 4rem;
-  }
+.login-trigger-btn:hover {
+  border-color: rgba(0, 0, 0, 0.5) !important;
+  color: rgba(0, 0, 0, 0.9) !important;
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+
+.login-card {
+  background: rgba(245, 245, 245, 0.9) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px !important;
+  width: 100%;
+}
+
+.version-label {
+  position: fixed;
+  bottom: 16px;
+  right: 20px;
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.3);
+  letter-spacing: 0.5px;
+  user-select: none;
 }
 
 @media (max-width: 480px) {
-  .app-title {
-    font-size: 3rem;
+  .login-icon {
+    width: 280px;
+    height: 280px;
+  }
+
+  .login-form-area {
+    width: 260px;
+    bottom: -10px;
   }
 }
 </style>

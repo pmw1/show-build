@@ -23,6 +23,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["misc"])
 
 
+# ── LLM Notifications ──
+
+@router.get("/api/llm-notifications/unseen")
+async def get_unseen_llm_notifications(db: Session = Depends(get_db)):
+    """Return unseen LLM content generation notifications and mark them as seen."""
+    from sqlalchemy import text
+    try:
+        rows = db.execute(text("""
+            SELECT id, type, content_type, asset_id, segment_title, episode_number,
+                   status, message, created_at
+            FROM llm_notifications
+            WHERE seen = FALSE
+            ORDER BY created_at DESC
+            LIMIT 20
+        """)).fetchall()
+        if not rows:
+            return {"notifications": []}
+        ids = [r.id for r in rows]
+        db.execute(text("UPDATE llm_notifications SET seen = TRUE WHERE id = ANY(:ids)"), {"ids": ids})
+        db.commit()
+        return {"notifications": [dict(r._mapping) for r in rows]}
+    except Exception as e:
+        return {"notifications": [], "error": str(e)}
+
+
 @router.get("/api/branding/random")
 async def random_branding_image():
     """Serve a random branding image from docs/branding/"""

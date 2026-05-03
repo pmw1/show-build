@@ -85,112 +85,59 @@
   </v-card>
 </template>
 
-<script>
+<script setup>
 import { ref, computed, onMounted } from 'vue'
 import { CORE_ITEM_TYPES } from '@/config/itemTypes'
 import axios from 'axios'
 
-export default {
-  name: 'MetaExtractionSettings',
+const allItemTypes = ref([...CORE_ITEM_TYPES])
+const selectedTypes = ref([])
+const originalTypes = ref([])
+const defaultTypes = ref([])
+const saving = ref(false)
+const lastSaved = ref(false)
 
-  setup() {
-    // All available item types from the config
-    const allItemTypes = ref([...CORE_ITEM_TYPES])
+const hasChanges = computed(() => {
+  if (selectedTypes.value.length !== originalTypes.value.length) return true
+  return !selectedTypes.value.every(t => originalTypes.value.includes(t))
+})
 
-    // Currently selected types
-    const selectedTypes = ref([])
+function getAuthHeaders() {
+  const token = localStorage.getItem('auth-token')
+  return token ? { 'Authorization': `Bearer ${token}` } : {}
+}
 
-    // Original types (for change detection)
-    const originalTypes = ref([])
-
-    // Default types from API
-    const defaultTypes = ref([])
-
-    // State
-    const loading = ref(false)
-    const saving = ref(false)
-    const lastSaved = ref(false)
-
-    // Computed
-    const hasChanges = computed(() => {
-      if (selectedTypes.value.length !== originalTypes.value.length) return true
-      return !selectedTypes.value.every(t => originalTypes.value.includes(t))
-    })
-
-    // Methods
-    function getAuthHeaders() {
-      const token = localStorage.getItem('auth-token')
-      return token ? { 'Authorization': `Bearer ${token}` } : {}
+async function loadSettings() {
+  try {
+    const response = await axios.get('/api/settings/meta_extraction', { headers: getAuthHeaders() })
+    if (response.data?.item_types) {
+      selectedTypes.value = [...response.data.item_types]
+      originalTypes.value = [...response.data.item_types]
     }
-
-    async function loadSettings() {
-      loading.value = true
-      try {
-        const response = await axios.get('/api/settings/meta_extraction', {
-          headers: getAuthHeaders()
-        })
-
-        if (response.data?.item_types) {
-          selectedTypes.value = [...response.data.item_types]
-          originalTypes.value = [...response.data.item_types]
-        }
-
-        if (response.data?.defaults) {
-          defaultTypes.value = [...response.data.defaults]
-        }
-      } catch (error) {
-        console.error('Failed to load meta extraction settings:', error)
-      } finally {
-        loading.value = false
-      }
-    }
-
-    async function saveSettings() {
-      saving.value = true
-      lastSaved.value = false
-      try {
-        await axios.post('/api/settings/meta_extraction', {
-          item_types: selectedTypes.value
-        }, {
-          headers: getAuthHeaders()
-        })
-
-        originalTypes.value = [...selectedTypes.value]
-        lastSaved.value = true
-
-        // Auto-hide saved indicator after 3 seconds
-        setTimeout(() => {
-          lastSaved.value = false
-        }, 3000)
-      } catch (error) {
-        console.error('Failed to save meta extraction settings:', error)
-      } finally {
-        saving.value = false
-      }
-    }
-
-    function resetToDefaults() {
-      selectedTypes.value = [...defaultTypes.value]
-    }
-
-    onMounted(() => {
-      loadSettings()
-    })
-
-    return {
-      allItemTypes,
-      selectedTypes,
-      defaultTypes,
-      loading,
-      saving,
-      lastSaved,
-      hasChanges,
-      loadSettings,
-      saveSettings,
-      resetToDefaults
-    }
+    if (response.data?.defaults) defaultTypes.value = [...response.data.defaults]
+  } catch (error) {
+    console.error('Failed to load meta extraction settings:', error)
   }
 }
+
+async function saveSettings() {
+  saving.value = true
+  lastSaved.value = false
+  try {
+    await axios.post('/api/settings/meta_extraction', { item_types: selectedTypes.value }, { headers: getAuthHeaders() })
+    originalTypes.value = [...selectedTypes.value]
+    lastSaved.value = true
+    setTimeout(() => { lastSaved.value = false }, 3000)
+  } catch (error) {
+    console.error('Failed to save meta extraction settings:', error)
+  } finally {
+    saving.value = false
+  }
+}
+
+function resetToDefaults() { selectedTypes.value = [...defaultTypes.value] }
+
+onMounted(loadSettings)
 </script>
 
 <style scoped>

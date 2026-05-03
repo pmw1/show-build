@@ -146,26 +146,26 @@
           v-bind="props"
           class="health-item"
           :class="{
-            'health-error': xttsStatus === 'error',
-            'health-warning': xttsStatus === 'warning',
-            'health-deprecated': xttsStatus === 'deprecated'
+            'health-error': ttsStatus === 'error',
+            'health-warning': ttsStatus === 'warning',
+            'health-deprecated': ttsStatus === 'deprecated'
           }"
         >
           <v-icon
-            :color="xttsStatusColor"
+            :color="ttsStatusColor"
             size="small"
             class="health-icon"
           >
-            {{ xttsStatusIcon }}
+            {{ ttsStatusIcon }}
           </v-icon>
           <span class="health-label">{{ ttsDisplayLabel }}</span>
         </div>
       </template>
       <div>
-        <strong>{{ isFishSpeechActive ? 'Fish Speech TTS' : 'XTTS TTS Service' }}</strong><br>
-        Status: {{ xttsStatusText }}<br>
-        <span v-if="xttsHost">Host: {{ xttsHost }}</span>
-        <span v-if="xttsError" class="text-error">{{ xttsError }}</span>
+        <strong>{{ isFishSpeechActive ? 'Fish Speech TTS' : 'TTS Service' }}</strong><br>
+        Status: {{ ttsStatusText }}<br>
+        <span v-if="ttsHost">Host: {{ ttsHost }}</span>
+        <span v-if="ttsError" class="text-error">{{ ttsError }}</span>
         <span v-if="isXttsDeprecated" class="text-grey">XTTS deprecated - replaced by Fish Speech</span>
       </div>
     </v-tooltip>
@@ -216,12 +216,12 @@ const {
   driveCanList,
   driveCanWrite,
   driveError,
-  xttsStatus,
-  xttsStatusText,
-  xttsStatusColor,
-  xttsStatusIcon,
-  xttsHost,
-  xttsError,
+  ttsStatus,
+  ttsStatusText,
+  ttsStatusColor,
+  ttsStatusIcon,
+  ttsHost,
+  ttsError,
   ttsDisplayLabel,
   isFishSpeechActive,
   isXttsDeprecated,

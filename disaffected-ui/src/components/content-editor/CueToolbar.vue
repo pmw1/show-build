@@ -151,32 +151,31 @@
   </v-toolbar>
 </template>
 
-<script>
-export default {
-  name: 'CueToolbar',
-  emits: ['toggle-rundown', 'show-modal'],
-  props: {
-    showRundownPanel: {
-      type: Boolean,
-      default: false
-    },
-    editorMode: {
-      type: String,
-      default: 'script',
-      validator: (value) => ['script', 'scratch', 'metadata'].includes(value)
-    }
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({
+  showRundownPanel: {
+    type: Boolean,
+    default: false
   },
-  computed: {
-    modeIcon() {
-      const icons = {
-        script: 'mdi-script-text',
-        scratch: 'mdi-pencil',
-        metadata: 'mdi-cog'
-      }
-      return icons[this.editorMode] || 'mdi-script-text'
-    }
+  editorMode: {
+    type: String,
+    default: 'script',
+    validator: (value) => ['script', 'scratch', 'metadata'].includes(value)
   }
-}
+})
+
+defineEmits(['toggle-rundown', 'show-modal'])
+
+const modeIcon = computed(() => {
+  const icons = {
+    script: 'mdi-script-text',
+    scratch: 'mdi-pencil',
+    metadata: 'mdi-cog'
+  }
+  return icons[props.editorMode] || 'mdi-script-text'
+})
 </script>
 
 <style scoped>

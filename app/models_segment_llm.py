@@ -7,6 +7,7 @@ from segment content. This extracted data (entities, summaries, quotes) can then
 be efficiently reused for episode descriptions, social posts, and other AI tasks.
 """
 from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, JSON, Float
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -87,6 +88,20 @@ class SegmentLLMData(Base):
     # Error tracking
     error_message = Column(Text, nullable=True)
 
+    # ========== Phase 2 Enrichment (async, Grok-powered) ==========
+    # Phase 2 verifies/refines Phase 1 output: current roles, social handles,
+    # short bios, recent activity, segment timeline, fact-check flags, etc.
+    # All enriched payload lives in phase2_data; status/timing/error in
+    # dedicated columns so the row stays queryable without JSONB unpacking.
+    phase2_data = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    phase2_status = Column(String(20), nullable=False, default="not_started", server_default="not_started", index=True)
+    # Values: not_started, queued, running, completed, failed
+    phase2_started_at = Column(DateTime(timezone=True), nullable=True)
+    phase2_completed_at = Column(DateTime(timezone=True), nullable=True)
+    phase2_model = Column(String(100), nullable=True)
+    phase2_task_id = Column(String(100), nullable=True)
+    phase2_error = Column(Text, nullable=True)
+
     # ========== Review Workflow ==========
 
     # Human review support
@@ -134,6 +149,13 @@ class SegmentLLMData(Base):
             "derived_data": self.derived_data or {},
             "tier_metadata": self.tier_metadata or {},
             "error_message": self.error_message,
+            "phase2_data": self.phase2_data or {},
+            "phase2_status": self.phase2_status,
+            "phase2_started_at": self.phase2_started_at.isoformat() if self.phase2_started_at else None,
+            "phase2_completed_at": self.phase2_completed_at.isoformat() if self.phase2_completed_at else None,
+            "phase2_model": self.phase2_model,
+            "phase2_task_id": self.phase2_task_id,
+            "phase2_error": self.phase2_error,
             "needs_review": self.needs_review,
             "reviewed_by": self.reviewed_by,
             "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,

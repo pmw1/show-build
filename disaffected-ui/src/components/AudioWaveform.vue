@@ -15,6 +15,20 @@
       class="waveform-canvas"
     ></canvas>
 
+    <!-- In point marker line -->
+    <div
+      v-if="inPoint !== null && duration > 0"
+      class="io-marker"
+      :style="inBracketStyle"
+    ></div>
+
+    <!-- Out point marker line -->
+    <div
+      v-if="outPoint !== null && duration > 0"
+      class="io-marker"
+      :style="outBracketStyle"
+    ></div>
+
     <!-- Playhead indicator -->
     <div
       v-if="currentTime !== null && duration > 0"
@@ -33,243 +47,175 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
-export default {
-  name: 'AudioWaveform',
-  props: {
-    waveformData: {
-      type: Array,
-      required: true,
-      default: () => []
-    },
-    currentTime: {
-      type: Number,
-      default: null
-    },
-    duration: {
-      type: Number,
-      default: 0
-    },
-    height: {
-      type: Number,
-      default: 60
-    },
-    backgroundColor: {
-      type: String,
-      default: 'rgba(0, 0, 0, 0.5)'
-    },
-    waveColor: {
-      type: String,
-      default: '#4CAF50'
-    },
-    progressColor: {
-      type: String,
-      default: '#81C784'
-    },
-    playheadColor: {
-      type: String,
-      default: '#FF5722'
-    }
-  },
-  emits: ['seek'],
-  setup(props, { emit }) {
-    const waveformCanvas = ref(null)
-    const canvasWidth = ref(800)
-    const canvasHeight = computed(() => props.height)
-    const resizeObserver = ref(null)
-    const isDragging = ref(false)
-    const hoverTime = ref(null)
-    const hoverX = ref(0)
+const props = defineProps({
+  waveformData: { type: Array, required: true, default: () => [] },
+  currentTime: { type: Number, default: null },
+  duration: { type: Number, default: 0 },
+  height: { type: Number, default: 60 },
+  backgroundColor: { type: String, default: 'rgba(0, 0, 0, 0.5)' },
+  waveColor: { type: String, default: '#4CAF50' },
+  progressColor: { type: String, default: '#81C784' },
+  playheadColor: { type: String, default: '#FF5722' },
+  inPoint: { type: Number, default: null },
+  outPoint: { type: Number, default: null },
+  regionColor: { type: String, default: '#000000' },
+  regionBackground: { type: String, default: 'rgba(255, 255, 255, 0.35)' }
+})
+const emit = defineEmits(['seek'])
 
-    // Container style
-    const containerStyle = computed(() => ({
-      width: '100%',
-      height: `${props.height}px`,
-      position: 'relative',
-      background: props.backgroundColor,
-      borderRadius: '4px',
-      overflow: 'hidden'
-    }))
+const waveformCanvas = ref(null)
+const canvasWidth = ref(800)
+const canvasHeight = computed(() => props.height)
+let resizeObserver = null
+const isDragging = ref(false)
+const hoverTime = ref(null)
+const hoverX = ref(0)
 
-    // Playhead position style
-    const playheadStyle = computed(() => {
-      if (props.currentTime === null || props.duration === 0) return {}
+const containerStyle = computed(() => ({
+  width: '100%',
+  height: `${props.height}px`,
+  position: 'relative',
+  background: props.backgroundColor,
+  borderRadius: '4px',
+  overflow: 'hidden'
+}))
 
-      const progress = (props.currentTime / props.duration) * 100
-      return {
-        left: `${progress}%`,
-        transform: 'translateX(-50%)'
-      }
-    })
+const playheadStyle = computed(() => {
+  if (props.currentTime === null || props.duration === 0) return {}
+  const progress = (props.currentTime / props.duration) * 100
+  return { left: `${progress}%`, transform: 'translateX(-50%)' }
+})
 
-    // Hover indicator style
-    const hoverIndicatorStyle = computed(() => {
-      return {
-        left: `${hoverX.value}px`,
-        transform: 'translateX(-50%)'
-      }
-    })
+const hoverIndicatorStyle = computed(() => ({
+  left: `${hoverX.value}px`,
+  transform: 'translateX(-50%)'
+}))
 
-    // Format time for display (HH:MM:SS)
-    const formatTime = (seconds) => {
-      const h = Math.floor(seconds / 3600)
-      const m = Math.floor((seconds % 3600) / 60)
-      const s = Math.floor(seconds % 60)
-      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-    }
+const inBracketStyle = computed(() => {
+  if (props.inPoint === null || props.duration === 0) return {}
+  const pct = (props.inPoint / props.duration) * 100
+  return { left: `${pct}%` }
+})
 
-    // Calculate time from mouse position
-    const getTimeFromEvent = (event) => {
-      if (!waveformCanvas.value || props.duration === 0) return null
-      const rect = waveformCanvas.value.getBoundingClientRect()
-      const x = event.clientX - rect.left
-      const progress = Math.max(0, Math.min(1, x / rect.width))
-      return progress * props.duration
-    }
+const outBracketStyle = computed(() => {
+  if (props.outPoint === null || props.duration === 0) return {}
+  const pct = (props.outPoint / props.duration) * 100
+  return { left: `${pct}%` }
+})
 
-    // Handle click to seek
-    const handleClick = (event) => {
-      const time = getTimeFromEvent(event)
-      if (time !== null) {
-        emit('seek', time)
-      }
-    }
+function formatTime(seconds) {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+}
 
-    // Handle mouse down for drag scrubbing
-    const handleMouseDown = (event) => {
-      isDragging.value = true
-      const time = getTimeFromEvent(event)
-      if (time !== null) {
-        emit('seek', time)
-      }
-    }
+function getTimeFromEvent(event) {
+  if (!waveformCanvas.value || props.duration === 0) return null
+  const rect = waveformCanvas.value.getBoundingClientRect()
+  const x = event.clientX - rect.left
+  return Math.max(0, Math.min(1, x / rect.width)) * props.duration
+}
 
-    // Handle mouse move for hover preview and drag scrubbing
-    const handleMouseMove = (event) => {
-      const rect = waveformCanvas.value?.getBoundingClientRect()
-      if (rect) {
-        hoverX.value = event.clientX - rect.left
-        hoverTime.value = getTimeFromEvent(event)
-      }
+function handleClick(event) {
+  const time = getTimeFromEvent(event)
+  if (time !== null) emit('seek', time)
+}
 
-      if (isDragging.value) {
-        const time = getTimeFromEvent(event)
-        if (time !== null) {
-          emit('seek', time)
-        }
-      }
-    }
+function handleMouseDown(event) {
+  isDragging.value = true
+  const time = getTimeFromEvent(event)
+  if (time !== null) emit('seek', time)
+}
 
-    // Handle mouse up to stop dragging
-    const handleMouseUp = () => {
-      isDragging.value = false
-      hoverTime.value = null
-    }
-
-    /**
-     * Draw waveform on canvas
-     */
-    const drawWaveform = () => {
-      if (!waveformCanvas.value || props.waveformData.length === 0) return
-
-      const canvas = waveformCanvas.value
-      const ctx = canvas.getContext('2d')
-      const width = canvas.width
-      const height = canvas.height
-
-      // Clear canvas
-      ctx.clearRect(0, 0, width, height)
-
-      // Draw waveform
-      const barWidth = width / props.waveformData.length
-      const centerY = height / 2
-
-      props.waveformData.forEach((amplitude, index) => {
-        const x = index * barWidth
-        const barHeight = amplitude * (height * 0.9) // Use 90% of height for safety
-
-        // Determine color based on playback progress
-        const progress = props.currentTime !== null && props.duration > 0
-          ? props.currentTime / props.duration
-          : 0
-        const barProgress = index / props.waveformData.length
-
-        const color = barProgress <= progress ? props.progressColor : props.waveColor
-
-        // Draw waveform bar (centered vertically)
-        ctx.fillStyle = color
-        ctx.fillRect(
-          x,
-          centerY - barHeight / 2,
-          Math.max(1, barWidth - 1), // Ensure at least 1px width, with 1px gap
-          barHeight
-        )
-      })
-    }
-
-    /**
-     * Handle canvas resize
-     */
-    const handleResize = () => {
-      if (!waveformCanvas.value) return
-
-      const container = waveformCanvas.value.parentElement
-      if (container) {
-        canvasWidth.value = container.clientWidth
-        nextTick(() => {
-          drawWaveform()
-        })
-      }
-    }
-
-    // Watch for waveform data changes
-    watch(() => props.waveformData, () => {
-      nextTick(() => {
-        drawWaveform()
-      })
-    }, { deep: true })
-
-    // Watch for current time changes (playhead movement)
-    watch(() => props.currentTime, () => {
-      drawWaveform()
-    })
-
-    // Initial render and resize observer
-    onMounted(() => {
-      handleResize()
-
-      // Set up resize observer
-      if (waveformCanvas.value && waveformCanvas.value.parentElement) {
-        resizeObserver.value = new ResizeObserver(handleResize)
-        resizeObserver.value.observe(waveformCanvas.value.parentElement)
-      }
-    })
-
-    // Cleanup
-    onBeforeUnmount(() => {
-      if (resizeObserver.value) {
-        resizeObserver.value.disconnect()
-      }
-    })
-
-    return {
-      waveformCanvas,
-      canvasWidth,
-      canvasHeight,
-      containerStyle,
-      playheadStyle,
-      hoverIndicatorStyle,
-      hoverTime,
-      formatTime,
-      handleClick,
-      handleMouseDown,
-      handleMouseMove,
-      handleMouseUp
-    }
+function handleMouseMove(event) {
+  const rect = waveformCanvas.value?.getBoundingClientRect()
+  if (rect) {
+    hoverX.value = event.clientX - rect.left
+    hoverTime.value = getTimeFromEvent(event)
+  }
+  if (isDragging.value) {
+    const time = getTimeFromEvent(event)
+    if (time !== null) emit('seek', time)
   }
 }
+
+function handleMouseUp() {
+  isDragging.value = false
+  hoverTime.value = null
+}
+
+function drawWaveform() {
+  if (!waveformCanvas.value || props.waveformData.length === 0) return
+  const canvas = waveformCanvas.value
+  const ctx = canvas.getContext('2d')
+  const width = canvas.width
+  const height = canvas.height
+  ctx.clearRect(0, 0, width, height)
+
+  const barWidth = width / props.waveformData.length
+  const centerY = height / 2
+
+  // Draw in/out region background
+  const hasInOut = props.inPoint !== null && props.outPoint !== null && props.duration > 0
+  if (hasInOut) {
+    const inX = (props.inPoint / props.duration) * width
+    const outX = (props.outPoint / props.duration) * width
+    ctx.fillStyle = props.regionBackground
+    ctx.fillRect(inX, 0, outX - inX, height)
+  }
+
+  // Determine in/out range as fraction of total bars
+  const inFrac = hasInOut ? props.inPoint / props.duration : null
+  const outFrac = hasInOut ? props.outPoint / props.duration : null
+
+  props.waveformData.forEach((amplitude, index) => {
+    const x = index * barWidth
+    const barHeight = amplitude * (height * 0.9)
+    const barProgress = index / props.waveformData.length
+    const progress = props.currentTime !== null && props.duration > 0 ? props.currentTime / props.duration : 0
+
+    // Check if this bar is inside the in/out region
+    const inRegion = hasInOut && barProgress >= inFrac && barProgress <= outFrac
+
+    if (inRegion) {
+      ctx.fillStyle = barProgress <= progress ? props.regionColor : '#FFFFFF'
+    } else {
+      ctx.fillStyle = barProgress <= progress ? props.progressColor : props.waveColor
+    }
+
+    ctx.fillRect(x, centerY - barHeight / 2, Math.max(1, barWidth - 1), barHeight)
+  })
+}
+
+function handleResize() {
+  if (!waveformCanvas.value) return
+  const container = waveformCanvas.value.parentElement
+  if (container) {
+    canvasWidth.value = container.clientWidth
+    nextTick(drawWaveform)
+  }
+}
+
+watch(() => props.waveformData, () => nextTick(drawWaveform), { deep: true })
+watch(() => props.currentTime, drawWaveform)
+watch(() => props.inPoint, drawWaveform)
+watch(() => props.outPoint, drawWaveform)
+
+onMounted(() => {
+  handleResize()
+  if (waveformCanvas.value?.parentElement) {
+    resizeObserver = new ResizeObserver(handleResize)
+    resizeObserver.observe(waveformCanvas.value.parentElement)
+  }
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+})
 </script>
 
 <style scoped>
@@ -317,5 +263,17 @@ export default {
   font-size: 12px;
   font-family: 'Roboto Mono', monospace;
   white-space: nowrap;
+}
+
+.io-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #00E676;
+  box-shadow: 0 0 6px rgba(0, 230, 118, 0.8);
+  pointer-events: none;
+  z-index: 15;
+  transform: translateX(-50%);
 }
 </style>

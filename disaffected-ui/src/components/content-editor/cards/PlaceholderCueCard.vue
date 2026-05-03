@@ -7,6 +7,7 @@
       { 'cue-complete': cueStatus === 'complete' },
       { 'cue-needs-attention': cueStatus === 'needs_attention' },
       { 'cue-urgent-attention': cueStatus === 'urgent_attention' },
+      { 'cue-collapsed': isCollapsed },
       getAnalysisClass
     ]"
     :style="cardStyleWithStatus"
@@ -14,7 +15,7 @@
     @click="$emit('select')"
   >
     <!-- Card Header -->
-    <v-card-title class="cue-card-header" :style="headerStyleWithStatus">
+    <v-card-title class="cue-card-header" :style="headerStyleWithStatus" @dblclick.stop="isCollapsed = !isCollapsed">
       <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 8px;">mdi-drag-vertical</v-icon>
       <div class="cue-type-badge" :style="badgeStyle">
         {{ cueTypeBadgeLabel }}
@@ -88,7 +89,7 @@
     </v-card-title>
 
     <!-- Card Content (hidden entirely for RIF) -->
-    <v-card-text v-if="cueData.type !== 'RIF'" class="cue-card-content">
+    <v-card-text v-if="cueData.type !== 'RIF' && !isCollapsed" class="cue-card-content">
       <!-- FSQ-specific Display - Delegated to FsqCueContent -->
       <FsqCueContent
         v-if="cueData.type === 'FSQ' && cueData.quote"
@@ -219,12 +220,28 @@
           <span class="media-url-text">{{ truncateUrl(cueData.mediaUrl) }}</span>
         </div>
 
-        <!-- Processing Status Display -->
-        <div v-if="processingStatusMessage" class="processing-status" :class="{ 'status-failed': isFailed, 'status-processing': isProcessing }">
-          <v-icon size="small" class="status-icon" :color="isFailed ? 'error' : 'info'">
-            {{ isFailed ? 'mdi-alert-circle' : 'mdi-cog' }}
-          </v-icon>
-          <span class="status-text">{{ processingStatusMessage }}</span>
+        <!-- Job Status Display (centered in card body) -->
+        <div v-if="(showJobStatus && jobStatus) || processingStatusMessage" class="job-status-body" :class="{ 'status-failed': isFailed, 'status-processing': isProcessing }">
+          <v-chip
+            v-if="showJobStatus && jobStatus"
+            :color="jobStatusColor"
+            size="small"
+            class="job-status-chip-body"
+          >
+            <v-icon size="x-small" start>
+              {{ jobStatus.status === 'processing' ? 'mdi-loading mdi-spin' :
+                 jobStatus.status === 'completed' ? 'mdi-check-circle' :
+                 jobStatus.status === 'failed' ? 'mdi-alert-circle' :
+                 'mdi-clock-outline' }}
+            </v-icon>
+            {{ jobStatusText }}
+          </v-chip>
+          <div v-else-if="processingStatusMessage" class="processing-status-inline">
+            <v-icon size="small" class="status-icon" :color="isFailed ? 'error' : 'info'">
+              {{ isFailed ? 'mdi-alert-circle' : 'mdi-cog' }}
+            </v-icon>
+            <span class="status-text">{{ processingStatusMessage }}</span>
+          </div>
         </div>
 
         <!-- Retry Button for Failed Jobs -->
@@ -242,23 +259,8 @@
       </div>
     </v-card-text>
 
-    <!-- Card Footer (hidden for RIF) -->
-    <v-card-actions v-if="cueData.type !== 'RIF'" class="cue-card-footer" :style="footerStyle">
-      <!-- Delete Cue Button - Left side -->
-      <v-btn
-        size="x-small"
-        variant="text"
-        color="white"
-        @click.stop="$emit('delete')"
-        class="delete-cue-btn"
-      >
-        <v-icon size="small">mdi-delete</v-icon>
-        <span style="margin-left: 4px;">Delete</span>
-        <v-tooltip activator="parent" location="top">
-          Delete this cue
-        </v-tooltip>
-      </v-btn>
-
+    <!-- Card Footer (hidden for RIF and collapsed) -->
+    <v-card-actions v-if="cueData.type !== 'RIF' && !isCollapsed" class="cue-card-footer" :style="footerStyle">
       <!-- Show duration in footer -->
       <div class="duration-display">
         <v-icon size="small" color="white">mdi-timer-outline</v-icon>
@@ -266,33 +268,6 @@
       </div>
 
       <v-spacer></v-spacer>
-
-      <!-- Job Status Indicator (SOT only) -->
-      <v-chip
-        v-if="showJobStatus && jobStatus"
-        :color="jobStatusColor"
-        size="small"
-        class="job-status-chip"
-        style="margin-right: 8px;"
-      >
-        <v-icon size="x-small" start>
-          {{ jobStatus.status === 'processing' ? 'mdi-loading mdi-spin' :
-             jobStatus.status === 'completed' ? 'mdi-check-circle' :
-             jobStatus.status === 'failed' ? 'mdi-alert-circle' :
-             'mdi-clock-outline' }}
-        </v-icon>
-        {{ jobStatusText }}
-        <v-tooltip activator="parent" location="top">
-          <div v-if="jobStatus.error_message">
-            <strong>Error:</strong> {{ jobStatus.error_message }}
-          </div>
-          <div v-else>
-            Job Status: {{ jobStatus.status }}<br>
-            Phase: {{ jobStatus.current_phase || 'N/A' }}<br>
-            Updated: {{ new Date(jobStatus.updated_at).toLocaleTimeString() }}
-          </div>
-        </v-tooltip>
-      </v-chip>
 
       <!-- Orbital Action Menu -->
       <div class="orbital-menu" :class="{ 'orbital-open': orbitalOpen }" @click.stop>
@@ -372,6 +347,19 @@
           </v-btn>
         </transition-group>
       </div>
+
+      <!-- Delete Cue Button - Right side -->
+      <v-btn
+        size="small"
+        variant="text"
+        @click.stop="$emit('delete')"
+        class="delete-cue-btn"
+        style="color: white !important;"
+      >
+        <v-icon size="small" class="me-1">mdi-delete</v-icon>
+        DELETE
+        <v-tooltip activator="parent" location="top">Delete this cue</v-tooltip>
+      </v-btn>
     </v-card-actions>
 
     <!-- FSQ Preview Modal (960x540 - half resolution) -->
@@ -500,1843 +488,1875 @@
   </v-card>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { useRoute } from 'vue-router';
 import { getColorValue, resolveVuetifyColor } from '../../../utils/themeColorMap.js';
 import { useSOTProcessing } from '../../../composables/useSOTProcessing.js';
-import FsqCueContent from './cue-types/FsqCueContent.vue';
-import SotCueContent from './cue-types/SotCueContent.vue';
-import GfxCueContent from './cue-types/GfxCueContent.vue';
+import FsqCueContent from './cue-types/FsqCueContent.vue'; // eslint-disable-line no-unused-vars
+import SotCueContent from './cue-types/SotCueContent.vue'; // eslint-disable-line no-unused-vars
+import GfxCueContent from './cue-types/GfxCueContent.vue'; // eslint-disable-line no-unused-vars
+import { FSQ_DEFAULTS, FSQ_PNG_SCALE, FSQ_PNG_ATTRIBUTION_SCALE } from '../../../utils/fsqLayout.js';
 
-export default {
-  name: 'PlaceholderCueCard',
-  components: {
-    FsqCueContent,
-    SotCueContent,
-    GfxCueContent
+const props = defineProps({
+  cueData: {
+    type: Object,
+    required: true,
+    default: () => ({})
   },
-  emits: ['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq'],
-  props: {
-    cueData: {
-      type: Object,
-      required: true,
-      default: () => ({})
-    },
-    selected: {
-      type: Boolean,
-      default: false
-    },
-    orderNumber: {
-      type: [String, Number],
-      default: null
-    },
-    currentEpisode: {
-      type: String,
-      default: ''
-    }
+  selected: {
+    type: Boolean,
+    default: false
   },
-  setup() {
-    const { getJobByAssetId, retryFailedJob, reprocessJob } = useSOTProcessing();
-
-    return {
-      getJobByAssetId,
-      retryFailedJob,
-      reprocessJob
-    };
+  orderNumber: {
+    type: [String, Number],
+    default: null
   },
-  data() {
-    return {
-      orbitalOpen: false,
-      generatingPNG: false,
-      fsqDirty: true, // Assume dirty until proven generated (no PNG = needs generation)
-      generatingGfx: false,       // GFX generation in progress
-      gfxImageError: false,       // GFX image failed to load
-      gfxGenerationStatus: null,  // GFX generation status: null, 'queued', 'generating', 'completed', 'failed'
-      gfxTaskId: null,            // Current GFX Celery task ID
-      fsqGenerationStatus: null, // FSQ generation status: null, 'queued', 'generating', 'completed', 'failed'
-      fsqTaskId: null,        // Current FSQ Celery task ID
-      fsqCacheBuster: null,   // Timestamp to bust browser cache after regeneration
-      jobStatus: null,        // Current job status from API (SOT)
-      statusPollInterval: null, // Interval ID for polling
-      currentThumbnailIndex: 7, // Default to middle thumbnail (index 7 = thumb 8 of 15)
-      pollingActive: false,    // Whether we're currently polling
-      cueStatus: null,
-      thumbnailError: false,
-      gfxGeneratedUrl: null,  // Local override for immediate card refresh after generation
-      // Inline video player state
-      showInlinePlayer: false,
-      // FSQ preview modal state
-      showFsqPreviewModal: false,
-      // SOT preview modal state
-      showSotPreviewModal: false,
-      // Preview countdown state
-      previewCountdown: 0,
-      countdownInterval: null
-    };
-  },
-  computed: {
-    /**
-     * Badge label - shows "NOTE: DIRECTOR" for NOTE cues with noteFor, otherwise just the type
-     */
-    cueTypeBadgeLabel() {
-      const t = this.cueData.type;
-      if ((t === 'NOTE' || t === 'DIR') && this.cueData.noteFor) {
-        return `${t}: ${this.cueData.noteFor.toUpperCase()}`;
-      }
-      if (t === 'GFX' && this.cueData.gfxType === 'xpost') {
-        return 'GFX-XPOST';
-      }
-      return t;
-    },
-    /**
-     * Card style based on cue_status
-     */
-    cardStyleWithStatus() {
-      const baseStyle = this.getCardStyle;
+  currentEpisode: {
+    type: String,
+    default: ''
+  }
+});
 
-      switch (this.cueStatus) {
-        case 'complete':
-          return {
-            ...baseStyle,
-            backgroundColor: '#C8E6C9',  // Light green background
-            borderColor: '#4CAF50'       // Green border
-          };
-        case 'needs_attention':
-          return {
-            ...baseStyle,
-            // Keep body background unchanged, just border
-            borderColor: '#FFC107'       // Yellow/amber border
-          };
-        case 'urgent_attention':
-          return {
-            ...baseStyle,
-            // Keep body background unchanged, just border
-            borderColor: '#D32F2F',      // Red border
-            borderWidth: '5px'           // Slightly thicker for urgency
-          };
-        default:
-          return baseStyle;
-      }
-    },
+const emit = defineEmits(['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq', 'status-changed']);
 
-    /**
-     * Header style based on cue_status
-     */
-    headerStyleWithStatus() {
-      switch (this.cueStatus) {
-        case 'complete':
-          return {
-            backgroundColor: '#388E3C',  // Darker green header
-            color: 'white'
-          };
-        case 'needs_attention':
-          return {
-            backgroundColor: '#FFD54F',  // Bright yellow header
-            color: '#1a1a1a'             // Dark text for readability
-          };
-        case 'urgent_attention':
-          return {
-            backgroundColor: '#D32F2F',  // Red header
-            color: 'white'
-          };
-        default:
-          return this.headerStyle;
-      }
-    },
+const route = useRoute();
+const { getJobByAssetId, retryFailedJob, reprocessJob } = useSOTProcessing();
 
-    formatCueTitle() {
-      const title = this.cueData.slug || this.cueData.title || '';
+// Template refs
+const fsqContentRef = ref(null);
+const gfxContentRef = ref(null);
+const fsqPreviewVideoRef = ref(null); // eslint-disable-line no-unused-vars
+const sotPreviewVideoRef = ref(null); // eslint-disable-line no-unused-vars
+const inlineVideoPlayer = ref(null);
 
-      // For RIF cues: remove hyphens and capitalize each word
-      if (this.cueData.type === 'RIF') {
-        return title
-          .split('-')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-          .join(' ');
-      }
+// Reactive data (was data())
+const orbitalOpen = ref(false);
+const isCollapsed = ref(false);
+const generatingPNG = ref(false);
+const fsqDirty = ref(true); // Assume dirty until proven generated (no PNG = needs generation)
+const generatingGfx = ref(false);       // GFX generation in progress
+const gfxImageError = ref(false);       // GFX image failed to load
+const gfxGenerationStatus = ref(null);  // GFX generation status: null, 'queued', 'generating', 'completed', 'failed'
+const gfxTaskId = ref(null);            // Current GFX Celery task ID // eslint-disable-line no-unused-vars
+const fsqGenerationStatus = ref(null); // FSQ generation status: null, 'queued', 'generating', 'completed', 'failed'
+const fsqTaskId = ref(null);        // Current FSQ Celery task ID // eslint-disable-line no-unused-vars
+const fsqCacheBuster = ref(null);   // Timestamp to bust browser cache after regeneration
+const jobStatus = ref(null);        // Current job status from API (SOT)
+const statusPollInterval = ref(null); // Interval ID for polling
+const currentThumbnailIndex = ref(7); // Default to middle thumbnail (index 7 = thumb 8 of 15)
+const pollingActive = ref(false);    // Whether we're currently polling
+const cueStatus = ref(null);
+const thumbnailError = ref(false); // eslint-disable-line no-unused-vars
+const gfxGeneratedUrl = ref(null);  // Local override for immediate card refresh after generation
+// Inline video player state
+const showInlinePlayer = ref(false);
+// FSQ preview modal state
+const showFsqPreviewModal = ref(false);
+// SOT preview modal state
+const showSotPreviewModal = ref(false);
+// Preview countdown state
+const previewCountdown = ref(0);
+const countdownInterval = ref(null);
 
-      // For XPOST cues: show @handle if available
-      if (this.cueData.type === 'GFX' && this.cueData.gfxType === 'xpost') {
-        const handle = this.cueData.rawData?.authorHandle || this.cueData.authorHandle;
-        if (handle) return `@${handle}`;
-      }
+// Computed properties
+/**
+ * Badge label - shows "NOTE: DIRECTOR" for NOTE cues with noteFor, otherwise just the type
+ */
+const cueTypeBadgeLabel = computed(() => {
+  const t = props.cueData.type;
+  if ((t === 'NOTE' || t === 'DIR') && props.cueData.noteFor) {
+    return `${t}: ${props.cueData.noteFor.toUpperCase()}`;
+  }
+  if (t === 'GFX' && props.cueData.gfxType === 'xpost') {
+    return 'GFX-XPOST';
+  }
+  return t;
+});
 
-      // For all other cues: return as-is
-      return title;
-    },
+/**
+ * Card style based on cue_status
+ */
+const cardStyleWithStatus = computed(() => {
+  const baseStyle = getCardStyle.value;
 
-    /**
-     * Get all SOT thumbnail options (array of URLs)
-     * Uses relative URLs - Vue dev proxy forwards /episodes to backend
-     */
-    sotThumbnailOptions() {
-      // Helper function to normalize URL path
-      const makeAbsoluteUrl = (url) => {
-        if (url.startsWith('http')) {
-          return url;
-        }
-        if (url.startsWith('/episodes')) {
-          return url;
-        }
-        return `/episodes/${url}`;
+  switch (cueStatus.value) {
+    case 'complete':
+      return {
+        ...baseStyle,
+        backgroundColor: '#C8E6C9',  // Light green background
+        borderColor: '#4CAF50'       // Green border
       };
+    case 'needs_attention':
+      return {
+        ...baseStyle,
+        // Keep body background unchanged, just border
+        borderColor: '#FFC107'       // Yellow/amber border
+      };
+    case 'urgent_attention':
+      return {
+        ...baseStyle,
+        // Keep body background unchanged, just border
+        borderColor: '#D32F2F',      // Red border
+        borderWidth: '5px'           // Slightly thicker for urgency
+      };
+    default:
+      return baseStyle;
+  }
+});
 
-      // First check cue data for ThumbnailOptions (array from processing)
-      if (this.cueData?.thumbnailOptions && Array.isArray(this.cueData.thumbnailOptions)) {
-        return this.cueData.thumbnailOptions.map(makeAbsoluteUrl);
-      }
+/**
+ * Header style based on cue_status
+ */
+const headerStyleWithStatus = computed(() => {
+  switch (cueStatus.value) {
+    case 'complete':
+      return {
+        backgroundColor: '#388E3C',  // Darker green header
+        color: 'white'
+      };
+    case 'needs_attention':
+      return {
+        backgroundColor: '#FFD54F',  // Bright yellow header
+        color: '#1a1a1a'             // Dark text for readability
+      };
+    case 'urgent_attention':
+      return {
+        backgroundColor: '#D32F2F',  // Red header
+        color: 'white'
+      };
+    default:
+      return headerStyle.value;
+  }
+});
 
-      // Check job status for thumbnail_candidates (from database)
-      if (this.jobStatus?.thumbnail_candidates && Array.isArray(this.jobStatus.thumbnail_candidates)) {
-        // Use final_thumbnail_path to get correct directory (thumbnails, not video)
-        const thumbnailPath = this.jobStatus.final_thumbnail_path || '';
-        if (thumbnailPath) {
-          // Extract the base pattern from final_thumbnail_path (e.g., "0257/assets/thumbnails/airplane-girl-thumb-01.jpg")
-          const match = thumbnailPath.match(/^(.+)-thumb-\d+\.(jpg|png)$/);
-          if (match) {
-            const basePath = match[1];  // "0257/assets/thumbnails/airplane-girl"
-            const ext = match[2];  // preserve original extension
-            return this.jobStatus.thumbnail_candidates.map((_, i) => {
-              return `/episodes/${basePath}-thumb-${String(i + 1).padStart(2, '0')}.${ext}`;
-            });
-          }
-        }
-        // Fallback: try to build from video path but use thumbnails directory
-        const videoPath = this.jobStatus.final_video_path?.replace(/\.mp4$/, '') || '';
-        if (videoPath) {
-          // Replace /video/ with /thumbnails/ in the path
-          const thumbnailDir = videoPath.replace('/video/', '/thumbnails/');
-          return this.jobStatus.thumbnail_candidates.map((_, i) => {
-            return `/episodes/${thumbnailDir}-thumb-${String(i + 1).padStart(2, '0')}.jpg`;
-          });
-        }
-      }
+const formatCueTitle = computed(() => {
+  const title = props.cueData.slug || props.cueData.title || '';
 
-      // Generate options based on single thumbnail URL pattern
-      if (this.sotThumbnailUrl) {
-        const match = this.sotThumbnailUrl.match(/^(.+)-thumb-(\d+)\.(jpg|png)$/);
-        if (match) {
-          const base = match[1];
-          const ext = match[3];  // preserve original extension
-          return Array.from({ length: 15 }, (_, i) => `${base}-thumb-${String(i + 1).padStart(2, '0')}.${ext}`);
-        }
-      }
+  // For RIF cues: remove hyphens and capitalize each word
+  if (props.cueData.type === 'RIF') {
+    return title
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  }
 
-      // Single thumbnail fallback
-      if (this.sotThumbnailUrl) {
-        return [this.sotThumbnailUrl];
-      }
+  // For XPOST cues: show @handle if available
+  if (props.cueData.type === 'GFX' && props.cueData.gfxType === 'xpost') {
+    const handle = props.cueData.rawData?.authorHandle || props.cueData.authorHandle;
+    if (handle) return `@${handle}`;
+  }
 
-      return [];
-    },
+  // For all other cues: return as-is
+  return title;
+});
 
-    /**
-     * Get current thumbnail URL based on selected index
-     */
-    currentSotThumbnailUrl() {
-      const options = this.sotThumbnailOptions;
-      if (options.length === 0) return '';
-
-      // Ensure index is within bounds
-      const index = Math.min(Math.max(0, this.currentThumbnailIndex), options.length - 1);
-      return options[index] || options[0];
-    },
-
-    /**
-     * Get sharpness score for current thumbnail from thumbnail_data
-     */
-    currentThumbnailSharpness() {
-      if (!this.jobStatus?.thumbnail_data || !Array.isArray(this.jobStatus.thumbnail_data)) {
-        return null;
-      }
-
-      // Find thumbnail data for current index (1-based in data)
-      const thumbData = this.jobStatus.thumbnail_data.find(
-        t => t.index === this.currentThumbnailIndex + 1
-      );
-
-      return thumbData?.sharpness || null;
-    },
-
-    /**
-     * Check if job is completed (status from API)
-     */
-    isJobCompleted() {
-      return this.jobStatus?.status === 'completed';
-    },
-
-    /**
-     * Display duration - prioritizes jobStatus data over stale cueData placeholders
-     * Treats "calculating", "processing", "queued", "pending" as null values
-     */
-    displayDuration() {
-      const stalePlaceholders = ['calculating', 'processing', 'queued', 'pending', ''];
-
-      // If job is completed, prefer jobStatus data
-      if (this.isJobCompleted) {
-        // Try post_analysis duration first
-        if (this.jobStatus?.post_analysis?.duration) {
-          return this.jobStatus.post_analysis.duration;
-        }
-        // Try video_specs duration
-        if (this.jobStatus?.video_specs?.duration) {
-          return this.jobStatus.video_specs.duration;
-        }
-      }
-
-      // Check cueData, but filter out placeholder values
-      const cueDuration = this.cueData?.duration?.toLowerCase?.() || this.cueData?.duration;
-      if (cueDuration && !stalePlaceholders.includes(cueDuration?.toLowerCase?.())) {
-        return this.cueData.duration;
-      }
-
-      // Fallback to jobStatus even if not completed
-      if (this.jobStatus?.post_analysis?.duration) {
-        return this.jobStatus.post_analysis.duration;
-      }
-      if (this.jobStatus?.video_specs?.duration) {
-        return this.jobStatus.video_specs.duration;
-      }
-
-      return null;
-    },
-
-    /**
-     * Display video path - prioritizes jobStatus data over stale cueData placeholders
-     */
-    displayVideoPath() {
-      const stalePlaceholders = ['processing', 'queued', 'pending', ''];
-
-      // If job is completed, prefer jobStatus data
-      if (this.isJobCompleted && this.jobStatus?.final_video_path) {
-        return this.jobStatus.final_video_path;
-      }
-
-      // Check cueData, but filter out placeholder values
-      const cueMediaUrl = this.cueData?.mediaUrl?.toLowerCase?.() || this.cueData?.mediaUrl;
-      if (cueMediaUrl && !stalePlaceholders.includes(cueMediaUrl?.toLowerCase?.())) {
-        return this.cueData.mediaUrl;
-      }
-
-      // Fallback to jobStatus
-      if (this.jobStatus?.final_video_path) {
-        return this.jobStatus.final_video_path;
-      }
-
-      return null;
-    },
-
-    /**
-     * Display processing status - prioritizes actual job status over stale cueData
-     */
-    displayProcessingStatus() {
-      // If we have live job status, use that
-      if (this.jobStatus?.status) {
-        const status = this.jobStatus.status;
-        if (status === 'completed') return 'Completed';
-        if (status === 'failed') return 'Failed';
-        if (status === 'processing') return this.jobStatus.current_phase || 'Processing...';
-        if (status === 'queued') return 'Queued';
-        return status;
-      }
-
-      // Fallback to cueData
-      if (this.cueData?.processingStatus) {
-        return this.cueData.processingStatus;
-      }
-
-      return null;
-    },
-
-    /**
-     * Get color for sharpness indicator based on value
-     */
-    sharpnessColor() {
-      const sharpness = this.currentThumbnailSharpness;
-      if (!sharpness) return 'grey';
-
-      if (sharpness < 100) return '#D32F2F';  // Red - blurry
-      if (sharpness < 150) return '#FF9800';  // Orange - below average
-      if (sharpness < 200) return '#FFC107';  // Yellow - average
-      return '#4CAF50';  // Green - sharp
-    },
-
-    /**
-     * Get SOT thumbnail URL from cue data or job status (base/primary thumbnail)
-     * Uses relative URLs - Vue dev proxy forwards /episodes to backend
-     */
-    sotThumbnailUrl() {
-      const backendUrl = '';
-
-      // First check cue data for ThumbnailURL (skip stale blob: URLs)
-      if (this.cueData?.thumbnailUrl && !this.cueData.thumbnailUrl.startsWith('blob:')) {
-        // If already an absolute URL, return as-is
-        if (this.cueData.thumbnailUrl.startsWith('http')) {
-          return this.cueData.thumbnailUrl;
-        }
-        // If starts with /episodes, use as relative URL
-        if (this.cueData.thumbnailUrl.startsWith('/episodes')) {
-          return this.cueData.thumbnailUrl;
-        }
-        // Otherwise, construct full path
-        return `/episodes/${this.cueData.thumbnailUrl}`;
-      }
-
-      // Fall back to job status thumbnail path
-      if (this.jobStatus?.final_thumbnail_path) {
-        const path = this.jobStatus.final_thumbnail_path;
-        if (path.startsWith('http')) {
-          return path;
-        }
-        if (path.startsWith('/episodes')) {
-          return `${backendUrl}${path}`;
-        }
-        return `${backendUrl}/episodes/${path}`;
-      }
-
-      return '';
-    },
-
-    /**
-     * Get SOT transcription from cue data or job status
-     */
-    sotTranscription() {
-      // First check cue data (from parsed cue block)
-      if (this.cueData?.transcription) {
-        return this.cueData.transcription;
-      }
-      // Fall back to job status transcription
-      if (this.jobStatus?.transcription) {
-        return this.jobStatus.transcription;
-      }
-      return '';
-    },
-
-    /**
-     * Get SOT outcue from cue data (last 5 words of transcription with "..." prefix)
-     */
-    sotOutcue() {
-      // Check cue data for outcue field
-      if (this.cueData?.outcue) {
-        return this.cueData.outcue;
-      }
-      return '';
-    },
-
-    /**
-     * Get SOT video URL for inline player
-     * Uses relative URLs - Vue dev proxy forwards /episodes to backend
-     */
-    sotVideoUrl() {
-      const backendUrl = '';
-
-      // First check cue data for MediaURL (skip stale blob: URLs)
-      if (this.cueData?.mediaUrl && !this.cueData.mediaUrl.startsWith('blob:')) {
-        // If already an absolute URL, return as-is
-        if (this.cueData.mediaUrl.startsWith('http')) {
-          return this.cueData.mediaUrl;
-        }
-        // If starts with /episodes, use as relative URL
-        if (this.cueData.mediaUrl.startsWith('/episodes')) {
-          return this.cueData.mediaUrl;
-        }
-        // Otherwise, construct full path
-        return `/episodes/${this.cueData.mediaUrl}`;
-      }
-
-      // Fall back to job status final video path
-      if (this.jobStatus?.final_video_path) {
-        const path = this.jobStatus.final_video_path;
-        if (path.startsWith('http')) {
-          return path;
-        }
-        if (path.startsWith('/episodes')) {
-          return `${backendUrl}${path}`;
-        }
-        return `${backendUrl}/episodes/${path}`;
-      }
-
-      return '';
-    },
-
-    /**
-     * Get FSQ thumbnail URL - use mediaUrl from cue data
-     */
-    fsqThumbnailUrl() {
-      if (!this.cueData?.mediaUrl) return '';
-      let url;
-      // If it's already a full URL, use it; otherwise prepend /episodes
-      if (this.cueData.mediaUrl.startsWith('http') || this.cueData.mediaUrl.startsWith('/')) {
-        url = this.cueData.mediaUrl;
-      } else {
-        // Build episode-relative URL
-        const episode = this.$route?.params?.episode || '';
-        url = `/episodes/${episode}/assets/quotes/${this.cueData.mediaUrl}`;
-      }
-      // Add cache buster to force reload after regeneration
-      if (this.fsqCacheBuster) {
-        url += `?t=${this.fsqCacheBuster}`;
-      }
+/**
+ * Get all SOT thumbnail options (array of URLs)
+ * Uses relative URLs - Vue dev proxy forwards /episodes to backend
+ */
+const sotThumbnailOptions = computed(() => {
+  // Helper function to normalize URL path
+  const makeAbsoluteUrl = (url) => {
+    if (url.startsWith('http')) {
       return url;
-    },
+    }
+    if (url.startsWith('/episodes')) {
+      return url;
+    }
+    return `/episodes/${url}`;
+  };
 
-    /**
-     * Get GFX image URL from cue data
-     */
-    gfxActiveListItems() {
-      const raw = this.cueData?.listItems || this.cueData?.rawData?.listItems;
-      if (!raw) return [];
-      try {
-        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        return Array.isArray(parsed) ? parsed.filter(item => item && item.trim()) : [];
-      } catch (e) {
-        return [];
+  // First check cue data for ThumbnailOptions (array from processing)
+  if (props.cueData?.thumbnailOptions && Array.isArray(props.cueData.thumbnailOptions)) {
+    return props.cueData.thumbnailOptions.map(makeAbsoluteUrl);
+  }
+
+  // Check job status for thumbnail_candidates (from database)
+  if (jobStatus.value?.thumbnail_candidates && Array.isArray(jobStatus.value.thumbnail_candidates)) {
+    // Use final_thumbnail_path to get correct directory (thumbnails, not video)
+    const thumbnailPath = jobStatus.value.final_thumbnail_path || '';
+    if (thumbnailPath) {
+      // Extract the base pattern from final_thumbnail_path (e.g., "0257/assets/thumbnails/airplane-girl-thumb-01.jpg")
+      const match = thumbnailPath.match(/^(.+)-thumb-\d+\.(jpg|png)$/);
+      if (match) {
+        const basePath = match[1];  // "0257/assets/thumbnails/airplane-girl"
+        const ext = match[2];  // preserve original extension
+        return jobStatus.value.thumbnail_candidates.map((_, i) => {
+          return `/episodes/${basePath}-thumb-${String(i + 1).padStart(2, '0')}.${ext}`;
+        });
       }
-    },
+    }
+    // Fallback: try to build from video path but use thumbnails directory
+    const videoPath = jobStatus.value.final_video_path?.replace(/\.mp4$/, '') || '';
+    if (videoPath) {
+      // Replace /video/ with /thumbnails/ in the path
+      const thumbnailDir = videoPath.replace('/video/', '/thumbnails/');
+      return jobStatus.value.thumbnail_candidates.map((_, i) => {
+        return `/episodes/${thumbnailDir}-thumb-${String(i + 1).padStart(2, '0')}.jpg`;
+      });
+    }
+  }
 
-    hasGfxAsset() {
-      return !!(this.gfxGeneratedUrl || this.cueData?.assetUrl || this.cueData?.mediaUrl);
-    },
+  // Generate options based on single thumbnail URL pattern
+  if (sotThumbnailUrl.value) {
+    const match = sotThumbnailUrl.value.match(/^(.+)-thumb-(\d+)\.(jpg|png)$/);
+    if (match) {
+      const base = match[1];
+      const ext = match[3];  // preserve original extension
+      return Array.from({ length: 15 }, (_, i) => `${base}-thumb-${String(i + 1).padStart(2, '0')}.${ext}`);
+    }
+  }
 
-    xpostData() {
-      const rd = this.cueData?.rawData || this.cueData || {};
+  // Single thumbnail fallback
+  if (sotThumbnailUrl.value) {
+    return [sotThumbnailUrl.value];
+  }
+
+  return [];
+});
+
+/**
+ * Get current thumbnail URL based on selected index
+ */
+const currentSotThumbnailUrl = computed(() => {
+  const options = sotThumbnailOptions.value;
+  if (options.length === 0) return '';
+
+  // Ensure index is within bounds
+  const index = Math.min(Math.max(0, currentThumbnailIndex.value), options.length - 1);
+  return options[index] || options[0];
+});
+
+/**
+ * Get sharpness score for current thumbnail from thumbnail_data
+ */
+const currentThumbnailSharpness = computed(() => {
+  if (!jobStatus.value?.thumbnail_data || !Array.isArray(jobStatus.value.thumbnail_data)) {
+    return null;
+  }
+
+  // Find thumbnail data for current index (1-based in data)
+  const thumbData = jobStatus.value.thumbnail_data.find(
+    t => t.index === currentThumbnailIndex.value + 1
+  );
+
+  return thumbData?.sharpness || null;
+});
+
+/**
+ * Check if job is completed (status from API)
+ */
+const isJobCompleted = computed(() => {
+  return jobStatus.value?.status === 'completed';
+});
+
+/**
+ * Display duration - prioritizes jobStatus data over stale cueData placeholders
+ * Treats "calculating", "processing", "queued", "pending" as null values
+ */
+const displayDuration = computed(() => {
+  const stalePlaceholders = ['calculating', 'processing', 'queued', 'pending', ''];
+
+  // If job is completed, prefer jobStatus data
+  if (isJobCompleted.value) {
+    // Try post_analysis duration first
+    if (jobStatus.value?.post_analysis?.duration) {
+      return jobStatus.value.post_analysis.duration;
+    }
+    // Try video_specs duration
+    if (jobStatus.value?.video_specs?.duration) {
+      return jobStatus.value.video_specs.duration;
+    }
+  }
+
+  // Check cueData, but filter out placeholder values
+  const cueDuration = props.cueData?.duration?.toLowerCase?.() || props.cueData?.duration;
+  if (cueDuration && !stalePlaceholders.includes(cueDuration?.toLowerCase?.())) {
+    return props.cueData.duration;
+  }
+
+  // Fallback to jobStatus even if not completed
+  if (jobStatus.value?.post_analysis?.duration) {
+    return jobStatus.value.post_analysis.duration;
+  }
+  if (jobStatus.value?.video_specs?.duration) {
+    return jobStatus.value.video_specs.duration;
+  }
+
+  return null;
+});
+
+/**
+ * Display video path - prioritizes jobStatus data over stale cueData placeholders
+ */
+const displayVideoPath = computed(() => {
+  const stalePlaceholders = ['processing', 'queued', 'pending', ''];
+
+  // If job is completed, prefer jobStatus data
+  if (isJobCompleted.value && jobStatus.value?.final_video_path) {
+    return jobStatus.value.final_video_path;
+  }
+
+  // Check cueData, but filter out placeholder values
+  const cueMediaUrl = props.cueData?.mediaUrl?.toLowerCase?.() || props.cueData?.mediaUrl;
+  if (cueMediaUrl && !stalePlaceholders.includes(cueMediaUrl?.toLowerCase?.())) {
+    return props.cueData.mediaUrl;
+  }
+
+  // Fallback to jobStatus
+  if (jobStatus.value?.final_video_path) {
+    return jobStatus.value.final_video_path;
+  }
+
+  return null;
+});
+
+/**
+ * Display processing status - prioritizes actual job status over stale cueData
+ */
+const displayProcessingStatus = computed(() => {
+  // If we have live job status, use that
+  if (jobStatus.value?.status) {
+    const status = jobStatus.value.status;
+    if (status === 'completed') return 'Completed';
+    if (status === 'failed') {
+      const errMsg = jobStatus.value.error_message || '';
+      if (errMsg) {
+        const cleaned = errMsg.replace(/^Unexpected error:\s*/i, '');
+        return `FAILED: ${cleaned}`;
+      }
+      return 'Failed';
+    }
+    if (status === 'processing') return jobStatus.value.current_phase || 'Processing...';
+    if (status === 'queued') return 'Queued';
+    return status;
+  }
+
+  // Fallback to cueData
+  if (props.cueData?.processingStatus) {
+    return props.cueData.processingStatus;
+  }
+
+  return null;
+});
+
+/**
+ * Get color for sharpness indicator based on value
+ */
+const sharpnessColor = computed(() => {
+  const sharpness = currentThumbnailSharpness.value;
+  if (!sharpness) return 'grey';
+
+  if (sharpness < 100) return '#D32F2F';  // Red - blurry
+  if (sharpness < 150) return '#FF9800';  // Orange - below average
+  if (sharpness < 200) return '#FFC107';  // Yellow - average
+  return '#4CAF50';  // Green - sharp
+});
+
+/**
+ * Get SOT thumbnail URL from cue data or job status (base/primary thumbnail)
+ * Uses relative URLs - Vue dev proxy forwards /episodes to backend
+ */
+const sotThumbnailUrl = computed(() => {
+  const backendUrl = '';
+
+  // First check cue data for ThumbnailURL (skip stale blob: URLs)
+  if (props.cueData?.thumbnailUrl && !props.cueData.thumbnailUrl.startsWith('blob:')) {
+    // If already an absolute URL, return as-is
+    if (props.cueData.thumbnailUrl.startsWith('http')) {
+      return props.cueData.thumbnailUrl;
+    }
+    // If starts with /episodes, use as relative URL
+    if (props.cueData.thumbnailUrl.startsWith('/episodes')) {
+      return props.cueData.thumbnailUrl;
+    }
+    // Otherwise, construct full path
+    return `/episodes/${props.cueData.thumbnailUrl}`;
+  }
+
+  // Fall back to job status thumbnail path
+  if (jobStatus.value?.final_thumbnail_path) {
+    const path = jobStatus.value.final_thumbnail_path;
+    if (path.startsWith('http')) {
+      return path;
+    }
+    if (path.startsWith('/episodes')) {
+      return `${backendUrl}${path}`;
+    }
+    return `${backendUrl}/episodes/${path}`;
+  }
+
+  return '';
+});
+
+/**
+ * Get SOT transcription from cue data or job status
+ */
+const sotTranscription = computed(() => {
+  // First check cue data (from parsed cue block)
+  if (props.cueData?.transcription) {
+    return props.cueData.transcription;
+  }
+  // Fall back to job status transcription
+  if (jobStatus.value?.transcription) {
+    return jobStatus.value.transcription;
+  }
+  return '';
+});
+
+/**
+ * Get SOT outcue from cue data (last 5 words of transcription with "..." prefix)
+ */
+const sotOutcue = computed(() => {
+  // Check cue data for outcue field
+  if (props.cueData?.outcue) {
+    return props.cueData.outcue;
+  }
+  return '';
+});
+
+/**
+ * Get SOT video URL for inline player
+ * Uses relative URLs - Vue dev proxy forwards /episodes to backend
+ */
+const sotVideoUrl = computed(() => {
+  const backendUrl = '';
+
+  // First check cue data for MediaURL (skip stale blob: URLs)
+  if (props.cueData?.mediaUrl && !props.cueData.mediaUrl.startsWith('blob:')) {
+    // If already an absolute URL, return as-is
+    if (props.cueData.mediaUrl.startsWith('http')) {
+      return props.cueData.mediaUrl;
+    }
+    // If starts with /episodes, use as relative URL
+    if (props.cueData.mediaUrl.startsWith('/episodes')) {
+      return props.cueData.mediaUrl;
+    }
+    // Otherwise, construct full path
+    return `/episodes/${props.cueData.mediaUrl}`;
+  }
+
+  // Fall back to job status final video path
+  if (jobStatus.value?.final_video_path) {
+    const path = jobStatus.value.final_video_path;
+    if (path.startsWith('http')) {
+      return path;
+    }
+    if (path.startsWith('/episodes')) {
+      return `${backendUrl}${path}`;
+    }
+    return `${backendUrl}/episodes/${path}`;
+  }
+
+  return '';
+});
+
+/**
+ * Get FSQ thumbnail URL - use mediaUrl from cue data
+ */
+const fsqThumbnailUrl = computed(() => {
+  if (!props.cueData?.mediaUrl) return '';
+  let url;
+  // If it's already a full URL, use it; otherwise prepend /episodes
+  if (props.cueData.mediaUrl.startsWith('http') || props.cueData.mediaUrl.startsWith('/')) {
+    url = props.cueData.mediaUrl;
+  } else {
+    // Build episode-relative URL
+    const episode = route?.params?.episode || '';
+    url = `/episodes/${episode}/assets/quotes/${props.cueData.mediaUrl}`;
+  }
+  // Add cache buster to force reload after regeneration
+  if (fsqCacheBuster.value) {
+    url += `?t=${fsqCacheBuster.value}`;
+  }
+  return url;
+});
+
+/**
+ * Get GFX image URL from cue data
+ */
+const gfxActiveListItems = computed(() => {
+  const raw = props.cueData?.listItems || props.cueData?.rawData?.listItems;
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? parsed.filter(item => item && item.trim()) : [];
+  } catch (e) { // eslint-disable-line no-unused-vars
+    return [];
+  }
+});
+
+const hasGfxAsset = computed(() => {
+  return !!(gfxGeneratedUrl.value || props.cueData?.assetUrl || props.cueData?.mediaUrl);
+});
+
+const xpostData = computed(() => {
+  const rd = props.cueData?.rawData || props.cueData || {};
+  return {
+    name: rd.authorName || '',
+    username: rd.authorHandle || '',
+    profilePhoto: rd.authorAvatar || '',
+    verified: rd.authorVerified === 'true' || rd.authorVerified === true,
+    text: (rd.tweetText || '').replace(/\\n/g, '\n'),
+    datetime: rd.publishedTime || '',
+    views: parseInt(rd.views) || 0,
+    likes: parseInt(rd.likes) || 0,
+    retweets: parseInt(rd.retweets) || 0,
+    replies: parseInt(rd.replies) || 0,
+    quotes: parseInt(rd.quotes) || 0,
+    bookmarks: parseInt(rd.bookmarks) || 0,
+    sourceUrl: rd.sourceUrl || rd.sourceURL || '',
+  };
+});
+
+const gfxImageUrl = computed(() => { // eslint-disable-line no-unused-vars
+  const url = gfxGeneratedUrl.value || props.cueData?.assetUrl || props.cueData?.mediaUrl;
+  if (!url) return '';
+  if (url.startsWith('http') || url.startsWith('/')) {
+    return url;
+  }
+  const episode = props.currentEpisode || route?.params?.episode || '';
+  return `/episodes/${episode}/assets/graphics/${url}`;
+});
+
+/**
+ * Get FSQ generation status text for display
+ */
+const fsqStatusText = computed(() => { // eslint-disable-line no-unused-vars
+  switch (fsqGenerationStatus.value) {
+    case 'queued': return 'Queued';
+    case 'generating': return 'Generating...';
+    case 'completed': return 'Complete';
+    case 'failed': return 'Failed';
+    default: return '';
+  }
+});
+
+/**
+ * Get FSQ status chip color
+ */
+const fsqStatusChipColor = computed(() => { // eslint-disable-line no-unused-vars
+  switch (fsqGenerationStatus.value) {
+    case 'queued': return 'info';
+    case 'generating': return 'warning';
+    case 'completed': return 'success';
+    case 'failed': return 'error';
+    default: return 'grey';
+  }
+});
+
+/**
+ * Get FSQ status chip icon
+ */
+const fsqStatusChipIcon = computed(() => { // eslint-disable-line no-unused-vars
+  switch (fsqGenerationStatus.value) {
+    case 'queued': return 'mdi-clock-outline';
+    case 'generating': return 'mdi-loading';
+    case 'completed': return 'mdi-check-circle';
+    case 'failed': return 'mdi-alert-circle';
+    default: return 'mdi-help-circle';
+  }
+});
+
+/**
+ * Get GFX generation status text for display
+ */
+const gfxStatusText = computed(() => { // eslint-disable-line no-unused-vars
+  const map = { queued: 'Queued', generating: 'Generating...', completed: 'Complete', failed: 'Failed' }
+  return map[gfxGenerationStatus.value] || ''
+});
+
+/**
+ * Get GFX status chip color
+ */
+const gfxStatusChipColor = computed(() => { // eslint-disable-line no-unused-vars
+  const map = { queued: 'blue-grey', generating: 'amber', completed: 'success', failed: 'error' }
+  return map[gfxGenerationStatus.value] || 'grey'
+});
+
+/**
+ * Get GFX status chip icon
+ */
+const gfxStatusChipIcon = computed(() => { // eslint-disable-line no-unused-vars
+  const map = { queued: 'mdi-clock-outline', generating: 'mdi-cog', completed: 'mdi-check-circle', failed: 'mdi-alert-circle' }
+  return map[gfxGenerationStatus.value] || 'mdi-help-circle'
+});
+
+/**
+ * Get motion background style for FSQ thumbnail container
+ * Uses fsqBackgroundVideo from settings
+ */
+const thumbnailBackgroundStyle = computed(() => { // eslint-disable-line no-unused-vars
+  // Fallback gradient for when video isn't loaded
+  return {
+    background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+    backgroundSize: 'cover'
+  };
+});
+
+/**
+ * Get FSQ background video URL from settings or use default
+ */
+const fsqBackgroundVideoUrl = computed(() => {
+  // Try to get from localStorage settings
+  try {
+    const settings = JSON.parse(localStorage.getItem('fsqSettings') || '{}');
+    if (settings.fsq_background_video) {
+      return settings.fsq_background_video;
+    }
+  } catch (e) {
+    console.warn('Failed to parse FSQ settings:', e);
+  }
+  // Default background video path
+  return '/assets/preview-background.mp4';
+});
+
+const showReprocessButton = computed(() => {
+  const cueType = props.cueData.type?.toUpperCase();
+  const isSOTorVO = cueType === 'SOT' || cueType === 'VO';
+  // Check both assetId (camelCase) and assetid (lowercase from parser)
+  const hasAssetId = !!(props.cueData.assetId || props.cueData.assetid);
+  const actualAssetId = props.cueData.assetId || props.cueData.assetid;
+  console.log(`🔍 PlaceholderCueCard: type=${props.cueData.type}, assetId=${props.cueData.assetId}, assetid=${props.cueData.assetid}, actualAssetId=${actualAssetId}, showButton=${isSOTorVO && hasAssetId}`);
+  return isSOTorVO && hasAssetId;
+});
+
+const showJobStatus = computed(() => {
+  // Show status for SOT/VO cues that have an AssetID (case-insensitive check)
+  const cueType = props.cueData.type?.toUpperCase();
+  const isSOTorVO = cueType === 'SOT' || cueType === 'VO';
+  return isSOTorVO && !!(props.cueData.assetId || props.cueData.assetid);
+});
+
+const jobStatusText = computed(() => {
+  if (!jobStatus.value) return '';
+
+  const status = jobStatus.value.status;
+  const phase = jobStatus.value.current_phase;
+
+  if (status === 'processing' && phase) {
+    const phaseNames = {
+      'phase1': 'Analyzing',
+      'phase2': 'Processing Clips',
+      'phase3': 'Finalizing'
+    };
+    return phaseNames[phase] || phase;
+  }
+  if (status === 'failed') {
+    const errMsg = jobStatus.value.error_message || '';
+    if (errMsg) {
+      const cleaned = errMsg.replace(/^Unexpected error:\s*/i, '');
+      return `FAILED: ${cleaned}`;
+    }
+    return 'FAILED';
+  }
+  if (status === 'not_found') return '';
+  return status;
+});
+
+const jobStatusColor = computed(() => {
+  if (!jobStatus.value) return 'grey';
+
+  const status = jobStatus.value.status;
+  const phase = jobStatus.value.current_phase;
+
+  // Different colors for different phases
+  if (status === 'processing' && phase) {
+    const phaseColors = {
+      'phase1': 'light-blue',  // Analyzing/trimming
+      'phase2': 'indigo',       // Processing clips
+      'phase3': 'deep-purple'   // Finalizing
+    };
+    return phaseColors[phase] || 'blue';
+  }
+
+  const statusColors = {
+    'queued': 'orange',
+    'processing': 'blue',
+    'completed': 'green',
+    'failed': 'red',
+    'not_found': 'grey'
+  };
+
+  return statusColors[status] || 'grey';
+});
+
+const cueTypeColor = computed(() => {
+  if (!props.cueData.type) return 'grey';
+  const colorName = getColorValue(props.cueData.type.toLowerCase());
+  return resolveVuetifyColor(colorName);
+});
+
+const cueTypeStyle = computed(() => { // eslint-disable-line no-unused-vars
+  const backgroundColor = cueTypeColor.value;
+  return {
+    backgroundColor: backgroundColor,
+    color: 'white'
+  };
+});
+
+const headerStyle = computed(() => {
+  const backgroundColor = cueTypeColor.value;
+  return {
+    backgroundColor: backgroundColor,
+    color: 'white'
+  };
+});
+
+const badgeStyle = computed(() => {
+  const baseColor = cueTypeColor.value;
+  // Only lighten if we have a valid hex color string
+  const lighterColor = (typeof baseColor === 'string' && baseColor.startsWith('#'))
+    ? lightenColor(baseColor, 20)
+    : baseColor;
+  return {
+    backgroundColor: lighterColor || '#666',
+    color: 'white'
+  };
+});
+
+const footerStyle = computed(() => {
+  const backgroundColor = cueTypeColor.value;
+  return {
+    backgroundColor: backgroundColor,
+    color: 'white'
+  };
+});
+
+/**
+ * Get CSS class for analysis state
+ */
+const getAnalysisClass = computed(() => {
+  const state = props.cueData?.analysisState;
+  if (state === 'analyzing') return 'cue-analyzing';
+  if (state === 'needs_review') return 'cue-needs-review';
+  return '';
+});
+
+/**
+ * Get card style including analysis state border
+ */
+const getCardStyle = computed(() => {
+  const state = props.cueData?.analysisState;
+
+  // Check for processing job status
+  if (processingJob.value) {
+    if (processingJob.value.status === 'failed') {
+      // Red 7px border for failed processing
       return {
-        name: rd.authorName || '',
-        username: rd.authorHandle || '',
-        profilePhoto: rd.authorAvatar || '',
-        verified: rd.authorVerified === 'true' || rd.authorVerified === true,
-        text: (rd.tweetText || '').replace(/\\n/g, '\n'),
-        datetime: rd.publishedTime || '',
-        views: parseInt(rd.views) || 0,
-        likes: parseInt(rd.likes) || 0,
-        retweets: parseInt(rd.retweets) || 0,
-        replies: parseInt(rd.replies) || 0,
-        quotes: parseInt(rd.quotes) || 0,
-        bookmarks: parseInt(rd.bookmarks) || 0,
-        sourceUrl: rd.sourceUrl || rd.sourceURL || '',
-      };
-    },
-
-    gfxImageUrl() {
-      const url = this.gfxGeneratedUrl || this.cueData?.assetUrl || this.cueData?.mediaUrl;
-      if (!url) return '';
-      if (url.startsWith('http') || url.startsWith('/')) {
-        return url;
-      }
-      const episode = this.currentEpisode || this.$route?.params?.episode || '';
-      return `/episodes/${episode}/assets/graphics/${url}`;
-    },
-
-    /**
-     * Get FSQ generation status text for display
-     */
-    fsqStatusText() {
-      switch (this.fsqGenerationStatus) {
-        case 'queued': return 'Queued';
-        case 'generating': return 'Generating...';
-        case 'completed': return 'Complete';
-        case 'failed': return 'Failed';
-        default: return '';
-      }
-    },
-
-    /**
-     * Get FSQ status chip color
-     */
-    fsqStatusChipColor() {
-      switch (this.fsqGenerationStatus) {
-        case 'queued': return 'info';
-        case 'generating': return 'warning';
-        case 'completed': return 'success';
-        case 'failed': return 'error';
-        default: return 'grey';
-      }
-    },
-
-    /**
-     * Get FSQ status chip icon
-     */
-    fsqStatusChipIcon() {
-      switch (this.fsqGenerationStatus) {
-        case 'queued': return 'mdi-clock-outline';
-        case 'generating': return 'mdi-loading';
-        case 'completed': return 'mdi-check-circle';
-        case 'failed': return 'mdi-alert-circle';
-        default: return 'mdi-help-circle';
-      }
-    },
-
-    /**
-     * Get GFX generation status text for display
-     */
-    gfxStatusText() {
-      const map = { queued: 'Queued', generating: 'Generating...', completed: 'Complete', failed: 'Failed' }
-      return map[this.gfxGenerationStatus] || ''
-    },
-
-    /**
-     * Get GFX status chip color
-     */
-    gfxStatusChipColor() {
-      const map = { queued: 'blue-grey', generating: 'amber', completed: 'success', failed: 'error' }
-      return map[this.gfxGenerationStatus] || 'grey'
-    },
-
-    /**
-     * Get GFX status chip icon
-     */
-    gfxStatusChipIcon() {
-      const map = { queued: 'mdi-clock-outline', generating: 'mdi-cog', completed: 'mdi-check-circle', failed: 'mdi-alert-circle' }
-      return map[this.gfxGenerationStatus] || 'mdi-help-circle'
-    },
-
-    /**
-     * Get FSQ preview container style (alignment)
-     */
-    /**
-     * Get motion background style for FSQ thumbnail container
-     * Uses fsqBackgroundVideo from settings
-     */
-    thumbnailBackgroundStyle() {
-      // Fallback gradient for when video isn't loaded
-      return {
-        background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-        backgroundSize: 'cover'
-      };
-    },
-
-    /**
-     * Get FSQ background video URL from settings or use default
-     */
-    fsqBackgroundVideoUrl() {
-      // Try to get from localStorage settings
-      try {
-        const settings = JSON.parse(localStorage.getItem('fsqSettings') || '{}');
-        if (settings.fsq_background_video) {
-          return settings.fsq_background_video;
-        }
-      } catch (e) {
-        console.warn('Failed to parse FSQ settings:', e);
-      }
-      // Default background video path
-      return '/assets/preview-background.mp4';
-    },
-
-    showReprocessButton() {
-      const cueType = this.cueData.type?.toUpperCase();
-      const isSOTorVO = cueType === 'SOT' || cueType === 'VO';
-      // Check both assetId (camelCase) and assetid (lowercase from parser)
-      const hasAssetId = !!(this.cueData.assetId || this.cueData.assetid);
-      const actualAssetId = this.cueData.assetId || this.cueData.assetid;
-      console.log(`🔍 PlaceholderCueCard: type=${this.cueData.type}, assetId=${this.cueData.assetId}, assetid=${this.cueData.assetid}, actualAssetId=${actualAssetId}, showButton=${isSOTorVO && hasAssetId}`);
-      return isSOTorVO && hasAssetId;
-    },
-
-    showJobStatus() {
-      // Show status for SOT/VO cues that have an AssetID (case-insensitive check)
-      const cueType = this.cueData.type?.toUpperCase();
-      const isSOTorVO = cueType === 'SOT' || cueType === 'VO';
-      return isSOTorVO && !!(this.cueData.assetId || this.cueData.assetid);
-    },
-
-    jobStatusText() {
-      if (!this.jobStatus) return '';
-
-      const status = this.jobStatus.status;
-      const phase = this.jobStatus.current_phase;
-
-      if (status === 'processing' && phase) {
-        const phaseNames = {
-          'phase1': 'Analyzing',
-          'phase2': 'Processing Clips',
-          'phase3': 'Finalizing'
-        };
-        return phaseNames[phase] || phase;
-      }
-      return status;
-    },
-
-    jobStatusColor() {
-      if (!this.jobStatus) return 'grey';
-
-      const status = this.jobStatus.status;
-      const phase = this.jobStatus.current_phase;
-
-      // Different colors for different phases
-      if (status === 'processing' && phase) {
-        const phaseColors = {
-          'phase1': 'light-blue',  // Analyzing/trimming
-          'phase2': 'indigo',       // Processing clips
-          'phase3': 'deep-purple'   // Finalizing
-        };
-        return phaseColors[phase] || 'blue';
-      }
-
-      const statusColors = {
-        'queued': 'orange',
-        'processing': 'blue',
-        'completed': 'green',
-        'failed': 'red',
-        'not_found': 'grey'
-      };
-
-      return statusColors[status] || 'grey';
-    },
-
-    cueTypeColor() {
-      if (!this.cueData.type) return 'grey';
-      const colorName = getColorValue(this.cueData.type.toLowerCase());
-      return resolveVuetifyColor(colorName);
-    },
-
-    cueTypeStyle() {
-      const backgroundColor = this.cueTypeColor;
-      return {
-        backgroundColor: backgroundColor,
-        color: 'white'
-      };
-    },
-
-    headerStyle() {
-      const backgroundColor = this.cueTypeColor;
-      return {
-        backgroundColor: backgroundColor,
-        color: 'white'
-      };
-    },
-
-    badgeStyle() {
-      const baseColor = this.cueTypeColor;
-      // Only lighten if we have a valid hex color string
-      const lighterColor = (typeof baseColor === 'string' && baseColor.startsWith('#'))
-        ? this.lightenColor(baseColor, 20)
-        : baseColor;
-      return {
-        backgroundColor: lighterColor || '#666',
-        color: 'white'
-      };
-    },
-
-    footerStyle() {
-      const backgroundColor = this.cueTypeColor;
-      return {
-        backgroundColor: backgroundColor,
-        color: 'white'
-      };
-    },
-
-    /**
-     * Get CSS class for analysis state
-     */
-    getAnalysisClass() {
-      const state = this.cueData?.analysisState;
-      if (state === 'analyzing') return 'cue-analyzing';
-      if (state === 'needs_review') return 'cue-needs-review';
-      return '';
-    },
-
-    /**
-     * Get card style including analysis state border
-     */
-    getCardStyle() {
-      const state = this.cueData?.analysisState;
-
-      // Check for processing job status
-      if (this.processingJob) {
-        if (this.processingJob.status === 'failed') {
-          // Red 7px border for failed processing
-          return {
-            borderColor: '#D32F2F',
-            borderWidth: '7px',
-            borderStyle: 'solid'
-          };
-        } else if (this.processingJob.status === 'processing') {
-          // Blue 7px border while processing
-          return {
-            borderColor: '#2196F3',
-            borderWidth: '7px',
-            borderStyle: 'solid'
-          };
-        }
-      }
-
-      if (state === 'analyzing') {
-        // Purple 7px border while analyzing
-        return {
-          borderColor: '#9C27B0',
-          borderWidth: '7px',
-          borderStyle: 'solid'
-        };
-      } else if (state === 'needs_review') {
-        // Red 7px border when needs review
-        return {
-          borderColor: '#D32F2F',
-          borderWidth: '7px',
-          borderStyle: 'solid'
-        };
-      }
-
-      // Default: use darker version of cue type color with 3px border
-      return {
-        borderColor: this.darkenColor(this.cueTypeColor, 0.3),
-        borderWidth: '3px',
+        borderColor: '#D32F2F',
+        borderWidth: '7px',
         borderStyle: 'solid'
       };
-    },
-
-    /**
-     * Get processing job for this cue's asset
-     */
-    processingJob() {
-      if (!this.cueData?.assetId) return null;
-      return this.getJobByAssetId(this.cueData.assetId);
-    },
-
-    /**
-     * Check if this cue is currently processing
-     */
-    isProcessing() {
-      return this.processingJob?.status === 'processing';
-    },
-
-    /**
-     * Check if this cue's processing failed
-     */
-    isFailed() {
-      return this.processingJob?.status === 'failed';
-    },
-
-    /**
-     * Get processing status message
-     */
-    processingStatusMessage() {
-      if (!this.processingJob) return null;
-
-      const job = this.processingJob;
-      if (job.status === 'processing') {
-        return job.phase_message || job.current_phase || 'Processing...';
-      } else if (job.status === 'failed') {
-        return 'Processing failed';
-      }
-      return null;
+    } else if (processingJob.value.status === 'processing') {
+      // Blue 7px border while processing
+      return {
+        borderColor: '#2196F3',
+        borderWidth: '7px',
+        borderStyle: 'solid'
+      };
     }
-  },
-  methods: {
-    /**
-     * Forward update-meta events from child cue content components
-     */
-    handleChildUpdateMeta(payload) {
-      // Mark FSQ as dirty when FSQ params change (so Generate PNG button re-enables)
-      if (this.cueData.type === 'FSQ') {
-        this.fsqDirty = true;
-      }
-      this.$emit('update-meta', payload);
-    },
+  }
 
-    darkenColor(color, amount) {
-      if (!color || color === 'grey') return '#555';
-      // Handle hex colors
-      let hex = color.replace('#', '');
-      if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
-      if (hex.length !== 6) return color;
-      const r = Math.max(0, Math.round(parseInt(hex.substring(0, 2), 16) * (1 - amount)));
-      const g = Math.max(0, Math.round(parseInt(hex.substring(2, 4), 16) * (1 - amount)));
-      const b = Math.max(0, Math.round(parseInt(hex.substring(4, 6), 16) * (1 - amount)));
-      return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-    },
+  if (state === 'analyzing') {
+    // Purple 7px border while analyzing
+    return {
+      borderColor: '#9C27B0',
+      borderWidth: '7px',
+      borderStyle: 'solid'
+    };
+  } else if (state === 'needs_review') {
+    // Red 7px border when needs review
+    return {
+      borderColor: '#D32F2F',
+      borderWidth: '7px',
+      borderStyle: 'solid'
+    };
+  }
 
-    /**
-     * Navigate to previous thumbnail
-     */
-    prevThumbnail() {
-      if (this.currentThumbnailIndex > 0) {
-        this.currentThumbnailIndex--;
-        this.emitSelectedThumbnail();
-      }
-    },
+  // Default: use darker version of cue type color with 3px border
+  return {
+    borderColor: darkenColor(cueTypeColor.value, 0.3),
+    borderWidth: '3px',
+    borderStyle: 'solid'
+  };
+});
 
-    /**
-     * Navigate to next thumbnail
-     */
-    nextThumbnail() {
-      if (this.currentThumbnailIndex < this.sotThumbnailOptions.length - 1) {
-        this.currentThumbnailIndex++;
-        this.emitSelectedThumbnail();
-      }
-    },
+/**
+ * Get processing job for this cue's asset
+ */
+const processingJob = computed(() => {
+  if (!props.cueData?.assetId) return null;
+  return getJobByAssetId(props.cueData.assetId);
+});
 
-    /**
-     * Emit selected thumbnail to parent for saving to cue block
-     */
-    emitSelectedThumbnail() {
-      const selectedUrl = this.currentSotThumbnailUrl;
-      console.log(`🖼️ Selected thumbnail ${this.currentThumbnailIndex + 1}: ${selectedUrl}`);
-      this.$emit('update-meta', {
-        assetId: this.cueData.assetId || this.cueData.assetid,
-        field: 'thumbnailUrl',
-        value: selectedUrl
-      });
-    },
+/**
+ * Check if this cue is currently processing
+ */
+const isProcessing = computed(() => {
+  return processingJob.value?.status === 'processing';
+});
 
-    /**
-     * Handle SOT thumbnail error
-     */
-    handleSotThumbnailError() {
-      console.warn('SOT thumbnail failed to load:', this.currentSotThumbnailUrl);
-    },
+/**
+ * Check if this cue's processing failed
+ */
+const isFailed = computed(() => {
+  return processingJob.value?.status === 'failed';
+});
 
-    /**
-     * Toggle inline video player visibility
-     */
-    toggleInlinePlayer() {
-      if (this.sotVideoUrl) {
-        // If closing, pause video first to prevent race condition
-        if (this.showInlinePlayer) {
-          const video = this.$refs.inlineVideoPlayer;
-          if (video) {
-            video.pause();
-            video.currentTime = 0;
-          }
-        }
-        this.showInlinePlayer = !this.showInlinePlayer;
-        // Auto-play when opening with proper promise handling
-        if (this.showInlinePlayer) {
-          this.$nextTick(() => {
-            const video = this.$refs.inlineVideoPlayer;
-            if (video) {
-              const playPromise = video.play();
-              if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                  console.log('Inline video auto-play prevented:', error.message);
-                });
-              }
-            }
-          });
-        }
-      } else {
-        // Fallback: open in new tab if no video URL available
-        this.openVideoPlayer();
-      }
-    },
+/**
+ * Get processing status message
+ */
+const processingStatusMessage = computed(() => {
+  if (!processingJob.value) return null;
 
-    /**
-     * Handle video metadata loaded
-     */
-    onVideoLoaded() {
-      console.log('Inline video loaded:', this.sotVideoUrl);
-    },
+  const job = processingJob.value;
+  if (job.status === 'processing') {
+    return job.phase_message || job.current_phase || 'Processing...';
+  } else if (job.status === 'failed') {
+    const errMsg = job.error_message || job.error || '';
+    if (errMsg) {
+      // Extract the meaningful part after "Unexpected error: "
+      const cleaned = errMsg.replace(/^Unexpected error:\s*/i, '');
+      return `FAILED: ${cleaned}`;
+    }
+    return 'Processing failed';
+  } else if (job.status === 'not_found') {
+    return null;
+  }
+  return null;
+});
 
-    /**
-     * Open video player for SOT (in new tab)
-     * Uses relative URLs - Vue dev proxy forwards /episodes to backend
-     */
-    openVideoPlayer() {
-      const backendUrl = '';
-      const videoPath = this.cueData.mediaUrl || this.jobStatus?.final_video_path;
-      if (videoPath) {
-        let fullPath;
-        if (videoPath.startsWith('http')) {
-          fullPath = videoPath;
-        } else if (videoPath.startsWith('/episodes')) {
-          fullPath = `${backendUrl}${videoPath}`;
-        } else {
-          fullPath = `${backendUrl}/episodes/${videoPath}`;
-        }
-        window.open(fullPath, '_blank');
-      }
-    },
+// Methods
+/**
+ * Forward update-meta events from child cue content components
+ */
+function handleChildUpdateMeta(payload) {
+  // Mark FSQ as dirty when FSQ params change (so Generate PNG button re-enables)
+  if (props.cueData.type === 'FSQ') {
+    fsqDirty.value = true;
+  }
+  emit('update-meta', payload);
+}
 
-    /**
-     * Format media path for display (truncate long paths)
-     */
-    formatMediaPath(path) {
-      if (!path) return '';
-      // Show just the filename
-      const parts = path.split('/');
-      return parts[parts.length - 1] || path;
-    },
+function darkenColor(color, amount) {
+  if (!color || color === 'grey') return '#555';
+  // Handle hex colors
+  let hex = color.replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+  if (hex.length !== 6) return color;
+  const r = Math.max(0, Math.round(parseInt(hex.substring(0, 2), 16) * (1 - amount)));
+  const g = Math.max(0, Math.round(parseInt(hex.substring(2, 4), 16) * (1 - amount)));
+  const b = Math.max(0, Math.round(parseInt(hex.substring(4, 6), 16) * (1 - amount)));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
 
-    /**
-     * Format warning label for display (extract short description)
-     */
-    formatWarningLabel(warning) {
-      if (!warning) return '';
+/**
+ * Navigate to previous thumbnail
+ */
+function prevThumbnail() { // eslint-disable-line no-unused-vars
+  if (currentThumbnailIndex.value > 0) {
+    currentThumbnailIndex.value--;
+    emitSelectedThumbnail();
+  }
+}
 
-      // Extract the type before the colon for display
-      if (warning.includes(':')) {
-        const type = warning.split(':')[0];
-        const typeLabels = {
-          'low_sharpness': 'Blurry',
-          'moderate_blur': 'Low Quality',
-          'unbalanced_audio': 'Audio Issue',
-          'large_file': 'Large File'
-        };
-        return typeLabels[type] || type;
-      }
+/**
+ * Navigate to next thumbnail
+ */
+function nextThumbnail() { // eslint-disable-line no-unused-vars
+  if (currentThumbnailIndex.value < sotThumbnailOptions.value.length - 1) {
+    currentThumbnailIndex.value++;
+    emitSelectedThumbnail();
+  }
+}
 
-      return warning.length > 20 ? warning.substring(0, 20) + '...' : warning;
-    },
+/**
+ * Emit selected thumbnail to parent for saving to cue block
+ */
+function emitSelectedThumbnail() {
+  const selectedUrl = currentSotThumbnailUrl.value;
+  console.log(`🖼️ Selected thumbnail ${currentThumbnailIndex.value + 1}: ${selectedUrl}`);
+  emit('update-meta', {
+    assetId: props.cueData.assetId || props.cueData.assetid,
+    field: 'thumbnailUrl',
+    value: selectedUrl
+  });
+}
 
-    /**
-     * Truncate transcription for preview
-     */
-    truncateTranscription(text) {
-      if (!text) return '';
-      if (text.length <= 100) return text;
-      return text.substring(0, 100) + '...';
-    },
+/**
+ * Handle SOT thumbnail error
+ */
+function handleSotThumbnailError() { // eslint-disable-line no-unused-vars
+  console.warn('SOT thumbnail failed to load:', currentSotThumbnailUrl.value);
+}
 
-    /**
-     * Preload all thumbnail images for faster navigation
-     * Creates Image objects in memory to cache them in the browser
-     */
-    preloadThumbnails() {
-      const options = this.sotThumbnailOptions;
-      if (!options || options.length <= 1) return;
-
-      console.log(`🖼️ Preloading ${options.length} thumbnails for ${this.cueData.slug || 'cue'}`);
-
-      options.forEach((url, index) => {
-        const img = new Image();
-        img.onload = () => {
-          if (index === 0) {
-            console.log(`✅ First thumbnail preloaded: ${url}`);
-          }
-        };
-        img.onerror = () => {
-          console.warn(`⚠️ Failed to preload thumbnail ${index + 1}: ${url}`);
-        };
-        img.src = url;
-      });
-    },
-
-
-    /**
-     * Select quote text for copying
-     */
-    selectQuoteText(event) {
-      const textElement = event.target;
-      if (window.getSelection && document.createRange) {
-        const selection = window.getSelection();
-        const range = document.createRange();
-        range.selectNodeContents(textElement);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-    },
-
-    /**
-     * Handle thumbnail load error
-     */
-    handleThumbnailError() {
-      console.warn('FSQ thumbnail failed to load:', this.cueData.mediaUrl);
-      this.thumbnailError = true;
-    },
-
-    /**
-     * Open FSQ preview modal with video background
-     */
-    openFsqPreviewModal() {
-      console.log('🖼️ Opening FSQ preview modal');
-      this.showFsqPreviewModal = true;
-      // Add ESC key listener
-      this.$nextTick(() => {
-        document.addEventListener('keydown', this.handlePreviewModalEsc);
-      });
-    },
-
-    /**
-     * Close FSQ preview modal
-     */
-    closeFsqPreviewModal() {
-      console.log('🖼️ Closing FSQ preview modal');
-      this.showFsqPreviewModal = false;
-      document.removeEventListener('keydown', this.handlePreviewModalEsc);
-    },
-
-    /**
-     * Open SOT preview modal with video player
-     */
-    openSotPreviewModal() {
-      console.log('🎬 Opening SOT preview modal');
-      this.showSotPreviewModal = true;
-      // Add ESC key listener
-      this.$nextTick(() => {
-        document.addEventListener('keydown', this.handlePreviewModalEsc);
-      });
-    },
-
-    /**
-     * Close SOT preview modal
-     */
-    closeSotPreviewModal() {
-      console.log('🎬 Closing SOT preview modal');
-      // Clear countdown interval if running
-      if (this.countdownInterval) {
-        clearInterval(this.countdownInterval);
-        this.countdownInterval = null;
-      }
-      this.previewCountdown = 0;
-      // Pause video before closing to prevent play/pause race condition
-      const video = this.$refs.sotPreviewVideoRef;
+/**
+ * Toggle inline video player visibility
+ */
+function toggleInlinePlayer() { // eslint-disable-line no-unused-vars
+  if (sotVideoUrl.value) {
+    // If closing, pause video first to prevent race condition
+    if (showInlinePlayer.value) {
+      const video = inlineVideoPlayer.value;
       if (video) {
         video.pause();
         video.currentTime = 0;
       }
-      this.showSotPreviewModal = false;
-      document.removeEventListener('keydown', this.handlePreviewModalEsc);
-    },
-
-    /**
-     * Handle preview video ready - start countdown then auto-play
-     */
-    onPreviewVideoReady() {
-      const video = this.$refs.sotPreviewVideoRef;
-      if (video && this.showSotPreviewModal) {
-        // Start 1.5 second countdown before playing
-        this.previewCountdown = 1.5;
-
-        // Clear any existing interval
-        if (this.countdownInterval) {
-          clearInterval(this.countdownInterval);
-        }
-
-        // Update countdown every 100ms for smooth animation
-        this.countdownInterval = setInterval(() => {
-          this.previewCountdown -= 0.1;
-
-          if (this.previewCountdown <= 0) {
-            this.previewCountdown = 0;
-            clearInterval(this.countdownInterval);
-            this.countdownInterval = null;
-
-            // Now play the video with promise handling
-            const playPromise = video.play();
-            if (playPromise !== undefined) {
-              playPromise.catch(error => {
-                // Auto-play was prevented - this is fine, user can click play
-                console.log('Auto-play prevented:', error.message);
-              });
-            }
+    }
+    showInlinePlayer.value = !showInlinePlayer.value;
+    // Auto-play when opening with proper promise handling
+    if (showInlinePlayer.value) {
+      nextTick(() => {
+        const video = inlineVideoPlayer.value;
+        if (video) {
+          const playPromise = video.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(error => {
+              console.log('Inline video auto-play prevented:', error.message);
+            });
           }
-        }, 100);
-      }
-    },
-
-    /**
-     * Handle ESC key to close preview modals
-     */
-    handlePreviewModalEsc(event) {
-      if (event.key === 'Escape') {
-        if (this.showFsqPreviewModal) {
-          this.closeFsqPreviewModal();
         }
-        if (this.showSotPreviewModal) {
-          this.closeSotPreviewModal();
-        }
+      });
+    }
+  } else {
+    // Fallback: open in new tab if no video URL available
+    openVideoPlayer();
+  }
+}
+
+/**
+ * Handle video metadata loaded
+ */
+function onVideoLoaded() { // eslint-disable-line no-unused-vars
+  console.log('Inline video loaded:', sotVideoUrl.value);
+}
+
+/**
+ * Open video player for SOT (in new tab)
+ * Uses relative URLs - Vue dev proxy forwards /episodes to backend
+ */
+function openVideoPlayer() {
+  const backendUrl = '';
+  const videoPath = props.cueData.mediaUrl || jobStatus.value?.final_video_path;
+  if (videoPath) {
+    let fullPath;
+    if (videoPath.startsWith('http')) {
+      fullPath = videoPath;
+    } else if (videoPath.startsWith('/episodes')) {
+      fullPath = `${backendUrl}${videoPath}`;
+    } else {
+      fullPath = `${backendUrl}/episodes/${videoPath}`;
+    }
+    window.open(fullPath, '_blank');
+  }
+}
+
+/**
+ * Format media path for display (truncate long paths)
+ */
+function formatMediaPath(path) { // eslint-disable-line no-unused-vars
+  if (!path) return '';
+  // Show just the filename
+  const parts = path.split('/');
+  return parts[parts.length - 1] || path;
+}
+
+/**
+ * Format warning label for display (extract short description)
+ */
+function formatWarningLabel(warning) { // eslint-disable-line no-unused-vars
+  if (!warning) return '';
+
+  // Extract the type before the colon for display
+  if (warning.includes(':')) {
+    const type = warning.split(':')[0];
+    const typeLabels = {
+      'low_sharpness': 'Blurry',
+      'moderate_blur': 'Low Quality',
+      'unbalanced_audio': 'Audio Issue',
+      'large_file': 'Large File'
+    };
+    return typeLabels[type] || type;
+  }
+
+  return warning.length > 20 ? warning.substring(0, 20) + '...' : warning;
+}
+
+/**
+ * Truncate transcription for preview
+ */
+function truncateTranscription(text) { // eslint-disable-line no-unused-vars
+  if (!text) return '';
+  if (text.length <= 100) return text;
+  return text.substring(0, 100) + '...';
+}
+
+/**
+ * Preload all thumbnail images for faster navigation
+ * Creates Image objects in memory to cache them in the browser
+ */
+function preloadThumbnails() {
+  const options = sotThumbnailOptions.value;
+  if (!options || options.length <= 1) return;
+
+  console.log(`🖼️ Preloading ${options.length} thumbnails for ${props.cueData.slug || 'cue'}`);
+
+  options.forEach((url, index) => {
+    const img = new Image();
+    img.onload = () => {
+      if (index === 0) {
+        console.log(`✅ First thumbnail preloaded: ${url}`);
       }
-    },
+    };
+    img.onerror = () => {
+      console.warn(`⚠️ Failed to preload thumbnail ${index + 1}: ${url}`);
+    };
+    img.src = url;
+  });
+}
 
-    getCueIcon(cueType) {
-      const iconMap = {
-        'SOT': 'mdi-play-circle-outline',
-        'VO': 'mdi-microphone',
-        'NAT': 'mdi-volume-high',
-        'PKG': 'mdi-package-variant',
-        'FSQ': 'mdi-format-quote-close',
-        'RIF': 'mdi-music-note',
-        'VOX': 'mdi-account-voice',
-        'MUS': 'mdi-music',
-        'LIVE': 'mdi-broadcast',
-        'CG': 'mdi-text-box',
-        'LOWER': 'mdi-text-box-outline',
-        'TITLE': 'mdi-title',
-        'CREDIT': 'mdi-account-credit-card',
-        'BUMPER': 'mdi-movie-roll',
-        'PROMO': 'mdi-bullhorn',
-        'TEASE': 'mdi-eye',
-        'BREAK': 'mdi-pause',
-        'COMMERCIAL': 'mdi-currency-usd'
-      };
 
-      return iconMap[cueType?.toUpperCase()] || 'mdi-file-question-outline';
-    },
+/**
+ * Select quote text for copying
+ */
+function selectQuoteText(event) { // eslint-disable-line no-unused-vars
+  const textElement = event.target;
+  if (window.getSelection && document.createRange) {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(textElement);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+}
 
-    truncateUrl(url) {
-      if (!url) return '';
-      if (url.length <= 40) return url;
+/**
+ * Handle thumbnail load error
+ */
+function handleThumbnailError() { // eslint-disable-line no-unused-vars
+  console.warn('FSQ thumbnail failed to load:', props.cueData.mediaUrl);
+  thumbnailError.value = true;
+}
 
-      const start = url.substring(0, 20);
-      const end = url.substring(url.length - 17);
-      return `${start}...${end}`;
-    },
+/**
+ * Open FSQ preview modal with video background
+ */
+function openFsqPreviewModal() {
+  console.log('🖼️ Opening FSQ preview modal');
+  showFsqPreviewModal.value = true;
+  // Add ESC key listener
+  nextTick(() => {
+    document.addEventListener('keydown', handlePreviewModalEsc);
+  });
+}
 
-    lightenColor(color, percent) {
-      // Convert hex to RGB
-      let hex = color.replace('#', '');
+/**
+ * Close FSQ preview modal
+ */
+function closeFsqPreviewModal() {
+  console.log('🖼️ Closing FSQ preview modal');
+  showFsqPreviewModal.value = false;
+  document.removeEventListener('keydown', handlePreviewModalEsc);
+}
 
-      // Handle short hex
-      if (hex.length === 3) {
-        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-      }
+/**
+ * Open SOT preview modal with video player
+ */
+function openSotPreviewModal() {
+  console.log('🎬 Opening SOT preview modal');
+  showSotPreviewModal.value = true;
+  // Add ESC key listener
+  nextTick(() => {
+    document.addEventListener('keydown', handlePreviewModalEsc);
+  });
+}
 
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
+/**
+ * Close SOT preview modal
+ */
+function closeSotPreviewModal() {
+  console.log('🎬 Closing SOT preview modal');
+  // Clear countdown interval if running
+  if (countdownInterval.value) {
+    clearInterval(countdownInterval.value);
+    countdownInterval.value = null;
+  }
+  previewCountdown.value = 0;
+  // Pause video before closing to prevent play/pause race condition
+  const video = sotPreviewVideoRef.value;
+  if (video) {
+    video.pause();
+    video.currentTime = 0;
+  }
+  showSotPreviewModal.value = false;
+  document.removeEventListener('keydown', handlePreviewModalEsc);
+}
 
-      // Lighten each component
-      const newR = Math.min(255, Math.round(r + (255 - r) * (percent / 100)));
-      const newG = Math.min(255, Math.round(g + (255 - g) * (percent / 100)));
-      const newB = Math.min(255, Math.round(b + (255 - b) * (percent / 100)));
+/**
+ * Handle preview video ready - start countdown then auto-play
+ */
+function onPreviewVideoReady() {
+  const video = sotPreviewVideoRef.value;
+  if (video && showSotPreviewModal.value) {
+    // Start 1.5 second countdown before playing
+    previewCountdown.value = 1.5;
 
-      // Convert back to hex
-      const toHex = (n) => {
-        const hex = n.toString(16);
-        return hex.length === 1 ? '0' + hex : hex;
-      };
+    // Clear any existing interval
+    if (countdownInterval.value) {
+      clearInterval(countdownInterval.value);
+    }
 
-      return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`;
-    },
+    // Update countdown every 100ms for smooth animation
+    countdownInterval.value = setInterval(() => {
+      previewCountdown.value -= 0.1;
 
-    /**
-     * Handle retry button click
-     */
-    async handleRetry() {
-      if (!this.processingJob?.temp_job_id) {
-        console.error('Cannot retry: no temp_job_id found');
-        return;
-      }
+      if (previewCountdown.value <= 0) {
+        previewCountdown.value = 0;
+        clearInterval(countdownInterval.value);
+        countdownInterval.value = null;
 
-      console.log(`🔄 Retrying failed job from cue card: ${this.processingJob.temp_job_id}`);
-      const success = await this.retryFailedJob(this.processingJob.temp_job_id);
-
-      if (success) {
-        console.log('✅ Retry initiated successfully');
-      }
-    },
-
-    /**
-     * Download GFX PNG image
-     */
-    downloadGfxPNG() {
-      const mediaUrl = this.cueData.assetUrl || this.cueData.mediaUrl
-      if (!mediaUrl) return
-
-      const url = mediaUrl.startsWith('http') ? mediaUrl : `${window.location.origin}${mediaUrl}`
-      const filename = mediaUrl.split('/').pop() || `${this.cueData.slug || 'gfx'}.png`
-
-      const authToken = localStorage.getItem('auth-token')
-      fetch(url, {
-        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
-      })
-        .then(res => {
-          if (!res.ok) throw new Error('Download failed')
-          return res.blob()
-        })
-        .then(blob => {
-          const a = document.createElement('a')
-          a.href = URL.createObjectURL(blob)
-          a.download = filename
-          document.body.appendChild(a)
-          a.click()
-          document.body.removeChild(a)
-          URL.revokeObjectURL(a.href)
-        })
-        .catch(err => {
-          console.error('GFX PNG download error:', err)
-        })
-    },
-
-    /**
-     * Poll GFX Celery task status until completion
-     */
-    async pollGfxTaskStatus(taskId, maxAttempts = 30) {
-      let attempts = 0;
-
-      const poll = async () => {
-        if (attempts >= maxAttempts) {
-          console.log('⏱️ GFX polling timeout');
-          this.gfxGenerationStatus = 'failed';
-          return;
-        }
-
-        attempts++;
-
-        try {
-          const token = localStorage.getItem('auth-token');
-          const response = await fetch(`/api/gfx/task/${taskId}`, {
-            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        // Now play the video with promise handling
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            // Auto-play was prevented - this is fine, user can click play
+            console.log('Auto-play prevented:', error.message);
           });
-
-          if (!response.ok) {
-            console.error('Failed to check GFX task status');
-            return;
-          }
-
-          const status = await response.json();
-          console.log(`📊 GFX Task ${taskId} status:`, status.state);
-
-          if (status.ready) {
-            if (status.successful) {
-              console.log('🎉 GFX generation completed!', status.result);
-              this.gfxGenerationStatus = 'completed';
-
-              if (status.result.asset_url) {
-                const assetUrl = status.result.asset_url;
-                console.log('📝 Updating GFX assetUrl to:', assetUrl);
-
-                // Store locally so card refreshes immediately
-                this.gfxGeneratedUrl = assetUrl;
-                this.gfxImageError = false;
-
-                // Update the cue block in the script (persists to database)
-                this.$emit('update-meta', {
-                  assetId: this.cueData.assetId,
-                  field: 'assetUrl',
-                  value: assetUrl
-                });
-              }
-
-              setTimeout(() => {
-                if (this.gfxGenerationStatus === 'completed') {
-                  this.gfxGenerationStatus = null;
-                }
-              }, 3000);
-
-            } else {
-              console.error('❌ GFX generation failed:', status.error);
-              this.gfxGenerationStatus = 'failed';
-            }
-          } else {
-            setTimeout(poll, 2000);
-          }
-        } catch (error) {
-          console.error('Error polling GFX task status:', error);
         }
-      };
-
-      poll();
-    },
-
-    /**
-     * Handle re-upload button click - Open SotModal with existing metadata but no mediaUrl
-     * This allows uploading a new video while keeping the slug, description, credits, etc.
-     */
-    handleReupload() {
-      console.log('📤 Re-upload requested for SOT cue:', this.cueData.slug);
-
-      // Clear failed status immediately - we're starting fresh with a new video
-      this.jobStatus = null;
-
-      // Stop polling for old job status
-      if (this.statusPollInterval) {
-        clearInterval(this.statusPollInterval);
-        this.statusPollInterval = null;
-        this.pollingActive = false;
-        console.log('🛑 Stopped polling old job status for re-upload');
       }
+    }, 100);
+  }
+}
 
-      // Build re-upload data: preserve metadata but clear mediaUrl so user must upload new file
-      const reuploadData = {
-        assetId: this.cueData.assetId || this.cueData.assetid,
-        slug: this.cueData.slug,
-        description: this.cueData.description || this.cueData.text || '',
-        duration: this.cueData.duration,
-        transcription: this.cueData.transcription,
-        credits: this.cueData.credits,
-        // Explicitly do NOT include mediaUrl - user will upload a new video
-        // mediaUrl: null,
-        // thumbnailUrl: null,
-        // trimStart/trimEnd will be set when the new video is loaded
-      };
+/**
+ * Handle ESC key to close preview modals
+ */
+function handlePreviewModalEsc(event) {
+  if (event.key === 'Escape') {
+    if (showFsqPreviewModal.value) {
+      closeFsqPreviewModal();
+    }
+    if (showSotPreviewModal.value) {
+      closeSotPreviewModal();
+    }
+  }
+}
 
-      console.log('📤 Re-upload data:', reuploadData);
-      this.$emit('reupload-sot-cue', reuploadData);
-    },
+function getCueIcon(cueType) { // eslint-disable-line no-unused-vars
+  const iconMap = {
+    'SOT': 'mdi-play-circle-outline',
+    'VO': 'mdi-microphone',
+    'NAT': 'mdi-volume-high',
+    'PKG': 'mdi-package-variant',
+    'FSQ': 'mdi-format-quote-close',
+    'RIF': 'mdi-music-note',
+    'VOX': 'mdi-account-voice',
+    'MUS': 'mdi-music',
+    'LIVE': 'mdi-broadcast',
+    'CG': 'mdi-text-box',
+    'LOWER': 'mdi-text-box-outline',
+    'TITLE': 'mdi-title',
+    'CREDIT': 'mdi-account-credit-card',
+    'BUMPER': 'mdi-movie-roll',
+    'PROMO': 'mdi-bullhorn',
+    'TEASE': 'mdi-eye',
+    'BREAK': 'mdi-pause',
+    'COMMERCIAL': 'mdi-currency-usd'
+  };
 
-    /**
-     * Handle reprocess button click - Clean up and restart processing
-     */
-    async handleReprocess() {
-      const assetId = this.cueData.assetId || this.cueData.assetid;
-      if (!assetId) {
-        console.error('Cannot reprocess: no assetId found');
-        return;
-      }
+  return iconMap[cueType?.toUpperCase()] || 'mdi-file-question-outline';
+}
 
-      console.log(`🔄 Reprocessing SOT from cue card: ${assetId}`);
-      const success = await this.reprocessJob(assetId);
+function truncateUrl(url) { // eslint-disable-line no-unused-vars
+  if (!url) return '';
+  if (url.length <= 40) return url;
 
-      if (success) {
-        console.log('✅ Reprocess initiated successfully');
-      } else {
-        console.error('❌ Retry failed');
-      }
-    },
+  const start = url.substring(0, 20);
+  const end = url.substring(url.length - 17);
+  return `${start}...${end}`;
+}
 
-    /**
-     * Handle Generate PNG button click - Queue Celery task for FSQ PNG generation
-     */
-    downloadFsqPNG() {
-      if (!this.cueData.mediaUrl) return
+function lightenColor(color, percent) {
+  // Convert hex to RGB
+  let hex = color.replace('#', '');
 
-      const url = this.fsqThumbnailUrl
-      const filename = this.cueData.mediaUrl.split('/').pop() || `${this.cueData.slug || 'fsq'}.png`
+  // Handle short hex
+  if (hex.length === 3) {
+    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+  }
 
-      const authToken = localStorage.getItem('auth-token')
-      fetch(url, {
-        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
-      })
-        .then(res => {
-          if (!res.ok) throw new Error('Download failed')
-          return res.blob()
-        })
-        .then(blob => {
-          const a = document.createElement('a')
-          a.href = URL.createObjectURL(blob)
-          a.download = filename
-          document.body.appendChild(a)
-          a.click()
-          document.body.removeChild(a)
-          URL.revokeObjectURL(a.href)
-        })
-        .catch(err => {
-          console.error('FSQ PNG download error:', err)
-        })
-    },
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
 
-    async handleGeneratePNG() {
-      if (!this.cueData.assetId) {
-        console.error('Cannot generate PNG: no assetId found');
-        return;
-      }
+  // Lighten each component
+  const newR = Math.min(255, Math.round(r + (255 - r) * (percent / 100)));
+  const newG = Math.min(255, Math.round(g + (255 - g) * (percent / 100)));
+  const newB = Math.min(255, Math.round(b + (255 - b) * (percent / 100)));
 
-      if (!this.cueData.quote) {
-        console.error('Cannot generate PNG: no quote text found');
-        return;
-      }
+  // Convert back to hex
+  const toHex = (n) => {
+    const hexVal = n.toString(16);
+    return hexVal.length === 1 ? '0' + hexVal : hexVal;
+  };
 
-      try {
-        this.generatingPNG = true;
-        this.fsqGenerationStatus = 'queued';
-        console.log(`🎨 Generating FSQ PNG for: ${this.cueData.assetId}`);
+  return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`;
+}
 
-        const token = localStorage.getItem('auth-token');
-        // Use prop first, then fallback to route params
-        const episode = this.currentEpisode || this.$route?.params?.episode || '';
+/**
+ * Handle retry button click
+ */
+async function handleRetry() { // eslint-disable-line no-unused-vars
+  if (!processingJob.value?.temp_job_id) {
+    console.error('Cannot retry: no temp_job_id found');
+    return;
+  }
 
-        // Use LOCAL state values (from editable controls) not cueData values
-        // Get values from child component ref or fall back to cueData
-        const fsqRef = this.$refs.fsqContentRef;
-        const localFontSize = fsqRef?.localFontSize ?? (parseInt(this.cueData?.fontSize) || 34);
-        const localAlignment = fsqRef?.localAlignment ?? (this.cueData?.alignment || 'center');
-        const localFontFamily = fsqRef?.localFontFamily ?? (this.cueData?.fontFamily || 'sans-serif');
-        const localBoxHeight = fsqRef?.localBoxHeight ?? (parseInt(this.cueData?.boxHeight) || 75);
-        const localBoxOpacity = fsqRef?.localBoxOpacity ?? (parseInt(this.cueData?.boxOpacity) || 75);
-        const localLineSpacing = fsqRef?.localLineSpacing ?? (parseInt(this.cueData?.lineSpacing) || 22);
-        const localAttributionSize = fsqRef?.localAttributionSize ?? (parseInt(this.cueData?.attributionSize) || 16);
-        // Scale up font size: slider shows 15-50, but renderer needs 60-200px for 1920x1080 canvas
-        const scaledMaxFontSize = localFontSize * 4;
-        const requestData = {
-          episode_id: episode,
-          quote: this.cueData.quote,
-          attribution: this.cueData.attribution || this.cueData.source || '',
-          slug: this.cueData.slug || 'quote',
-          asset_id: this.cueData.assetId,
-          alignment: localAlignment,
-          font_family: localFontFamily,
-          max_font_size: scaledMaxFontSize,
-          box_height: localBoxHeight,
-          box_opacity: localBoxOpacity,
-          line_spacing: localLineSpacing,
-          attribution_size: localAttributionSize,
-          duration: this.cueData.duration || '00:00:05:00'
-        };
+  console.log(`🔄 Retrying failed job from cue card: ${processingJob.value.temp_job_id}`);
+  const success = await retryFailedJob(processingJob.value.temp_job_id);
 
-        console.log('📤 Sending FSQ PNG generation request:', requestData);
+  if (success) {
+    console.log('✅ Retry initiated successfully');
+  }
+}
 
-        const response = await fetch('/api/fsq/generate-async', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-          },
-          body: JSON.stringify(requestData)
-        });
+/**
+ * Download GFX PNG image
+ */
+function downloadGfxPNG() { // eslint-disable-line no-unused-vars
+  const mediaUrl = props.cueData.assetUrl || props.cueData.mediaUrl
+  if (!mediaUrl) return
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.detail || 'Failed to queue PNG generation');
-        }
+  const url = mediaUrl.startsWith('http') ? mediaUrl : `${window.location.origin}${mediaUrl}`
+  const filename = mediaUrl.split('/').pop() || `${props.cueData.slug || 'gfx'}.png`
 
-        const result = await response.json();
-        console.log('✅ PNG generation queued:', result);
+  const authToken = localStorage.getItem('auth-token')
+  fetch(url, {
+    headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Download failed')
+      return res.blob()
+    })
+    .then(blob => {
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(a.href)
+    })
+    .catch(err => {
+      console.error('GFX PNG download error:', err)
+    })
+}
 
-        // Update status to generating and store task ID
-        this.fsqGenerationStatus = 'generating';
-        this.fsqTaskId = result.task_id;
+/**
+ * Poll GFX Celery task status until completion
+ */
+async function pollGfxTaskStatus(taskId, maxAttempts = 30) {
+  let attempts = 0;
 
-        // Poll for completion (silent - no alerts)
-        this.pollTaskStatus(result.task_id);
+  const poll = async () => {
+    if (attempts >= maxAttempts) {
+      console.log('⏱️ GFX polling timeout');
+      gfxGenerationStatus.value = 'failed';
+      return;
+    }
 
-      } catch (error) {
-        console.error('❌ Error generating FSQ PNG:', error);
-        this.fsqGenerationStatus = 'failed';
-      } finally {
-        this.generatingPNG = false;
-      }
-    },
+    attempts++;
 
-    /**
-     * Generate GFX image from cue data
-     */
-    async handleGenerateGfx() {
-      if (!this.cueData.assetId) {
-        console.error('Cannot generate GFX: no assetId found');
-        return;
-      }
-
-      // Allow generation with body OR list items OR title
-      const gfxTitle = this.cueData.gfxTitle || this.cueData.rawData?.title || null;
-      const rawListItems = this.cueData.listItems || this.cueData.rawData?.listItems || null;
-      const hasListItems = rawListItems && (
-        typeof rawListItems === 'string' ? JSON.parse(rawListItems).length > 0 : rawListItems.length > 0
-      );
-      if (!this.cueData.body && !gfxTitle && !hasListItems) {
-        console.error('Cannot generate GFX: no body, title, or list items found');
-        return;
-      }
-
-      try {
-        this.generatingGfx = true;
-        this.gfxGenerationStatus = 'queued';
-        console.log(`🎨 Generating GFX for: ${this.cueData.assetId}`);
-
-        const token = localStorage.getItem('auth-token');
-        const episode = this.currentEpisode || this.$route?.params?.episode || '';
-
-        // Use gfxTitle (actual title text) not title (card display label)
-        const gfxTitle = this.cueData.gfxTitle || this.cueData.rawData?.title || null;
-        const listItems = this.cueData.listItems || this.cueData.rawData?.listItems || null;
-        let parsedListItems = null;
-        if (listItems) {
-          parsedListItems = typeof listItems === 'string' ? JSON.parse(listItems) : listItems;
-        }
-
-        // Use LOCAL state values from child component faceplate controls, not stale cueData
-        const gfxRef = this.$refs.gfxContentRef;
-        const localGfxAlignment = gfxRef?.localGfxAlignment ?? (this.cueData?.textAlign || 'center');
-        const localGfxFontFamily = gfxRef?.localGfxFontFamily ?? (this.cueData?.fontFamily || 'sans-serif');
-        const localGfxFontSize = gfxRef?.localGfxFontSize ?? (parseInt(this.cueData?.fontSize) || 25);
-        const requestData = {
-          episode_id: episode,
-          gfx_type: this.cueData.gfxType || this.cueData.rawData?.gfxType || 'fullscreen-text',
-          body: (this.cueData.body || this.cueData.rawData?.body || '').replace(/\\n/g, '\n'),
-          slug: this.cueData.slug || 'gfx',
-          asset_id: this.cueData.assetId,
-          title: gfxTitle,
-          alignment: localGfxAlignment,
-          font_family: localGfxFontFamily,
-          font_size: localGfxFontSize,
-          render_mode: this.cueData.renderMode || this.cueData.rawData?.renderMode || 'png',
-          priority: 'high',
-          title_alignment: this.cueData.titleAlign || this.cueData.rawData?.titleAlign || null,
-          title_font_size: (this.cueData.titleFontSize || this.cueData.rawData?.titleFontSize) ? parseInt(this.cueData.titleFontSize || this.cueData.rawData?.titleFontSize) : null,
-          title_pin_to_top: (this.cueData.titlePinToTop || this.cueData.rawData?.titlePinToTop) === 'true' || this.cueData.titlePinToTop === true,
-          title_margin_top: (this.cueData.titleMarginTop || this.cueData.rawData?.titleMarginTop) ? parseFloat(this.cueData.titleMarginTop || this.cueData.rawData?.titleMarginTop) : 1.0,
-          title_margin_bottom: (this.cueData.titleMarginBottom || this.cueData.rawData?.titleMarginBottom) ? parseFloat(this.cueData.titleMarginBottom || this.cueData.rawData?.titleMarginBottom) : 1.5,
-          list_items: parsedListItems,
-          enumerator: this.cueData.enumerator || null
-        };
-
-        console.log('📤 Sending GFX generation request:', requestData);
-
-        const response = await fetch('/api/gfx/generate-async', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-          },
-          body: JSON.stringify(requestData)
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.detail || 'Failed to queue GFX generation');
-        }
-
-        const result = await response.json();
-        console.log('✅ GFX generation queued:', result);
-
-        this.gfxGenerationStatus = 'generating';
-        this.gfxTaskId = result.task_id;
-
-        // Poll for completion
-        this.pollGfxTaskStatus(result.task_id);
-
-      } catch (error) {
-        console.error('❌ Error generating GFX:', error);
-        this.gfxGenerationStatus = 'failed';
-      } finally {
-        this.generatingGfx = false;
-      }
-    },
-
-    formatMetric(n) {
-      if (!n) return '0';
-      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-      return String(n);
-    },
-
-    /**
-     * Format GFX body text for display (unescape newlines)
-     */
-    formatGfxBody(body) {
-      if (!body) return '';
-      // Unescape \n to actual newlines, then truncate for preview
-      const unescaped = body.replace(/\\n/g, '\n');
-      // Truncate to 200 chars for preview
-      return unescaped.length > 200 ? unescaped.substring(0, 200) + '...' : unescaped;
-    },
-
-    /**
-     * Handle GFX image load error
-     */
-    handleGfxImageError() {
-      console.warn('GFX image failed to load:', this.gfxImageUrl);
-      this.gfxImageError = true;
-    },
-
-    /**
-     * Poll Celery task status until completion
-     */
-    async pollTaskStatus(taskId, maxAttempts = 30) {
-      let attempts = 0;
-
-      const poll = async () => {
-        if (attempts >= maxAttempts) {
-          console.log('⏱️ Polling timeout - task may still be processing');
-          return;
-        }
-
-        attempts++;
-
-        try {
-          const token = localStorage.getItem('auth-token');
-          const response = await fetch(`/api/fsq/task/${taskId}`, {
-            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-          });
-
-          if (!response.ok) {
-            console.error('Failed to check task status');
-            return;
-          }
-
-          const status = await response.json();
-          console.log(`📊 Task ${taskId} status:`, status.state);
-
-          if (status.ready) {
-            if (status.successful) {
-              console.log('🎉 PNG generation completed!', status.result);
-              this.fsqGenerationStatus = 'completed';
-              this.fsqDirty = false;
-
-              // Update the cue block with the generated mediaUrl
-              if (status.result.asset_url) {
-                console.log('📝 Updating cue mediaUrl to:', status.result.asset_url);
-                this.$emit('update-meta', {
-                  assetId: this.cueData.assetId,
-                  field: 'mediaUrl',
-                  value: status.result.asset_url
-                });
-              }
-
-              // Wait 1 second for file to be fully written, then force thumbnail reload
-              setTimeout(() => {
-                console.log('🔄 Forcing thumbnail reload after 1s delay');
-                this.fsqCacheBuster = Date.now();
-              }, 1000);
-
-              // Clear status after 3 seconds
-              setTimeout(() => {
-                if (this.fsqGenerationStatus === 'completed') {
-                  this.fsqGenerationStatus = null;
-                }
-              }, 3000);
-
-            } else {
-              console.error('❌ PNG generation failed:', status.error);
-              this.fsqGenerationStatus = 'failed';
-            }
-          } else {
-            // Still processing, poll again in 2 seconds
-            setTimeout(poll, 2000);
-          }
-        } catch (error) {
-          console.error('Error polling task status:', error);
-        }
-      };
-
-      // Start polling
-      poll();
-    },
-
-    /**
-     * Fetch job status from API by AssetID
-     */
-    async fetchJobStatus() {
-      const assetId = this.cueData.assetId || this.cueData.assetid;
-
-      console.log('🔍 fetchJobStatus called for cue:', {
-        slug: this.cueData.slug,
-        type: this.cueData.type,
-        assetId: assetId,
-        cueData: this.cueData
+    try {
+      const token = localStorage.getItem('auth-token');
+      const response = await fetch(`/api/gfx/task/${taskId}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
 
-      if (!assetId) {
-        console.warn('⚠️ No AssetID found in cue data, cannot fetch job status');
+      if (!response.ok) {
+        console.error('Failed to check GFX task status');
         return;
       }
 
-      try {
-        const token = localStorage.getItem('auth-token');
-        // Use appropriate endpoint based on cue type (SOT or VO)
-        const cueType = this.cueData.type?.toUpperCase();
-        const endpoint = cueType === 'VO' ? `/api/vo/job-status/${assetId}` : `/api/sot/job-status/${assetId}`;
-        const response = await fetch(endpoint, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        });
+      const status = await response.json();
+      console.log(`📊 GFX Task ${taskId} status:`, status.state);
 
-        if (!response.ok) {
-          console.error(`Failed to fetch job status for ${assetId}`, response.status);
-          return;
+      if (status.ready) {
+        if (status.successful) {
+          console.log('🎉 GFX generation completed!', status.result);
+          gfxGenerationStatus.value = 'completed';
+
+          if (status.result.asset_url) {
+            const assetUrl = status.result.asset_url;
+            console.log('📝 Updating GFX assetUrl to:', assetUrl);
+
+            // Store locally so card refreshes immediately
+            gfxGeneratedUrl.value = assetUrl;
+            gfxImageError.value = false;
+
+            // Update the cue block in the script (persists to database)
+            emit('update-meta', {
+              assetId: props.cueData.assetId,
+              field: 'assetUrl',
+              value: assetUrl
+            });
+          }
+
+          setTimeout(() => {
+            if (gfxGenerationStatus.value === 'completed') {
+              gfxGenerationStatus.value = null;
+            }
+          }, 3000);
+
+        } else {
+          console.error('❌ GFX generation failed:', status.error);
+          gfxGenerationStatus.value = 'failed';
         }
-
-        const status = await response.json();
-        this.jobStatus = status;
-
-        console.log(`📊 Job status for ${assetId}:`, status);
-
-        // Stop polling if job is in terminal state
-        if (status.status === 'completed' || status.status === 'failed' || status.status === 'not_found') {
-          this.stopPolling();
-        }
-      } catch (error) {
-        console.error('Error fetching job status:', error);
+      } else {
+        setTimeout(poll, 2000);
       }
-    },
-
-    /**
-     * Start polling for job status updates
-     */
-    startPolling() {
-      if (this.pollingActive) return;
-
-      this.pollingActive = true;
-
-      // Fetch immediately
-      this.fetchJobStatus();
-
-      // Then poll every 3 seconds
-      this.statusPollInterval = setInterval(() => {
-        this.fetchJobStatus();
-      }, 3000);
-
-      console.log('📡 Started polling job status');
-    },
-
-    /**
-     * Stop polling for job status updates
-     */
-    stopPolling() {
-      if (this.statusPollInterval) {
-        clearInterval(this.statusPollInterval);
-        this.statusPollInterval = null;
-        this.pollingActive = false;
-        console.log('🛑 Stopped polling job status');
-      }
+    } catch (error) {
+      console.error('Error polling GFX task status:', error);
     }
-  },
+  };
 
-  watch: {
-    // Watch for assetId changes to start/stop polling dynamically
-    showJobStatus: {
-      handler(newVal, oldVal) {
-        console.log('👁️ showJobStatus changed:', oldVal, '->', newVal);
-        if (newVal && !oldVal) {
-          // assetId was added - start polling
-          console.log('🚀 AssetID appeared - starting status polling');
-          this.startPolling();
-        } else if (!newVal && oldVal) {
-          // assetId was removed - stop polling
-          this.stopPolling();
-        }
-      },
-      immediate: false
-    },
-    // Watch jobStatus object for changes (nested path doesn't work when parent is null)
-    jobStatus: {
-      handler(newJobStatus, oldJobStatus) {
-        const newStatus = newJobStatus?.status;
-        const oldStatus = oldJobStatus?.status;
-        console.log('📊 jobStatus watcher fired:', oldStatus, '->', newStatus);
+  poll();
+}
 
-        if (newStatus === 'completed' && oldStatus !== 'completed') {
-          console.log('✅ Job completed - emitting refresh request');
-          this.$emit('status-changed', {
-            status: newStatus,
-            assetId: this.cueData.assetId || this.cueData.assetid
-          });
-        }
-      },
-      deep: true
-    },
-    // Watch sotThumbnailOptions to preload thumbnails when they become available
-    sotThumbnailOptions: {
-      handler(newOptions, oldOptions) {
-        // Preload when we get new options (e.g., after job status updates)
-        if (newOptions && newOptions.length > 1 && (!oldOptions || oldOptions.length <= 1)) {
-          console.log('📷 Thumbnail options now available, preloading...');
-          this.preloadThumbnails();
-        }
-      },
-      immediate: false
-    }
-  },
+/**
+ * Handle re-upload button click - Open SotModal with existing metadata but no mediaUrl
+ * This allows uploading a new video while keeping the slug, description, credits, etc.
+ */
+function handleReupload() {
+  console.log('📤 Re-upload requested for SOT cue:', props.cueData.slug);
 
-  mounted() {
-    console.log('🔍 PlaceholderCueCard MOUNTED:', {
-      type: this.cueData?.type,
-      assetId: this.cueData?.assetId,
-      assetid: this.cueData?.assetid,
-      allKeys: Object.keys(this.cueData || {}),
-      showReprocessButton: this.showReprocessButton
+  // Clear failed status immediately - we're starting fresh with a new video
+  jobStatus.value = null;
+
+  // Stop polling for old job status
+  if (statusPollInterval.value) {
+    clearInterval(statusPollInterval.value);
+    statusPollInterval.value = null;
+    pollingActive.value = false;
+    console.log('🛑 Stopped polling old job status for re-upload');
+  }
+
+  // Build re-upload data: preserve metadata but clear mediaUrl so user must upload new file
+  const reuploadData = {
+    assetId: props.cueData.assetId || props.cueData.assetid,
+    slug: props.cueData.slug,
+    description: props.cueData.description || props.cueData.text || '',
+    duration: props.cueData.duration,
+    transcription: props.cueData.transcription,
+    credits: props.cueData.credits,
+    // Explicitly do NOT include mediaUrl - user will upload a new video
+    // mediaUrl: null,
+    // thumbnailUrl: null,
+    // trimStart/trimEnd will be set when the new video is loaded
+  };
+
+  console.log('📤 Re-upload data:', reuploadData);
+  emit('reupload-sot-cue', reuploadData);
+}
+
+/**
+ * Handle reprocess button click - Clean up and restart processing
+ */
+async function handleReprocess() {
+  const assetId = props.cueData.assetId || props.cueData.assetid;
+  if (!assetId) {
+    console.error('Cannot reprocess: no assetId found');
+    return;
+  }
+
+  console.log(`🔄 Reprocessing SOT from cue card: ${assetId}`);
+  const success = await reprocessJob(assetId);
+
+  if (success) {
+    console.log('✅ Reprocess initiated successfully');
+  } else {
+    console.error('❌ Retry failed');
+  }
+}
+
+/**
+ * Handle Generate PNG button click - Queue Celery task for FSQ PNG generation
+ */
+function downloadFsqPNG() {
+  if (!props.cueData.mediaUrl) return
+
+  const url = fsqThumbnailUrl.value
+  const filename = props.cueData.mediaUrl.split('/').pop() || `${props.cueData.slug || 'fsq'}.png`
+
+  const authToken = localStorage.getItem('auth-token')
+  fetch(url, {
+    headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Download failed')
+      return res.blob()
+    })
+    .then(blob => {
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(a.href)
+    })
+    .catch(err => {
+      console.error('FSQ PNG download error:', err)
+    })
+}
+
+async function handleGeneratePNG() {
+  if (!props.cueData.assetId) {
+    console.error('Cannot generate PNG: no assetId found');
+    return;
+  }
+
+  if (!props.cueData.quote) {
+    console.error('Cannot generate PNG: no quote text found');
+    return;
+  }
+
+  try {
+    generatingPNG.value = true;
+    fsqGenerationStatus.value = 'queued';
+    console.log(`🎨 Generating FSQ PNG for: ${props.cueData.assetId}`);
+
+    const token = localStorage.getItem('auth-token');
+    // Use prop first, then fallback to route params
+    const episode = props.currentEpisode || route?.params?.episode || '';
+
+    // Use LOCAL state values (from editable controls) not cueData values
+    // Get values from child component ref or fall back to cueData
+    const fsqRef = fsqContentRef.value;
+    const localFontSize = fsqRef?.localFontSize ?? (parseInt(props.cueData?.fontSize) || FSQ_DEFAULTS.fontSize);
+    const localAlignment = fsqRef?.localAlignment ?? (props.cueData?.alignment || FSQ_DEFAULTS.alignment);
+    const localFontFamily = fsqRef?.localFontFamily ?? (props.cueData?.fontFamily || FSQ_DEFAULTS.fontFamily);
+    const localBoxHeight = fsqRef?.localBoxHeight ?? (parseInt(props.cueData?.boxHeight) || FSQ_DEFAULTS.boxHeight);
+    const localBoxOpacity = fsqRef?.localBoxOpacity ?? (parseInt(props.cueData?.boxOpacity) || FSQ_DEFAULTS.boxOpacity);
+    const localLineSpacing = fsqRef?.localLineSpacing ?? (parseInt(props.cueData?.lineSpacing) || FSQ_DEFAULTS.lineSpacing);
+    const localAttributionSize = fsqRef?.localAttributionSize ?? (parseInt(props.cueData?.attributionSize) || FSQ_DEFAULTS.attributionSize);
+    // Scale up the user's UI value to PNG-space and force it as the EXACT
+    // rendered size (not a max-fit cap). Sending font_size — not
+    // max_font_size — makes the renderer skip its auto-fit search and use
+    // exactly this size, so the slider value drives the output reliably.
+    const scaledFontSize = localFontSize * FSQ_PNG_SCALE;
+    // Attribution size needs the same UI→PNG-space scale as the quote font.
+    // Without this, a UI value of 16 was reaching the renderer as 16px on
+    // a 1920×1080 canvas (unreadable), while the modal preview at 0.5×
+    // looked fine — matching the user's report of "OK in preview, too
+    // tiny in the generated PNG."
+    const scaledAttributionSize = localAttributionSize
+      ? localAttributionSize * FSQ_PNG_ATTRIBUTION_SCALE
+      : null;
+    const requestData = {
+      episode_id: episode,
+      quote: props.cueData.quote,
+      attribution: props.cueData.attribution || props.cueData.source || '',
+      slug: props.cueData.slug || 'quote',
+      asset_id: props.cueData.assetId,
+      alignment: localAlignment,
+      font_family: localFontFamily,
+      font_size: scaledFontSize,
+      box_height: localBoxHeight,
+      box_opacity: localBoxOpacity,
+      line_spacing: localLineSpacing,
+      attribution_size: scaledAttributionSize,
+      duration: props.cueData.duration || '00:00:05:00'
+    };
+
+    console.log('📤 Sending FSQ PNG generation request:', requestData);
+
+    const response = await fetch('/api/fsq/generate-async', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(requestData)
     });
 
-    // Start polling if this is a SOT cue with AssetID
-    if (this.showJobStatus) {
-      this.startPolling();
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to queue PNG generation');
     }
 
-    // Preload thumbnails if already available on mount
-    if (this.sotThumbnailOptions && this.sotThumbnailOptions.length > 1) {
-      this.preloadThumbnails();
-    }
-  },
+    const result = await response.json();
+    console.log('✅ PNG generation queued:', result);
 
-  beforeUnmount() {
-    // Clean up polling interval
-    this.stopPolling();
-    // Clean up countdown interval
-    if (this.countdownInterval) {
-      clearInterval(this.countdownInterval);
-      this.countdownInterval = null;
-    }
-    // Clean up ESC key listener for preview modals
-    document.removeEventListener('keydown', this.handlePreviewModalEsc);
+    // Update status to generating and store task ID
+    fsqGenerationStatus.value = 'generating';
+    fsqTaskId.value = result.task_id;
+
+    // Poll for completion (silent - no alerts)
+    pollTaskStatus(result.task_id);
+
+  } catch (error) {
+    console.error('❌ Error generating FSQ PNG:', error);
+    fsqGenerationStatus.value = 'failed';
+  } finally {
+    generatingPNG.value = false;
   }
-};
+}
+
+/**
+ * Generate GFX image from cue data
+ */
+async function handleGenerateGfx() {
+  if (!props.cueData.assetId) {
+    console.error('Cannot generate GFX: no assetId found');
+    return;
+  }
+
+  // Allow generation with body OR list items OR title
+  const gfxTitleCheck = props.cueData.gfxTitle || props.cueData.rawData?.title || null;
+  const rawListItems = props.cueData.listItems || props.cueData.rawData?.listItems || null;
+  const hasListItems = rawListItems && (
+    typeof rawListItems === 'string' ? JSON.parse(rawListItems).length > 0 : rawListItems.length > 0
+  );
+  if (!props.cueData.body && !gfxTitleCheck && !hasListItems) {
+    console.error('Cannot generate GFX: no body, title, or list items found');
+    return;
+  }
+
+  try {
+    generatingGfx.value = true;
+    gfxGenerationStatus.value = 'queued';
+    console.log(`🎨 Generating GFX for: ${props.cueData.assetId}`);
+
+    const token = localStorage.getItem('auth-token');
+    const episode = props.currentEpisode || route?.params?.episode || '';
+
+    // Use gfxTitle (actual title text) not title (card display label)
+    const gfxTitle = props.cueData.gfxTitle || props.cueData.rawData?.title || null;
+    const listItems = props.cueData.listItems || props.cueData.rawData?.listItems || null;
+    let parsedListItems = null;
+    if (listItems) {
+      parsedListItems = typeof listItems === 'string' ? JSON.parse(listItems) : listItems;
+    }
+
+    // Use LOCAL state values from child component faceplate controls, not stale cueData
+    const gfxRef = gfxContentRef.value;
+    const localGfxAlignment = gfxRef?.localGfxAlignment ?? (props.cueData?.textAlign || 'center');
+    const localGfxFontFamily = gfxRef?.localGfxFontFamily ?? (props.cueData?.fontFamily || 'sans-serif');
+    const localGfxFontSize = gfxRef?.localGfxFontSize ?? (parseInt(props.cueData?.fontSize) || 25);
+    const requestData = {
+      episode_id: episode,
+      gfx_type: props.cueData.gfxType || props.cueData.rawData?.gfxType || 'fullscreen-text',
+      body: (props.cueData.body || props.cueData.rawData?.body || '').replace(/\\n/g, '\n'),
+      slug: props.cueData.slug || 'gfx',
+      asset_id: props.cueData.assetId,
+      title: gfxTitle,
+      alignment: localGfxAlignment,
+      font_family: localGfxFontFamily,
+      font_size: localGfxFontSize,
+      render_mode: props.cueData.renderMode || props.cueData.rawData?.renderMode || 'png',
+      priority: 'high',
+      title_alignment: props.cueData.titleAlign || props.cueData.rawData?.titleAlign || null,
+      title_font_size: (props.cueData.titleFontSize || props.cueData.rawData?.titleFontSize) ? parseInt(props.cueData.titleFontSize || props.cueData.rawData?.titleFontSize) : null,
+      title_pin_to_top: (props.cueData.titlePinToTop || props.cueData.rawData?.titlePinToTop) === 'true' || props.cueData.titlePinToTop === true,
+      title_margin_top: (props.cueData.titleMarginTop || props.cueData.rawData?.titleMarginTop) ? parseFloat(props.cueData.titleMarginTop || props.cueData.rawData?.titleMarginTop) : 1.0,
+      title_margin_bottom: (props.cueData.titleMarginBottom || props.cueData.rawData?.titleMarginBottom) ? parseFloat(props.cueData.titleMarginBottom || props.cueData.rawData?.titleMarginBottom) : 1.5,
+      list_items: parsedListItems,
+      enumerator: props.cueData.enumerator || null
+    };
+
+    console.log('📤 Sending GFX generation request:', requestData);
+
+    const response = await fetch('/api/gfx/generate-async', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(requestData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to queue GFX generation');
+    }
+
+    const result = await response.json();
+    console.log('✅ GFX generation queued:', result);
+
+    gfxGenerationStatus.value = 'generating';
+    gfxTaskId.value = result.task_id;
+
+    // Poll for completion
+    pollGfxTaskStatus(result.task_id);
+
+  } catch (error) {
+    console.error('❌ Error generating GFX:', error);
+    gfxGenerationStatus.value = 'failed';
+  } finally {
+    generatingGfx.value = false;
+  }
+}
+
+function formatMetric(n) { // eslint-disable-line no-unused-vars
+  if (!n) return '0';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return String(n);
+}
+
+/**
+ * Format GFX body text for display (unescape newlines)
+ */
+function formatGfxBody(body) { // eslint-disable-line no-unused-vars
+  if (!body) return '';
+  // Unescape \n to actual newlines, then truncate for preview
+  const unescaped = body.replace(/\\n/g, '\n');
+  // Truncate to 200 chars for preview
+  return unescaped.length > 200 ? unescaped.substring(0, 200) + '...' : unescaped;
+}
+
+/**
+ * Handle GFX image load error
+ */
+function handleGfxImageError() { // eslint-disable-line no-unused-vars
+  console.warn('GFX image failed to load:', gfxImageUrl.value);
+  gfxImageError.value = true;
+}
+
+/**
+ * Poll Celery task status until completion
+ */
+async function pollTaskStatus(taskId, maxAttempts = 30) {
+  let attempts = 0;
+
+  const poll = async () => {
+    if (attempts >= maxAttempts) {
+      console.log('⏱️ Polling timeout - task may still be processing');
+      return;
+    }
+
+    attempts++;
+
+    try {
+      const token = localStorage.getItem('auth-token');
+      const response = await fetch(`/api/fsq/task/${taskId}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+
+      if (!response.ok) {
+        console.error('Failed to check task status');
+        return;
+      }
+
+      const status = await response.json();
+      console.log(`📊 Task ${taskId} status:`, status.state);
+
+      if (status.ready) {
+        if (status.successful) {
+          console.log('🎉 PNG generation completed!', status.result);
+          fsqGenerationStatus.value = 'completed';
+          fsqDirty.value = false;
+
+          // Update the cue block with the generated mediaUrl
+          if (status.result.asset_url) {
+            console.log('📝 Updating cue mediaUrl to:', status.result.asset_url);
+            emit('update-meta', {
+              assetId: props.cueData.assetId,
+              field: 'mediaUrl',
+              value: status.result.asset_url
+            });
+          }
+
+          // Wait 1 second for file to be fully written, then force thumbnail reload
+          setTimeout(() => {
+            console.log('🔄 Forcing thumbnail reload after 1s delay');
+            fsqCacheBuster.value = Date.now();
+          }, 1000);
+
+          // Clear status after 3 seconds
+          setTimeout(() => {
+            if (fsqGenerationStatus.value === 'completed') {
+              fsqGenerationStatus.value = null;
+            }
+          }, 3000);
+
+        } else {
+          console.error('❌ PNG generation failed:', status.error);
+          fsqGenerationStatus.value = 'failed';
+        }
+      } else {
+        // Still processing, poll again in 2 seconds
+        setTimeout(poll, 2000);
+      }
+    } catch (error) {
+      console.error('Error polling task status:', error);
+    }
+  };
+
+  // Start polling
+  poll();
+}
+
+/**
+ * Fetch job status from API by AssetID
+ */
+async function fetchJobStatus() {
+  const assetId = props.cueData.assetId || props.cueData.assetid;
+
+  console.log('🔍 fetchJobStatus called for cue:', {
+    slug: props.cueData.slug,
+    type: props.cueData.type,
+    assetId: assetId,
+    cueData: props.cueData
+  });
+
+  if (!assetId) {
+    console.warn('⚠️ No AssetID found in cue data, cannot fetch job status');
+    return;
+  }
+
+  try {
+    const token = localStorage.getItem('auth-token');
+    // Use appropriate endpoint based on cue type (SOT or VO)
+    const cueType = props.cueData.type?.toUpperCase();
+    const endpoint = cueType === 'VO' ? `/api/vo/job-status/${assetId}` : `/api/sot/job-status/${assetId}`;
+    const response = await fetch(endpoint, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to fetch job status for ${assetId}`, response.status);
+      return;
+    }
+
+    const status = await response.json();
+    jobStatus.value = status;
+
+    console.log(`📊 Job status for ${assetId}:`, status);
+
+    // Stop polling if job is in terminal state
+    if (status.status === 'completed') {
+      stopPolling();
+    }
+  } catch (error) {
+    console.error('Error fetching job status:', error);
+  }
+}
+
+/**
+ * Start polling for job status updates
+ */
+function startPolling() {
+  if (pollingActive.value) return;
+
+  pollingActive.value = true;
+
+  // Fetch immediately
+  fetchJobStatus();
+
+  // Then poll every 3 seconds
+  statusPollInterval.value = setInterval(() => {
+    fetchJobStatus();
+  }, 3000);
+
+  console.log('📡 Started polling job status');
+}
+
+/**
+ * Stop polling for job status updates
+ */
+function stopPolling() {
+  if (statusPollInterval.value) {
+    clearInterval(statusPollInterval.value);
+    statusPollInterval.value = null;
+    pollingActive.value = false;
+    console.log('🛑 Stopped polling job status');
+  }
+}
+
+// Watchers
+// Watch for assetId changes to start/stop polling dynamically
+watch(showJobStatus, (newVal, oldVal) => {
+  console.log('👁️ showJobStatus changed:', oldVal, '->', newVal);
+  if (newVal && !oldVal) {
+    // assetId was added - start polling
+    console.log('🚀 AssetID appeared - starting status polling');
+    startPolling();
+  } else if (!newVal && oldVal) {
+    // assetId was removed - stop polling
+    stopPolling();
+  }
+});
+
+// Watch jobStatus object for changes (nested path doesn't work when parent is null)
+watch(jobStatus, (newJobStatus, oldJobStatus) => {
+  const newStatus = newJobStatus?.status;
+  const oldStatus = oldJobStatus?.status;
+  console.log('📊 jobStatus watcher fired:', oldStatus, '->', newStatus);
+
+  if (newStatus === 'completed' && oldStatus !== 'completed') {
+    console.log('✅ Job completed - emitting refresh request');
+    emit('status-changed', {
+      status: newStatus,
+      assetId: props.cueData.assetId || props.cueData.assetid
+    });
+  }
+}, { deep: true });
+
+// Watch sotThumbnailOptions to preload thumbnails when they become available
+watch(sotThumbnailOptions, (newOptions, oldOptions) => {
+  // Preload when we get new options (e.g., after job status updates)
+  if (newOptions && newOptions.length > 1 && (!oldOptions || oldOptions.length <= 1)) {
+    console.log('📷 Thumbnail options now available, preloading...');
+    preloadThumbnails();
+  }
+});
+
+// Lifecycle hooks
+onMounted(() => {
+  console.log('🔍 PlaceholderCueCard MOUNTED:', {
+    type: props.cueData?.type,
+    assetId: props.cueData?.assetId,
+    assetid: props.cueData?.assetid,
+    allKeys: Object.keys(props.cueData || {}),
+    showReprocessButton: showReprocessButton.value
+  });
+
+  // Start polling if this is a SOT cue with AssetID
+  if (showJobStatus.value) {
+    startPolling();
+  }
+
+  // Preload thumbnails if already available on mount
+  if (sotThumbnailOptions.value && sotThumbnailOptions.value.length > 1) {
+    preloadThumbnails();
+  }
+});
+
+onBeforeUnmount(() => {
+  // Clean up polling interval
+  stopPolling();
+  // Clean up countdown interval
+  if (countdownInterval.value) {
+    clearInterval(countdownInterval.value);
+    countdownInterval.value = null;
+  }
+  // Clean up ESC key listener for preview modals
+  document.removeEventListener('keydown', handlePreviewModalEsc);
+});
+
+// Expose for parent component access (even though no current $refs access found,
+// expose key methods that child components or future parents might need)
+defineExpose({
+  handleGeneratePNG,
+  handleGenerateGfx,
+  fetchJobStatus,
+  startPolling,
+  stopPolling
+});
 </script>
 
 <style scoped>
@@ -2347,6 +2367,8 @@ export default {
   cursor: pointer;
   border-radius: 0 !important;
   position: relative;
+  /* Per-user knob: cue card text size (Settings → Editor Display) */
+  font-size: var(--editor-cue-font-size, inherit);
 }
 
 .cue-card:hover {
@@ -2371,6 +2393,28 @@ export default {
   max-width: 75%;
   width: 75%;
   /* Margins removed - alignment now controlled by parent .cue-segment flex container */
+  transition: all 0.2s ease;
+}
+
+/* Collapsed state — compact single-line card */
+.cue-collapsed {
+  max-height: 48px;
+  overflow: hidden;
+}
+
+.cue-collapsed .cue-card-header {
+  cursor: pointer;
+  min-height: 48px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.cue-collapsed .cue-type-badge {
+  font-size: 0.7rem;
+}
+
+.cue-collapsed .cue-title-text {
+  font-size: 0.8rem;
 }
 
 /* RIF card right-alignment removed - now controlled by global cue card alignment setting */
@@ -2473,7 +2517,8 @@ export default {
 
 /* Content Styling */
 .cue-card-content {
-  padding: 16px !important;
+  /* Per-user knob: cue card density (compact / comfortable / roomy) */
+  padding: var(--editor-cue-density, 16px) !important;
 }
 
 .placeholder-container {
@@ -3002,7 +3047,8 @@ export default {
 .sot-inline-video {
   width: 100%;
   display: block;
-  max-height: 200px;
+  /* Per-user knob: inline image/video preview max height */
+  max-height: var(--editor-image-max-height, 200px);
   background: #000;
 }
 
@@ -3787,15 +3833,17 @@ export default {
   justify-content: flex-start;
 }
 
-/* Delete Cue Button */
+/* Delete Cue Button - right aligned, highlighted */
 .delete-cue-btn {
-  opacity: 0.7;
-  margin-right: 12px;
+  margin-left: auto !important;
+  font-size: 0.85rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .delete-cue-btn:hover {
-  opacity: 1;
-  background-color: rgba(244, 67, 54, 0.2) !important;
+  background-color: rgba(244, 67, 54, 0.3) !important;
 }
 
 .duration-display {
@@ -3813,14 +3861,32 @@ export default {
 }
 
 /* Processing Status */
-.processing-status {
+.job-status-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 12px;
+  margin-top: 8px;
+  border-radius: 4px;
+}
+
+.job-status-chip-body {
+  max-width: 100%;
+  white-space: normal;
+  height: auto !important;
+  padding: 4px 10px;
+}
+
+.job-status-chip-body :deep(.v-chip__content) {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.processing-status-inline {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 0.9rem;
-  padding: 8px 12px;
-  border-radius: 4px;
-  margin-top: 8px;
 }
 
 .status-processing {

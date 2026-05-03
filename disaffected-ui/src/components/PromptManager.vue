@@ -437,485 +437,443 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { notifyUserStandard, NOTIFICATION_COLORS } from '@/composables/useStandardNotification'
 
-export default {
-  name: 'PromptManager',
-  setup() {
+// State
+const loading = ref(false)
+const saving = ref(false)
+const dialog = ref(false)
+const editMode = ref(false)
+const overrides = ref([])
+const filterCategory = ref(null)
+const showEnabledOnly = ref(false)
+const formRef = ref(null)
 
-    // State
-    const loading = ref(false)
-    const saving = ref(false)
-    const dialog = ref(false)
-    const editMode = ref(false)
-    const overrides = ref([])
-    const filterCategory = ref(null)
-    const showEnabledOnly = ref(false)
-    const formRef = ref(null)
+// Categories from backend
+const categories = ref(['generate', 'analyze', 'extract', 'refactor', 'compose'])
 
-    // Categories from backend
-    const categories = ref(['generate', 'analyze', 'extract', 'refactor', 'compose'])
+// Operations by category (loaded from backend)
+const operationsByCategory = ref({})
 
-    // Operations by category (loaded from backend)
-    const operationsByCategory = ref({})
+// Form data
+const formData = ref({
+  id: null,
+  category: null,
+  operation_key: null,
+  system_prompt: '',
+  user_prompt_template: '',
+  notes: '',
+  is_enabled: true,
+  suggested_service: null,
+  suggested_model: null,
+  temperature: null,
+  max_tokens: null
+})
 
-    // Form data
-    const formData = ref({
-      id: null,
-      category: null,
-      operation_key: null,
-      system_prompt: '',
-      user_prompt_template: '',
-      notes: '',
-      is_enabled: true,
-      suggested_service: null,
-      suggested_model: null,
-      temperature: null,
-      max_tokens: null
-    })
+// Selected operation variables
+const selectedOperationVariables = ref([])
 
-    // Selected operation variables
-    const selectedOperationVariables = ref([])
+// Default prompt modal
+const defaultPromptDialog = ref(false)
+const loadingDefaultPrompt = ref(false)
+const defaultPromptError = ref(null)
+const defaultPromptData = ref({
+  systemPrompt: '',
+  prompt: '',
+  version: '',
+  description: '',
+  temperature: null,
+  maxTokens: null
+})
 
-    // Default prompt modal
-    const defaultPromptDialog = ref(false)
-    const loadingDefaultPrompt = ref(false)
-    const defaultPromptError = ref(null)
-    const defaultPromptData = ref({
-      systemPrompt: '',
-      prompt: '',
-      version: '',
-      description: '',
-      temperature: null,
-      maxTokens: null
-    })
+// Variable definitions by operation
+const operationVariables = {
+  // Generate operations
+  'generate-segment-script': [
+    { name: 'title', description: 'Segment title', example: 'The Rise of AI' },
+    { name: 'topic', description: 'Main topic or subject', example: 'Artificial Intelligence' },
+    { name: 'duration', description: 'Target duration', example: '5:00' },
+    { name: 'tone', description: 'Desired tone', example: 'casual, formal, humorous' },
+    { name: 'audience', description: 'Target audience', example: 'developers, general public' },
+    { name: 'context', description: 'Additional background', example: 'Follow-up to episode 243' }
+  ],
+  'generate-ad-script': [
+    { name: 'product', description: 'Product/service name', example: 'VPN Service' },
+    { name: 'duration', description: 'Ad duration', example: '30 seconds' },
+    { name: 'features', description: 'Key features', example: 'secure, fast, unlimited' },
+    { name: 'callToAction', description: 'CTA text', example: 'Visit example.com' },
+    { name: 'tone', description: 'Ad tone', example: 'professional, friendly' }
+  ],
+  'generate-promo-script': [
+    { name: 'show', description: 'Show name', example: 'Tech Talk Podcast' },
+    { name: 'episode', description: 'Episode title/number', example: 'Episode 244' },
+    { name: 'duration', description: 'Promo duration', example: '15 seconds' },
+    { name: 'hook', description: 'Attention-grabbing hook', example: 'What if AI could...' }
+  ],
+  'generate-cta-script': [
+    { name: 'action', description: 'Desired action', example: 'Subscribe to newsletter' },
+    { name: 'platform', description: 'Platform name', example: 'YouTube, Patreon' },
+    { name: 'benefit', description: 'User benefit', example: 'Get exclusive content' }
+  ],
+  'generate-episode-description': [
+    { name: 'title', description: 'Episode title', example: 'AI Ethics in 2025' },
+    { name: 'topics', description: 'Main topics covered', example: 'AI safety, regulation, privacy' },
+    { name: 'guests', description: 'Guest names', example: 'Dr. Jane Smith' },
+    { name: 'duration', description: 'Episode duration', example: '45 minutes' }
+  ],
 
-    // Variable definitions by operation
-    const operationVariables = {
-      // Generate operations
-      'generate-segment-script': [
-        { name: 'title', description: 'Segment title', example: 'The Rise of AI' },
-        { name: 'topic', description: 'Main topic or subject', example: 'Artificial Intelligence' },
-        { name: 'duration', description: 'Target duration', example: '5:00' },
-        { name: 'tone', description: 'Desired tone', example: 'casual, formal, humorous' },
-        { name: 'audience', description: 'Target audience', example: 'developers, general public' },
-        { name: 'context', description: 'Additional background', example: 'Follow-up to episode 243' }
-      ],
-      'generate-ad-script': [
-        { name: 'product', description: 'Product/service name', example: 'VPN Service' },
-        { name: 'duration', description: 'Ad duration', example: '30 seconds' },
-        { name: 'features', description: 'Key features', example: 'secure, fast, unlimited' },
-        { name: 'callToAction', description: 'CTA text', example: 'Visit example.com' },
-        { name: 'tone', description: 'Ad tone', example: 'professional, friendly' }
-      ],
-      'generate-promo-script': [
-        { name: 'show', description: 'Show name', example: 'Tech Talk Podcast' },
-        { name: 'episode', description: 'Episode title/number', example: 'Episode 244' },
-        { name: 'duration', description: 'Promo duration', example: '15 seconds' },
-        { name: 'hook', description: 'Attention-grabbing hook', example: 'What if AI could...' }
-      ],
-      'generate-cta-script': [
-        { name: 'action', description: 'Desired action', example: 'Subscribe to newsletter' },
-        { name: 'platform', description: 'Platform name', example: 'YouTube, Patreon' },
-        { name: 'benefit', description: 'User benefit', example: 'Get exclusive content' }
-      ],
-      'generate-episode-description': [
-        { name: 'title', description: 'Episode title', example: 'AI Ethics in 2025' },
-        { name: 'topics', description: 'Main topics covered', example: 'AI safety, regulation, privacy' },
-        { name: 'guests', description: 'Guest names', example: 'Dr. Jane Smith' },
-        { name: 'duration', description: 'Episode duration', example: '45 minutes' }
-      ],
+  // Analyze operations
+  'analyze-script-tone': [
+    { name: 'script', description: 'Script content to analyze', example: 'Full script text...' },
+    { name: 'targetTone', description: 'Expected tone', example: 'professional, casual' }
+  ],
+  'analyze-script-length': [
+    { name: 'script', description: 'Script content', example: 'Full script text...' },
+    { name: 'targetDuration', description: 'Target duration', example: '5:00' },
+    { name: 'wordsPerMinute', description: 'Speaking pace', example: '150' }
+  ],
 
-      // Analyze operations
-      'analyze-script-tone': [
-        { name: 'script', description: 'Script content to analyze', example: 'Full script text...' },
-        { name: 'targetTone', description: 'Expected tone', example: 'professional, casual' }
-      ],
-      'analyze-script-length': [
-        { name: 'script', description: 'Script content', example: 'Full script text...' },
-        { name: 'targetDuration', description: 'Target duration', example: '5:00' },
-        { name: 'wordsPerMinute', description: 'Speaking pace', example: '150' }
-      ],
+  // Extract operations
+  'extract-keywords': [
+    { name: 'content', description: 'Content to extract from', example: 'Article or script text...' },
+    { name: 'maxKeywords', description: 'Max number of keywords', example: '10' }
+  ],
+  'extract-quotes': [
+    { name: 'content', description: 'Content to extract from', example: 'Interview transcript...' },
+    { name: 'minLength', description: 'Min quote length', example: '20' }
+  ],
 
-      // Extract operations
-      'extract-keywords': [
-        { name: 'content', description: 'Content to extract from', example: 'Article or script text...' },
-        { name: 'maxKeywords', description: 'Max number of keywords', example: '10' }
-      ],
-      'extract-quotes': [
-        { name: 'content', description: 'Content to extract from', example: 'Interview transcript...' },
-        { name: 'minLength', description: 'Min quote length', example: '20' }
-      ],
+  // Refactor operations
+  'refactor-shorten-script': [
+    { name: 'script', description: 'Original script', example: 'Full script text...' },
+    { name: 'targetDuration', description: 'Target duration', example: '3:00' },
+    { name: 'preserveKey', description: 'Key points to preserve', example: 'Main argument, conclusion' }
+  ],
+  'refactor-adjust-tone': [
+    { name: 'script', description: 'Original script', example: 'Full script text...' },
+    { name: 'currentTone', description: 'Current tone', example: 'formal' },
+    { name: 'targetTone', description: 'Desired tone', example: 'casual' }
+  ],
 
-      // Refactor operations
-      'refactor-shorten-script': [
-        { name: 'script', description: 'Original script', example: 'Full script text...' },
-        { name: 'targetDuration', description: 'Target duration', example: '3:00' },
-        { name: 'preserveKey', description: 'Key points to preserve', example: 'Main argument, conclusion' }
-      ],
-      'refactor-adjust-tone': [
-        { name: 'script', description: 'Original script', example: 'Full script text...' },
-        { name: 'currentTone', description: 'Current tone', example: 'formal' },
-        { name: 'targetTone', description: 'Desired tone', example: 'casual' }
-      ],
+  // Common variables (shown for all if not defined)
+  'default': [
+    { name: 'title', description: 'Item title', example: 'My Content' },
+    { name: 'topic', description: 'Main topic', example: 'Technology' },
+    { name: 'duration', description: 'Target duration', example: '5:00' },
+    { name: 'tone', description: 'Content tone', example: 'casual' },
+    { name: 'context', description: 'Additional context', example: 'Background information...' }
+  ]
+}
 
-      // Common variables (shown for all if not defined)
-      'default': [
-        { name: 'title', description: 'Item title', example: 'My Content' },
-        { name: 'topic', description: 'Main topic', example: 'Technology' },
-        { name: 'duration', description: 'Target duration', example: '5:00' },
-        { name: 'tone', description: 'Content tone', example: 'casual' },
-        { name: 'context', description: 'Additional context', example: 'Background information...' }
-      ]
+// Table headers
+const headers = [
+  { title: 'Category', key: 'category', sortable: true },
+  { title: 'Operation', key: 'operation_key', sortable: true },
+  { title: 'System Prompt', key: 'system_prompt', sortable: false },
+  { title: 'User Prompt', key: 'user_prompt_template', sortable: false },
+  { title: 'Route', key: 'route', sortable: false },
+  { title: 'Enabled', key: 'is_enabled', sortable: true },
+  { title: 'Actions', key: 'actions', sortable: false, width: 120 }
+]
+
+// Methods
+const loadOperations = async () => {
+  try {
+    const response = await axios.get('/api/prompts/operations')
+    if (response.data.success) {
+      operationsByCategory.value = response.data.operations
     }
-
-    // Table headers
-    const headers = [
-      { title: 'Category', key: 'category', sortable: true },
-      { title: 'Operation', key: 'operation_key', sortable: true },
-      { title: 'System Prompt', key: 'system_prompt', sortable: false },
-      { title: 'User Prompt', key: 'user_prompt_template', sortable: false },
-      { title: 'Route', key: 'route', sortable: false },
-      { title: 'Enabled', key: 'is_enabled', sortable: true },
-      { title: 'Actions', key: 'actions', sortable: false, width: 120 }
-    ]
-
-    // Methods
-    const loadOperations = async () => {
-      try {
-        const response = await axios.get('/api/prompts/operations')
-        if (response.data.success) {
-          operationsByCategory.value = response.data.operations
-        }
-      } catch (error) {
-        console.error('Failed to load operations:', error)
-        notifyUserStandard('Failed to load operations', NOTIFICATION_COLORS.ERROR)
-      }
-    }
-
-    const loadOverrides = async () => {
-      loading.value = true
-      try {
-        const params = {}
-        if (filterCategory.value) params.category = filterCategory.value
-        if (showEnabledOnly.value) params.enabled_only = true
-
-        const response = await axios.get('/api/prompts/overrides', { params })
-        if (response.data.success) {
-          overrides.value = response.data.overrides
-        }
-      } catch (error) {
-        console.error('Failed to load overrides:', error)
-        notifyUserStandard('Failed to load prompt overrides', NOTIFICATION_COLORS.ERROR)
-      } finally {
-        loading.value = false
-      }
-    }
-
-    const openCreateDialog = () => {
-      editMode.value = false
-      formData.value = {
-        id: null,
-        category: null,
-        operation_key: null,
-        system_prompt: '',
-        user_prompt_template: '',
-        notes: '',
-        is_enabled: true,
-        suggested_service: null,
-        suggested_model: null,
-        temperature: null,
-        max_tokens: null
-      }
-      dialog.value = true
-    }
-
-    const openEditDialog = (item) => {
-      editMode.value = true
-      formData.value = {
-        id: item.id,
-        category: item.category,
-        operation_key: item.operation_key,
-        system_prompt: item.system_prompt || '',
-        user_prompt_template: item.user_prompt_template || '',
-        notes: item.notes || '',
-        is_enabled: item.is_enabled,
-        suggested_service: item.suggested_service || null,
-        suggested_model: item.suggested_model || null,
-        temperature: item.temperature,
-        max_tokens: item.max_tokens
-      }
-      // Populate variables panel for the selected operation
-      onOperationSelected(item.operation_key)
-      dialog.value = true
-    }
-
-    const closeDialog = () => {
-      dialog.value = false
-      formData.value = {
-        id: null,
-        category: null,
-        operation_key: null,
-        system_prompt: '',
-        user_prompt_template: '',
-        notes: '',
-        is_enabled: true,
-        suggested_service: null,
-        suggested_model: null,
-        temperature: null,
-        max_tokens: null
-      }
-    }
-
-    const saveOverride = async () => {
-      // Validate form
-      const { valid } = await formRef.value.validate()
-      if (!valid) {
-        notifyUserStandard('Please fill in required fields', NOTIFICATION_COLORS.WARNING)
-        return
-      }
-
-      saving.value = true
-      try {
-        if (editMode.value) {
-          // Update existing override
-          await axios.patch(`/api/prompts/overrides/${formData.value.id}`, {
-            system_prompt: formData.value.system_prompt,
-            user_prompt_template: formData.value.user_prompt_template,
-            notes: formData.value.notes,
-            is_enabled: formData.value.is_enabled
-          })
-          notifyUserStandard('Prompt override updated', NOTIFICATION_COLORS.SUCCESS)
-        } else {
-          // Create new override
-          await axios.post('/api/prompts/overrides', formData.value)
-          notifyUserStandard('Prompt override created', NOTIFICATION_COLORS.SUCCESS)
-        }
-
-        closeDialog()
-        await loadOverrides()
-      } catch (error) {
-        console.error('Failed to save override:', error)
-        const message = error.response?.data?.detail || 'Failed to save prompt override'
-        notifyUserStandard(message, NOTIFICATION_COLORS.ERROR)
-      } finally {
-        saving.value = false
-      }
-    }
-
-    const toggleOverride = async (item) => {
-      try {
-        await axios.post(`/api/prompts/overrides/${item.id}/toggle`)
-        notifyUserStandard(
-          `Override ${item.is_enabled ? 'disabled' : 'enabled'}`,
-          NOTIFICATION_COLORS.SUCCESS,
-          1500
-        )
-        await loadOverrides()
-      } catch (error) {
-        console.error('Failed to toggle override:', error)
-        notifyUserStandard('Failed to toggle override', NOTIFICATION_COLORS.ERROR)
-      }
-    }
-
-    const deleteOverride = async (item) => {
-      if (!confirm(`Delete override for ${item.category}.${item.operation_key}?`)) {
-        return
-      }
-
-      try {
-        await axios.delete(`/api/prompts/overrides/${item.id}`)
-        notifyUserStandard('Prompt override deleted', NOTIFICATION_COLORS.SUCCESS)
-        await loadOverrides()
-      } catch (error) {
-        console.error('Failed to delete override:', error)
-        notifyUserStandard('Failed to delete prompt override', NOTIFICATION_COLORS.ERROR)
-      }
-    }
-
-    const getCategoryColor = (category) => {
-      const colors = {
-        generate: 'blue',
-        analyze: 'purple',
-        extract: 'green',
-        refactor: 'orange',
-        compose: 'pink',
-        inventory: 'teal'
-      }
-      return colors[category] || 'grey'
-    }
-
-    // Operation metadata for tooltips
-    const operationMetadata = {
-      'inventory-match-file-to-slot': {
-        title: 'File to Slot Matcher',
-        description: 'Determines if a specific file matches an expected episode file slot (e.g., episode_info, rundown_json). Called when validating individual files against canonical expectations.'
-      },
-      'inventory-classify-stray-file': {
-        title: 'Stray File Classifier',
-        description: 'Classifies unmatched files into categories (test file, backup, duplicate, temp, etc.) and suggests actions (keep/delete/relocate). Called for files that don\'t match any expected slots.'
-      },
-      'inventory-batch-match-slots': {
-        title: 'Batch Slot Matcher',
-        description: 'Analyzes entire episode directory tree and matches files to 25 semantic slots in batches. Called during episode file inventory scans to classify captures, exports, thumbnails, projects, and assets. Uses DeepSeek R1 by default for better reasoning.'
-      }
-    }
-
-    const getOperationTitle = (operationKey) => {
-      return operationMetadata[operationKey]?.title || operationKey
-    }
-
-    const getOperationDescription = (operationKey) => {
-      return operationMetadata[operationKey]?.description || 'No description available for this operation.'
-    }
-
-    const getOperationsForCategory = (category) => {
-      if (!category || !operationsByCategory.value[category]) {
-        return []
-      }
-      return operationsByCategory.value[category]
-    }
-
-    // Handle operation selection - load variables
-    const onOperationSelected = (operationKey) => {
-      if (operationKey && operationVariables[operationKey]) {
-        selectedOperationVariables.value = operationVariables[operationKey]
-      } else {
-        // Show default variables if operation not found
-        selectedOperationVariables.value = operationVariables['default']
-      }
-    }
-
-    // Insert variable into user prompt template
-    const insertVariable = (variableName) => {
-      const variable = `{{${variableName}}}`
-      const textarea = document.querySelector('textarea[label="User Prompt Template Override"]')
-
-      if (textarea) {
-        const cursorPos = textarea.selectionStart
-        const textBefore = formData.value.user_prompt_template.substring(0, cursorPos)
-        const textAfter = formData.value.user_prompt_template.substring(cursorPos)
-
-        formData.value.user_prompt_template = textBefore + variable + textAfter
-
-        // Move cursor after inserted variable
-        setTimeout(() => {
-          textarea.focus()
-          textarea.selectionStart = textarea.selectionEnd = cursorPos + variable.length
-        }, 0)
-
-        notifyUserStandard(`Inserted ${variable}`, NOTIFICATION_COLORS.INFO, 1000)
-      } else {
-        // Fallback: append to end
-        if (formData.value.user_prompt_template) {
-          formData.value.user_prompt_template += ' ' + variable
-        } else {
-          formData.value.user_prompt_template = variable
-        }
-        notifyUserStandard(`Added ${variable}`, NOTIFICATION_COLORS.INFO, 1000)
-      }
-    }
-
-    // View default prompt
-    const viewDefaultPrompt = async () => {
-      if (!formData.value.operation_key) {
-        notifyUserStandard('Please select an operation first', NOTIFICATION_COLORS.WARNING)
-        return
-      }
-
-      defaultPromptDialog.value = true
-      loadingDefaultPrompt.value = true
-      defaultPromptError.value = null
-
-      try {
-        // Import and get default prompt from useLLMPrompts
-        const { getLLMPrompt } = await import('@/composables/useLLMPrompts')
-
-        // Get default prompt (without category to avoid override lookup)
-        const promptData = await getLLMPrompt(formData.value.operation_key, {})
-
-        defaultPromptData.value = {
-          systemPrompt: promptData.systemPrompt || '',
-          prompt: promptData.prompt || '',
-          version: promptData.version || '',
-          description: promptData.description || '',
-          temperature: promptData.temperature,
-          maxTokens: promptData.maxTokens
-        }
-
-        console.log('Loaded default prompt:', defaultPromptData.value)
-      } catch (error) {
-        console.error('Failed to load default prompt:', error)
-        defaultPromptError.value = `Failed to load default prompt: ${error.message}`
-      } finally {
-        loadingDefaultPrompt.value = false
-      }
-    }
-
-    // Copy default system prompt to override
-    const copyDefaultSystemPrompt = () => {
-      if (defaultPromptData.value.systemPrompt) {
-        formData.value.system_prompt = defaultPromptData.value.systemPrompt
-        notifyUserStandard('System prompt copied to override', NOTIFICATION_COLORS.SUCCESS, 2000)
-        defaultPromptDialog.value = false
-      }
-    }
-
-    // Copy default user prompt to override
-    const copyDefaultUserPrompt = () => {
-      if (defaultPromptData.value.prompt) {
-        formData.value.user_prompt_template = defaultPromptData.value.prompt
-        notifyUserStandard('User prompt copied to override', NOTIFICATION_COLORS.SUCCESS, 2000)
-        defaultPromptDialog.value = false
-      }
-    }
-
-    // Lifecycle
-    onMounted(async () => {
-      await loadOperations()
-      await loadOverrides()
-    })
-
-    return {
-      loading,
-      saving,
-      dialog,
-      editMode,
-      overrides,
-      filterCategory,
-      showEnabledOnly,
-      formRef,
-      categories,
-      operationsByCategory,
-      formData,
-      headers,
-      selectedOperationVariables,
-      defaultPromptDialog,
-      loadingDefaultPrompt,
-      defaultPromptError,
-      defaultPromptData,
-      loadOverrides,
-      openCreateDialog,
-      openEditDialog,
-      closeDialog,
-      saveOverride,
-      toggleOverride,
-      deleteOverride,
-      getCategoryColor,
-      getOperationTitle,
-      getOperationDescription,
-      getOperationsForCategory,
-      onOperationSelected,
-      insertVariable,
-      viewDefaultPrompt,
-      copyDefaultSystemPrompt,
-      copyDefaultUserPrompt
-    }
+  } catch (error) {
+    console.error('Failed to load operations:', error)
+    notifyUserStandard('Failed to load operations', NOTIFICATION_COLORS.ERROR)
   }
 }
+
+const loadOverrides = async () => {
+  loading.value = true
+  try {
+    const params = {}
+    if (filterCategory.value) params.category = filterCategory.value
+    if (showEnabledOnly.value) params.enabled_only = true
+
+    const response = await axios.get('/api/prompts/overrides', { params })
+    if (response.data.success) {
+      overrides.value = response.data.overrides
+    }
+  } catch (error) {
+    console.error('Failed to load overrides:', error)
+    notifyUserStandard('Failed to load prompt overrides', NOTIFICATION_COLORS.ERROR)
+  } finally {
+    loading.value = false
+  }
+}
+
+const openCreateDialog = () => {
+  editMode.value = false
+  formData.value = {
+    id: null,
+    category: null,
+    operation_key: null,
+    system_prompt: '',
+    user_prompt_template: '',
+    notes: '',
+    is_enabled: true,
+    suggested_service: null,
+    suggested_model: null,
+    temperature: null,
+    max_tokens: null
+  }
+  dialog.value = true
+}
+
+const openEditDialog = (item) => {
+  editMode.value = true
+  formData.value = {
+    id: item.id,
+    category: item.category,
+    operation_key: item.operation_key,
+    system_prompt: item.system_prompt || '',
+    user_prompt_template: item.user_prompt_template || '',
+    notes: item.notes || '',
+    is_enabled: item.is_enabled,
+    suggested_service: item.suggested_service || null,
+    suggested_model: item.suggested_model || null,
+    temperature: item.temperature,
+    max_tokens: item.max_tokens
+  }
+  // Populate variables panel for the selected operation
+  onOperationSelected(item.operation_key)
+  dialog.value = true
+}
+
+const closeDialog = () => {
+  dialog.value = false
+  formData.value = {
+    id: null,
+    category: null,
+    operation_key: null,
+    system_prompt: '',
+    user_prompt_template: '',
+    notes: '',
+    is_enabled: true,
+    suggested_service: null,
+    suggested_model: null,
+    temperature: null,
+    max_tokens: null
+  }
+}
+
+const saveOverride = async () => {
+  // Validate form
+  const { valid } = await formRef.value.validate()
+  if (!valid) {
+    notifyUserStandard('Please fill in required fields', NOTIFICATION_COLORS.WARNING)
+    return
+  }
+
+  saving.value = true
+  try {
+    if (editMode.value) {
+      // Update existing override
+      await axios.patch(`/api/prompts/overrides/${formData.value.id}`, {
+        system_prompt: formData.value.system_prompt,
+        user_prompt_template: formData.value.user_prompt_template,
+        notes: formData.value.notes,
+        is_enabled: formData.value.is_enabled
+      })
+      notifyUserStandard('Prompt override updated', NOTIFICATION_COLORS.SUCCESS)
+    } else {
+      // Create new override
+      await axios.post('/api/prompts/overrides', formData.value)
+      notifyUserStandard('Prompt override created', NOTIFICATION_COLORS.SUCCESS)
+    }
+
+    closeDialog()
+    await loadOverrides()
+  } catch (error) {
+    console.error('Failed to save override:', error)
+    const message = error.response?.data?.detail || 'Failed to save prompt override'
+    notifyUserStandard(message, NOTIFICATION_COLORS.ERROR)
+  } finally {
+    saving.value = false
+  }
+}
+
+const toggleOverride = async (item) => {
+  try {
+    await axios.post(`/api/prompts/overrides/${item.id}/toggle`)
+    notifyUserStandard(
+      `Override ${item.is_enabled ? 'disabled' : 'enabled'}`,
+      NOTIFICATION_COLORS.SUCCESS,
+      1500
+    )
+    await loadOverrides()
+  } catch (error) {
+    console.error('Failed to toggle override:', error)
+    notifyUserStandard('Failed to toggle override', NOTIFICATION_COLORS.ERROR)
+  }
+}
+
+const deleteOverride = async (item) => {
+  if (!confirm(`Delete override for ${item.category}.${item.operation_key}?`)) {
+    return
+  }
+
+  try {
+    await axios.delete(`/api/prompts/overrides/${item.id}`)
+    notifyUserStandard('Prompt override deleted', NOTIFICATION_COLORS.SUCCESS)
+    await loadOverrides()
+  } catch (error) {
+    console.error('Failed to delete override:', error)
+    notifyUserStandard('Failed to delete prompt override', NOTIFICATION_COLORS.ERROR)
+  }
+}
+
+const getCategoryColor = (category) => {
+  const colors = {
+    generate: 'blue',
+    analyze: 'purple',
+    extract: 'green',
+    refactor: 'orange',
+    compose: 'pink',
+    inventory: 'teal'
+  }
+  return colors[category] || 'grey'
+}
+
+// Operation metadata for tooltips
+const operationMetadata = {
+  'inventory-match-file-to-slot': {
+    title: 'File to Slot Matcher',
+    description: 'Determines if a specific file matches an expected episode file slot (e.g., episode_info, rundown_json). Called when validating individual files against canonical expectations.'
+  },
+  'inventory-classify-stray-file': {
+    title: 'Stray File Classifier',
+    description: 'Classifies unmatched files into categories (test file, backup, duplicate, temp, etc.) and suggests actions (keep/delete/relocate). Called for files that don\'t match any expected slots.'
+  },
+  'inventory-batch-match-slots': {
+    title: 'Batch Slot Matcher',
+    description: 'Analyzes entire episode directory tree and matches files to 25 semantic slots in batches. Called during episode file inventory scans to classify captures, exports, thumbnails, projects, and assets. Uses DeepSeek R1 by default for better reasoning.'
+  }
+}
+
+const getOperationTitle = (operationKey) => {
+  return operationMetadata[operationKey]?.title || operationKey
+}
+
+const getOperationDescription = (operationKey) => {
+  return operationMetadata[operationKey]?.description || 'No description available for this operation.'
+}
+
+const getOperationsForCategory = (category) => {
+  if (!category || !operationsByCategory.value[category]) {
+    return []
+  }
+  return operationsByCategory.value[category]
+}
+
+// Handle operation selection - load variables
+const onOperationSelected = (operationKey) => {
+  if (operationKey && operationVariables[operationKey]) {
+    selectedOperationVariables.value = operationVariables[operationKey]
+  } else {
+    // Show default variables if operation not found
+    selectedOperationVariables.value = operationVariables['default']
+  }
+}
+
+// Insert variable into user prompt template
+const insertVariable = (variableName) => {
+  const variable = `{{${variableName}}}`
+  const textarea = document.querySelector('textarea[label="User Prompt Template Override"]')
+
+  if (textarea) {
+    const cursorPos = textarea.selectionStart
+    const textBefore = formData.value.user_prompt_template.substring(0, cursorPos)
+    const textAfter = formData.value.user_prompt_template.substring(cursorPos)
+
+    formData.value.user_prompt_template = textBefore + variable + textAfter
+
+    // Move cursor after inserted variable
+    setTimeout(() => {
+      textarea.focus()
+      textarea.selectionStart = textarea.selectionEnd = cursorPos + variable.length
+    }, 0)
+
+    notifyUserStandard(`Inserted ${variable}`, NOTIFICATION_COLORS.INFO, 1000)
+  } else {
+    // Fallback: append to end
+    if (formData.value.user_prompt_template) {
+      formData.value.user_prompt_template += ' ' + variable
+    } else {
+      formData.value.user_prompt_template = variable
+    }
+    notifyUserStandard(`Added ${variable}`, NOTIFICATION_COLORS.INFO, 1000)
+  }
+}
+
+// View default prompt
+const viewDefaultPrompt = async () => {
+  if (!formData.value.operation_key) {
+    notifyUserStandard('Please select an operation first', NOTIFICATION_COLORS.WARNING)
+    return
+  }
+
+  defaultPromptDialog.value = true
+  loadingDefaultPrompt.value = true
+  defaultPromptError.value = null
+
+  try {
+    // Import and get default prompt from useLLMPrompts
+    const { getLLMPrompt } = await import('@/composables/useLLMPrompts')
+
+    // Get default prompt (without category to avoid override lookup)
+    const promptData = await getLLMPrompt(formData.value.operation_key, {})
+
+    defaultPromptData.value = {
+      systemPrompt: promptData.systemPrompt || '',
+      prompt: promptData.prompt || '',
+      version: promptData.version || '',
+      description: promptData.description || '',
+      temperature: promptData.temperature,
+      maxTokens: promptData.maxTokens
+    }
+
+    console.log('Loaded default prompt:', defaultPromptData.value)
+  } catch (error) {
+    console.error('Failed to load default prompt:', error)
+    defaultPromptError.value = `Failed to load default prompt: ${error.message}`
+  } finally {
+    loadingDefaultPrompt.value = false
+  }
+}
+
+// Copy default system prompt to override
+const copyDefaultSystemPrompt = () => {
+  if (defaultPromptData.value.systemPrompt) {
+    formData.value.system_prompt = defaultPromptData.value.systemPrompt
+    notifyUserStandard('System prompt copied to override', NOTIFICATION_COLORS.SUCCESS, 2000)
+    defaultPromptDialog.value = false
+  }
+}
+
+// Copy default user prompt to override
+const copyDefaultUserPrompt = () => {
+  if (defaultPromptData.value.prompt) {
+    formData.value.user_prompt_template = defaultPromptData.value.prompt
+    notifyUserStandard('User prompt copied to override', NOTIFICATION_COLORS.SUCCESS, 2000)
+    defaultPromptDialog.value = false
+  }
+}
+
+// Lifecycle
+onMounted(async () => {
+  await loadOperations()
+  await loadOverrides()
+})
 </script>
 
 <style scoped>

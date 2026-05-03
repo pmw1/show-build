@@ -61,9 +61,10 @@ export function useEpisodeMetadata() {
   // --- Production ---
   const currentProductionStatus = ref('draft');
   const productionStatuses = ref([
+    { title: 'Scheduled', value: 'scheduled' },
     { title: 'Draft', value: 'draft' },
-    { title: 'Approved', value: 'approved' },
     { title: 'Production', value: 'production' },
+    { title: 'Running', value: 'running' },
     { title: 'Completed', value: 'completed' }
   ]);
 

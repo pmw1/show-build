@@ -43,6 +43,48 @@ curl -X POST http://192.168.51.223:8001/write -H "Content-Type: application/json
 
 Update task status as you complete work.
 
+## Unified Task List (Dashboard Todo Panel)
+
+All todos — from any user AND from Claude — live in one table (`user_todos`)
+and one unified API under `/api/todos`. There is no longer a split between
+"Claude tasks" and "user tasks"; the only distinction is the `created_by`
+field on each row, which can be a username or `"claude"`.
+
+**Canonical endpoints** (no auth required, permissive by design):
+```
+GET    /api/todos                 → all todos, sorted active→priority→newest
+POST   /api/todos                 → create; body must include created_by
+PATCH  /api/todos/{id}            → update any field (content/priority/status/etc.)
+DELETE /api/todos/{id}            → delete
+```
+
+**POST body shape:**
+```json
+{
+  "content":     "Task title",
+  "description": "Optional details",
+  "priority":    "low|normal|high|critical",
+  "status":      "pending|in_progress|completed|on_hold",
+  "created_by":  "kevin"   // or "claude", or any service name
+}
+```
+
+**Claude's sync protocol** (what I use during sessions):
+1. **Start of session** — read existing todos: `curl -sk http://localhost:8888/api/todos` (from inside the container) or `https://192.168.51.207:8888/api/todos` (from the host)
+2. **Starting work** — POST with `created_by: "claude"` and `status: "in_progress"`
+3. **Completing work** — PATCH the id to `status: "completed"`; the backend auto-fills `completed_at`
+4. Keep the internal TaskCreate/TaskUpdate tools in sync with the dashboard — the dashboard is the single source of truth
+
+**Legacy routes** (`/api/todos/claude` and `/api/todos/user`) are kept as
+thin backward-compat wrappers but should NOT be used in new code. Use the
+unified endpoints.
+
+**Frontend** (`disaffected-ui/src/components/TodoPanel.vue`) renders the
+unified list with: checkbox | task title (truncated, clickable for full
+text) | priority chip | user chip (robot icon for Claude, account icon
+for humans) | delete button. No tabs. A "Show completed" switch toggles
+completed items in/out of view.
+
 ---
 
 ## Project Overview
@@ -90,6 +132,115 @@ Show-Build is a **database-first broadcast production platform** for the Disaffe
 - [`docs/RBAC_AUTHENTICATION_GUIDE.md`](docs/RBAC_AUTHENTICATION_GUIDE.md) — Complete RBAC reference
 - [`docs/DASHBOARD_ANNOUNCEMENTS.md`](docs/DASHBOARD_ANNOUNCEMENTS.md) — Dashboard announcement creation
 - [`docs/X_API_COMPLETE_REFERENCE.md`](docs/X_API_COMPLETE_REFERENCE.md) — X/Twitter API v2 reference
+- [`docs/KEYBOARD_SHORTCUTS.md`](docs/KEYBOARD_SHORTCUTS.md) — Master keyboard shortcut reference. Runtime data lives in `disaffected-ui/src/data/keyboardShortcuts.js`; in-app help modal opens with `?` or `F1`. **When adding/changing a shortcut, update both the `.js` file and the `.md` file.**
+
+## MetadataPanel LLM-Generated Field Highlighting
+
+The right sidebar (`disaffected-ui/src/components/content-editor/MetadataPanel.vue`)
+visually distinguishes LLM-written field values from human-written ones by
+rendering LLM-filled inputs in purple italic (`#7e57c2`). This is wired up
+**once**, in a single bottleneck — no per-field template annotations.
+
+**How it lights up:**
+1. The rundown item carries an array field `llm_generated_fields: string[]`
+   listing field names the LLM filled in (e.g. `["description", "title"]`).
+   This must be persisted on the rundown item by whatever generation code
+   writes the field.
+2. `MetadataPanel.vue` has one ref (`metadataRootRef`) on its root div and a
+   single `watch` over `props.item` + `llm_generated_fields` that:
+   - clears any stale `.llm-generated` classes under the root,
+   - for each field in `llm_generated_fields`, queries all `.sidebar-field
+     input, .sidebar-field textarea` descendants and finds the first whose
+     current `.value` equals `item[field]`,
+   - adds the `llm-generated` class to that input's `.sidebar-field` ancestor.
+3. A delegated `input` listener on the same root strips the class the
+   instant the user types into any LLM-marked field (instant feedback; no
+   per-field handlers).
+4. CSS: `:deep(.sidebar-field.llm-generated input, textarea, .v-field__input,
+   .v-select__selection-text) { color: #7e57c2 !important; font-style: italic; }`
+
+**Rules for future work:**
+- **When writing an LLM generator that fills a MetadataPanel field**, update
+  the rundown item's `llm_generated_fields` array (add the field name) as
+  part of the same persistence operation. Do not try to style the field
+  directly.
+- **When a user edit persists**, the backend should remove the field name
+  from `llm_generated_fields`. The frontend already strips the class
+  instantly on keystroke, but removing it from the persisted array keeps the
+  state correct across reloads.
+- **Do NOT add per-field `:class="{ 'llm-generated': ... }"` bindings** in
+  `MetadataPanel.vue`. The value-matching scanner handles every field in
+  the panel automatically — adding new sidebar fields requires no wiring.
+- **Do not key the scanner off placeholders or labels** — it matches by
+  comparing the input's `.value` to `item[field]`. Field value collisions
+  are handled via a `WeakSet` (first match wins per field).
+
+## LLM Generation History Pattern (Universal)
+
+Any field on a rundown item that an LLM can generate should follow a
+**generation-history** pattern so the user can iteratively refine the output
+across multiple rounds. The pattern has three parts:
+
+### 1. History column (per field)
+Each LLM-generated field gets a companion JSONB column named
+`{field}_gen_history` (e.g. `description_gen_history`,
+`title_gen_history`, `social_post_gen_history`). The column stores an
+ordered array of conversation entries:
+```json
+[
+  {"role": "llm", "text": "First attempt...", "ts": "2026-04-08T12:00:00Z"},
+  {"role": "user", "text": "Make it shorter", "ts": "2026-04-08T12:01:00Z"},
+  {"role": "llm", "text": "Revised attempt...", "ts": "2026-04-08T12:01:30Z"}
+]
+```
+`role` is always `"llm"` or `"user"`. `ts` is UTC ISO-8601.
+
+### 2. Service functions (per field)
+In `app/services/auto_description_service.py` (or a future per-field
+service), use these **field-specific** helper names:
+- `append_{field}_history(db, asset_id, role, text)` — appends one entry.
+- `get_{field}_history(db, asset_id)` — reads the array.
+- `generate_{field}(asset_id)` — first-pass generation; appends an `llm`
+  entry to history on success.
+- `regenerate_{field}(asset_id, previous_value, feedback)` — reads full
+  history, appends the `user` feedback entry, calls the LLM with the
+  complete conversation, appends the new `llm` entry.
+
+**Naming is field-specific, not generic.** `append_description_history` not
+`append_history`; `regenerate_segment_description` not `regenerate_field`.
+This keeps call sites self-documenting and avoids ambiguity when multiple
+fields are LLM-generated on the same item.
+
+### 3. Regenerate prompt structure
+When regenerating, the LLM prompt contains (in this order):
+1. The full standard generation prompt (segment content, tone, template).
+2. `--- GENERATION HISTORY ---` block with every prior `[LLM generated]`
+   and `[User feedback]` entry from the history array.
+3. The current field value.
+4. The user's latest feedback.
+5. Instruction: "Write a NEW value that addresses ALL the user's feedback
+   (both current and any prior rounds)."
+
+This ensures each iteration converges toward the user's intent with full
+context, not just the last attempt.
+
+### 4. Frontend regenerate button
+Each LLM-generated field with a history column should have a regenerate
+button (purple refresh icon, bottom-right corner, appears on hover). The
+button opens a modal showing the current value + a feedback textarea. On
+submit, it calls `POST /api/episodes/regenerate-{field}` with
+`{asset_id, previous_value, feedback}`.
+
+### 5. When adding a new LLM-generated field
+1. Create a `{field}_gen_history JSONB DEFAULT '[]'` migration.
+2. Add the column to the SQLAlchemy model.
+3. Write field-specific `generate_*` and `regenerate_*` functions.
+4. Add the field name to `llm_generated_fields` on generation (drives
+   purple highlighting automatically).
+5. Add a regenerate button + modal in the sidebar (or wherever the field
+   is displayed). Wire to a new API endpoint.
+6. Return `{field}_gen_history` in the API response if the frontend needs
+   to display iteration count or history.
 
 ## ContentEditor Save/Reload Architecture
 

@@ -57,12 +57,12 @@
           </v-card>
         </v-col>
 
-        <!-- XTTS Configuration -->
+        <!-- TTS Configuration (legacy XTTS) -->
         <v-col cols="12">
           <v-card variant="outlined" class="pa-4">
             <div class="d-flex align-center mb-3">
               <v-icon class="mr-3" size="large">mdi-account-voice</v-icon>
-              <v-card-title class="text-subtitle-1 pa-0 flex-grow-1">XTTS (Text-to-Speech)</v-card-title>
+              <v-card-title class="text-subtitle-1 pa-0 flex-grow-1">TTS (Text-to-Speech)</v-card-title>
               <v-switch
                 :model-value="xttsConfig.enabled || false"
                 label="Enable"
@@ -81,7 +81,7 @@
                   label="Host URL"
                   placeholder="http://192.168.51.197:5001"
                   persistent-hint
-                  hint="XTTS text-to-speech service endpoint"
+                  hint="TTS text-to-speech service endpoint"
                   @update:model-value="updateVoiceConfig('xtts', 'host', $event)"
                 />
                 <v-text-field
@@ -89,7 +89,7 @@
                   label="TTS Endpoint"
                   placeholder="/v1/audio/speech"
                   persistent-hint
-                  hint="XTTS API endpoint for text-to-speech"
+                  hint="TTS API endpoint for text-to-speech"
                   @update:model-value="updateVoiceConfig('xtts', 'endpoint', $event)"
                 />
                 <v-text-field
@@ -116,7 +116,7 @@
                   :items="availableSpeakers"
                   label="Available Speakers"
                   persistent-hint
-                  hint="Select a voice speaker for text-to-speech (OpenAI + XTTS speakers)"
+                  hint="Select a voice speaker for text-to-speech"
                   density="compact"
                   item-title="name"
                   item-value="id"
@@ -279,7 +279,7 @@
                 </div>
                 <div class="d-flex align-center">
                   <v-icon color="grey">mdi-robot</v-icon>
-                  <span class="ml-3 text-grey">XTTS model fine-tuning</span>
+                  <span class="ml-3 text-grey">TTS model fine-tuning</span>
                 </div>
               </div>
 
@@ -354,12 +354,12 @@ const testingVoice = ref(false)
 
 // Auto-fetch speakers when component mounts (but avoid triggering reactive loops)
 onMounted(() => {
-  // Only fetch speakers if XTTS is enabled and has a host - don't fetch on every mount
+  // Only fetch speakers if TTS is enabled and has a host - don't fetch on every mount
   if (xttsConfig.value?.enabled && xttsConfig.value?.host) {
-    console.log('XTTS is enabled with host, fetching speakers...')
+    console.log('TTS is enabled with host, fetching speakers...')
     fetchAvailableSpeakers()
   } else {
-    console.log('XTTS not enabled or no host configured, skipping speaker fetch')
+    console.log('TTS not enabled or no host configured, skipping speaker fetch')
   }
 })
 
@@ -394,7 +394,7 @@ function updateVoiceConfig(service, field, value) {
   newConfigs[service][field] = value
   emit('update:modelValue', newConfigs)
 
-  // Handle XTTS-specific side effects without updating global state
+  // Handle TTS-specific side effects without updating global state
   if (service === 'xtts') {
     // Special handling for enabled field
     // Only fetch if not already loading (prevent recursive loops)
@@ -489,7 +489,7 @@ async function testConnection(service) {
     if (response.ok) {
       const result = await response.json()
       const serviceName = service === 'fishspeech' ? 'Fish Speech' :
-                          service === 'xtts' ? 'XTTS' :
+                          service === 'xtts' ? 'TTS' :
                           service === 'whisper' ? 'Whisper' : service
       alert(`${serviceName} connection successful! ${result.message || ''}`)
     } else {
@@ -499,7 +499,7 @@ async function testConnection(service) {
   } catch (error) {
     console.error(`Error testing ${service} connection:`, error)
     const serviceName = service === 'fishspeech' ? 'Fish Speech' :
-                        service === 'xtts' ? 'XTTS' :
+                        service === 'xtts' ? 'TTS' :
                         service === 'whisper' ? 'Whisper' : service
     alert(`Failed to connect to ${serviceName}: ${error.message}`)
   }
@@ -507,7 +507,7 @@ async function testConnection(service) {
 
 async function testVoiceSynthesis() {
   if (!xttsConfig.value.enabled) {
-    alert('Please enable XTTS first')
+    alert('Please enable TTS first')
     return
   }
 
@@ -517,7 +517,7 @@ async function testVoiceSynthesis() {
   }
 
   // Debug: log the current configuration
-  console.log('XTTS Configuration:', xttsConfig.value)
+  console.log('TTS Configuration:', xttsConfig.value)
   console.log('Selected speaker:', xttsConfig.value.speaker)
   console.log('Available speakers:', availableSpeakers.value)
 
@@ -581,7 +581,7 @@ async function testVoiceSynthesis() {
     try {
       console.log('Attempting to play audio...')
       await audio.play()
-      console.log('✅ XTTS test voice synthesis successful:', testMessage)
+      console.log('TTS test voice synthesis successful:', testMessage)
     } catch (playError) {
       console.error('Audio play failed:', playError)
       if (playError.name === 'NotAllowedError') {

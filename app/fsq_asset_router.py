@@ -67,7 +67,8 @@ class FSQAssetAsyncRequest(BaseModel):
     asset_id: str
     alignment: str = "center"  # Text alignment: left, center, right
     font_family: str = "sans-serif"  # sans-serif or serif
-    max_font_size: Optional[int] = None  # Maximum font size in px for auto-fitting (None = full auto)
+    font_size: Optional[int] = None  # Forced exact font size in px (preferred — what user sets, what gets rendered)
+    max_font_size: Optional[int] = None  # Legacy: upper bound for auto-fit (kept for backward compat)
     box_height: int = 80  # Black overlay height as % of canvas
     box_opacity: int = 75  # Black overlay opacity as %
     line_spacing: int = 30  # Line spacing as % of font size
@@ -382,6 +383,7 @@ async def generate_fsq_asset_async(
                 'asset_id': request.asset_id,
                 'alignment': request.alignment,
                 'font_family': request.font_family,
+                'font_size': request.font_size,
                 'max_font_size': request.max_font_size,
                 'box_height': request.box_height,
                 'box_opacity': request.box_opacity,
@@ -635,33 +637,32 @@ async def regenerate_all_fsq_assets(
                     skipped += 1
                     continue
 
-                # Scale the stored fontsize for readable output at 1920x1080
-                # The modal slider (10-40px) represents "preview scale" values.
-                # Quote text: 3x scaling as MAX (auto-fit will find optimal size)
-                # Attribution: 2x scaling as MAX
+                # Scale the user's UI font size into PNG space and pass it as
+                # the EXACT rendered size (not a max-fit cap). Multiplier 4
+                # matches FSQ_PNG_SCALE on the frontend so what the user sets
+                # is what gets rendered.
                 fontsize_raw = cue.get('fontsize', cue.get('fontSize', ''))
-                max_fontsize = None
+                forced_fontsize = None
                 if fontsize_raw:
                     try:
-                        # Parse the stored value (e.g., "23px" -> 23)
                         raw_value = float(str(fontsize_raw).replace('px', '').strip())
-                        # Apply 3x scaling as upper limit for auto-fitting
-                        max_fontsize = int(raw_value * 3)
+                        forced_fontsize = int(raw_value * 4)
                     except (ValueError, AttributeError):
-                        pass  # Fall back to default max (200px)
+                        pass  # Falls through to renderer auto-fit
 
-                # Scale attribution size at 2x (smaller than quote text)
+                # Attribution uses the same ×4 multiplier as the quote so the
+                # quote-to-attribution ratio in the PNG matches the modal
+                # preview exactly (WYSIWYG). To make attribution bigger,
+                # drag the per-cue Attrib Size slider.
                 attribution_raw = cue.get('attributionSize', cue.get('attributionsize', ''))
-                max_attribution_size = None
+                forced_attribution_size = None
                 if attribution_raw:
                     try:
                         raw_attr = float(str(attribution_raw).replace('px', '').strip())
-                        max_attribution_size = int(raw_attr * 2)
+                        forced_attribution_size = int(raw_attr * 4)
                     except (ValueError, AttributeError):
-                        pass  # Fall back to auto-sizing
+                        pass
 
-                # Queue Celery task with low priority (batch operation)
-                # Use max_font_size for auto-fitting (finds largest size that fits with 10% padding)
                 task = generate_fsq_png.apply_async(
                     kwargs={
                         'episode_id': episode_id,
@@ -671,16 +672,16 @@ async def regenerate_all_fsq_assets(
                         'asset_id': cue.get('assetId', cue.get('asset_id', '')),
                         'alignment': cue.get('alignment', cue.get('style', 'center')),
                         'font_family': cue.get('fontFamily', cue.get('fontfamily', 'sans-serif')),
-                        'max_font_size': max_fontsize,  # Upper limit for auto-fit (3x scaled)
+                        'font_size': forced_fontsize,  # Exact size — user value × 4
                         'box_height': int(cue.get('boxHeight', cue.get('boxheight', 80))),
                         'box_opacity': int(cue.get('boxOpacity', cue.get('boxopacity', 75))),
                         'line_spacing': int(cue.get('lineSpacing', cue.get('linespacing', 30))),
-                        'max_attribution_size': max_attribution_size,  # Upper limit (2x scaled)
+                        'attribution_size': forced_attribution_size,
                         'duration': cue.get('duration', '00:00:05:00'),
                         'enumerator': enumerator,
-                        'priority': 'low'  # Batch regeneration uses low priority
+                        'priority': 'low'
                     },
-                    queue='fsq'  # FSQ queue - Kairo worker handles this
+                    queue='fsq'
                 )
 
                 task_ids.append(task.id)

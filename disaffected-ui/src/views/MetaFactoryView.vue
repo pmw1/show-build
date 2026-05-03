@@ -231,77 +231,56 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useSegmentLLMData } from '@/composables/useSegmentLLMData'
-import MetaExtraction from '@/components/metafactory/MetaExtraction.vue'
+import MetaExtraction from '@/components/metafactory/MetaExtraction.vue' // eslint-disable-line no-unused-vars
 
-export default {
-  name: 'MetaFactoryView',
+const { getEpisodeLLMContext } = useSegmentLLMData()
 
-  components: {
-    MetaExtraction
-  },
+// State
+const currentEpisode = ref(null)
+const activeTab = ref('extract-meta')
+const episodeContext = ref(null)
+const loadingContext = ref(false)
 
-  setup() {
-    const { getEpisodeLLMContext } = useSegmentLLMData()
+// Methods
+async function loadEpisodeContext() {
+  if (!currentEpisode.value) return
 
-    // State
-    const currentEpisode = ref(null)
-    const activeTab = ref('extract-meta')
-    const episodeContext = ref(null)
-    const loadingContext = ref(false)
-
-    // Methods
-    async function loadEpisodeContext() {
-      if (!currentEpisode.value) return
-
-      loadingContext.value = true
-      try {
-        const context = await getEpisodeLLMContext(currentEpisode.value)
-        episodeContext.value = context
-      } catch (error) {
-        console.error('Failed to load episode context:', error)
-      } finally {
-        loadingContext.value = false
-      }
-    }
-
-    // Watch for episode changes via sessionStorage
-    function checkEpisode() {
-      const stored = sessionStorage.getItem('currentEpisode')
-      if (stored !== currentEpisode.value) {
-        currentEpisode.value = stored
-        episodeContext.value = null
-      }
-    }
-
-    // Setup interval to check for episode changes
-    let episodeCheckInterval = null
-
-    onMounted(() => {
-      checkEpisode()
-      episodeCheckInterval = setInterval(checkEpisode, 1000)
-    })
-
-    onUnmounted(() => {
-      if (episodeCheckInterval) {
-        clearInterval(episodeCheckInterval)
-      }
-    })
-
-    return {
-      // State
-      currentEpisode,
-      activeTab,
-      episodeContext,
-      loadingContext,
-
-      // Methods
-      loadEpisodeContext
-    }
+  loadingContext.value = true
+  try {
+    const context = await getEpisodeLLMContext(currentEpisode.value)
+    episodeContext.value = context
+  } catch (error) {
+    console.error('Failed to load episode context:', error)
+  } finally {
+    loadingContext.value = false
   }
 }
+
+// Watch for episode changes via sessionStorage
+function checkEpisode() {
+  const stored = sessionStorage.getItem('currentEpisode')
+  if (stored !== currentEpisode.value) {
+    currentEpisode.value = stored
+    episodeContext.value = null
+  }
+}
+
+// Setup interval to check for episode changes
+let episodeCheckInterval = null
+
+onMounted(() => {
+  checkEpisode()
+  episodeCheckInterval = setInterval(checkEpisode, 1000)
+})
+
+onUnmounted(() => {
+  if (episodeCheckInterval) {
+    clearInterval(episodeCheckInterval)
+  }
+})
 </script>
 
 <style scoped>

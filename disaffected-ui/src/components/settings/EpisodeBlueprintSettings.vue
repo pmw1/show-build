@@ -118,7 +118,7 @@
   </v-card>
 </template>
 
-<script>
+<script setup>
 import { ref, computed, onMounted, defineComponent, h } from 'vue'
 import axios from 'axios'
 
@@ -217,11 +217,10 @@ const BlueprintTreeNode = defineComponent({
   }
 })
 
-export default {
-  name: 'EpisodeBlueprintSettings',
-  components: { BlueprintTreeNode },
-  setup() {
-    const nodes = ref([])
+// Auto-register BlueprintTreeNode in script setup
+void BlueprintTreeNode
+
+const nodes = ref([])
     const loading = ref(false)
     const saving = ref(false)
     const error = ref(null)
@@ -358,31 +357,6 @@ export default {
     }
 
     onMounted(loadNodes)
-
-    return {
-      nodes,
-      loading,
-      saving,
-      error,
-      showDialog,
-      showDeleteDialog,
-      editingNode,
-      deletingNode,
-      parentForCreate,
-      nodeTypes,
-      formData,
-      rootNodes,
-      getChildren,
-      openCreateDialog,
-      openEditDialog,
-      closeDialog,
-      saveNode,
-      confirmDelete,
-      deleteNode,
-      loadNodes
-    }
-  }
-}
 </script>
 
 <style scoped>

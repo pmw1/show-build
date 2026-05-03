@@ -639,426 +639,460 @@
   </v-card>
 </template>
 
-<script>
-export default {
-  name: 'LLMRoutingSettings',
-  props: {
-    modelValue: {
-      type: Object,
-      default: () => ({
-        routing: {
-          quoteSplitting: 'auto',
-          slugGeneration: 'auto',
-          scriptSummary: 'auto',
-          titleGeneration: 'auto',
-          contentExpansion: 'auto',
-          entityExtraction: 'auto',
-          peopleSearch: 'auto',
-          socialSearch: 'auto',
-          tweetComposing: 'auto',
-          factChecking: 'auto',
-          enableFallback: true,
-          fallbackOrder: ['ollama', 'openai', 'anthropic', 'gemini', 'grok']
-        },
-        prompts: []
-      })
-    }
-  },
-  emits: ['update:modelValue', 'save'],
-  data() {
-    return {
-      routingSubTab: 'task-routing',
-      expandedPrompts: [],
-      showNewPromptDialog: false,
-      localSettings: this.modelValue ? JSON.parse(JSON.stringify(this.modelValue)) : {
-        routing: {
-          quoteSplitting: 'auto',
-          slugGeneration: 'auto',
-          scriptSummary: 'auto',
-          titleGeneration: 'auto',
-          contentExpansion: 'auto',
-          entityExtraction: 'auto',
-          peopleSearch: 'auto',
-          socialSearch: 'auto',
-          tweetComposing: 'auto',
-          factChecking: 'auto',
-          enableFallback: true,
-          fallbackOrder: ['ollama', 'openai', 'anthropic', 'gemini', 'grok']
-        },
-        prompts: []
+<script setup>
+import { ref, computed, watch, onMounted, getCurrentInstance } from 'vue';
+
+const props = defineProps({
+  modelValue: {
+    type: Object,
+    default: () => ({
+      routing: {
+        quoteSplitting: 'auto',
+        slugGeneration: 'auto',
+        scriptSummary: 'auto',
+        titleGeneration: 'auto',
+        contentExpansion: 'auto',
+        entityExtraction: 'auto',
+        peopleSearch: 'auto',
+        socialSearch: 'auto',
+        tweetComposing: 'auto',
+        factChecking: 'auto',
+        enableFallback: true,
+        fallbackOrder: ['ollama', 'openai', 'anthropic', 'gemini', 'grok']
       },
-      newPrompt: {
-        name: '',
-        category: 'content',
-        template: '',
-        preferredService: 'auto',
-        temperature: 0.7,
-        maxTokens: 500,
-        enabled: true
-      },
-      llmServiceOptions: [],
-      ollamaModels: [],
-      enabledCloudServices: [],
-      availableServices: [
-        { title: 'Auto (Smart Routing)', value: 'auto' }
-      ],
-      serviceModels: {
-        ollama: [],
-        openai: [],
-        anthropic: [],
-        gemini: [],
-        grok: []
-      },
-      // Separate service/model selections for each task type
-      contentExpansionService: 'auto',
-      contentExpansionModel: null,
-      entityExtractionService: 'auto',
-      entityExtractionModel: null,
-      peopleSearchService: 'auto',
-      peopleSearchModel: null,
-      socialSearchService: 'auto',
-      socialSearchModel: null,
-      tweetComposingService: 'auto',
-      tweetComposingModel: null,
-      quoteSplittingService: 'auto',
-      quoteSplittingModel: null,
-      slugGenerationService: 'auto',
-      slugGenerationModel: null,
-      scriptSummaryService: 'auto',
-      scriptSummaryModel: null,
-      titleGenerationService: 'auto',
-      titleGenerationModel: null,
-      fallbackOrderOptions: [
-        { title: 'Ollama (Local)', value: 'ollama' },
-        { title: 'OpenAI', value: 'openai' },
-        { title: 'Anthropic', value: 'anthropic' },
-        { title: 'Gemini', value: 'gemini' },
-        { title: 'Grok', value: 'grok' }
-      ],
-      promptCategories: [
-        { title: 'Content Generation', value: 'content' },
-        { title: 'Analysis', value: 'analysis' },
-        { title: 'Summarization', value: 'summarization' },
-        { title: 'Formatting', value: 'formatting' },
-        { title: 'Research', value: 'research' },
-        { title: 'Development', value: 'development' }
-      ],
-      performanceStats: {
-        avgResponseTime: 0,
-        totalRequests: 0,
-        successRate: 0,
-        estimatedCost: 0,
-        serviceBreakdown: []
+      prompts: []
+    })
+  }
+});
+
+const emit = defineEmits(['update:modelValue', 'save']);
+
+const instance = getCurrentInstance(); // eslint-disable-line no-unused-vars
+
+// Reactive state
+const routingSubTab = ref('task-routing');
+const expandedPrompts = ref([]);
+const showNewPromptDialog = ref(false);
+const localSettings = ref(props.modelValue ? JSON.parse(JSON.stringify(props.modelValue)) : {
+  routing: {
+    quoteSplitting: 'auto',
+    slugGeneration: 'auto',
+    scriptSummary: 'auto',
+    titleGeneration: 'auto',
+    contentExpansion: 'auto',
+    entityExtraction: 'auto',
+    peopleSearch: 'auto',
+    socialSearch: 'auto',
+    tweetComposing: 'auto',
+    factChecking: 'auto',
+    enableFallback: true,
+    fallbackOrder: ['ollama', 'openai', 'anthropic', 'gemini', 'grok']
+  },
+  prompts: []
+});
+const newPrompt = ref({
+  name: '',
+  category: 'content',
+  template: '',
+  preferredService: 'auto',
+  temperature: 0.7,
+  maxTokens: 500,
+  enabled: true
+});
+const llmServiceOptions = ref([]); // eslint-disable-line no-unused-vars
+const ollamaModels = ref([]); // eslint-disable-line no-unused-vars
+const enabledCloudServices = ref([]); // eslint-disable-line no-unused-vars
+const availableServices = ref([
+  { title: 'Auto (Smart Routing)', value: 'auto' }
+]);
+const serviceModels = ref({
+  ollama: [],
+  openai: [],
+  anthropic: [],
+  gemini: [],
+  grok: []
+});
+// Separate service/model selections for each task type
+const contentExpansionService = ref('auto');
+const contentExpansionModel = ref(null);
+const entityExtractionService = ref('auto');
+const entityExtractionModel = ref(null);
+const peopleSearchService = ref('auto');
+const peopleSearchModel = ref(null);
+const socialSearchService = ref('auto');
+const socialSearchModel = ref(null);
+const tweetComposingService = ref('auto');
+const tweetComposingModel = ref(null);
+const quoteSplittingService = ref('auto');
+const quoteSplittingModel = ref(null);
+const slugGenerationService = ref('auto');
+const slugGenerationModel = ref(null);
+const scriptSummaryService = ref('auto');
+const scriptSummaryModel = ref(null);
+const titleGenerationService = ref('auto');
+const titleGenerationModel = ref(null);
+const fallbackOrderOptions = [
+  { title: 'Ollama (Local)', value: 'ollama' },
+  { title: 'OpenAI', value: 'openai' },
+  { title: 'Anthropic', value: 'anthropic' },
+  { title: 'Gemini', value: 'gemini' },
+  { title: 'Grok', value: 'grok' }
+];
+const promptCategories = [
+  { title: 'Content Generation', value: 'content' },
+  { title: 'Analysis', value: 'analysis' },
+  { title: 'Summarization', value: 'summarization' },
+  { title: 'Formatting', value: 'formatting' },
+  { title: 'Research', value: 'research' },
+  { title: 'Development', value: 'development' }
+];
+const performanceStats = ref({
+  avgResponseTime: 0,
+  totalRequests: 0,
+  successRate: 0,
+  estimatedCost: 0,
+  serviceBreakdown: []
+});
+
+// Task type service/model ref maps for dynamic access
+const taskServiceRefs = {
+  contentExpansion: contentExpansionService,
+  contentExpansionModel: contentExpansionModel,
+  entityExtraction: entityExtractionService,
+  entityExtractionModel: entityExtractionModel,
+  peopleSearch: peopleSearchService,
+  peopleSearchModel: peopleSearchModel,
+  socialSearch: socialSearchService,
+  socialSearchModel: socialSearchModel,
+  tweetComposing: tweetComposingService,
+  tweetComposingModel: tweetComposingModel,
+  quoteSplitting: quoteSplittingService,
+  quoteSplittingModel: quoteSplittingModel,
+  slugGeneration: slugGenerationService,
+  slugGenerationModel: slugGenerationModel,
+  scriptSummary: scriptSummaryService,
+  scriptSummaryModel: scriptSummaryModel,
+  titleGeneration: titleGenerationService,
+  titleGenerationModel: titleGenerationModel
+};
+
+// Watch
+watch(() => props.modelValue, (newVal) => {
+  if (newVal) {
+    localSettings.value = JSON.parse(JSON.stringify(newVal))
+  }
+}, { deep: true });
+
+// Computed
+const promptCategoriesWithPrompts = computed(() => {
+  if (!localSettings.value || !localSettings.value.prompts) {
+    return []
+  }
+  return promptCategories.filter(category => {
+    return localSettings.value.prompts.some(p => p.category === category.value)
+  })
+});
+
+// Methods
+function getPromptsForCategory(category) {
+  if (!localSettings.value || !localSettings.value.prompts) {
+    return []
+  }
+  return localSettings.value.prompts.filter(p => p.category === category)
+}
+
+function getPromptInvocation(prompt) {
+  if (prompt.name.includes('Segment Generator (Tease)')) {
+    return 'Invoked: Ctrl+Alt+Shift+[1-9] in tease segments'
+  } else if (prompt.name.includes('Segment Generator (Cold Open)')) {
+    return 'Invoked: Ctrl+Alt+Shift+[1-9] in coldopen segments'
+  } else if (prompt.name.includes('Segment Generator (Standard)')) {
+    return 'Invoked: Ctrl+Alt+Shift+[1-9] in standard segments'
+  } else if (prompt.name.includes('Quote Splitter')) {
+    return 'Invoked: Automatically when splitting long FSQ quotes'
+  } else if (prompt.name.includes('Slug Generator')) {
+    return 'Invoked: Automatically when generating URL slugs'
+  } else if (prompt.name.includes('Script Summarizer')) {
+    return 'Invoked: Via summarize button in content editor'
+  } else {
+    return 'Custom prompt - invocation depends on implementation'
+  }
+}
+
+async function loadAvailableModels() {
+  try {
+    const $axios = instance.appContext.config.globalProperties.$axios;
+    const services = [
+      { title: 'Auto (Smart Routing)', value: 'auto' },
+      { title: 'Ollama (Local)', value: 'ollama' },
+      { title: 'OpenAI', value: 'openai' },
+      { title: 'Google Gemini', value: 'gemini' },
+      { title: 'xAI (Grok)', value: 'grok' }
+    ]
+
+    // Fetch Ollama models if available
+    try {
+      const ollamaResponse = await $axios.get('/llm/ollama/models')
+      if (ollamaResponse.data.models && ollamaResponse.data.models.length > 0) {
+        serviceModels.value.ollama = ollamaResponse.data.models.map(m => ({
+          title: m.name,
+          value: m.name
+        }))
       }
+    } catch (e) {
+      console.warn('Ollama models not available:', e)
     }
-  },
-  watch: {
-    modelValue: {
-      handler(newVal) {
-        if (newVal) {
-          this.localSettings = JSON.parse(JSON.stringify(newVal))
-        }
-      },
-      deep: true
-    }
-  },
-  computed: {
-    promptCategoriesWithPrompts() {
-      // Only return categories that have prompts
-      if (!this.localSettings || !this.localSettings.prompts) {
-        return []
-      }
-      return this.promptCategories.filter(category => {
-        return this.localSettings.prompts.some(p => p.category === category.value)
-      })
-    }
-  },
-  async mounted() {
-    await this.loadAvailableModels()
-    this.loadPerformanceStats()
-    this.initializeDefaultPrompts()
-  },
-  methods: {
-    getPromptsForCategory(category) {
-      if (!this.localSettings || !this.localSettings.prompts) {
-        return []
-      }
-      return this.localSettings.prompts.filter(p => p.category === category)
-    },
-    getPromptInvocation(prompt) {
-      // Return invocation instructions based on prompt name
-      if (prompt.name.includes('Segment Generator (Tease)')) {
-        return 'Invoked: Ctrl+Alt+Shift+[1-9] in tease segments'
-      } else if (prompt.name.includes('Segment Generator (Cold Open)')) {
-        return 'Invoked: Ctrl+Alt+Shift+[1-9] in coldopen segments'
-      } else if (prompt.name.includes('Segment Generator (Standard)')) {
-        return 'Invoked: Ctrl+Alt+Shift+[1-9] in standard segments'
-      } else if (prompt.name.includes('Quote Splitter')) {
-        return 'Invoked: Automatically when splitting long FSQ quotes'
-      } else if (prompt.name.includes('Slug Generator')) {
-        return 'Invoked: Automatically when generating URL slugs'
-      } else if (prompt.name.includes('Script Summarizer')) {
-        return 'Invoked: Via summarize button in content editor'
-      } else {
-        return 'Custom prompt - invocation depends on implementation'
-      }
-    },
-    async loadAvailableModels() {
-      try {
-        // Always show all services regardless of config status
-        const services = [
-          { title: 'Auto (Smart Routing)', value: 'auto' },
-          { title: 'Ollama (Local)', value: 'ollama' },
-          { title: 'OpenAI', value: 'openai' },
-          { title: 'Google Gemini', value: 'gemini' },
-          { title: 'xAI (Grok)', value: 'grok' }
-        ]
 
-        // Fetch Ollama models if available
-        try {
-          const ollamaResponse = await this.$axios.get('/llm/ollama/models')
-          if (ollamaResponse.data.models && ollamaResponse.data.models.length > 0) {
-            this.serviceModels.ollama = ollamaResponse.data.models.map(m => ({
-              title: m.name,
-              value: m.name
-            }))
-          }
-        } catch (e) {
-          console.warn('Ollama models not available:', e)
-        }
+    // Define models for all cloud services (always available)
+    serviceModels.value.openai = [
+      { title: 'GPT-4 Turbo', value: 'gpt-4-turbo-preview' },
+      { title: 'GPT-4', value: 'gpt-4' },
+      { title: 'GPT-3.5 Turbo', value: 'gpt-3.5-turbo' },
+      { title: 'GPT-3.5 Turbo 16k', value: 'gpt-3.5-turbo-16k' }
+    ]
 
-        // Define models for all cloud services (always available)
-        this.serviceModels.openai = [
-          { title: 'GPT-4 Turbo', value: 'gpt-4-turbo-preview' },
-          { title: 'GPT-4', value: 'gpt-4' },
-          { title: 'GPT-3.5 Turbo', value: 'gpt-3.5-turbo' },
-          { title: 'GPT-3.5 Turbo 16k', value: 'gpt-3.5-turbo-16k' }
-        ]
+    serviceModels.value.gemini = [
+      { title: 'Gemini 2.0 Flash', value: 'gemini-2.0-flash' },
+      { title: 'Gemini Pro', value: 'gemini-pro' },
+      { title: 'Gemini Pro Vision', value: 'gemini-pro-vision' }
+    ]
 
-        this.serviceModels.gemini = [
-          { title: 'Gemini 2.0 Flash', value: 'gemini-2.0-flash' },
-          { title: 'Gemini Pro', value: 'gemini-pro' },
-          { title: 'Gemini Pro Vision', value: 'gemini-pro-vision' }
-        ]
+    serviceModels.value.grok = [
+      { title: 'Grok 4 Latest', value: 'grok-4-latest' },
+      { title: 'Grok Beta', value: 'grok-beta' }
+    ]
 
-        this.serviceModels.grok = [
-          { title: 'Grok 4 Latest', value: 'grok-4-latest' },
-          { title: 'Grok Beta', value: 'grok-beta' }
-        ]
+    availableServices.value = services
 
-        this.availableServices = services
+    // Parse existing task type settings
+    const taskTypes = ['contentExpansion', 'entityExtraction', 'peopleSearch', 'socialSearch', 'tweetComposing']
+    taskTypes.forEach(taskType => {
+      if (localSettings.value && localSettings.value.routing && localSettings.value.routing[taskType]) {
+        const [service, model] = localSettings.value.routing[taskType].split(':')
+        taskServiceRefs[taskType].value = service || 'auto'
+        taskServiceRefs[`${taskType}Model`].value = model || null
+      }
+    })
+  } catch (error) {
+    console.error('Failed to load available models:', error)
+  }
+}
 
-        // Parse existing task type settings
-        const taskTypes = ['contentExpansion', 'entityExtraction', 'peopleSearch', 'socialSearch', 'tweetComposing']
-        taskTypes.forEach(taskType => {
-          if (this.localSettings && this.localSettings.routing && this.localSettings.routing[taskType]) {
-            const [service, model] = this.localSettings.routing[taskType].split(':')
-            this[`${taskType}Service`] = service || 'auto'
-            this[`${taskType}Model`] = model || null
-          }
-        })
-      } catch (error) {
-        console.error('Failed to load available models:', error)
-      }
-    },
-    getModelsForService(service) {
-      if (!service || service === 'auto') {
-        return []
-      }
-      const models = this.serviceModels[service] || []
-      console.log(`getModelsForService(${service}):`, models)
-      return models
-    },
-    updateContentExpansionModel() {
-      // Reset model when service changes
-      this.contentExpansionModel = null
-      if (this.localSettings && this.localSettings.routing && this.contentExpansionService === 'auto') {
-        this.localSettings.routing.contentExpansion = 'auto'
-      }
-    },
-    updateContentExpansion() {
-      if (!this.localSettings || !this.localSettings.routing) return
+function getModelsForService(service) {
+  if (!service || service === 'auto') {
+    return []
+  }
+  const models = serviceModels.value[service] || []
+  console.log(`getModelsForService(${service}):`, models)
+  return models
+}
 
-      if (this.contentExpansionService === 'auto') {
-        this.localSettings.routing.contentExpansion = 'auto'
-      } else if (this.contentExpansionModel) {
-        this.localSettings.routing.contentExpansion = `${this.contentExpansionService}:${this.contentExpansionModel}`
-      }
-    },
-    updateTaskService(taskType) {
-      if (!this.localSettings || !this.localSettings.routing) return
+function updateContentExpansionModel() {
+  // Reset model when service changes
+  contentExpansionModel.value = null
+  if (localSettings.value && localSettings.value.routing && contentExpansionService.value === 'auto') {
+    localSettings.value.routing.contentExpansion = 'auto'
+  }
+}
 
-      // Reset model when service changes
-      this[`${taskType}Model`] = null
-      const service = this[`${taskType}Service`]
+function updateContentExpansion() {
+  if (!localSettings.value || !localSettings.value.routing) return
 
-      if (service === 'auto') {
-        this.localSettings.routing[taskType] = 'auto'
-      }
-    },
-    updateTaskModel(taskType) {
-      if (!this.localSettings || !this.localSettings.routing) return
+  if (contentExpansionService.value === 'auto') {
+    localSettings.value.routing.contentExpansion = 'auto'
+  } else if (contentExpansionModel.value) {
+    localSettings.value.routing.contentExpansion = `${contentExpansionService.value}:${contentExpansionModel.value}`
+  }
+}
 
-      const service = this[`${taskType}Service`]
-      const model = this[`${taskType}Model`]
+function updateTaskService(taskType) {
+  if (!localSettings.value || !localSettings.value.routing) return
 
-      if (service === 'auto') {
-        this.localSettings.routing[taskType] = 'auto'
-      } else if (model) {
-        this.localSettings.routing[taskType] = `${service}:${model}`
-      }
-    },
-    save() {
-      this.$emit('update:modelValue', this.localSettings)
-      this.$emit('save', this.localSettings)
-    },
-    addNewPrompt() {
-      this.localSettings.prompts.push({ ...this.newPrompt })
-      this.showNewPromptDialog = false
-      this.newPrompt = {
-        name: '',
-        category: 'content',
-        template: '',
-        preferredService: 'auto',
-        temperature: 0.7,
-        maxTokens: 500,
-        enabled: true
-      }
-    },
-    deletePrompt(index) {
-      this.localSettings.prompts.splice(index, 1)
-    },
-    testPrompt(prompt) {
-      console.log('Testing prompt:', prompt)
-      // TODO: Implement prompt testing
-    },
-    getPromptIcon(category) {
-      const icons = {
-        content: 'mdi-file-document-edit',
-        analysis: 'mdi-chart-line',
-        summarization: 'mdi-format-list-bulleted',
-        formatting: 'mdi-format-paint',
-        research: 'mdi-magnify',
-        development: 'mdi-code-braces'
-      }
-      return icons[category] || 'mdi-message-text'
-    },
-    getCategoryColor(category) {
-      const colors = {
-        content: 'blue',
-        analysis: 'green',
-        summarization: 'orange',
-        formatting: 'purple',
-        research: 'teal',
-        development: 'red'
-      }
-      return colors[category] || 'grey'
-    },
-    loadPerformanceStats() {
-      // Load from localStorage or API
-      const saved = localStorage.getItem('llm-performance-stats')
-      if (saved) {
-        this.performanceStats = JSON.parse(saved)
-      } else {
-        this.performanceStats = {
-          avgResponseTime: 1240,
-          totalRequests: 0,
-          successRate: 0,
-          estimatedCost: 0,
-          serviceBreakdown: [
-            { name: 'Ollama', icon: 'mdi-server', color: 'green', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
-            { name: 'OpenAI', icon: 'mdi-robot', color: 'blue', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
-            { name: 'Anthropic', icon: 'mdi-brain', color: 'purple', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
-            { name: 'Gemini', icon: 'mdi-google', color: 'orange', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
-            { name: 'Grok', icon: 'mdi-twitter', color: 'cyan', requests: 0, avgTime: 0, cost: 0, status: 'inactive' }
-          ]
-        }
-      }
-    },
-    resetPerformanceStats() {
-      this.performanceStats = {
-        avgResponseTime: 0,
-        totalRequests: 0,
-        successRate: 0,
-        estimatedCost: 0,
-        serviceBreakdown: [
-          { name: 'Ollama', icon: 'mdi-server', color: 'green', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
-          { name: 'OpenAI', icon: 'mdi-robot', color: 'blue', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
-          { name: 'Anthropic', icon: 'mdi-brain', color: 'purple', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
-          { name: 'Gemini', icon: 'mdi-google', color: 'orange', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
-          { name: 'Grok', icon: 'mdi-twitter', color: 'cyan', requests: 0, avgTime: 0, cost: 0, status: 'inactive' }
-        ]
-      }
-      localStorage.setItem('llm-performance-stats', JSON.stringify(this.performanceStats))
-    },
-    initializeDefaultPrompts() {
-      if (!this.localSettings) {
-        return
-      }
-      if (!this.localSettings.prompts) {
-        this.localSettings.prompts = []
-      }
-      if (this.localSettings.prompts.length === 0) {
-        this.localSettings.prompts = [
-          {
-            name: 'Quote Splitter',
-            category: 'formatting',
-            preferredService: 'auto',
-            temperature: 0.3,
-            maxTokens: 500,
-            enabled: true,
-            template: 'Split this quote into segments of maximum {maxWords} words each. Maintain natural sentence boundaries and preserve meaning:\n\n"{quote}"\n\nReturn ONLY a JSON array of strings.'
-          },
-          {
-            name: 'Slug Generator',
-            category: 'formatting',
-            preferredService: 'auto',
-            temperature: 0.5,
-            maxTokens: 50,
-            enabled: true,
-            template: 'Generate a short, SEO-friendly slug (5-8 words max) for this text. Use lowercase, hyphens, no special characters:\n\n"{title}"\n\nReturn ONLY the slug.'
-          },
-          {
-            name: 'Script Summarizer',
-            category: 'summarization',
-            preferredService: 'auto',
-            temperature: 0.7,
-            maxTokens: 200,
-            enabled: true,
-            template: 'Summarize this script segment in 2-3 sentences:\n\n{script}\n\nFocus on key points and main message.'
-          },
-          {
-            name: 'Segment Generator (Tease)',
-            category: 'development',
-            preferredService: 'ollama',
-            temperature: 0.8,
-            maxTokens: 1000,
-            enabled: true,
-            template: 'RUNDOWN ITEM TYPE DEFINITIONS:\n- Cold Open: Opening hook before any intro/music. Grabs attention instantly with compelling question, shocking statement, or intriguing scenario. Sets episode tone. No explanations - just hook. 30-90 seconds.\n- Tease: Preview of upcoming segments to keep listeners engaged. Builds curiosity without spoiling details. References specific upcoming topics. Brief and energetic. Appears before breaks or at show start.\n- Segment: Main content blocks. In-depth discussion, analysis, interviews, storytelling. Educational yet engaging. Conversational tone. 5-15 minutes.\n- Ad: Commercial advertisement with sponsor name, product description, benefits, pricing, clear call-to-action.\n- Promo: Promotional content for the show, network shows, events, or membership offers.\n\nYOU ARE WRITING: TEASE\n\nWrite a {duration}-minute podcast tease/preview for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).\n\nThis tease should hook listeners and preview what\'s coming up in the show.{upcomingSegments}\n\nWrite {paragraphs} short, punchy paragraphs that build anticipation.\n\nStyle requirements:\n- Create urgency and intrigue\n- Tease topics without spoiling details\n- Use vivid, compelling language\n- Build curiosity about upcoming segments\n- Keep it brief and energetic\n\nCRITICAL FORMATTING:\n- Separate each paragraph with TWO newlines (blank line between paragraphs)\n- Format: Plain paragraph text, ready to paste into script\n- No titles, no metadata, just the tease content\n\nDO NOT include any introductory text like "Here is the tease" - start IMMEDIATELY with the first paragraph of actual content.\n\nGenerate the tease now:'
-          },
-          {
-            name: 'Segment Generator (Cold Open)',
-            category: 'development',
-            preferredService: 'ollama',
-            temperature: 0.8,
-            maxTokens: 1500,
-            enabled: true,
-            template: 'RUNDOWN ITEM TYPE DEFINITIONS:\n- Cold Open: Opening hook before any intro/music. Grabs attention instantly with compelling question, shocking statement, or intriguing scenario. Sets episode tone. No explanations - just hook. 30-90 seconds.\n- Tease: Preview of upcoming segments to keep listeners engaged. Builds curiosity without spoiling details. References specific upcoming topics. Brief and energetic. Appears before breaks or at show start.\n- Segment: Main content blocks. In-depth discussion, analysis, interviews, storytelling. Educational yet engaging. Conversational tone. 5-15 minutes.\n- Ad: Commercial advertisement with sponsor name, product description, benefits, pricing, clear call-to-action.\n- Promo: Promotional content for the show, network shows, events, or membership offers.\n\nYOU ARE WRITING: COLD OPEN\n\nWrite a {duration}-minute cold open for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).\n\nA cold open should immediately grab attention with a compelling hook - a powerful question, shocking statement, or intriguing scenario.\n\nWrite {paragraphs} paragraphs.\n\nStyle requirements:\n- Start with maximum impact - hook listeners instantly\n- Create immediate tension or curiosity\n- Use vivid, cinematic language\n- Set the tone for the episode\n- Don\'t explain everything - leave them wanting more\n\nCRITICAL FORMATTING:\n- Separate each paragraph with TWO newlines (blank line between paragraphs)\n- Format: Plain paragraph text, ready to paste into script\n- No titles, no metadata, just the cold open content\n\nDO NOT include any introductory text - start IMMEDIATELY with the hook.\n\nGenerate the cold open now:'
-          },
-          {
-            name: 'Segment Generator (Standard)',
-            category: 'development',
-            preferredService: 'ollama',
-            temperature: 0.8,
-            maxTokens: 2000,
-            enabled: true,
-            template: 'RUNDOWN ITEM TYPE DEFINITIONS:\n- Cold Open: Opening hook before any intro/music. Grabs attention instantly with compelling question, shocking statement, or intriguing scenario. Sets episode tone. No explanations - just hook. 30-90 seconds.\n- Tease: Preview of upcoming segments to keep listeners engaged. Builds curiosity without spoiling details. References specific upcoming topics. Brief and energetic. Appears before breaks or at show start.\n- Segment: Main content blocks. In-depth discussion, analysis, interviews, storytelling. Educational yet engaging. Conversational tone. 5-15 minutes.\n- Ad: Commercial advertisement with sponsor name, product description, benefits, pricing, clear call-to-action.\n- Promo: Promotional content for the show, network shows, events, or membership offers.\n\nYOU ARE WRITING: SEGMENT\n\nWrite a {duration}-minute podcast segment for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).\n\nWrite {paragraphs} paragraphs.\n\nStyle requirements:\n- Speak directly to podcast listeners in conversational, engaging tone\n- Use real psychological concepts but fictional case examples\n- Include specific manipulation tactics (gaslighting, love-bombing, triangulation, DARVO, hoovering)\n- Reference clinical patterns while remaining accessible\n- Maintain journalistic credibility and empathy for victims\n- DO NOT use real names or identify real cases\n\nCRITICAL FORMATTING:\n- Separate each paragraph with TWO newlines (blank line between paragraphs)\n- Example format:\n  First paragraph text here.\n\n  Second paragraph text here.\n\n  Third paragraph text here.\n\nFormat: Plain paragraph text, ready to paste into script. No titles, no metadata, just the segment content with blank lines between paragraphs.\n\nDO NOT include any introductory text like "Here is the podcast segment" or "Here you go" - start IMMEDIATELY with the first paragraph of actual content.\n\nGenerate the segment now:'
-          }
-        ]
-      }
+  // Reset model when service changes
+  taskServiceRefs[`${taskType}Model`].value = null
+  const service = taskServiceRefs[taskType].value
+
+  if (service === 'auto') {
+    localSettings.value.routing[taskType] = 'auto'
+  }
+}
+
+function updateTaskModel(taskType) {
+  if (!localSettings.value || !localSettings.value.routing) return
+
+  const service = taskServiceRefs[taskType].value
+  const model = taskServiceRefs[`${taskType}Model`].value
+
+  if (service === 'auto') {
+    localSettings.value.routing[taskType] = 'auto'
+  } else if (model) {
+    localSettings.value.routing[taskType] = `${service}:${model}`
+  }
+}
+
+function save() {
+  emit('update:modelValue', localSettings.value)
+  emit('save', localSettings.value)
+}
+
+function addNewPrompt() {
+  localSettings.value.prompts.push({ ...newPrompt.value })
+  showNewPromptDialog.value = false
+  newPrompt.value = {
+    name: '',
+    category: 'content',
+    template: '',
+    preferredService: 'auto',
+    temperature: 0.7,
+    maxTokens: 500,
+    enabled: true
+  }
+}
+
+function deletePrompt(index) {
+  localSettings.value.prompts.splice(index, 1)
+}
+
+function testPrompt(prompt) {
+  console.log('Testing prompt:', prompt)
+  // TODO: Implement prompt testing
+}
+
+function getPromptIcon(category) {
+  const icons = {
+    content: 'mdi-file-document-edit',
+    analysis: 'mdi-chart-line',
+    summarization: 'mdi-format-list-bulleted',
+    formatting: 'mdi-format-paint',
+    research: 'mdi-magnify',
+    development: 'mdi-code-braces'
+  }
+  return icons[category] || 'mdi-message-text'
+}
+
+function getCategoryColor(category) {
+  const colors = {
+    content: 'blue',
+    analysis: 'green',
+    summarization: 'orange',
+    formatting: 'purple',
+    research: 'teal',
+    development: 'red'
+  }
+  return colors[category] || 'grey'
+}
+
+function loadPerformanceStats() {
+  const saved = localStorage.getItem('llm-performance-stats')
+  if (saved) {
+    performanceStats.value = JSON.parse(saved)
+  } else {
+    performanceStats.value = {
+      avgResponseTime: 1240,
+      totalRequests: 0,
+      successRate: 0,
+      estimatedCost: 0,
+      serviceBreakdown: [
+        { name: 'Ollama', icon: 'mdi-server', color: 'green', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
+        { name: 'OpenAI', icon: 'mdi-robot', color: 'blue', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
+        { name: 'Anthropic', icon: 'mdi-brain', color: 'purple', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
+        { name: 'Gemini', icon: 'mdi-google', color: 'orange', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
+        { name: 'Grok', icon: 'mdi-twitter', color: 'cyan', requests: 0, avgTime: 0, cost: 0, status: 'inactive' }
+      ]
     }
   }
 }
+
+function resetPerformanceStats() {
+  performanceStats.value = {
+    avgResponseTime: 0,
+    totalRequests: 0,
+    successRate: 0,
+    estimatedCost: 0,
+    serviceBreakdown: [
+      { name: 'Ollama', icon: 'mdi-server', color: 'green', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
+      { name: 'OpenAI', icon: 'mdi-robot', color: 'blue', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
+      { name: 'Anthropic', icon: 'mdi-brain', color: 'purple', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
+      { name: 'Gemini', icon: 'mdi-google', color: 'orange', requests: 0, avgTime: 0, cost: 0, status: 'inactive' },
+      { name: 'Grok', icon: 'mdi-twitter', color: 'cyan', requests: 0, avgTime: 0, cost: 0, status: 'inactive' }
+    ]
+  }
+  localStorage.setItem('llm-performance-stats', JSON.stringify(performanceStats.value))
+}
+
+function initializeDefaultPrompts() {
+  if (!localSettings.value) {
+    return
+  }
+  if (!localSettings.value.prompts) {
+    localSettings.value.prompts = []
+  }
+  if (localSettings.value.prompts.length === 0) {
+    localSettings.value.prompts = [
+      {
+        name: 'Quote Splitter',
+        category: 'formatting',
+        preferredService: 'auto',
+        temperature: 0.3,
+        maxTokens: 500,
+        enabled: true,
+        template: 'Split this quote into segments of maximum {maxWords} words each. Maintain natural sentence boundaries and preserve meaning:\n\n"{quote}"\n\nReturn ONLY a JSON array of strings.'
+      },
+      {
+        name: 'Slug Generator',
+        category: 'formatting',
+        preferredService: 'auto',
+        temperature: 0.5,
+        maxTokens: 50,
+        enabled: true,
+        template: 'Generate a short, SEO-friendly slug (5-8 words max) for this text. Use lowercase, hyphens, no special characters:\n\n"{title}"\n\nReturn ONLY the slug.'
+      },
+      {
+        name: 'Script Summarizer',
+        category: 'summarization',
+        preferredService: 'auto',
+        temperature: 0.7,
+        maxTokens: 200,
+        enabled: true,
+        template: 'Summarize this script segment in 2-3 sentences:\n\n{script}\n\nFocus on key points and main message.'
+      },
+      {
+        name: 'Segment Generator (Tease)',
+        category: 'development',
+        preferredService: 'ollama',
+        temperature: 0.8,
+        maxTokens: 1000,
+        enabled: true,
+        template: 'RUNDOWN ITEM TYPE DEFINITIONS:\n- Cold Open: Opening hook before any intro/music. Grabs attention instantly with compelling question, shocking statement, or intriguing scenario. Sets episode tone. No explanations - just hook. 30-90 seconds.\n- Tease: Preview of upcoming segments to keep listeners engaged. Builds curiosity without spoiling details. References specific upcoming topics. Brief and energetic. Appears before breaks or at show start.\n- Segment: Main content blocks. In-depth discussion, analysis, interviews, storytelling. Educational yet engaging. Conversational tone. 5-15 minutes.\n- Ad: Commercial advertisement with sponsor name, product description, benefits, pricing, clear call-to-action.\n- Promo: Promotional content for the show, network shows, events, or membership offers.\n\nYOU ARE WRITING: TEASE\n\nWrite a {duration}-minute podcast tease/preview for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).\n\nThis tease should hook listeners and preview what\'s coming up in the show.{upcomingSegments}\n\nWrite {paragraphs} short, punchy paragraphs that build anticipation.\n\nStyle requirements:\n- Create urgency and intrigue\n- Tease topics without spoiling details\n- Use vivid, compelling language\n- Build curiosity about upcoming segments\n- Keep it brief and energetic\n\nCRITICAL FORMATTING:\n- Separate each paragraph with TWO newlines (blank line between paragraphs)\n- Format: Plain paragraph text, ready to paste into script\n- No titles, no metadata, just the tease content\n\nDO NOT include any introductory text like "Here is the tease" - start IMMEDIATELY with the first paragraph of actual content.\n\nGenerate the tease now:'
+      },
+      {
+        name: 'Segment Generator (Cold Open)',
+        category: 'development',
+        preferredService: 'ollama',
+        temperature: 0.8,
+        maxTokens: 1500,
+        enabled: true,
+        template: 'RUNDOWN ITEM TYPE DEFINITIONS:\n- Cold Open: Opening hook before any intro/music. Grabs attention instantly with compelling question, shocking statement, or intriguing scenario. Sets episode tone. No explanations - just hook. 30-90 seconds.\n- Tease: Preview of upcoming segments to keep listeners engaged. Builds curiosity without spoiling details. References specific upcoming topics. Brief and energetic. Appears before breaks or at show start.\n- Segment: Main content blocks. In-depth discussion, analysis, interviews, storytelling. Educational yet engaging. Conversational tone. 5-15 minutes.\n- Ad: Commercial advertisement with sponsor name, product description, benefits, pricing, clear call-to-action.\n- Promo: Promotional content for the show, network shows, events, or membership offers.\n\nYOU ARE WRITING: COLD OPEN\n\nWrite a {duration}-minute cold open for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).\n\nA cold open should immediately grab attention with a compelling hook - a powerful question, shocking statement, or intriguing scenario.\n\nWrite {paragraphs} paragraphs.\n\nStyle requirements:\n- Start with maximum impact - hook listeners instantly\n- Create immediate tension or curiosity\n- Use vivid, cinematic language\n- Set the tone for the episode\n- Don\'t explain everything - leave them wanting more\n\nCRITICAL FORMATTING:\n- Separate each paragraph with TWO newlines (blank line between paragraphs)\n- Format: Plain paragraph text, ready to paste into script\n- No titles, no metadata, just the cold open content\n\nDO NOT include any introductory text - start IMMEDIATELY with the hook.\n\nGenerate the cold open now:'
+      },
+      {
+        name: 'Segment Generator (Standard)',
+        category: 'development',
+        preferredService: 'ollama',
+        temperature: 0.8,
+        maxTokens: 2000,
+        enabled: true,
+        template: 'RUNDOWN ITEM TYPE DEFINITIONS:\n- Cold Open: Opening hook before any intro/music. Grabs attention instantly with compelling question, shocking statement, or intriguing scenario. Sets episode tone. No explanations - just hook. 30-90 seconds.\n- Tease: Preview of upcoming segments to keep listeners engaged. Builds curiosity without spoiling details. References specific upcoming topics. Brief and energetic. Appears before breaks or at show start.\n- Segment: Main content blocks. In-depth discussion, analysis, interviews, storytelling. Educational yet engaging. Conversational tone. 5-15 minutes.\n- Ad: Commercial advertisement with sponsor name, product description, benefits, pricing, clear call-to-action.\n- Promo: Promotional content for the show, network shows, events, or membership offers.\n\nYOU ARE WRITING: SEGMENT\n\nWrite a {duration}-minute podcast segment for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).\n\nWrite {paragraphs} paragraphs.\n\nStyle requirements:\n- Speak directly to podcast listeners in conversational, engaging tone\n- Use real psychological concepts but fictional case examples\n- Include specific manipulation tactics (gaslighting, love-bombing, triangulation, DARVO, hoovering)\n- Reference clinical patterns while remaining accessible\n- Maintain journalistic credibility and empathy for victims\n- DO NOT use real names or identify real cases\n\nCRITICAL FORMATTING:\n- Separate each paragraph with TWO newlines (blank line between paragraphs)\n- Example format:\n  First paragraph text here.\n\n  Second paragraph text here.\n\n  Third paragraph text here.\n\nFormat: Plain paragraph text, ready to paste into script. No titles, no metadata, just the segment content with blank lines between paragraphs.\n\nDO NOT include any introductory text like "Here is the podcast segment" or "Here you go" - start IMMEDIATELY with the first paragraph of actual content.\n\nGenerate the segment now:'
+      }
+    ]
+  }
+}
+
+// Lifecycle
+onMounted(async () => {
+  await loadAvailableModels()
+  loadPerformanceStats()
+  initializeDefaultPrompts()
+});
 </script>
 
 <style scoped>

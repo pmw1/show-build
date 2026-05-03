@@ -21,6 +21,7 @@ from auth.utils import get_current_user_or_key
 from models_segment_llm import SegmentLLMData
 from models_v2 import RundownItem
 from services.segment_llm_extractor import SegmentLLMExtractor
+from services.phase2_enrichment_service import queue_phase2_enrichment
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/segments", tags=["segment-llm"])
@@ -416,3 +417,72 @@ async def check_segment_stale(
 
 # Import datetime for manual edit tracking
 from datetime import datetime
+
+
+# ============================================================================
+# PHASE 2 ENRICHMENT (async Grok-powered refinement of Phase 1 output)
+# ============================================================================
+@router.post("/{rundown_item_id}/phase2")
+async def trigger_phase2_enrichment(
+    rundown_item_id: int,
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Queue an async Phase 2 enrichment job for this segment.
+
+    Phase 2 sends the segment + Phase 1 entities to Grok (X.AI) and writes
+    the refined output to segment_llm_data.phase2_data. Returns immediately
+    with the Celery task id; clients should poll GET /phase2 for status.
+    """
+    try:
+        rundown_item = db.query(RundownItem).filter(
+            RundownItem.id == rundown_item_id
+        ).first()
+        if not rundown_item:
+            raise HTTPException(status_code=404, detail="Rundown item not found")
+
+        task_id = queue_phase2_enrichment(db, rundown_item_id)
+        return {
+            "success": True,
+            "rundown_item_id": rundown_item_id,
+            "phase2_status": "queued",
+            "task_id": task_id,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to queue Phase 2 enrichment")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{rundown_item_id}/phase2")
+async def get_phase2_enrichment(
+    rundown_item_id: int,
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """Get current Phase 2 status + data (if any) for a segment."""
+    llm_data = db.query(SegmentLLMData).filter(
+        SegmentLLMData.rundown_item_id == rundown_item_id
+    ).first()
+    if not llm_data:
+        return {
+            "success": True,
+            "rundown_item_id": rundown_item_id,
+            "phase2_status": "not_started",
+            "phase2_data": {},
+        }
+    return {
+        "success": True,
+        "rundown_item_id": rundown_item_id,
+        "phase2_status": llm_data.phase2_status,
+        "phase2_started_at": llm_data.phase2_started_at.isoformat() if llm_data.phase2_started_at else None,
+        "phase2_completed_at": llm_data.phase2_completed_at.isoformat() if llm_data.phase2_completed_at else None,
+        "phase2_model": llm_data.phase2_model,
+        "phase2_task_id": llm_data.phase2_task_id,
+        "phase2_error": llm_data.phase2_error,
+        "phase2_data": llm_data.phase2_data or {},
+    }

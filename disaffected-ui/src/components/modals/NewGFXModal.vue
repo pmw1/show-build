@@ -153,203 +153,197 @@
   </v-dialog>
 </template>
 
-<script>
-export default {
-  name: 'NewGFXModal',
-  emits: ['update:show', 'submit'],
-  props: {
-    show: {
-      type: Boolean,
-      default: false
-    }
-  },
-  data() {
-    return {
-      formValid: false,
-      loading: false,
-      error: '',
-      imageError: '',
-      imagePreview: null,
-      imageSource: '',
-      imageBlob: null,
-      imageExtension: '',
-      formData: {
-        slug: '',
-        title: '',
-        duration: '00:00:00:00',
-        description: '',
-        type: 'gfx',
-        status: 'draft'
-      }
-    }
-  },
-  computed: {
-    hasImage() {
-      return !!this.imageBlob
-    },
-    slugRules() {
-      return [
-        v => !!v || 'Slug is required',
-        v => /^[a-z0-9-]+$/.test(v) || 'Slug must contain only lowercase letters, numbers, and hyphens'
-      ]
-    },
-    durationRules() {
-      return [
-        v => !v || /^\d{2}:\d{2}:\d{2}:\d{2}$/.test(v) || 'Duration must be in HH:MM:SS:FF format'
-      ]
-    }
-  },
-  mounted() {
-    // Add ESC key listener
-    document.addEventListener('keydown', this.handleKeydown)
-    
-    // Add Ctrl+V listener for clipboard paste
-    document.addEventListener('keydown', this.handleGlobalKeydown)
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown)
-    document.removeEventListener('keydown', this.handleGlobalKeydown)
-  },
-  methods: {
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        this.cancel()
-      }
-    },
-    
-    handleGlobalKeydown(event) {
-      if (event.ctrlKey && event.key === 'v' && this.show) {
-        event.preventDefault()
-        this.handleClipboardPaste()
-      }
-    },
+<script setup>
+import { ref, reactive, computed, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue';
 
-    async handleClipboardPaste() {
-      this.imageError = ''
-      
-      try {
-        const clipboardItems = await navigator.clipboard.read()
-        
-        for (const clipboardItem of clipboardItems) {
-          for (const type of clipboardItem.types) {
-            if (type.startsWith('image/')) {
-              const blob = await clipboardItem.getType(type)
-              const extension = type.split('/')[1] || 'png'
-              
-              // Store blob and show preview
-              this.imageBlob = blob
-              this.imageExtension = extension
-              this.imagePreview = URL.createObjectURL(blob)
-              this.imageSource = 'Clipboard'
-              
-              this.$toast.success('Image pasted from clipboard!')
-              return
-            }
-          }
-        }
-        
-        this.imageError = 'No image found in clipboard'
-      } catch (error) {
-        console.error('Clipboard paste error:', error)
-        this.imageError = 'Failed to access clipboard. Please try manually.'
-      }
-    },
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
+  }
+});
 
-    handleFileSelect(event) {
-      const file = event.target.files[0]
-      if (!file) return
-      
-      this.imageError = ''
-      
-      if (!file.type.startsWith('image/')) {
-        this.imageError = 'Please select an image file'
-        return
-      }
-      
-      this.imageBlob = file
-      this.imageExtension = file.name.split('.').pop() || 'png'
-      this.imagePreview = URL.createObjectURL(file)
-      this.imageSource = file.name
-      
-      this.$toast.success(`File selected: ${file.name}`)
-    },
+const emit = defineEmits(['update:show', 'submit']);
 
-    async createGFXItem() {
-      if (!this.$refs.gfxFormRef.validate()) {
-        return
-      }
-      
-      if (!this.hasImage) {
-        this.error = 'Please select an image'
-        return
-      }
-      
-      this.loading = true
-      this.error = ''
-      
-      try {
-        // Create the GFX item data
-        const gfxItem = {
-          ...this.formData,
-          // Image will be handled by the parent component
-          imageBlob: this.imageBlob,
-          imageExtension: this.imageExtension,
-          // Additional fields for GFX items
-          subtitle: '',
-          airdate: '',
-          priority: '',
-          guests: '',
-          tags: '',
-          server_message: '',
-          customer: '',
-          link: ''
-        }
-        
-        // Emit the item creation
-        this.$emit('submit', gfxItem)
-        
-        // Reset form
-        this.resetForm()
-        
-        // Close modal
-        this.cancel()
-        
-      } catch (error) {
-        console.error('Error creating GFX item:', error)
-        this.error = 'Failed to create GFX item. Please try again.'
-      } finally {
-        this.loading = false
-      }
-    },
-    
-    resetForm() {
-      this.formData = {
-        slug: '',
-        title: '',
-        duration: '00:00:00:00',
-        description: '',
-        type: 'gfx',
-        status: 'draft'
-      }
-      this.imagePreview = null
-      this.imageBlob = null
-      this.imageExtension = ''
-      this.imageSource = ''
-      this.error = ''
-      this.imageError = ''
-      
-      // Reset file input
-      if (this.$refs.gfxFileInput) {
-        this.$refs.gfxFileInput.value = ''
-      }
-    },
+const $toast = getCurrentInstance()?.appContext.config.globalProperties.$toast;
 
-    cancel() {
-      this.resetForm()
-      this.$emit('update:show', false)
-    }
+// Template refs
+const gfxFormRef = ref(null);
+const gfxFileInput = ref(null);
+
+// Data
+const formValid = ref(false);
+const loading = ref(false);
+const error = ref('');
+const imageError = ref('');
+const imagePreview = ref(null);
+const imageSource = ref('');
+const imageBlob = ref(null);
+const imageExtension = ref('');
+const formData = reactive({
+  slug: '',
+  title: '',
+  duration: '00:00:00:00',
+  description: '',
+  type: 'gfx',
+  status: 'draft'
+});
+
+// Computed
+const hasImage = computed(() => {
+  return !!imageBlob.value;
+});
+
+const slugRules = computed(() => {
+  return [
+    v => !!v || 'Slug is required',
+    v => /^[a-z0-9-]+$/.test(v) || 'Slug must contain only lowercase letters, numbers, and hyphens'
+  ];
+});
+
+const durationRules = computed(() => {
+  return [
+    v => !v || /^\d{2}:\d{2}:\d{2}:\d{2}$/.test(v) || 'Duration must be in HH:MM:SS:FF format'
+  ];
+});
+
+// Methods
+function handleKeydown(event) {
+  if (event.key === 'Escape' && props.show) {
+    cancel();
   }
 }
+
+function handleGlobalKeydown(event) {
+  if (event.ctrlKey && event.key === 'v' && props.show) {
+    event.preventDefault();
+    handleClipboardPaste();
+  }
+}
+
+async function handleClipboardPaste() {
+  imageError.value = '';
+
+  try {
+    const clipboardItems = await navigator.clipboard.read();
+
+    for (const clipboardItem of clipboardItems) {
+      for (const type of clipboardItem.types) {
+        if (type.startsWith('image/')) {
+          const blob = await clipboardItem.getType(type);
+          const extension = type.split('/')[1] || 'png';
+
+          imageBlob.value = blob;
+          imageExtension.value = extension;
+          imagePreview.value = URL.createObjectURL(blob);
+          imageSource.value = 'Clipboard';
+
+          $toast?.success('Image pasted from clipboard!');
+          return;
+        }
+      }
+    }
+
+    imageError.value = 'No image found in clipboard';
+  } catch (err) {
+    console.error('Clipboard paste error:', err);
+    imageError.value = 'Failed to access clipboard. Please try manually.';
+  }
+}
+
+function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  imageError.value = '';
+
+  if (!file.type.startsWith('image/')) {
+    imageError.value = 'Please select an image file';
+    return;
+  }
+
+  imageBlob.value = file;
+  imageExtension.value = file.name.split('.').pop() || 'png';
+  imagePreview.value = URL.createObjectURL(file);
+  imageSource.value = file.name;
+
+  $toast?.success(`File selected: ${file.name}`);
+}
+
+async function createGFXItem() {
+  if (!gfxFormRef.value.validate()) {
+    return;
+  }
+
+  if (!hasImage.value) {
+    error.value = 'Please select an image';
+    return;
+  }
+
+  loading.value = true;
+  error.value = '';
+
+  try {
+    const gfxItem = {
+      ...formData,
+      imageBlob: imageBlob.value,
+      imageExtension: imageExtension.value,
+      subtitle: '',
+      airdate: '',
+      priority: '',
+      guests: '',
+      tags: '',
+      server_message: '',
+      customer: '',
+      link: ''
+    };
+
+    emit('submit', gfxItem);
+
+    resetForm();
+    cancel();
+  } catch (err) {
+    console.error('Error creating GFX item:', err);
+    error.value = 'Failed to create GFX item. Please try again.';
+  } finally {
+    loading.value = false;
+  }
+}
+
+function resetForm() {
+  formData.slug = '';
+  formData.title = '';
+  formData.duration = '00:00:00:00';
+  formData.description = '';
+  formData.type = 'gfx';
+  formData.status = 'draft';
+  imagePreview.value = null;
+  imageBlob.value = null;
+  imageExtension.value = '';
+  imageSource.value = '';
+  error.value = '';
+  imageError.value = '';
+
+  if (gfxFileInput.value) {
+    gfxFileInput.value.value = '';
+  }
+}
+
+function cancel() {
+  resetForm();
+  emit('update:show', false);
+}
+
+// Lifecycle
+onMounted(() => {
+  document.addEventListener('keydown', handleKeydown);
+  document.addEventListener('keydown', handleGlobalKeydown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleKeydown);
+  document.removeEventListener('keydown', handleGlobalKeydown);
+});
 </script>
 
 <style scoped>

@@ -51,7 +51,12 @@ const defaultColors = {
   'approved': 'green-accent', // #69F0AE - Bright green
   'production': 'blue-accent', // #448AFF - Bright blue
   'promotion': 'deep-orange', // #FF5722 - Orange
+  'scheduled': 'deep-orange', // alias for legacy promotion → scheduled
+  'running': 'green-accent',  // green for in-flight episodes
   'completed': 'yellow-accent', // #FFD740 - Bright yellow
+
+  // General UI section colors (configurable via Settings → Color Selector)
+  'block-header': 'blue',    // background of sidebar block headers (Segment Info, etc.)
 
   // AI Interaction States
   'ai-analyzing': 'amber',       // #FFC107 - Gold: AI considering something (don't know what yet)

@@ -36,6 +36,7 @@
         :subtitle="currentEpisodeSubtitle"
         :guest="currentEpisodeGuest"
         :description="currentEpisodeDescription"
+        :description-model="currentEpisode?.description_model || ''"
         :is-dummy="currentEpisodeIsDummy"
         :air-date="currentAirDate"
         :air-time="currentAirTime"
@@ -48,6 +49,7 @@
         :show-metadata-panel="showMetadataPanel"
         :is-xtts-configured="isXttsConfigured"
         :is-reading-script="isReadingScript"
+        :auto-generate-enabled="currentEpisode?.auto_generate_enabled !== false"
         :thumbnails="episodeThumbnails"
         :confirmed-thumbnail-url="confirmedThumbnailUrl"
         :taken-source-url="takenSourceUrl"
@@ -173,6 +175,7 @@
           :item="currentRundownItem"
           :current-item-metadata="currentItemMetadata"
           :current-episode="currentEpisodeNumber"
+          :current-episode-title="currentEpisodeTitle"
           :script-content="scriptContent"
           @update:script-content="updateScriptContent"
           v-model:scratch-content="scratchContent"
@@ -396,6 +399,7 @@
     <ImgCueModal
       v-model:show="showImgCueModal"
       :current-episode="currentEpisodeNumber"
+      :edit-data="editingImgCueData"
       @submit="handleImgCueSubmit"
     />
 
@@ -632,6 +636,8 @@ import { useSOTProcessing } from '../composables/useSOTProcessing';
 import { useRequireEpisode } from '../composables/useRequireEpisode';
 import { useSegmentLock } from '../composables/useSegmentLock';
 import { useEpisodeMetadata } from '../composables/useEpisodeMetadata';
+import { useSessionResume } from '../composables/useSessionResume';
+import { useUserPrefs } from '../composables/useUserPrefs';
 
 export default {
   name: 'ContentEditor',
@@ -683,6 +689,8 @@ export default {
 
     // Episode metadata (refs auto-unwrapped on `this` in Options API)
     const episodeMetadata = useEpisodeMetadata();
+    const sessionResume = useSessionResume();
+    const userPrefs = useUserPrefs();
 
     return {
       showEpisodeModal,
@@ -692,13 +700,26 @@ export default {
       // Segment lock state and methods
       segmentLockState: segmentLock,
       // Episode metadata refs + helpers
-      ...episodeMetadata
+      ...episodeMetadata,
+      // Session resume helpers (recordLocation is debounced)
+      sessionResume,
+      userPrefs,
     };
   },
 
   async mounted() {
     console.log('ContentEditor mounted');
-    
+
+    // Restore persisted side-panel widths (per-user pref). If the cache
+    // hasn't hydrated yet (fresh page-load right after login), the watcher
+    // below picks up the value once it lands.
+    try {
+      const rw = this.userPrefs.get('editor.rundownPanelWidth', null);
+      if (rw === 'narrow' || rw === 'wide') this.rundownPanelWidth = rw;
+      const mw = this.userPrefs.get('editor.metadataPanelWidth', null);
+      if (mw === 'narrow' || mw === 'wide') this.metadataPanelWidth = mw;
+    } catch (e) { void e; }
+
     // Load item types from single source of truth
     this.rundownItemTypes = getItemTypesForDropdown();
     console.log('Loaded item types from config:', this.rundownItemTypes.length, 'types');
@@ -842,6 +863,42 @@ export default {
   },
 
   watch: {
+    // Pick up persisted panel widths if the prefs cache hydrates after mount.
+    'userPrefs.cache.value.editor.rundownPanelWidth': function (v) {
+      if ((v === 'narrow' || v === 'wide') && v !== this.rundownPanelWidth) {
+        this.rundownPanelWidth = v;
+      }
+    },
+    'userPrefs.cache.value.editor.metadataPanelWidth': function (v) {
+      if ((v === 'narrow' || v === 'wide') && v !== this.metadataPanelWidth) {
+        this.metadataPanelWidth = v;
+      }
+    },
+
+    // Session resume: remember which segment + mode the user was in so we
+    // can offer a one-click jump back on next login. Debounced inside the
+    // composable; safe to fire on every selection change.
+    selectedItemIndex(idx) {
+      if (idx < 0 || !this.currentRundownItem) return;
+      this.sessionResume.recordLocation({
+        view: 'content-editor',
+        episode_number: this.currentEpisodeNumber,
+        segment_id: this.currentRundownItem.asset_id || this.currentRundownItem.id || null,
+        segment_title: this.currentRundownItem.title || null,
+        mode: this.editorMode,
+      });
+    },
+    editorMode(mode) {
+      if (this.selectedItemIndex < 0 || !this.currentRundownItem) return;
+      this.sessionResume.recordLocation({
+        view: 'content-editor',
+        episode_number: this.currentEpisodeNumber,
+        segment_id: this.currentRundownItem.asset_id || this.currentRundownItem.id || null,
+        segment_title: this.currentRundownItem.title || null,
+        mode,
+      });
+    },
+
     // Dirty tracking + autosave for all rawMarkdownContent changes.
     // Paragraph typing in Script Mode is owned by EditorPanel (its own debounce +
     // persistCurrentItemToDatabase), guarded by isActivelyEditing.
@@ -912,7 +969,13 @@ export default {
     // Vuetify closing the dialog before our document-level handler fires
     showGfxModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
     showFsqModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
-    showImgCueModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
+    showImgCueModal(newVal, oldVal) {
+      if (oldVal && !newVal) {
+        this.lastModalCloseTime = Date.now();
+        // Clear edit state on close so the next open starts fresh in create mode
+        this.editingImgCueData = null;
+      }
+    },
     showVoModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
     showNatModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
     showPkgModal(newVal, oldVal) { if (oldVal && !newVal) this.lastModalCloseTime = Date.now(); },
@@ -1815,6 +1878,17 @@ Try dropping an image or video file here!`
         return;
       }
 
+      // Flush any buffered segment edits so current state is fully in rawMarkdownContent
+      const editorPanel = this.$refs.editorPanel;
+      if (editorPanel?.flushPendingChanges) {
+        editorPanel.flushPendingChanges();
+      }
+
+      // Block capture for longer than the 300ms debounce to prevent the restored
+      // content from being re-captured as a new snapshot after the restore.
+      this.isUndoingRedoing = true;
+      this.debouncedCaptureUndoState.cancel();
+
       // Save current state to redo stack before undoing
       const currentState = {
         scriptContent: this.rawMarkdownContent,
@@ -1825,8 +1899,6 @@ Try dropping an image or video file here!`
       };
       this.redoStack.push(currentState);
 
-      // Restore previous state
-      this.isUndoingRedoing = true;
       const previous = this.undoStack.pop();
 
       // Only restore if same item is selected
@@ -1836,10 +1908,11 @@ Try dropping an image or video file here!`
 
         this.$nextTick(() => {
           this.restoreCursorPosition(previous.cursorPosition);
-          this.isUndoingRedoing = false;
+          // Extend flag past the 300ms debounce so the watcher's deferred
+          // captureUndoState fires while the flag is still true and bails out.
+          setTimeout(() => { this.isUndoingRedoing = false; }, 400);
         });
       } else {
-        // Different item - just restore the flag
         this.isUndoingRedoing = false;
         console.log('⏮️ Undo skipped - different item was selected');
       }
@@ -1856,6 +1929,15 @@ Try dropping an image or video file here!`
         return;
       }
 
+      // Flush any buffered segment edits so current state is fully in rawMarkdownContent
+      const editorPanel = this.$refs.editorPanel;
+      if (editorPanel?.flushPendingChanges) {
+        editorPanel.flushPendingChanges();
+      }
+
+      this.isUndoingRedoing = true;
+      this.debouncedCaptureUndoState.cancel();
+
       // Save current state to undo stack before redoing
       const currentState = {
         scriptContent: this.rawMarkdownContent,
@@ -1866,8 +1948,6 @@ Try dropping an image or video file here!`
       };
       this.undoStack.push(currentState);
 
-      // Restore redo state
-      this.isUndoingRedoing = true;
       const next = this.redoStack.pop();
 
       // Only restore if same item is selected
@@ -1877,10 +1957,9 @@ Try dropping an image or video file here!`
 
         this.$nextTick(() => {
           this.restoreCursorPosition(next.cursorPosition);
-          this.isUndoingRedoing = false;
+          setTimeout(() => { this.isUndoingRedoing = false; }, 400);
         });
       } else {
-        // Different item - just restore the flag
         this.isUndoingRedoing = false;
         console.log('⏭️ Redo skipped - different item was selected');
       }
@@ -2902,26 +2981,42 @@ Try dropping an image or video file here!`
           const items = rundownResponse.value.data.items || [];
           this.rundownItems = items;
 
-          // Restore selected item from sessionStorage or default to first item
+          // Restore selected item from (in priority order):
+          //   1. ?segment=<asset_id> in the URL (set by Session Resume snackbar)
+          //   2. sessionStorage `selectedItem_<ep>` (browser-tab memory)
+          //   3. Default to first item
           let restoredIndex = -1;
           if (items.length > 0) {
-            const sessionKey = `selectedItem_${paddedNumber}`;
-            const savedIndex = sessionStorage.getItem(sessionKey);
-
-            if (savedIndex !== null) {
-              const parsedIndex = parseInt(savedIndex);
-              // Validate that the saved index is still valid
-              if (parsedIndex >= 0 && parsedIndex < items.length) {
-                restoredIndex = parsedIndex;
-                console.log(`Restored selected item index ${restoredIndex} from session for episode ${paddedNumber}`);
-              } else {
-                console.log(`Saved index ${parsedIndex} is invalid for ${items.length} items, defaulting to first item`);
-                restoredIndex = 0;
+            // 1. URL query param wins
+            const segmentQuery = this.$route?.query?.segment;
+            if (segmentQuery) {
+              const idx = items.findIndex(it =>
+                String(it.asset_id) === String(segmentQuery) ||
+                String(it.id) === String(segmentQuery)
+              );
+              if (idx >= 0) {
+                restoredIndex = idx;
+                console.log(`Restored selected item index ${idx} from ?segment=${segmentQuery}`);
               }
-            } else {
-              // No saved selection, default to first item
-              restoredIndex = 0;
-              console.log('No saved selection found, defaulting to first item');
+            }
+
+            // 2. sessionStorage fallback
+            if (restoredIndex < 0) {
+              const sessionKey = `selectedItem_${paddedNumber}`;
+              const savedIndex = sessionStorage.getItem(sessionKey);
+              if (savedIndex !== null) {
+                const parsedIndex = parseInt(savedIndex);
+                if (parsedIndex >= 0 && parsedIndex < items.length) {
+                  restoredIndex = parsedIndex;
+                  console.log(`Restored selected item index ${restoredIndex} from session for episode ${paddedNumber}`);
+                } else {
+                  console.log(`Saved index ${parsedIndex} is invalid for ${items.length} items, defaulting to first item`);
+                  restoredIndex = 0;
+                }
+              } else {
+                restoredIndex = 0;
+                console.log('No saved selection found, defaulting to first item');
+              }
             }
           }
 
@@ -2932,6 +3027,12 @@ Try dropping an image or video file here!`
               this.$refs.editorPanel.segmentReparseKey++;
             }
             this.loadItemContent(items[this.selectedItemIndex]);
+          }
+
+          // Apply ?mode=<script|scratch|code> from the resume URL once.
+          const modeQuery = this.$route?.query?.mode;
+          if (modeQuery && ['script', 'scratch', 'code'].includes(String(modeQuery))) {
+            this.editorMode = String(modeQuery);
           }
           console.log('Loaded episode', paddedNumber, 'with', items.length, 'items, selected index:', this.selectedItemIndex);
         } else {
@@ -3728,6 +3829,8 @@ Try dropping an image or video file here!`
         this.isLoadingItemContent = false;
         this.hasUnsavedChanges = false;
         console.log('🔓 Content load complete - autosave re-enabled');
+        // Capture initial snapshot so first Ctrl+Z can revert to the loaded state
+        this.captureUndoState();
       });
     },
 
@@ -3985,6 +4088,21 @@ Try dropping an image or video file here!`
 
       // CRITICAL: Save current item before switching to prevent data loss
       if (this.selectedItemIndex >= 0 && this.selectedItemIndex !== index) {
+        // Capture cursor position for the segment we're leaving so we
+        // can restore it if the user comes back. In-memory only, browser-tab
+        // local. The composable bounds itself to MAX_ENTRIES so this is safe.
+        try {
+          const leaving = this.rundownItems[this.selectedItemIndex];
+          const leavingId = leaving?.asset_id || leaving?.id;
+          if (leavingId && this.$refs.editorPanel?.captureSegmentCursor) {
+            const pos = this.$refs.editorPanel.captureSegmentCursor();
+            if (pos) {
+              const { useCursorMemory } = await import('../composables/useCursorMemory');
+              useCursorMemory().save(this.currentEpisodeNumber, leavingId, pos);
+            }
+          }
+        } catch (e) { console.debug('cursor capture skipped:', e); }
+
         // STEP 1: Clear editing flags BEFORE flush/save so the save can update
         // rundownItems[].script (the post-save mutation checks isActivelyEditing).
         // Without this, the mutation is skipped and the item's local .script stays stale,
@@ -4088,13 +4206,25 @@ Try dropping an image or video file here!`
         console.log('🔍 Loading item at index', index, ':', itemToLoad?.title || itemToLoad?.slug);
         this.loadItemContent(itemToLoad);
 
-        // Reset scroll position to top when switching items
-        this.$nextTick(() => {
+        // Reset scroll position to top when switching items, then try to
+        // restore the cursor position the user left in this segment
+        // earlier (in-memory only).
+        this.$nextTick(async () => {
           const scrollWrapper = document.querySelector('.scrollable-content-wrapper');
           if (scrollWrapper) {
             scrollWrapper.scrollTop = 0;
             console.log('📜 Reset scroll to top for new item');
           }
+          try {
+            const enteringId = itemToLoad?.asset_id || itemToLoad?.id;
+            if (enteringId && this.$refs.editorPanel?.restoreSegmentCursor) {
+              const { useCursorMemory } = await import('../composables/useCursorMemory');
+              const pos = useCursorMemory().get(this.currentEpisodeNumber, enteringId);
+              if (pos) {
+                this.$refs.editorPanel.restoreSegmentCursor(pos);
+              }
+            }
+          } catch (e) { console.debug('cursor restore skipped:', e); }
         });
 
         // Fetch version history for undo functionality
@@ -4209,11 +4339,13 @@ Try dropping an image or video file here!`
     toggleRundownWidth() {
       this.rundownPanelWidth = this.rundownPanelWidth === 'narrow' ? 'wide' : 'narrow';
       console.log('Rundown panel width toggled to:', this.rundownPanelWidth);
+      try { this.userPrefs.set('editor.rundownPanelWidth', this.rundownPanelWidth); } catch (e) { void e; }
     },
 
     toggleMetadataWidth() {
       this.metadataPanelWidth = this.metadataPanelWidth === 'narrow' ? 'wide' : 'narrow';
       console.log('Metadata panel width toggled to:', this.metadataPanelWidth);
+      try { this.userPrefs.set('editor.metadataPanelWidth', this.metadataPanelWidth); } catch (e) { void e; }
     },
 
     // Calculate available height for side panels based on how much header is visible
@@ -4245,8 +4377,11 @@ Try dropping an image or video file here!`
     handleEpisodeFieldUpdate({ field, value }) {
       // Map camelCase field names to the currentEpisode* data properties
       const fieldMap = {
+        title: 'currentEpisodeTitle',
+        slug: 'currentEpisodeSlug',
         description: 'currentEpisodeDescription',
         subtitle: 'currentEpisodeSubtitle',
+        guest: 'currentEpisodeGuest',
         tags: 'currentEpisodeTags',
         notes: 'currentEpisodeNotes',
         explicit: 'currentEpisodeExplicit',
@@ -4401,29 +4536,7 @@ Try dropping an image or video file here!`
           return;
         }
 
-        // No modal open - handle normal escape behavior
-        if (isInTextField) {
-          event.preventDefault();
-          event.target.blur(); // Remove focus from editor
-          console.log('🚪 Exited editing mode - returned to rundown navigation');
-
-          // CRITICAL: Flush and save any pending changes when user presses ESC
-          // This provides an explicit "I'm done editing" checkpoint
-          if (this.$refs.editorPanel?.flushPendingChanges) {
-            this.$refs.editorPanel.flushPendingChanges();
-          }
-          // Save after flush (async, don't await - let it happen in background)
-          this.$nextTick(() => {
-            if (this.hasUnsavedChanges) {
-              this.saveCurrentItem().then(() => {
-                console.log('💾 Auto-saved on ESC');
-              }).catch(err => {
-                console.error('Failed to auto-save on ESC:', err);
-              });
-            }
-          });
-          return;
-        }
+        // No modal open — ESC does nothing (disabled: was blurring text field / deselecting segment)
         // If not in text field, allow other Escape handlers (like multi-select cancel)
       }
 
@@ -5915,11 +6028,11 @@ Try dropping an image or video file here!`
             asset_id: fsqData.assetId,
             alignment: alignmentMap[fsqData.style] || 'center',
             font_family: fsqData.fontFamily || 'sans-serif',
-            max_font_size: fsqData.fontSize ? parseInt(fsqData.fontSize) * 3 : null,
+            font_size: fsqData.fontSize ? parseInt(fsqData.fontSize) * 4 : null,
             box_height: fsqData.boxHeight ? parseInt(fsqData.boxHeight) : 80,
             box_opacity: fsqData.boxOpacity ? parseInt(fsqData.boxOpacity) : 75,
             line_spacing: fsqData.lineSpacing ? parseInt(fsqData.lineSpacing) : 30,
-            attribution_size: fsqData.attributionSize ? parseInt(fsqData.attributionSize) : null,
+            attribution_size: fsqData.attributionSize ? parseInt(fsqData.attributionSize) * 4 : null,
             duration: fsqData.duration || '00:00:05:00',
             enumerator: null,
             priority: 'high'
@@ -7187,13 +7300,23 @@ Try dropping an image or video file here!`
     
     // IMG Cue Modal Methods
     async handleImgCueSubmit(imgCueData) {
-      console.log('🖼️ IMG cue submitted:', imgCueData);
-      console.log('🖼️ Current editorMode:', this.editorMode);
-      console.log('🖼️ Selected item index:', this.selectedItemIndex);
-      console.log('🖼️ Current rundown item:', this.currentRundownItem?.title);
+      // Snapshot edit state at function entry — modal close watcher may clear
+      // this.editingImgCueData mid-flight as the modal animates away.
+      const editing = this.editingImgCueData;
+      const isEdit = !!editing;
+      console.log('🖼️ IMG cue submitted (isEdit=' + isEdit + '):', imgCueData);
+      if (isEdit) {
+        console.log('🖼️ Editing cue snapshot:', {
+          assetId: editing.assetId,
+          rawAssetId: editing.rawData?.assetId,
+          rawAssetIdLower: editing.rawData?.assetid,
+          slug: editing.slug,
+          rawSlug: editing.rawData?.slug
+        });
+      }
 
-      // Validate we have a rundown item selected
-      if (this.selectedItemIndex < 0 || !this.currentRundownItem) {
+      // Validate we have a rundown item selected (only required for new cues)
+      if (!isEdit && (this.selectedItemIndex < 0 || !this.currentRundownItem)) {
         console.error('❌ No rundown item selected for IMG cue insertion');
         this.$toast?.error('Select a rundown item first to insert IMG cue');
         this.showImgCueModal = false;
@@ -7202,31 +7325,45 @@ Try dropping an image or video file here!`
 
       // Validate editorMode
       if (!this.editorMode || !['script', 'scratch', 'code'].includes(this.editorMode)) {
-        console.error('❌ Invalid editorMode:', this.editorMode);
-        // Default to script mode if not set
-        console.log('⚠️ Defaulting to script mode for insertion');
+        console.warn('⚠️ Invalid editorMode (' + this.editorMode + '), defaulting to script');
       }
 
       try {
-        // Generate AssetID for the image (must use FormData, not JSON)
-        const formData = new FormData();
-        formData.append('type', 'img');
-        formData.append('slug', imgCueData.slug);
+        // In edit mode, reuse the existing AssetID. In create mode, generate one.
+        // Resolve AssetID from edit data (covers multiple field-name variants).
+        const existingAssetId = isEdit
+          ? (editing.assetId || editing.rawData?.assetId || editing.rawData?.assetid || null)
+          : null;
+        let assetId = existingAssetId;
 
-        const assetIdResponse = await axios.post('/assetid/generate-legacy', formData, {
-          headers: {
-            'Accept': 'application/json',
-            'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
-          }
-        });
+        if (!isEdit && !assetId) {
+          // Brand-new cue — generate an AssetID server-side
+          const formData = new FormData();
+          formData.append('type', 'img');
+          formData.append('slug', imgCueData.slug);
 
-        const assetId = assetIdResponse.data.id;
-        console.log('🆔 Generated AssetID:', assetId);
+          const assetIdResponse = await axios.post('/assetid/generate-legacy', formData, {
+            headers: {
+              'Accept': 'application/json',
+              'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
+            }
+          });
+
+          assetId = assetIdResponse.data.id;
+          console.log('🆔 Generated AssetID:', assetId);
+        } else if (isEdit && !assetId) {
+          // Edit mode but no AssetID on the cue — we'll fall back to slug-based replacement
+          console.warn('⚠️ Edit mode but no AssetID on existing cue. Will try slug-based match.');
+        } else {
+          console.log('🆔 Reusing existing AssetID:', assetId);
+        }
 
         // Format the IMG cue block with all metadata
         let imgCueBlock = `<!-- Begin Cue -->\n`;
         imgCueBlock += `[Type: IMG]\n`;
-        imgCueBlock += `[AssetID: ${assetId}]\n`;
+        if (assetId) {
+          imgCueBlock += `[AssetID: ${assetId}]\n`;
+        }
         imgCueBlock += `[Slug: ${imgCueData.slug}]\n`;
         imgCueBlock += `[Duration: ${imgCueData.duration || '00:00:15:00'}]\n`;
         if (imgCueData.description) {
@@ -7245,11 +7382,80 @@ Try dropping an image or video file here!`
 
         console.log('📝 Generated IMG cue block:', imgCueBlock);
 
-        // Use the effective editor mode (default to 'script' if invalid)
+        // ── EDIT MODE: Replace existing cue in-place via raw markdown ──
+        if (isEdit) {
+          // Make sure rawMarkdownContent reflects any buffered Script-mode edits
+          // before we run the regex, otherwise the buffer flush will overwrite
+          // our update on the next debounce tick.
+          if (this.$refs.editorPanel?.flushPendingChanges) {
+            try { this.$refs.editorPanel.flushPendingChanges(); } catch (e) { /* noop */ }
+            await this.$nextTick();
+          }
+
+          const raw = this.rawMarkdownContent || '';
+          console.log('🔎 Searching rawMarkdownContent for cue (length=' + raw.length + ')');
+
+          let cuePattern = null;
+          let matchStrategy = '';
+          if (existingAssetId) {
+            const escAsset = existingAssetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            cuePattern = new RegExp(
+              `<!-- Begin Cue -->\\n[\\s\\S]*?\\[Asset\\s*Id\\s*:\\s*${escAsset}\\s*\\][\\s\\S]*?<!-- End Cue -->`,
+              'i'
+            );
+            matchStrategy = `assetId=${existingAssetId}`;
+          }
+
+          // Fallback: match by old slug (handles cues that lack an AssetID
+          // and the case where the user changed the slug — original slug is
+          // on editing.rawData.slug or editing.slug).
+          let matched = cuePattern && cuePattern.test(raw);
+          if (!matched) {
+            const oldSlug = editing.rawData?.slug || editing.slug;
+            if (oldSlug) {
+              const escSlug = oldSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const slugPattern = new RegExp(
+                `<!-- Begin Cue -->\\n[\\s\\S]*?\\[Type\\s*:\\s*IMG\\s*\\][\\s\\S]*?\\[Slug\\s*:\\s*${escSlug}\\s*\\][\\s\\S]*?<!-- End Cue -->`,
+                'i'
+              );
+              if (slugPattern.test(raw)) {
+                cuePattern = slugPattern;
+                matched = true;
+                matchStrategy = `slug=${oldSlug} (assetId fallback)`;
+              }
+            }
+          }
+
+          if (matched && cuePattern) {
+            const newRawContent = raw.replace(cuePattern, imgCueBlock);
+            this.updateScriptContent(newRawContent);
+            console.log(`✅ IMG cue replaced in-place using ${matchStrategy}`);
+            this.hasUnsavedChanges = true;
+            this.checkForUnsavedRundownChanges?.();
+            this.$toast?.success('IMG cue updated successfully!');
+            this.editingImgCueData = null;
+            this.showImgCueModal = false;
+            return;
+          }
+
+          // Diagnostic: dump a snippet around the first IMG block so we can
+          // see exactly why the match failed.
+          const imgIdx = raw.search(/\[Type\s*:\s*IMG\s*\]/i);
+          console.error('❌ Edit-mode replace failed. existingAssetId=' + existingAssetId +
+            ', oldSlug=' + (editing.rawData?.slug || editing.slug) +
+            '. First IMG block snippet at offset=' + imgIdx + ':\n' +
+            (imgIdx >= 0 ? raw.substring(Math.max(0, imgIdx - 30), imgIdx + 250) : '(no IMG cue found in rawMarkdownContent)'));
+
+          this.$toast?.error('Could not locate the IMG cue to update — see console for details.');
+          this.editingImgCueData = null;
+          this.showImgCueModal = false;
+          return;
+        }
+
+        // ── NEW MODE: Insert cue at cursor position ──
         const effectiveMode = ['script', 'scratch', 'code'].includes(this.editorMode) ? this.editorMode : 'script';
         console.log('📝 Using editor mode:', effectiveMode);
 
-        // Delegate to EditorPanel (uses pendingCueInsertionIndex snapshotted at button-press time)
         if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
           this.$refs.editorPanel.insertCueAtSnapshotPosition(imgCueBlock);
           console.log('✅ IMG cue inserted via EditorPanel.insertCueAtSnapshotPosition');
@@ -7264,11 +7470,11 @@ Try dropping an image or video file here!`
         console.log('✅ IMG cue inserted');
 
       } catch (error) {
-        console.error('❌ Error creating IMG cue:', error);
-        this.$toast?.error('Failed to insert IMG cue');
+        console.error('❌ Error handling IMG cue:', error);
+        this.$toast?.error(isEdit ? 'Failed to update IMG cue' : 'Failed to insert IMG cue');
       }
 
-      // Close the modal
+      // Close the modal (clears editingImgCueData via watcher)
       this.showImgCueModal = false;
     },
 
@@ -7520,13 +7726,11 @@ Try dropping an image or video file here!`
       return false;
     },
 
-    // Handle slug changes from ShowInfoHeader
+    // Handle slug changes from ShowInfoHeader (episode-level slug, NOT segment)
     handleSlugChange(newSlug) {
-      console.log('Slug change from header:', newSlug);
-      if (this.currentRundownItem) {
-        this.currentRundownItem.slug = newSlug;
-        this.onMetadataChange({ field: 'slug', value: newSlug });
-      }
+      console.log('Episode slug change from header:', newSlug);
+      this.currentEpisodeSlug = newSlug;
+      this.hasUnsavedChanges = true;
     },
 
     // Handle slug changes from EditorPanel slug field
@@ -7570,11 +7774,9 @@ Try dropping an image or video file here!`
     },
 
     handleSubtitleChange(newSubtitle) {
-      console.log('Subtitle change from header:', newSubtitle);
-      if (this.currentRundownItem) {
-        this.currentRundownItem.subtitle = newSubtitle;
-        this.onMetadataChange({ field: 'subtitle', value: newSubtitle });
-      }
+      console.log('Episode subtitle change from header:', newSubtitle);
+      this.currentEpisodeSubtitle = newSubtitle;
+      this.hasUnsavedChanges = true;
     },
 
     handleDescriptionChange(newDescription) {

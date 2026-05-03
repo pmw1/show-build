@@ -298,209 +298,213 @@
   </v-container>
 </template>
 
-<script>
+<script setup>
+import { ref, reactive, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useAuth } from '@/composables/useAuth'
 
-export default {
-  name: 'OrganizationEdit',
-  data() {
-    return {
-      loading: true,
-      saving: false,
-      error: null,
-      formValid: false,
-      organization: null,
-      originalData: null,
-      showSuccessMessage: false,
-      allOrganizations: [],
-      selectedOrgId: null,
-      isAdmin: false,
-      form: {
-        name: '',
-        legal_name: '',
-        trade_name: '',
-        organization_type: '',
-        industry: '',
-        sector: '',
-        registration_number: '',
-        tax_id: '',
-        address_line1: '',
-        address_line2: '',
-        city: '',
-        state_province: '',
-        postal_code: '',
-        country: 'United States',
-        phone: '',
-        email: '',
-        website: '',
-        founded_date: null,
-        number_of_employees: null,
-        annual_revenue: null,
-        status: 'active',
-        notes: ''
-      },
-      organizationTypes: [
-        'LLC',
-        'Corporation',
-        'Partnership',
-        'Nonprofit',
-        'Sole Proprietorship',
-        'Other'
-      ],
-      statusOptions: [
-        { title: 'Active', value: 'active' },
-        { title: 'Inactive', value: 'inactive' },
-        { title: 'Suspended', value: 'suspended' }
-      ],
-      countries: [
-        'United States',
-        'Canada',
-        'United Kingdom',
-        'Other'
-      ],
-      emailRules: [
-        v => !v || /.+@.+\..+/.test(v) || 'E-mail must be valid'
-      ]
-    }
+const emit = defineEmits(['error'])
+
+const orgFormRef = ref(null)
+
+const loading = ref(true)
+const saving = ref(false)
+const error = ref(null)
+const formValid = ref(false)
+const organization = ref(null)
+const originalData = ref(null)
+const showSuccessMessage = ref(false)
+const allOrganizations = ref([])
+const selectedOrgId = ref(null)
+const isAdmin = ref(false)
+
+const form = reactive({
+  name: '',
+  legal_name: '',
+  trade_name: '',
+  organization_type: '',
+  industry: '',
+  sector: '',
+  registration_number: '',
+  tax_id: '',
+  address_line1: '',
+  address_line2: '',
+  city: '',
+  state_province: '',
+  postal_code: '',
+  country: 'United States',
+  phone: '',
+  email: '',
+  website: '',
+  founded_date: null,
+  number_of_employees: null,
+  annual_revenue: null,
+  status: 'active',
+  notes: ''
+})
+
+const organizationTypes = [
+  'LLC',
+  'Corporation',
+  'Partnership',
+  'Nonprofit',
+  'Sole Proprietorship',
+  'Other'
+]
+
+const statusOptions = [
+  { title: 'Active', value: 'active' },
+  { title: 'Inactive', value: 'inactive' },
+  { title: 'Suspended', value: 'suspended' }
+]
+
+const countries = [
+  'United States',
+  'Canada',
+  'United Kingdom',
+  'Other'
+]
+
+const emailRules = [
+  v => !v || /.+@.+\..+/.test(v) || 'E-mail must be valid'
+]
+
+const hasChanges = computed(() => {
+  if (!originalData.value) return false
+  return JSON.stringify(form) !== JSON.stringify(originalData.value)
+})
+
+const foundedDateText = computed({
+  get() {
+    return form.founded_date ? form.founded_date.split('T')[0] : ''
   },
-  computed: {
-    hasChanges() {
-      if (!this.originalData) return false
-      return JSON.stringify(this.form) !== JSON.stringify(this.originalData)
-    },
-    foundedDateText: {
-      get() {
-        return this.form.founded_date ? this.form.founded_date.split('T')[0] : ''
-      },
-      set(value) {
-        this.form.founded_date = value || null
-      }
-    },
-    annualRevenueText: {
-      get() {
-        return this.form.annual_revenue ? this.form.annual_revenue / 100 : ''
-      },
-      set(value) {
-        this.form.annual_revenue = value ? Math.round(parseFloat(value) * 100) : null
-      }
-    }
+  set(value) {
+    form.founded_date = value || null
+  }
+})
+
+const annualRevenueText = computed({
+  get() {
+    return form.annual_revenue ? form.annual_revenue / 100 : ''
   },
-  async mounted() {
-    // Check if user is admin
-    const { currentUser } = useAuth()
-    this.isAdmin = currentUser.value?.access_level === 'admin'
-    
-    await this.loadOrganizations()
-  },
-  methods: {
-    async loadOrganizations() {
-      try {
-        this.loading = true
-        this.error = null
-        
-        const response = await axios.get('/api/organizations/')
-        
-        if (response.data && response.data.length > 0) {
-          this.allOrganizations = response.data
-          
-          // Load Polaris Broadcasting by default (look for name containing "Polaris")
-          let defaultOrg = response.data.find(org => 
-            org.name.toLowerCase().includes('polaris') || 
-            org.legal_name?.toLowerCase().includes('polaris')
-          )
-          
-          // Fallback to first organization if Polaris not found
-          if (!defaultOrg) {
-            defaultOrg = response.data[0]
-          }
-          
-          this.organization = defaultOrg
-          this.selectedOrgId = this.organization.id
-          this.populateForm()
-        } else {
-          this.error = 'No organizations found'
-        }
-      } catch (error) {
-        console.error('Failed to load organizations:', error)
-        this.error = error.response?.data?.detail || 'Failed to load organizations'
-      } finally {
-        this.loading = false
+  set(value) {
+    form.annual_revenue = value ? Math.round(parseFloat(value) * 100) : null
+  }
+})
+
+async function loadOrganizations() {
+  try {
+    loading.value = true
+    error.value = null
+
+    const response = await axios.get('/api/organizations/')
+
+    if (response.data && response.data.length > 0) {
+      allOrganizations.value = response.data
+
+      // Load Polaris Broadcasting by default (look for name containing "Polaris")
+      let defaultOrg = response.data.find(org =>
+        org.name.toLowerCase().includes('polaris') ||
+        org.legal_name?.toLowerCase().includes('polaris')
+      )
+
+      // Fallback to first organization if Polaris not found
+      if (!defaultOrg) {
+        defaultOrg = response.data[0]
       }
-    },
 
-    async switchOrganization() {
-      if (!this.isAdmin) return
-      
-      try {
-        this.loading = true
-        this.error = null
-        
-        const selectedOrg = this.allOrganizations.find(org => org.id === this.selectedOrgId)
-        if (selectedOrg) {
-          this.organization = selectedOrg
-          this.populateForm()
-        }
-      } catch (error) {
-        console.error('Failed to switch organization:', error)
-        this.error = error.response?.data?.detail || 'Failed to switch organization'
-      } finally {
-        this.loading = false
-      }
-    },
-
-    populateForm() {
-      // Populate form with organization data
-      Object.keys(this.form).forEach(key => {
-        if (Object.prototype.hasOwnProperty.call(this.organization, key)) {
-          this.form[key] = this.organization[key] || this.form[key]
-        }
-      })
-      
-      // Store original data for change detection
-      this.originalData = { ...this.form }
-    },
-
-    async saveOrganization() {
-      if (!this.$refs.form.validate()) return
-      
-      try {
-        this.saving = true
-        
-        // Only send changed fields
-        const changes = {}
-        Object.keys(this.form).forEach(key => {
-          if (this.form[key] !== this.originalData[key]) {
-            changes[key] = this.form[key]
-          }
-        })
-        
-        if (Object.keys(changes).length === 0) {
-          return // No changes to save
-        }
-        
-        const response = await axios.put(
-          `/api/organizations/${this.organization.id}`,
-          changes
-        )
-        
-        this.organization = response.data
-        this.populateForm() // Update form with latest data
-        this.showSuccessMessage = true
-        
-      } catch (error) {
-        console.error('Failed to save organization:', error)
-        this.$emit('error', error.response?.data?.detail || 'Failed to save organization')
-      } finally {
-        this.saving = false
-      }
-    },
-
-    resetForm() {
-      this.populateForm()
+      organization.value = defaultOrg
+      selectedOrgId.value = organization.value.id
+      populateForm()
+    } else {
+      error.value = 'No organizations found'
     }
+  } catch (err) {
+    console.error('Failed to load organizations:', err)
+    error.value = err.response?.data?.detail || 'Failed to load organizations'
+  } finally {
+    loading.value = false
   }
 }
+
+async function switchOrganization() { // eslint-disable-line no-unused-vars
+  if (!isAdmin.value) return
+
+  try {
+    loading.value = true
+    error.value = null
+
+    const selectedOrg = allOrganizations.value.find(org => org.id === selectedOrgId.value)
+    if (selectedOrg) {
+      organization.value = selectedOrg
+      populateForm()
+    }
+  } catch (err) {
+    console.error('Failed to switch organization:', err)
+    error.value = err.response?.data?.detail || 'Failed to switch organization'
+  } finally {
+    loading.value = false
+  }
+}
+
+function populateForm() {
+  // Populate form with organization data
+  Object.keys(form).forEach(key => {
+    if (Object.prototype.hasOwnProperty.call(organization.value, key)) {
+      form[key] = organization.value[key] || form[key]
+    }
+  })
+
+  // Store original data for change detection
+  originalData.value = { ...form }
+}
+
+async function saveOrganization() {
+  if (!orgFormRef.value.validate()) return
+
+  try {
+    saving.value = true
+
+    // Only send changed fields
+    const changes = {}
+    Object.keys(form).forEach(key => {
+      if (form[key] !== originalData.value[key]) {
+        changes[key] = form[key]
+      }
+    })
+
+    if (Object.keys(changes).length === 0) {
+      return // No changes to save
+    }
+
+    const response = await axios.put(
+      `/api/organizations/${organization.value.id}`,
+      changes
+    )
+
+    organization.value = response.data
+    populateForm() // Update form with latest data
+    showSuccessMessage.value = true
+
+  } catch (err) {
+    console.error('Failed to save organization:', err)
+    emit('error', err.response?.data?.detail || 'Failed to save organization')
+  } finally {
+    saving.value = false
+  }
+}
+
+function resetForm() {
+  populateForm()
+}
+
+onMounted(async () => {
+  // Check if user is admin
+  const { currentUser } = useAuth()
+  isAdmin.value = currentUser.value?.access_level === 'admin'
+
+  await loadOrganizations()
+})
 </script>
 
 <style scoped>

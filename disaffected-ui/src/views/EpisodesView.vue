@@ -197,6 +197,12 @@
                   Collect Media for vMix
                 </v-list-item-title>
               </v-list-item>
+              <v-list-item @click="buildVmixList(item)" :loading="item.buildingVmixList">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2">mdi-television-classic</v-icon>
+                  Send to vMix
+                </v-list-item-title>
+              </v-list-item>
 
               <v-divider class="my-1" />
 
@@ -857,196 +863,191 @@
   </v-container>
 </template>
 
-<script>
+<script setup>
 import axios from 'axios';
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { getColorValue, loadColorsFromDatabase } from '@/utils/themeColorMap.js';
-import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue';
+import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'; // eslint-disable-line no-unused-vars
 
-export default {
-  name: 'EpisodesView',
-  components: {
-    EpisodeScaffoldModal
-  },
-  setup() {
-    const router = useRouter();
-    
-    // Data
-    const episodes = ref([]);
-    const loading = ref(false);
-    const saving = ref(false);
-    const deleting = ref(false);
-    const search = ref('');
-    const statusFilter = ref(null);
-    const dateFilter = ref(null);
-    const episodeDialog = ref(false);
-    const deleteDialog = ref(false);
-    const phantomDeleteDialog = ref(false);  // For phantom record confirmation
-    const segmentLockDialog = ref(false);  // For segment lock confirmation
-    const segmentLockInfo = ref(null);  // Store lock info from server
-    const editingEpisode = ref(false);
-    const episodeToDelete = ref(null);
-    const assetIdInfoDialog = ref(false);
-    const selectedEpisodeForAssetId = ref(null);
-    const statusModalOpen = ref(false);
-    const selectedEpisodeForStatus = ref(null);
-    const episodeForm = ref({
-      episode_number: '',
-      template_id: null,
-      title: '',
-      airdate: '',
-      is_dummy: false
+const router = useRouter();
+
+// Data
+const episodes = ref([]);
+const loading = ref(false);
+const saving = ref(false);
+const deleting = ref(false);
+const search = ref('');
+const statusFilter = ref(null);
+const dateFilter = ref(null);
+const episodeDialog = ref(false);
+const deleteDialog = ref(false);
+const phantomDeleteDialog = ref(false);  // For phantom record confirmation
+const segmentLockDialog = ref(false);  // For segment lock confirmation
+const segmentLockInfo = ref(null);  // Store lock info from server
+const editingEpisode = ref(false);
+const episodeToDelete = ref(null);
+const assetIdInfoDialog = ref(false);
+const selectedEpisodeForAssetId = ref(null);
+const statusModalOpen = ref(false);
+const selectedEpisodeForStatus = ref(null);
+const episodeForm = ref({
+  episode_number: '',
+  template_id: null,
+  title: '',
+  airdate: '',
+  is_dummy: false
+});
+
+// New template-related data
+const availableTemplates = ref([]);
+const loadingTemplates = ref(false);
+const loadingNextNumber = ref(false);
+
+// Table headers
+const headers = [
+  { title: 'Ep', key: 'episode_number', width: '60px' },
+  { title: 'Status', key: 'status', width: '80px' },
+  { title: 'Title', key: 'title', width: '200px' },
+  { title: 'Air Date', key: 'airdate', width: '150px' },
+  { title: 'Duration', key: 'duration', width: '100px' },
+  { title: 'AssetID', key: 'asset_id', width: '140px' },
+  { title: 'Actions', key: 'actions', sortable: false, width: '280px' }
+];
+
+// Options
+const statusOptions = [
+  'scheduled',
+  'draft',
+  'production',
+  'running',
+  'completed'
+];
+
+const dateFilterOptions = [
+  { title: 'All Time', value: 'all' },
+  { title: 'This Week', value: 'week' },
+  { title: 'This Month', value: 'month' },
+  { title: 'Last 3 Months', value: '3months' },
+  { title: 'This Year', value: 'year' }
+];
+
+// eslint-disable-next-line no-unused-vars
+const templateOptions = [
+  { title: 'Sunday Show', value: 'sunday_show' },
+  { title: 'Full Show', value: 'full_show' },
+  { title: 'Interview', value: 'interview' },
+  { title: 'Custom', value: 'custom' }
+];
+
+// Computed
+const filteredEpisodes = computed(() => {
+  let result = [...episodes.value];
+
+  // Filter by status
+  if (statusFilter.value) {
+    result = result.filter(ep => ep.status === statusFilter.value);
+  }
+
+  // Filter by date range
+  if (dateFilter.value && dateFilter.value !== 'all') {
+    const now = new Date();
+    const filterDate = new Date();
+
+    switch (dateFilter.value) {
+      case 'week':
+        filterDate.setDate(now.getDate() - 7);
+        break;
+      case 'month':
+        filterDate.setMonth(now.getMonth() - 1);
+        break;
+      case '3months':
+        filterDate.setMonth(now.getMonth() - 3);
+        break;
+      case 'year':
+        filterDate.setFullYear(now.getFullYear() - 1);
+        break;
+    }
+
+    result = result.filter(ep => {
+      if (!ep.airdate) return false;
+      const epDate = new Date(ep.airdate);
+      return epDate >= filterDate;
     });
+  }
 
-    // New template-related data
-    const availableTemplates = ref([]);
-    const loadingTemplates = ref(false);
-    const loadingNextNumber = ref(false);
+  return result;
+});
 
-    // Table headers
-    const headers = [
-      { title: 'Ep', key: 'episode_number', width: '60px' },
-      { title: 'Status', key: 'status', width: '80px' },
-      { title: 'Title', key: 'title', width: '200px' },
-      { title: 'Air Date', key: 'airdate', width: '150px' },
-      { title: 'Duration', key: 'duration', width: '100px' },
-      { title: 'AssetID', key: 'asset_id', width: '140px' },
-      { title: 'Actions', key: 'actions', sortable: false, width: '280px' }
-    ];
+// Methods
+const fetchEpisodes = async () => {
+  loading.value = true;
+  try {
+    const response = await axios.get('/api/episodes');
+    episodes.value = response.data.episodes || [];
 
-    // Options
-    const statusOptions = [
-      'draft',
-      'approved',
-      'production',
-      'promotion',
-      'completed'
-    ];
-
-    const dateFilterOptions = [
-      { title: 'All Time', value: 'all' },
-      { title: 'This Week', value: 'week' },
-      { title: 'This Month', value: 'month' },
-      { title: 'Last 3 Months', value: '3months' },
-      { title: 'This Year', value: 'year' }
-    ];
-
-    // eslint-disable-next-line no-unused-vars
-    const templateOptions = [
-      { title: 'Sunday Show', value: 'sunday_show' },
-      { title: 'Full Show', value: 'full_show' },
-      { title: 'Interview', value: 'interview' },
-      { title: 'Custom', value: 'custom' }
-    ];
-
-    // Computed
-    const filteredEpisodes = computed(() => {
-      let result = [...episodes.value];
-      
-      // Filter by status
-      if (statusFilter.value) {
-        result = result.filter(ep => ep.status === statusFilter.value);
-      }
-      
-      // Filter by date range
-      if (dateFilter.value && dateFilter.value !== 'all') {
-        const now = new Date();
-        const filterDate = new Date();
-        
-        switch (dateFilter.value) {
-          case 'week':
-            filterDate.setDate(now.getDate() - 7);
-            break;
-          case 'month':
-            filterDate.setMonth(now.getMonth() - 1);
-            break;
-          case '3months':
-            filterDate.setMonth(now.getMonth() - 3);
-            break;
-          case 'year':
-            filterDate.setFullYear(now.getFullYear() - 1);
-            break;
-        }
-        
-        result = result.filter(ep => {
-          if (!ep.airdate) return false;
-          const epDate = new Date(ep.airdate);
-          return epDate >= filterDate;
-        });
-      }
-      
-      return result;
-    });
-
-    // Methods
-    const fetchEpisodes = async () => {
-      loading.value = true;
+    // Fetch additional info for each episode
+    for (const episode of episodes.value) {
       try {
-        const response = await axios.get('/api/episodes');
-        episodes.value = response.data.episodes || [];
-        
-        // Fetch additional info for each episode
-        for (const episode of episodes.value) {
-          try {
-            const infoResponse = await axios.get(`/api/episodes/${episode.episode_number}/info`);
-            Object.assign(episode, infoResponse.data.info);
-          } catch (error) {
-            console.warn(`Could not fetch info for episode ${episode.episode_number}`);
-          }
-        }
+        const infoResponse = await axios.get(`/api/episodes/${episode.episode_number}/info`);
+        Object.assign(episode, infoResponse.data.info);
       } catch (error) {
-        console.error('Failed to fetch episodes:', error);
-      } finally {
-        loading.value = false;
+        console.warn(`Could not fetch info for episode ${episode.episode_number}`);
       }
-    };
+    }
+  } catch (error) {
+    console.error('Failed to fetch episodes:', error);
+  } finally {
+    loading.value = false;
+  }
+};
 
-    // Handler for when a new episode is created via EpisodeScaffoldModal
-    const handleEpisodeCreated = async (episode) => {
-      console.log('Episode created:', episode);
-      await fetchEpisodes();
-    };
+// Handler for when a new episode is created via EpisodeScaffoldModal
+const handleEpisodeCreated = async (episode) => {
+  console.log('Episode created:', episode);
+  await fetchEpisodes();
+};
 
-    const formatDate = (dateString) => {
-      if (!dateString) return '';
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric' 
-      });
-    };
+const formatDate = (dateString) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+};
 
-    const isUpcoming = (dateString) => {
-      if (!dateString) return false;
-      const date = new Date(dateString);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      return date >= today;
-    };
+const isUpcoming = (dateString) => {
+  if (!dateString) return false;
+  const date = new Date(dateString);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date >= today;
+};
 
-    const getStatusColor = (status) => {
-      // Use the Show-Build color system for status colors
-      if (!status) return getColorValue('unknown');
-      
-      const statusLower = status.toLowerCase();
-      
-      // Map episode statuses to Show-Build color system
-      const statusColorMap = {
-        'draft': getColorValue('draft'),           // grey-darken-2
-        'approved': getColorValue('approved'),     // green-accent
-        'production': getColorValue('production'), // blue-accent
-        'promotion': getColorValue('promotion'),   // orange/purple-accent
-        'completed': getColorValue('completed'),   // yellow-accent
-        // Legacy mappings for backwards compatibility
-        'scheduled': getColorValue('approved'),
-        'recording': getColorValue('production'),
-        'post-production': getColorValue('production'),
-        'published': getColorValue('completed'),
-        'archived': getColorValue('completed'),
-        'live': getColorValue('promotion'),
-        'unknown': getColorValue('unknown')
+const getStatusColor = (status) => {
+  // Use the Show-Build color system for status colors
+  if (!status) return getColorValue('unknown');
+
+  const statusLower = status.toLowerCase();
+
+  // Map episode statuses to Show-Build color system
+  const statusColorMap = {
+    'scheduled': getColorValue('scheduled'),   // first stage
+    'draft': getColorValue('draft'),           // grey-darken-2
+    'production': getColorValue('production'), // blue-accent
+    'running': getColorValue('running'),       // green-accent
+    'completed': getColorValue('completed'),   // yellow-accent
+    // Legacy mappings for backwards compatibility
+    'approved': getColorValue('running'),      // legacy: approved -> running
+    'promotion': getColorValue('scheduled'),   // legacy: promotion -> scheduled
+    'recording': getColorValue('production'),
+    'post-production': getColorValue('production'),
+    'published': getColorValue('completed'),
+    'archived': getColorValue('completed'),
+    'live': getColorValue('scheduled'),
+    'unknown': getColorValue('unknown')
       };
       
       return statusColorMap[statusLower] || getColorValue('unknown');
@@ -1057,7 +1058,7 @@ export default {
       return episodeNumber.toString().padStart(4, '0');
     };
 
-    const createNewEpisode = async () => {
+    const createNewEpisode = async () => { // eslint-disable-line no-unused-vars
       editingEpisode.value = false;
       
       // Load templates and next episode number in parallel
@@ -1554,13 +1555,11 @@ export default {
     const collectMedia = async (episode) => {
       episode.collectingMedia = true;
       try {
-        const response = await axios.post('/api/media/collect', {
-          episode_number: episode.episode_number
-        }, {
+        const response = await axios.post(`/api/episodes/${episode.episode_number}/gather-media`, null, {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
         });
-        
-        alert(`Media collection completed for episode ${episode.episode_number}. ${response.data.files_collected} files collected to ${response.data.output_path}`);
+
+        alert(`Media collection completed for episode ${episode.episode_number}. ${response.data.files_collected || response.data.total || 0} files collected.`);
         console.log(`Media collected for episode ${episode.episode_number}:`, response.data);
         
       } catch (error) {
@@ -1571,284 +1570,234 @@ export default {
       }
     };
 
-    // Lifecycle
-    onMounted(async () => {
-      // Load color system and episodes in parallel
-      await Promise.all([
-        loadColorsFromDatabase('default'),
-        fetchEpisodes()
-      ]);
-    });
-
-    return {
-      episodes,
-      loading,
-      saving,
-      deleting,
-      search,
-      statusFilter,
-      dateFilter,
-      episodeDialog,
-      deleteDialog,
-      phantomDeleteDialog,
-      segmentLockDialog,
-      segmentLockInfo,
-      editingEpisode,
-      episodeToDelete,
-      episodeForm,
-      assetIdInfoDialog,
-      selectedEpisodeForAssetId,
-      statusModalOpen,
-      selectedEpisodeForStatus,
-      headers,
-      statusOptions,
-      dateFilterOptions,
-      templateOptions,
-      availableTemplates,
-      loadingTemplates,
-      loadingNextNumber,
-      filteredEpisodes,
-      fetchEpisodes,
-      handleEpisodeCreated,
-      formatDate,
-      isUpcoming,
-      getStatusColor,
-      formatEpisodeNumber,
-      createNewEpisode,
-      editEpisode,
-      openRundown,
-      duplicateEpisode,
-      deleteEpisode,
-      confirmDelete,
-      confirmPhantomDelete,
-      cancelPhantomDelete,
-      confirmSegmentLockDelete,
-      cancelSegmentLockDelete,
-      openStatusModal,
-      closeStatusModal,
-      changeEpisodeStatus,
-      closeEpisodeDialog,
-      saveEpisode,
-      loadNextEpisodeNumber,
-      // Production tools
-      calculateDuration,
-      generateScript,
-      collectMedia,
-      // AssetID management
-      requestNewEpisodeAssetID,
-      showEpisodeAssetIDInfo,
-      requestNewEpisodeAssetIDModal,
-      showEpisodeAssetIDInfoModal,
-      requestNewEpisodeAssetIDFromModal,
-      copyAssetIDToClipboard
+    const buildVmixList = async (episode) => {
+      episode.buildingVmixList = true;
+      try {
+        const response = await axios.post(`/api/vmix/build-list/${episode.episode_number}`, null, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
+        });
+        alert(`vMix list built: ${response.data.added} items added, ${response.data.failed} failed`);
+      } catch (error) {
+        console.error('Failed to build vMix list:', error);
+        alert(`Failed to build vMix list: ${error.response?.data?.detail || error.message}`);
+      } finally {
+        episode.buildingVmixList = false;
+      }
     };
 
-    // AssetID Management Methods
-    async function requestNewEpisodeAssetID(episode) {
+// Lifecycle
+onMounted(async () => {
+  // Load color system and episodes in parallel
+  await Promise.all([
+    loadColorsFromDatabase('default'),
+    fetchEpisodes()
+  ]);
+});
+
+// AssetID Management Methods
+async function requestNewEpisodeAssetID(episode) {
+  try {
+    console.log('🆔 Requesting new Episode AssetID for episode:', episode.episode_number);
+
+    // Get current episode AssetID from metadata
+    let currentEpisodeAssetID = episode.AssetID || episode.asset_id;
+
+    if (!currentEpisodeAssetID) {
+      // Try to fetch episode info to get AssetID
       try {
-        console.log('🆔 Requesting new Episode AssetID for episode:', episode.episode_number);
-
-        // Get current episode AssetID from metadata
-        let currentEpisodeAssetID = episode.AssetID || episode.asset_id;
-
-        if (!currentEpisodeAssetID) {
-          // Try to fetch episode info to get AssetID
-          try {
-            const infoResponse = await axios.get(`/api/episodes/${episode.episode_number}/info`);
-            currentEpisodeAssetID = infoResponse.data.info?.AssetID || infoResponse.data.info?.asset_id;
-          } catch (error) {
-            console.warn('Could not fetch episode info for AssetID');
-          }
-        }
-
-        if (!currentEpisodeAssetID) {
-          alert('No episode AssetID found. Please ensure the episode is properly loaded.');
-          return;
-        }
-
-        const response = await fetch('/assetid/regenerate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          },
-          body: JSON.stringify({
-            old_asset_id: currentEpisodeAssetID,
-            entity_type: 'episode',
-            episode_number: episode.episode_number
-          })
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to regenerate AssetID: ${response.status} ${response.statusText}`);
-        }
-
-        const result = await response.json();
-        alert(`Episode AssetID successfully regenerated!\n\nOld: ${result.old_asset_id}\nNew: ${result.new_asset_id}\n\nThe episode will be updated automatically.`);
-        console.log('✅ Episode AssetID regenerated:', result);
-
-        // Update the local episode data
-        episode.AssetID = result.new_asset_id;
-        episode.asset_id = result.new_asset_id;
-
-        // Refresh episodes to show updated AssetID
-        await fetchEpisodes();
-
+        const infoResponse = await axios.get(`/api/episodes/${episode.episode_number}/info`);
+        currentEpisodeAssetID = infoResponse.data.info?.AssetID || infoResponse.data.info?.asset_id;
       } catch (error) {
-        console.error('❌ Failed to regenerate Episode AssetID:', error);
-        alert(`Failed to regenerate Episode AssetID: ${error.message}`);
+        console.warn('Could not fetch episode info for AssetID');
       }
     }
 
-    async function showEpisodeAssetIDInfo(episode) {
-      try {
-        console.log('🆔 Showing AssetID info for episode:', episode.episode_number);
-
-        // Get current episode AssetID and fetch full episode info if needed
-        let episodeData = { ...episode };
-
-        if (!episodeData.AssetID && !episodeData.asset_id) {
-          // Try to fetch episode info to get AssetID
-          try {
-            const infoResponse = await axios.get(`/api/episodes/${episode.episode_number}/info`);
-            episodeData = { ...episodeData, ...infoResponse.data.info };
-          } catch (error) {
-            console.warn('Could not fetch episode info for AssetID');
-          }
-        }
-
-        selectedEpisodeForAssetId.value = episodeData;
-        assetIdInfoDialog.value = true;
-
-      } catch (error) {
-        console.error('❌ Failed to show AssetID info:', error);
-        alert(`Failed to show AssetID info: ${error.message}`);
-      }
+    if (!currentEpisodeAssetID) {
+      alert('No episode AssetID found. Please ensure the episode is properly loaded.');
+      return;
     }
 
-    // Modal-specific AssetID management methods
-    async function requestNewEpisodeAssetIDModal() {
-      try {
-        console.log('🆔 Requesting new Episode AssetID from modal for episode:', episodeForm.value.episode_number);
+    const response = await fetch('/assetid/regenerate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      },
+      body: JSON.stringify({
+        old_asset_id: currentEpisodeAssetID,
+        entity_type: 'episode',
+        episode_number: episode.episode_number
+      })
+    });
 
-        // Get current episode AssetID from form data
-        let currentEpisodeAssetID = episodeForm.value.AssetID || episodeForm.value.asset_id;
-
-        if (!currentEpisodeAssetID) {
-          alert('No episode AssetID found in the current episode data. Please ensure the episode is properly loaded.');
-          return;
-        }
-
-        const response = await fetch('/assetid/regenerate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          },
-          body: JSON.stringify({
-            old_asset_id: currentEpisodeAssetID,
-            entity_type: 'episode',
-            episode_number: episodeForm.value.episode_number
-          })
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to regenerate AssetID: ${response.status} ${response.statusText}`);
-        }
-
-        const result = await response.json();
-        alert(`Episode AssetID successfully regenerated!\n\nOld: ${result.old_asset_id}\nNew: ${result.new_asset_id}\n\nThe form will be updated with the new AssetID.`);
-        console.log('✅ Episode AssetID regenerated from modal:', result);
-
-        // Update the form data with new AssetID
-        episodeForm.value.AssetID = result.new_asset_id;
-        episodeForm.value.asset_id = result.new_asset_id;
-
-      } catch (error) {
-        console.error('❌ Failed to regenerate Episode AssetID from modal:', error);
-        alert(`Failed to regenerate Episode AssetID: ${error.message}`);
-      }
+    if (!response.ok) {
+      throw new Error(`Failed to regenerate AssetID: ${response.status} ${response.statusText}`);
     }
 
-    async function showEpisodeAssetIDInfoModal() {
-      try {
-        console.log('🆔 Showing AssetID info from modal for episode:', episodeForm.value.episode_number);
+    const result = await response.json();
+    alert(`Episode AssetID successfully regenerated!\n\nOld: ${result.old_asset_id}\nNew: ${result.new_asset_id}\n\nThe episode will be updated automatically.`);
+    console.log('✅ Episode AssetID regenerated:', result);
 
-        // Use the form data as the episode data for the modal
-        selectedEpisodeForAssetId.value = { ...episodeForm.value };
-        assetIdInfoDialog.value = true;
+    // Update the local episode data
+    episode.AssetID = result.new_asset_id;
+    episode.asset_id = result.new_asset_id;
 
-      } catch (error) {
-        console.error('❌ Failed to show AssetID info from modal:', error);
-        alert(`Failed to show AssetID info: ${error.message}`);
-      }
-    }
+    // Refresh episodes to show updated AssetID
+    await fetchEpisodes();
 
-    // Additional methods for the AssetID info modal
-    async function requestNewEpisodeAssetIDFromModal() {
-      try {
-        console.log('🆔 Requesting new Episode AssetID from info modal for episode:', selectedEpisodeForAssetId.value.episode_number);
-
-        const currentEpisodeAssetID = selectedEpisodeForAssetId.value.AssetID || selectedEpisodeForAssetId.value.asset_id;
-
-        if (!currentEpisodeAssetID) {
-          alert('No episode AssetID found. Please ensure the episode is properly loaded.');
-          return;
-        }
-
-        const response = await fetch('/assetid/regenerate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          },
-          body: JSON.stringify({
-            old_asset_id: currentEpisodeAssetID,
-            entity_type: 'episode',
-            episode_number: selectedEpisodeForAssetId.value.episode_number
-          })
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to regenerate AssetID: ${response.status} ${response.statusText}`);
-        }
-
-        const result = await response.json();
-        alert(`Episode AssetID successfully regenerated!\n\nOld: ${result.old_asset_id}\nNew: ${result.new_asset_id}`);
-        console.log('✅ Episode AssetID regenerated from info modal:', result);
-
-        // Update the selected episode data in the modal
-        selectedEpisodeForAssetId.value.AssetID = result.new_asset_id;
-        selectedEpisodeForAssetId.value.asset_id = result.new_asset_id;
-
-        // If this was called from the edit episode modal, update the form too
-        if (episodeForm.value.episode_number === selectedEpisodeForAssetId.value.episode_number) {
-          episodeForm.value.AssetID = result.new_asset_id;
-          episodeForm.value.asset_id = result.new_asset_id;
-        }
-
-        // Refresh episodes list
-        await fetchEpisodes();
-
-      } catch (error) {
-        console.error('❌ Failed to regenerate Episode AssetID from info modal:', error);
-        alert(`Failed to regenerate Episode AssetID: ${error.message}`);
-      }
-    }
-
-    function copyAssetIDToClipboard() {
-      const assetId = selectedEpisodeForAssetId.value.AssetID || selectedEpisodeForAssetId.value.asset_id;
-      if (assetId) {
-        navigator.clipboard.writeText(assetId).then(() => {
-          alert(`AssetID copied to clipboard: ${assetId}`);
-        }).catch(err => {
-          console.error('Failed to copy AssetID to clipboard:', err);
-          alert('Failed to copy AssetID to clipboard');
-        });
-      }
-    }
+  } catch (error) {
+    console.error('❌ Failed to regenerate Episode AssetID:', error);
+    alert(`Failed to regenerate Episode AssetID: ${error.message}`);
   }
-};
+}
+
+async function showEpisodeAssetIDInfo(episode) {
+  try {
+    console.log('🆔 Showing AssetID info for episode:', episode.episode_number);
+
+    // Get current episode AssetID and fetch full episode info if needed
+    let episodeData = { ...episode };
+
+    if (!episodeData.AssetID && !episodeData.asset_id) {
+      // Try to fetch episode info to get AssetID
+      try {
+        const infoResponse = await axios.get(`/api/episodes/${episode.episode_number}/info`);
+        episodeData = { ...episodeData, ...infoResponse.data.info };
+      } catch (error) {
+        console.warn('Could not fetch episode info for AssetID');
+      }
+    }
+
+    selectedEpisodeForAssetId.value = episodeData;
+    assetIdInfoDialog.value = true;
+
+  } catch (error) {
+    console.error('❌ Failed to show AssetID info:', error);
+    alert(`Failed to show AssetID info: ${error.message}`);
+  }
+}
+
+// Modal-specific AssetID management methods
+async function requestNewEpisodeAssetIDModal() {
+  try {
+    console.log('🆔 Requesting new Episode AssetID from modal for episode:', episodeForm.value.episode_number);
+
+    // Get current episode AssetID from form data
+    let currentEpisodeAssetID = episodeForm.value.AssetID || episodeForm.value.asset_id;
+
+    if (!currentEpisodeAssetID) {
+      alert('No episode AssetID found in the current episode data. Please ensure the episode is properly loaded.');
+      return;
+    }
+
+    const response = await fetch('/assetid/regenerate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      },
+      body: JSON.stringify({
+        old_asset_id: currentEpisodeAssetID,
+        entity_type: 'episode',
+        episode_number: episodeForm.value.episode_number
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to regenerate AssetID: ${response.status} ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    alert(`Episode AssetID successfully regenerated!\n\nOld: ${result.old_asset_id}\nNew: ${result.new_asset_id}\n\nThe form will be updated with the new AssetID.`);
+    console.log('✅ Episode AssetID regenerated from modal:', result);
+
+    // Update the form data with new AssetID
+    episodeForm.value.AssetID = result.new_asset_id;
+    episodeForm.value.asset_id = result.new_asset_id;
+
+  } catch (error) {
+    console.error('❌ Failed to regenerate Episode AssetID from modal:', error);
+    alert(`Failed to regenerate Episode AssetID: ${error.message}`);
+  }
+}
+
+async function showEpisodeAssetIDInfoModal() {
+  try {
+    console.log('🆔 Showing AssetID info from modal for episode:', episodeForm.value.episode_number);
+
+    // Use the form data as the episode data for the modal
+    selectedEpisodeForAssetId.value = { ...episodeForm.value };
+    assetIdInfoDialog.value = true;
+
+  } catch (error) {
+    console.error('❌ Failed to show AssetID info from modal:', error);
+    alert(`Failed to show AssetID info: ${error.message}`);
+  }
+}
+
+// Additional methods for the AssetID info modal
+async function requestNewEpisodeAssetIDFromModal() {
+  try {
+    console.log('🆔 Requesting new Episode AssetID from info modal for episode:', selectedEpisodeForAssetId.value.episode_number);
+
+    const currentEpisodeAssetID = selectedEpisodeForAssetId.value.AssetID || selectedEpisodeForAssetId.value.asset_id;
+
+    if (!currentEpisodeAssetID) {
+      alert('No episode AssetID found. Please ensure the episode is properly loaded.');
+      return;
+    }
+
+    const response = await fetch('/assetid/regenerate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      },
+      body: JSON.stringify({
+        old_asset_id: currentEpisodeAssetID,
+        entity_type: 'episode',
+        episode_number: selectedEpisodeForAssetId.value.episode_number
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to regenerate AssetID: ${response.status} ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    alert(`Episode AssetID successfully regenerated!\n\nOld: ${result.old_asset_id}\nNew: ${result.new_asset_id}`);
+    console.log('✅ Episode AssetID regenerated from info modal:', result);
+
+    // Update the selected episode data in the modal
+    selectedEpisodeForAssetId.value.AssetID = result.new_asset_id;
+    selectedEpisodeForAssetId.value.asset_id = result.new_asset_id;
+
+    // If this was called from the edit episode modal, update the form too
+    if (episodeForm.value.episode_number === selectedEpisodeForAssetId.value.episode_number) {
+      episodeForm.value.AssetID = result.new_asset_id;
+      episodeForm.value.asset_id = result.new_asset_id;
+    }
+
+    // Refresh episodes list
+    await fetchEpisodes();
+
+  } catch (error) {
+    console.error('❌ Failed to regenerate Episode AssetID from info modal:', error);
+    alert(`Failed to regenerate Episode AssetID: ${error.message}`);
+  }
+}
+
+function copyAssetIDToClipboard() {
+  const assetId = selectedEpisodeForAssetId.value.AssetID || selectedEpisodeForAssetId.value.asset_id;
+  if (assetId) {
+    navigator.clipboard.writeText(assetId).then(() => {
+      alert(`AssetID copied to clipboard: ${assetId}`);
+    }).catch(err => {
+      console.error('Failed to copy AssetID to clipboard:', err);
+      alert('Failed to copy AssetID to clipboard');
+    });
+  }
+}
 </script>
 
 <style scoped>

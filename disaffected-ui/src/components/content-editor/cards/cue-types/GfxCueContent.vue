@@ -184,88 +184,91 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: 'GfxCueContent',
-  emits: ['edit-gfx', 'delete', 'generate-gfx', 'download-gfx-png', 'update-meta'],
-  props: {
-    cueData: {
-      type: Object,
-      required: true
-    },
-    hasGfxAsset: {
-      type: Boolean,
-      default: false
-    },
-    generatingGfx: {
-      type: Boolean,
-      default: false
-    },
-    gfxGenerationStatus: {
-      type: String,
-      default: null
-    },
-    fsqBackgroundVideoUrl: {
-      type: String,
-      default: '/assets/preview-background.mp4'
-    },
-    xpostData: {
-      type: Object,
-      default: () => ({})
-    },
-    gfxActiveListItems: {
-      type: Array,
-      default: () => []
-    }
+<script setup>
+import { ref, computed } from 'vue';
+
+const props = defineProps({
+  cueData: {
+    type: Object,
+    required: true
   },
-  data() {
-    return {
-      localGfxFontSize: parseInt(this.cueData?.fontSize) || 25,
-      localGfxFontFamily: this.cueData?.fontFamily || 'sans-serif',
-      localGfxAlignment: this.cueData?.textAlign || 'center',
-      fontFamilyOptions: [
-        { title: 'Sans-Serif', value: 'sans-serif' },
-        { title: 'Serif', value: 'serif' }
-      ]
-    };
+  hasGfxAsset: {
+    type: Boolean,
+    default: false
   },
-  computed: {
-    gfxStatusText() {
-      const map = { queued: 'Queued', generating: 'Generating...', completed: 'Complete', failed: 'Failed' };
-      return map[this.gfxGenerationStatus] || '';
-    },
-    gfxStatusChipColor() {
-      const map = { queued: 'blue-grey', generating: 'amber', completed: 'success', failed: 'error' };
-      return map[this.gfxGenerationStatus] || 'grey';
-    },
-    gfxStatusChipIcon() {
-      const map = { queued: 'mdi-clock-outline', generating: 'mdi-cog', completed: 'mdi-check-circle', failed: 'mdi-alert-circle' };
-      return map[this.gfxGenerationStatus] || 'mdi-help-circle';
-    }
+  generatingGfx: {
+    type: Boolean,
+    default: false
   },
-  methods: {
-    formatMetric(n) {
-      if (!n) return '0';
-      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-      return String(n);
-    },
-    formatGfxBody(body) {
-      if (!body) return '';
-      const unescaped = body.replace(/\\n/g, '\n');
-      return unescaped.length > 200 ? unescaped.substring(0, 200) + '...' : unescaped;
-    },
-    emitGfxParamChange(paramName, value) {
-      console.log(`GFX param changed: ${paramName} = ${value}`);
-      this.$emit('update-meta', {
-        assetId: this.cueData.assetId,
-        field: paramName,
-        value: value
-      });
-    }
+  gfxGenerationStatus: {
+    type: String,
+    default: null
   },
-  expose: ['localGfxFontSize', 'localGfxFontFamily', 'localGfxAlignment']
-};
+  fsqBackgroundVideoUrl: {
+    type: String,
+    default: '/assets/preview-background.mp4'
+  },
+  xpostData: {
+    type: Object,
+    default: () => ({})
+  },
+  gfxActiveListItems: {
+    type: Array,
+    default: () => []
+  }
+});
+
+const emit = defineEmits(['edit-gfx', 'delete', 'generate-gfx', 'download-gfx-png', 'update-meta']);
+
+// data
+const localGfxFontSize = ref(parseInt(props.cueData?.fontSize) || 25);
+const localGfxFontFamily = ref(props.cueData?.fontFamily || 'sans-serif');
+const localGfxAlignment = ref(props.cueData?.textAlign || 'center');
+const fontFamilyOptions = ref([
+  { title: 'Sans-Serif', value: 'sans-serif' },
+  { title: 'Serif', value: 'serif' }
+]);
+
+// computed
+const gfxStatusText = computed(() => {
+  const map = { queued: 'Queued', generating: 'Generating...', completed: 'Complete', failed: 'Failed' };
+  return map[props.gfxGenerationStatus] || '';
+});
+
+const gfxStatusChipColor = computed(() => {
+  const map = { queued: 'blue-grey', generating: 'amber', completed: 'success', failed: 'error' };
+  return map[props.gfxGenerationStatus] || 'grey';
+});
+
+const gfxStatusChipIcon = computed(() => {
+  const map = { queued: 'mdi-clock-outline', generating: 'mdi-cog', completed: 'mdi-check-circle', failed: 'mdi-alert-circle' };
+  return map[props.gfxGenerationStatus] || 'mdi-help-circle';
+});
+
+// methods
+function formatMetric(n) {
+  if (!n) return '0';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return String(n);
+}
+
+function formatGfxBody(body) {
+  if (!body) return '';
+  const unescaped = body.replace(/\\n/g, '\n');
+  return unescaped.length > 200 ? unescaped.substring(0, 200) + '...' : unescaped;
+}
+
+function emitGfxParamChange(paramName, value) {
+  console.log(`GFX param changed: ${paramName} = ${value}`);
+  emit('update-meta', {
+    assetId: props.cueData.assetId,
+    field: paramName,
+    value: value
+  });
+}
+
+defineExpose({ localGfxFontSize, localGfxFontFamily, localGfxAlignment });
 </script>
 
 <style scoped>

@@ -21,61 +21,117 @@ from ._shared import (
 router = APIRouter()
 
 
+@router.post("/regenerate-description")
+async def regenerate_description(
+    payload: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Regenerate a segment description with user feedback about what to change.
+    Calls the LLM with the original prompt + previous description + feedback.
+    """
+    asset_id = payload.get('asset_id')
+    previous_description = payload.get('previous_description', '')
+    feedback = payload.get('feedback', '')
+
+    if not asset_id:
+        raise HTTPException(status_code=400, detail="asset_id is required")
+
+    try:
+        from services.auto_description_service import regenerate_segment_description
+        result = regenerate_segment_description(asset_id, previous_description, feedback)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Regeneration failed for {asset_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Regeneration failed: {str(e)}")
+
+
 @router.post("/rundown/{episode_number}/reorder")
 async def reorder_rundown(
     episode_number: str,
     payload: ReorderRequest,
-    current_user: Optional[dict] = None
+    current_user: Optional[dict] = None,
+    db: Session = Depends(get_db)
 ) -> Dict[str, str]:
-    """Update the order field in frontmatter for each rundown segment."""
-    episode_dir = EPISODES_ROOT / episode_number
-    rundown_dir = episode_dir / "rundown"
+    """Update order_in_rundown in database for each rundown segment.
 
-    if not rundown_dir.exists():
-        raise HTTPException(status_code=404, detail=f"Episode {episode_number} rundown not found")
+    Accepts segments with either 'asset_id' or 'filename' to identify items.
+    """
+    from models_v2 import Episode, Rundown, RundownItem
 
     try:
+        episode_num_int = int(episode_number)
+        episode = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+
+        rundown = db.query(Rundown).filter(Rundown.episode_id == episode.id).first()
+        if not rundown:
+            raise HTTPException(status_code=404, detail=f"No rundown found for episode {episode_number}")
+
+        updated_count = 0
         for segment in payload.segments:
-            filename = segment.get("filename")
             new_order = segment.get("order")
-
-            if not filename or new_order is None:
+            if new_order is None:
                 continue
 
-            file_path = rundown_dir / filename
-            if not file_path.exists():
-                logger.warning(f"File not found: {file_path}")
-                continue
+            asset_id = segment.get("asset_id")
+            filename = segment.get("filename")
 
-            # Read the file
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            item = None
+            if asset_id:
+                item = db.query(RundownItem).filter(
+                    RundownItem.asset_id == asset_id,
+                    RundownItem.rundown_id == rundown.id
+                ).first()
 
-            # Parse frontmatter and body
-            if content.startswith('---'):
-                parts = content.split('---', 2)
-                if len(parts) >= 3:
-                    front_matter = yaml.safe_load(parts[1])
-                    body = parts[2]
+            if not item and filename:
+                # Try to match by filename pattern — items have generated filenames
+                # like "010-slug.md" based on order + slug
+                items = db.query(RundownItem).filter(
+                    RundownItem.rundown_id == rundown.id
+                ).all()
+                for candidate in items:
+                    candidate_filename = f"{(candidate.order_in_rundown or 0):03d}-{candidate.slug}.md"
+                    if candidate_filename == filename:
+                        item = candidate
+                        break
 
-                    # Update the order field
-                    front_matter['order'] = new_order
+            if item:
+                item.order_in_rundown = new_order
+                item.updated_at = datetime.now()
+                updated_count += 1
 
-                    # Rebuild the file content
-                    new_content = '---\n'
-                    new_content += yaml.dump(front_matter, default_flow_style=False, sort_keys=False)
-                    new_content += '---'
-                    new_content += body
+        db.commit()
+        logger.info(f"Reordered {updated_count} items for episode {episode_number}")
 
-                    # Write back to file
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(new_content)
+        return {"status": "success", "message": f"Rundown order updated ({updated_count} items)"}
 
-        return {"status": "success", "message": "Rundown order updated"}
-
+    except HTTPException:
+        raise
     except Exception as e:
+        db.rollback()
         logger.error(f"Failed to reorder rundown: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reorder rundown: {str(e)}")
+
+
+@router.get("/rundown-item/{asset_id}")
+async def get_rundown_item_by_asset_id(asset_id: str, db: Session = Depends(get_db)):
+    """Get a single rundown item by asset_id (used for live refresh after LLM updates)."""
+    from models.episode import RundownItem
+    item = db.query(RundownItem).filter(RundownItem.asset_id == asset_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Rundown item {asset_id} not found")
+    return {
+        "asset_id": item.asset_id,
+        "description": item.description or '',
+        "description_model": getattr(item, 'description_model', None) or '',
+        "tone": item.tone or '',
+        "tone_rationale": item.tone_rationale or '',
+        "tone_confidence": item.tone_confidence,
+        "llm_generated_fields": item.llm_generated_fields or [],
+    }
 
 
 @router.get("/{episode_number}/rundown")
@@ -135,6 +191,12 @@ async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)
                     "server_message": item.server_message or '',
                     "created_at": item.created_at.isoformat() if item.created_at else None,
                     "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+                    "tone": item.tone or '',
+                    "tone_rationale": item.tone_rationale or '',
+                    "tone_confidence": item.tone_confidence,
+                    "llm_generated_fields": item.llm_generated_fields or [],
+                    "auto_description_enabled": getattr(item, 'auto_description_enabled', True),
+                    "description_model": getattr(item, 'description_model', None) or '',
                     "source": "rundown_item"  # Distinguish from library placements
                 }
                 rundown_items.append(rundown_item_dict)
@@ -392,6 +454,16 @@ async def update_rundown_item(
             item.duration = item_data['duration']
         if 'status' in item_data:
             item.status = item_data['status']
+        if 'tone' in item_data:
+            item.tone = item_data['tone']
+        if 'tone_rationale' in item_data:
+            item.tone_rationale = item_data['tone_rationale']
+        if 'tone_confidence' in item_data:
+            item.tone_confidence = item_data['tone_confidence']
+        if 'llm_generated_fields' in item_data:
+            item.llm_generated_fields = item_data['llm_generated_fields']
+        if 'auto_description_enabled' in item_data:
+            item.auto_description_enabled = item_data['auto_description_enabled']
 
         item.updated_at = datetime.now()
         db.commit()
@@ -419,46 +491,25 @@ async def save_rundown_item_by_id(
     current_user: dict = Depends(get_current_user_or_key),
     db: Session = Depends(get_db)
 ):
-    """Save rundown item using item ID - matches frontend expectation"""
+    """Save rundown item using asset_id — database-first lookup.
+
+    LEGACY: This endpoint is rarely called directly. Prefer PUT /{episode_number}/save-rundown.
+    """
+    from models_v2 import RundownItem
+
     try:
-        # Find the item by AssetID (which is the item_id from frontend)
-        episode_dir = Path(f"/home/episodes/{episode_number}")
-        if not episode_dir.exists():
-            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+        # Find item by asset_id in database (no filesystem scan needed)
+        item = db.query(RundownItem).filter(RundownItem.asset_id == item_id).first()
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Rundown item {item_id} not found in database")
 
-        rundown_dir = episode_dir / "rundown"
-        if not rundown_dir.exists():
-            raise HTTPException(status_code=404, detail=f"Rundown directory not found for episode {episode_number}")
+        # Generate a compatible filename from DB fields for the filesystem save path
+        item_filename = f"{(item.order_in_rundown or 0):03d}-{item.slug or 'untitled'}.md"
 
-        # Find the markdown file with matching AssetID
-        target_file = None
-        for md_file in rundown_dir.glob("*.md"):
-            try:
-                with open(md_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-
-                # Parse frontmatter
-                if content.startswith('---'):
-                    parts = content.split('---', 2)
-                    if len(parts) >= 3:
-                        frontmatter = yaml.safe_load(parts[1]) or {}
-                        file_asset_id = frontmatter.get('AssetID') or frontmatter.get('asset_id', '')
-
-                        if file_asset_id == item_id:
-                            target_file = md_file
-                            break
-
-            except Exception as e:
-                logger.warning(f"Could not read file {md_file}: {e}")
-                continue
-
-        if not target_file:
-            raise HTTPException(status_code=404, detail=f"Item with ID {item_id} not found")
-
-        # Now call the existing save function with the found filename
+        # Delegate to save_rundown_item which handles both DB and filesystem
         return await save_rundown_item(
             episode_number=episode_number,
-            item_filename=target_file.name,
+            item_filename=item_filename,
             payload=payload,
             current_user=current_user,
             db=db
@@ -560,6 +611,18 @@ async def save_rundown_item(
                         rundown_item.tags = db_metadata.get('tags', rundown_item.tags)
                         rundown_item.server_message = db_metadata.get('server_message', rundown_item.server_message)
                         rundown_item.order_in_rundown = int(db_metadata.get('order', rundown_item.order_in_rundown or 0)) if db_metadata.get('order') else rundown_item.order_in_rundown
+
+                        # Tone + LLM bookkeeping
+                        if 'tone' in db_metadata:
+                            rundown_item.tone = db_metadata['tone']
+                        if 'tone_rationale' in db_metadata:
+                            rundown_item.tone_rationale = db_metadata['tone_rationale']
+                        if 'tone_confidence' in db_metadata:
+                            rundown_item.tone_confidence = db_metadata['tone_confidence']
+                        if 'llm_generated_fields' in db_metadata:
+                            rundown_item.llm_generated_fields = db_metadata['llm_generated_fields']
+                        if 'auto_description_enabled' in db_metadata:
+                            rundown_item.auto_description_enabled = db_metadata['auto_description_enabled']
 
                         # Handle airdate conversion
                         if 'airdate' in db_metadata and db_metadata['airdate']:

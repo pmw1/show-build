@@ -419,16 +419,8 @@
   </v-container>
 </template>
 
-<script>
-export default {
-  name: 'DevToolsView',
-
-  data() {
-    return {
-      // Future: Add interactive dev tools here
-    }
-  }
-}
+<script setup>
+// Future: Add interactive dev tools here
 </script>
 
 <style scoped>

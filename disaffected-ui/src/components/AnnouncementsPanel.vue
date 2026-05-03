@@ -78,95 +78,78 @@
   </v-card>
 </template>
 
-<script>
-export default {
-  name: 'AnnouncementsPanel',
+<script setup>
+import { ref, onMounted } from 'vue'
 
-  data() {
-    return {
-      announcements: [],
-      showModal: false,
-      selectedAnnouncement: null,
-      announcementContent: '',
-      loading: false,
-      error: null
+const announcements = ref([])
+const showModal = ref(false)
+const selectedAnnouncement = ref(null)
+const announcementContent = ref('')
+const loading = ref(false)
+const error = ref(null)
+
+function getToken() {
+  return localStorage.getItem('auth-token') || localStorage.getItem('token')
+}
+
+async function loadAnnouncements() {
+  try {
+    const response = await fetch('/api/announcements/', {
+      headers: { 'Authorization': `Bearer ${getToken()}` }
+    })
+    if (response.ok) {
+      announcements.value = await response.json()
+    } else {
+      console.error('Failed to load announcements:', response.statusText)
     }
-  },
-
-  mounted() {
-    this.loadAnnouncements()
-  },
-
-  methods: {
-    async loadAnnouncements() {
-      try {
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-        const response = await fetch('/api/announcements/', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        })
-
-        if (response.ok) {
-          this.announcements = await response.json()
-        } else {
-          console.error('Failed to load announcements:', response.statusText)
-        }
-      } catch (error) {
-        console.error('Error loading announcements:', error)
-      }
-    },
-
-    async openAnnouncement(announcement) {
-      this.selectedAnnouncement = announcement
-      this.showModal = true
-      this.loading = true
-      this.error = null
-      this.announcementContent = ''
-
-      try {
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-        const response = await fetch(`/api/announcements/${announcement.id}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          this.announcementContent = data.content
-        } else {
-          this.error = 'Failed to load announcement content'
-        }
-      } catch (error) {
-        console.error('Error loading announcement content:', error)
-        this.error = 'Error loading announcement content'
-      } finally {
-        this.loading = false
-      }
-    },
-
-    closeModal() {
-      this.showModal = false
-      this.selectedAnnouncement = null
-      this.announcementContent = ''
-    },
-
-    formatDate(dateStr) {
-      if (!dateStr) return ''
-      try {
-        const date = new Date(dateStr)
-        return date.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric'
-        })
-      } catch (e) {
-        return dateStr
-      }
-    }
+  } catch (err) {
+    console.error('Error loading announcements:', err)
   }
 }
+
+async function openAnnouncement(announcement) {
+  selectedAnnouncement.value = announcement
+  showModal.value = true
+  loading.value = true
+  error.value = null
+  announcementContent.value = ''
+
+  try {
+    const response = await fetch(`/api/announcements/${announcement.id}`, {
+      headers: { 'Authorization': `Bearer ${getToken()}` }
+    })
+    if (response.ok) {
+      const data = await response.json()
+      announcementContent.value = data.content
+    } else {
+      error.value = 'Failed to load announcement content'
+    }
+  } catch (err) {
+    console.error('Error loading announcement content:', err)
+    error.value = 'Error loading announcement content'
+  } finally {
+    loading.value = false
+  }
+}
+
+function closeModal() {
+  showModal.value = false
+  selectedAnnouncement.value = null
+  announcementContent.value = ''
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return ''
+  try {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric'
+    })
+  } catch {
+    return dateStr
+  }
+}
+
+onMounted(loadAnnouncements)
 </script>
 
 <style scoped>

@@ -65,58 +65,51 @@
   </v-dialog>
 </template>
 
-<script>
-import CueParser from '../../../utils/cueParser.js';
+<script setup>
+import { ref, computed, watch } from 'vue'
+import CueParser from '../../../utils/cueParser.js'
 
-export default {
-  name: 'SpeakerSelectorModal',
-  emits: ['update:show', 'speaker-selected'],
-  props: {
-    show: {
-      type: Boolean,
-      default: false
-    },
-    currentSpeaker: {
-      type: String,
-      default: 'josh'
-    }
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
   },
-  data() {
-    return {
-      selectedSpeaker: '',
-      customSpeaker: ''
-    };
-  },
-  computed: {
-    speakerOptions() {
-      return CueParser.getSpeakerOptions();
-    }
-  },
-  watch: {
-    show(newVal) {
-      if (newVal) {
-        this.selectedSpeaker = this.currentSpeaker;
-        this.customSpeaker = '';
-      }
-    }
-  },
-  methods: {
-    confirmSelection() {
-      if (this.selectedSpeaker) {
-        this.$emit('speaker-selected', this.selectedSpeaker);
-        this.$emit('update:show', false);
-      }
-    },
-
-    handleCustomSpeaker() {
-      if (this.customSpeaker.trim()) {
-        const customValue = this.customSpeaker.toLowerCase().replace(/\s+/g, '-');
-        this.selectedSpeaker = customValue;
-        this.customSpeaker = '';
-      }
-    }
+  currentSpeaker: {
+    type: String,
+    default: 'josh'
   }
-};
+})
+
+const emit = defineEmits(['update:show', 'speaker-selected'])
+
+const selectedSpeaker = ref('')
+const customSpeaker = ref('')
+
+const speakerOptions = computed(() => {
+  return CueParser.getSpeakerOptions()
+})
+
+watch(() => props.show, (newVal) => {
+  if (newVal) {
+    selectedSpeaker.value = props.currentSpeaker
+    customSpeaker.value = ''
+  }
+})
+
+function confirmSelection() {
+  if (selectedSpeaker.value) {
+    emit('speaker-selected', selectedSpeaker.value)
+    emit('update:show', false)
+  }
+}
+
+function handleCustomSpeaker() {
+  if (customSpeaker.value.trim()) {
+    const customValue = customSpeaker.value.toLowerCase().replace(/\s+/g, '-')
+    selectedSpeaker.value = customValue
+    customSpeaker.value = ''
+  }
+}
 </script>
 
 <style scoped>

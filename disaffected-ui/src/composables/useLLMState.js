@@ -29,6 +29,7 @@
 
 import { computed, reactive } from 'vue'
 import axios from 'axios'
+import { useUserPrefs } from './useUserPrefs'
 
 // Global state shared across all component instances
 const activeOperations = reactive(new Map())
@@ -46,12 +47,20 @@ const API_ENDPOINTS = {
 // Load persisted state from database
 async function loadPersistedState() {
   try {
-    // CRITICAL: Load dismissed notification IDs FIRST from localStorage
-    const savedDismissed = localStorage.getItem('llm-dismissed-notifications')
-    if (savedDismissed) {
-      const dismissedIds = JSON.parse(savedDismissed)
-      dismissedIds.forEach(id => dismissedNotificationIds.add(id))
-      console.log(`♻️ Loaded ${dismissedIds.length} dismissed notification IDs from localStorage`)
+    // CRITICAL: Load dismissed notification IDs FIRST.
+    // Per-user pref wins; legacy localStorage is a fallback for first migration.
+    const userPrefs = useUserPrefs()
+    const savedDismissedFromPrefs = userPrefs.get('notifications.dismissed', null)
+    if (Array.isArray(savedDismissedFromPrefs) && savedDismissedFromPrefs.length > 0) {
+      savedDismissedFromPrefs.forEach(id => dismissedNotificationIds.add(id))
+      console.log(`♻️ Loaded ${savedDismissedFromPrefs.length} dismissed notification IDs from user prefs`)
+    } else {
+      const savedDismissed = localStorage.getItem('llm-dismissed-notifications')
+      if (savedDismissed) {
+        const dismissedIds = JSON.parse(savedDismissed)
+        dismissedIds.forEach(id => dismissedNotificationIds.add(id))
+        console.log(`♻️ Loaded ${dismissedIds.length} dismissed notification IDs from legacy localStorage`)
+      }
     }
 
     const token = localStorage.getItem('auth-token')
@@ -147,10 +156,13 @@ async function savePersistedState() {
       notifications: recentNotifs
     }, { headers })
 
-    // Also save to localStorage as fallback
+    // Also save to localStorage as fallback (offline / unauthenticated reload)
     localStorage.setItem('llm-operations-fallback', JSON.stringify(persistentOps))
     localStorage.setItem('llm-notifications-fallback', JSON.stringify(recentNotifs))
-    localStorage.setItem('llm-dismissed-notifications', JSON.stringify(Array.from(dismissedNotificationIds)))
+    const dismissedArray = Array.from(dismissedNotificationIds)
+    localStorage.setItem('llm-dismissed-notifications', JSON.stringify(dismissedArray))
+    // Source of truth for dismissed IDs is per-user prefs.
+    useUserPrefs().set('notifications.dismissed', dismissedArray)
 
   } catch (error) {
     console.warn('Failed to save LLM state to database:', error.message)

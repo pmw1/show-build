@@ -235,332 +235,327 @@
   </v-card>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, nextTick } from 'vue';
 import { getColorValue, resolveVuetifyColor } from '../../../utils/themeColorMap.js';
 
-export default {
-  name: 'ImageCueCard',
-  emits: ['select', 'edit', 'delete', 'modify', 'update-meta'],
-  props: {
-    cueData: {
-      type: Object,
-      required: true,
-      default: () => ({})
-    },
-    selected: {
-      type: Boolean,
-      default: false
-    },
-    orderNumber: {
-      type: [String, Number],
-      default: null
-    }
+const props = defineProps({
+  cueData: {
+    type: Object,
+    required: true,
+    default: () => ({})
   },
-  data() {
+  selected: {
+    type: Boolean,
+    default: false
+  },
+  orderNumber: {
+    type: [String, Number],
+    default: null
+  }
+});
+
+const emit = defineEmits(['select', 'edit', 'delete', 'modify', 'update-meta']);
+
+// ── Reactive state ──
+const imageError = ref(false);
+const imageLoaded = ref(false);
+const imageLoading = ref(false);
+const activeTab = ref(null);
+const imageWidth = ref(null);
+const imageHeight = ref(null);
+const imageSize = ref(null);
+const imageFormat = ref(null);
+const imageColorDepth = ref('24-bit'); // eslint-disable-line no-unused-vars
+const tags = ref('');
+// Editable meta fields
+const editableDescription = ref('');
+const editableCredit = ref('');
+const editableCaption = ref('');
+const editableDuration = ref('');
+const editableTags = ref('');
+
+// ── Computed ──
+const imageUrl = computed(() => {
+  // Check multiple possible locations for the image URL
+  // MediaURL field gets parsed to 'mediaurl' (all lowercase) by cueParser
+  return props.cueData.rawData?.mediaurl ||
+         props.cueData.rawData?.mediaUrl ||
+         props.cueData.mediaUrl ||
+         props.cueData.mediaurl ||
+         props.cueData.imageSrc ||
+         props.cueData.rawData?.imageSrc ||
+         '';
+});
+
+const cueTypeColor = computed(() => {
+  if (!props.cueData.type) return 'grey';
+  const colorName = getColorValue(props.cueData.type.toLowerCase());
+  return resolveVuetifyColor(colorName);
+});
+
+const cueTypeStyle = computed(() => { // eslint-disable-line no-unused-vars
+  const backgroundColor = cueTypeColor.value;
+  return {
+    backgroundColor: backgroundColor,
+    color: 'white'
+  };
+});
+
+const headerStyle = computed(() => {
+  const backgroundColor = cueTypeColor.value;
+  return {
+    backgroundColor: backgroundColor,
+    color: 'white'
+  };
+});
+
+const badgeStyle = computed(() => {
+  const baseColor = cueTypeColor.value;
+  // Only lighten if we have a valid hex color string
+  const lighterColor = (typeof baseColor === 'string' && baseColor.startsWith('#'))
+    ? lightenColor(baseColor, 20)
+    : baseColor;
+  return {
+    backgroundColor: lighterColor || '#666',
+    color: 'white'
+  };
+});
+
+/**
+ * Get CSS class for analysis state
+ */
+const getAnalysisClass = computed(() => {
+  const state = props.cueData?.analysisState;
+  if (state === 'analyzing') return 'cue-analyzing';
+  if (state === 'needs_review') return 'cue-needs-review';
+  return '';
+});
+
+/**
+ * Get card style including analysis state border
+ */
+const getCardStyle = computed(() => {
+  const state = props.cueData?.analysisState;
+
+  if (state === 'analyzing') {
+    // Purple 7px border while analyzing
     return {
-      imageError: false,
-      imageLoaded: false,
-      imageLoading: false,
-      activeTab: null,
-      imageWidth: null,
-      imageHeight: null,
-      imageSize: null,
-      imageFormat: null,
-      imageColorDepth: '24-bit',
-      tags: '',
-      // Editable meta fields
-      editableDescription: '',
-      editableCredit: '',
-      editableCaption: '',
-      editableDuration: '',
-      editableTags: ''
+      borderColor: '#9C27B0',
+      borderWidth: '7px',
+      borderStyle: 'solid'
     };
-  },
-  computed: {
-    imageUrl() {
-      // Check multiple possible locations for the image URL
-      // MediaURL field gets parsed to 'mediaurl' (all lowercase) by cueParser
-      return this.cueData.rawData?.mediaurl ||
-             this.cueData.rawData?.mediaUrl ||
-             this.cueData.mediaUrl ||
-             this.cueData.mediaurl ||
-             this.cueData.imageSrc ||
-             this.cueData.rawData?.imageSrc ||
-             '';
-    },
+  } else if (state === 'needs_review') {
+    // Red 7px border when needs review
+    return {
+      borderColor: '#D32F2F',
+      borderWidth: '7px',
+      borderStyle: 'solid'
+    };
+  }
 
-    cueTypeColor() {
-      if (!this.cueData.type) return 'grey';
-      const colorName = getColorValue(this.cueData.type.toLowerCase());
-      return resolveVuetifyColor(colorName);
-    },
+  // Default: use darker version of cue type color with 3px border
+  return {
+    borderColor: darkenColor(cueTypeColor.value, 0.3),
+    borderWidth: '3px',
+    borderStyle: 'solid'
+  };
+});
 
-    cueTypeStyle() {
-      const backgroundColor = this.cueTypeColor;
-      return {
-        backgroundColor: backgroundColor,
-        color: 'white'
-      };
-    },
+// ── Watch ──
+watch(imageUrl, (newUrl, oldUrl) => {
+  // Reset states when URL changes
+  if (newUrl !== oldUrl) {
+    imageLoaded.value = false;
+    imageError.value = false;
+    imageLoading.value = !!newUrl;
+  }
+}, { immediate: true });
 
-    headerStyle() {
-      const backgroundColor = this.cueTypeColor;
-      return {
-        backgroundColor: backgroundColor,
-        color: 'white'
-      };
-    },
+// ── Methods ──
+function darkenColor(color, amount) {
+  if (!color || color === 'grey') return '#555';
+  let hex = color.replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+  if (hex.length !== 6) return color;
+  const r = Math.max(0, Math.round(parseInt(hex.substring(0, 2), 16) * (1 - amount)));
+  const g = Math.max(0, Math.round(parseInt(hex.substring(2, 4), 16) * (1 - amount)));
+  const b = Math.max(0, Math.round(parseInt(hex.substring(4, 6), 16) * (1 - amount)));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
 
-    badgeStyle() {
-      const baseColor = this.cueTypeColor;
-      // Only lighten if we have a valid hex color string
-      const lighterColor = (typeof baseColor === 'string' && baseColor.startsWith('#'))
-        ? this.lightenColor(baseColor, 20)
-        : baseColor;
-      return {
-        backgroundColor: lighterColor || '#666',
-        color: 'white'
-      };
-    },
+function resolveImagePath(imagePath) {
+  if (!imagePath) return '';
 
-    /**
-     * Get CSS class for analysis state
-     */
-    getAnalysisClass() {
-      const state = this.cueData?.analysisState;
-      if (state === 'analyzing') return 'cue-analyzing';
-      if (state === 'needs_review') return 'cue-needs-review';
-      return '';
-    },
+  // Handle full URLs
+  if (imagePath.startsWith('http')) {
+    return imagePath;
+  }
 
-    /**
-     * Get card style including analysis state border
-     */
-    getCardStyle() {
-      const state = this.cueData?.analysisState;
+  // Handle absolute paths
+  if (imagePath.startsWith('/')) {
+    return imagePath;
+  }
 
-      if (state === 'analyzing') {
-        // Purple 7px border while analyzing
-        return {
-          borderColor: '#9C27B0',
-          borderWidth: '7px',
-          borderStyle: 'solid'
-        };
-      } else if (state === 'needs_review') {
-        // Red 7px border when needs review
-        return {
-          borderColor: '#D32F2F',
-          borderWidth: '7px',
-          borderStyle: 'solid'
-        };
+  // For relative paths, ensure they start with /
+  return `/${imagePath}`;
+}
+
+function handleImageError() {
+  imageError.value = true;
+  imageLoaded.value = false;
+  imageLoading.value = false;
+}
+
+function handleImageLoad(event) {
+  imageError.value = false;
+  imageLoaded.value = true;
+  imageLoading.value = false;
+
+  // Extract image dimensions from the loaded image
+  const img = event.target;
+  imageWidth.value = img.naturalWidth;
+  imageHeight.value = img.naturalHeight;
+
+  // Extract format from URL
+  const url = imageUrl.value;
+  if (url) {
+    const extension = url.split('.').pop().split('?')[0].toUpperCase();
+    imageFormat.value = extension;
+  }
+
+  // Try to get file size (requires additional fetch)
+  fetchImageMetadata();
+}
+
+async function fetchImageMetadata() {
+  try {
+    const response = await fetch(resolveImagePath(imageUrl.value), { method: 'HEAD' });
+    if (response.ok) {
+      const contentLength = response.headers.get('Content-Length');
+      if (contentLength) {
+        imageSize.value = parseInt(contentLength, 10);
       }
-
-      // Default: use darker version of cue type color with 3px border
-      return {
-        borderColor: this.darkenColor(this.cueTypeColor, 0.3),
-        borderWidth: '3px',
-        borderStyle: 'solid'
-      };
     }
-  },
-  methods: {
-    darkenColor(color, amount) {
-      if (!color || color === 'grey') return '#555';
-      let hex = color.replace('#', '');
-      if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
-      if (hex.length !== 6) return color;
-      const r = Math.max(0, Math.round(parseInt(hex.substring(0, 2), 16) * (1 - amount)));
-      const g = Math.max(0, Math.round(parseInt(hex.substring(2, 4), 16) * (1 - amount)));
-      const b = Math.max(0, Math.round(parseInt(hex.substring(4, 6), 16) * (1 - amount)));
-      return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-    },
-    resolveImagePath(imagePath) {
-      if (!imagePath) return '';
+  } catch (error) {
+    console.log('Could not fetch image metadata:', error);
+  }
+}
 
-      // Handle full URLs
-      if (imagePath.startsWith('http')) {
-        return imagePath;
-      }
+function toggleTab(tab) {
+  // Toggle tab: close if already open, open if closed
+  if (activeTab.value === tab) {
+    activeTab.value = null;
+  } else {
+    activeTab.value = tab;
 
-      // Handle absolute paths
-      if (imagePath.startsWith('/')) {
-        return imagePath;
-      }
-
-      // For relative paths, ensure they start with /
-      return `/${imagePath}`;
-    },
-
-    handleImageError() {
-      this.imageError = true;
-      this.imageLoaded = false;
-      this.imageLoading = false;
-    },
-
-    handleImageLoad(event) {
-      this.imageError = false;
-      this.imageLoaded = true;
-      this.imageLoading = false;
-
-      // Extract image dimensions from the loaded image
-      const img = event.target;
-      this.imageWidth = img.naturalWidth;
-      this.imageHeight = img.naturalHeight;
-
-      // Extract format from URL
-      const url = this.imageUrl;
-      if (url) {
-        const extension = url.split('.').pop().split('?')[0].toUpperCase();
-        this.imageFormat = extension;
-      }
-
-      // Try to get file size (requires additional fetch)
-      this.fetchImageMetadata();
-    },
-
-    async fetchImageMetadata() {
-      try {
-        const response = await fetch(this.resolveImagePath(this.imageUrl), { method: 'HEAD' });
-        if (response.ok) {
-          const contentLength = response.headers.get('Content-Length');
-          if (contentLength) {
-            this.imageSize = parseInt(contentLength, 10);
-          }
-        }
-      } catch (error) {
-        console.log('Could not fetch image metadata:', error);
-      }
-    },
-
-    toggleTab(tab) {
-      // Toggle tab: close if already open, open if closed
-      if (this.activeTab === tab) {
-        this.activeTab = null;
-      } else {
-        this.activeTab = tab;
-
-        // Initialize editable fields when opening meta tab
-        // Use nextTick to break any potential reactivity loops
-        if (tab === 'meta') {
-          this.$nextTick(() => {
-            this.initializeMetaFields();
-          });
-        }
-      }
-    },
-
-    initializeMetaFields() {
-      // Load current values into editable fields
-      this.editableDescription = this.cueData.rawData?.description || '';
-      this.editableCredit = this.cueData.rawData?.credit || '';
-      this.editableCaption = this.cueData.rawData?.caption || '';
-      this.editableDuration = this.cueData.rawData?.duration || this.cueData.duration || '00:00:15:00';
-      this.editableTags = this.tags || '';
-    },
-
-    saveMetaEdit() {
-      // Emit update event with new metadata
-      const updatedMeta = {
-        description: this.editableDescription,
-        credit: this.editableCredit,
-        caption: this.editableCaption,
-        duration: this.editableDuration,
-        tags: this.editableTags
-      };
-
-      this.$emit('update-meta', {
-        cueData: this.cueData,
-        metadata: updatedMeta
+    // Initialize editable fields when opening meta tab
+    // Use nextTick to break any potential reactivity loops
+    if (tab === 'meta') {
+      nextTick(() => {
+        initializeMetaFields();
       });
-
-      // Close the tab after saving
-      this.activeTab = null;
-    },
-
-    cancelMetaEdit() {
-      // Close tab first, then reset values
-      this.activeTab = null;
-      this.$nextTick(() => {
-        this.initializeMetaFields();
-      });
-    },
-
-    formatFileSize(bytes) {
-      if (!bytes) return 'Unknown';
-
-      const units = ['B', 'KB', 'MB', 'GB'];
-      let size = bytes;
-      let unitIndex = 0;
-
-      while (size >= 1024 && unitIndex < units.length - 1) {
-        size /= 1024;
-        unitIndex++;
-      }
-
-      return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-    },
-
-    handleCrop() {
-      console.log('Crop tool clicked');
-      this.$emit('modify', { action: 'crop', cueData: this.cueData });
-    },
-
-    handleEnhance() {
-      console.log('Enhance tool clicked');
-      this.$emit('modify', { action: 'enhance', cueData: this.cueData });
-    },
-
-    handleResize() {
-      console.log('Resize tool clicked');
-      this.$emit('modify', { action: 'resize', cueData: this.cueData });
-    },
-
-    handleComfyUI() {
-      console.log('ComfyUI tool clicked');
-      this.$emit('modify', { action: 'comfyui', cueData: this.cueData });
-    },
-
-    lightenColor(color, percent) {
-      // Convert hex to RGB
-      let hex = color.replace('#', '');
-
-      // Handle short hex
-      if (hex.length === 3) {
-        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-      }
-
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-
-      // Lighten each component
-      const newR = Math.min(255, Math.round(r + (255 - r) * (percent / 100)));
-      const newG = Math.min(255, Math.round(g + (255 - g) * (percent / 100)));
-      const newB = Math.min(255, Math.round(b + (255 - b) * (percent / 100)));
-
-      // Convert back to hex
-      const toHex = (n) => {
-        const hex = n.toString(16);
-        return hex.length === 1 ? '0' + hex : hex;
-      };
-
-      return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`;
-    }
-  },
-  watch: {
-    imageUrl: {
-      immediate: true,
-      handler(newUrl, oldUrl) {
-        // Reset states when URL changes
-        if (newUrl !== oldUrl) {
-          this.imageLoaded = false;
-          this.imageError = false;
-          this.imageLoading = !!newUrl;
-        }
-      }
     }
   }
-};
+}
+
+function initializeMetaFields() {
+  // Load current values into editable fields
+  editableDescription.value = props.cueData.rawData?.description || '';
+  editableCredit.value = props.cueData.rawData?.credit || '';
+  editableCaption.value = props.cueData.rawData?.caption || '';
+  editableDuration.value = props.cueData.rawData?.duration || props.cueData.duration || '00:00:15:00';
+  editableTags.value = tags.value || '';
+}
+
+function saveMetaEdit() {
+  // Emit update event with new metadata
+  const updatedMeta = {
+    description: editableDescription.value,
+    credit: editableCredit.value,
+    caption: editableCaption.value,
+    duration: editableDuration.value,
+    tags: editableTags.value
+  };
+
+  emit('update-meta', {
+    cueData: props.cueData,
+    metadata: updatedMeta
+  });
+
+  // Close the tab after saving
+  activeTab.value = null;
+}
+
+function cancelMetaEdit() {
+  // Close tab first, then reset values
+  activeTab.value = null;
+  nextTick(() => {
+    initializeMetaFields();
+  });
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return 'Unknown';
+
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = bytes;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+
+  return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function handleCrop() {
+  console.log('Crop tool clicked');
+  emit('modify', { action: 'crop', cueData: props.cueData });
+}
+
+function handleEnhance() {
+  console.log('Enhance tool clicked');
+  emit('modify', { action: 'enhance', cueData: props.cueData });
+}
+
+function handleResize() {
+  console.log('Resize tool clicked');
+  emit('modify', { action: 'resize', cueData: props.cueData });
+}
+
+function handleComfyUI() {
+  console.log('ComfyUI tool clicked');
+  emit('modify', { action: 'comfyui', cueData: props.cueData });
+}
+
+function lightenColor(color, percent) {
+  // Convert hex to RGB
+  let hex = color.replace('#', '');
+
+  // Handle short hex
+  if (hex.length === 3) {
+    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+  }
+
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+
+  // Lighten each component
+  const newR = Math.min(255, Math.round(r + (255 - r) * (percent / 100)));
+  const newG = Math.min(255, Math.round(g + (255 - g) * (percent / 100)));
+  const newB = Math.min(255, Math.round(b + (255 - b) * (percent / 100)));
+
+  // Convert back to hex
+  const toHex = (n) => {
+    const hexStr = n.toString(16);
+    return hexStr.length === 1 ? '0' + hexStr : hexStr;
+  };
+
+  return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`;
+}
 </script>
 
 <style scoped>

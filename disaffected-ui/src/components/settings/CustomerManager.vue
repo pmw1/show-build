@@ -256,283 +256,246 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 
-export default {
-  name: 'CustomerManager',
-  setup() {
-    // State
-    const loading = ref(false)
-    const saving = ref(false)
-    const deleting = ref(false)
-    const customers = ref([])
-    const searchQuery = ref('')
-    const filterType = ref(null)
-    const filterStatus = ref('active')
-    const dialogOpen = ref(false)
-    const deleteDialogOpen = ref(false)
-    const editingCustomer = ref(null)
-    const deletingCustomer = ref(null)
-    const formRef = ref(null)
+// State
+const loading = ref(false)
+const saving = ref(false)
+const deleting = ref(false)
+const customers = ref([])
+const searchQuery = ref('')
+const filterType = ref(null)
+const filterStatus = ref('active')
+const dialogOpen = ref(false)
+const deleteDialogOpen = ref(false)
+const editingCustomer = ref(null)
+const deletingCustomer = ref(null)
+const formRef = ref(null)
 
-    // Snackbar state
-    const snackbar = ref({
-      show: false,
-      message: '',
-      color: 'error',
-      timeout: 5000
+// Snackbar state
+const snackbar = ref({
+  show: false,
+  message: '',
+  color: 'error',
+  timeout: 5000
+})
+
+const showSnackbar = (message, color = 'error') => {
+  snackbar.value.message = message
+  snackbar.value.color = color
+  snackbar.value.show = true
+}
+
+const formData = ref({
+  company_name: '',
+  display_name: '',
+  customer_type: 'advertiser',
+  tier: 'standard',
+  industry: '',
+  contact_name: '',
+  contact_email: '',
+  contact_phone: '',
+  contact_title: '',
+  billing_email: '',
+  billing_address: '',
+  notes: ''
+})
+
+// Options
+const typeOptions = [
+  { title: 'Advertiser', value: 'advertiser' },
+  { title: 'Sponsor', value: 'sponsor' },
+  { title: 'Partner', value: 'partner' }
+]
+
+const tierOptions = [
+  { title: 'Premium', value: 'premium' },
+  { title: 'Standard', value: 'standard' },
+  { title: 'Basic', value: 'basic' }
+]
+
+const statusOptions = [
+  { title: 'Active', value: 'active' },
+  { title: 'Inactive', value: 'inactive' },
+  { title: 'All', value: 'all' }
+]
+
+const headers = [
+  { title: 'Company', key: 'company_name', sortable: true },
+  { title: 'Type', key: 'customer_type', sortable: true, width: 120 },
+  { title: 'Tier', key: 'tier', sortable: true, width: 100 },
+  { title: 'Contact', key: 'contact_name', sortable: true },
+  { title: 'Email', key: 'contact_email', sortable: false },
+  { title: 'Active', key: 'is_active', sortable: true, width: 80 },
+  { title: 'Actions', key: 'actions', sortable: false, width: 140 }
+]
+
+// Auth helper
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('auth-token')
+  return token ? { 'Authorization': `Bearer ${token}` } : {}
+}
+
+// Computed
+const filteredCustomers = computed(() => {
+  let items = [...customers.value]
+
+  if (filterStatus.value === 'active') {
+    items = items.filter(c => c.is_active)
+  } else if (filterStatus.value === 'inactive') {
+    items = items.filter(c => !c.is_active)
+  }
+
+  if (filterType.value) {
+    items = items.filter(c => c.customer_type === filterType.value)
+  }
+
+  if (searchQuery.value) {
+    const query = searchQuery.value.toLowerCase()
+    items = items.filter(c =>
+      c.company_name?.toLowerCase().includes(query) ||
+      c.contact_name?.toLowerCase().includes(query) ||
+      c.contact_email?.toLowerCase().includes(query)
+    )
+  }
+
+  return items
+})
+
+// Methods
+const loadCustomers = async () => {
+  loading.value = true
+  try {
+    const response = await axios.get('/api/customers/', {
+      headers: getAuthHeaders(),
+      params: { is_active: null, limit: 500 }
     })
-
-    const showSnackbar = (message, color = 'error') => {
-      snackbar.value.message = message
-      snackbar.value.color = color
-      snackbar.value.show = true
-    }
-
-    const formData = ref({
-      company_name: '',
-      display_name: '',
-      customer_type: 'advertiser',
-      tier: 'standard',
-      industry: '',
-      contact_name: '',
-      contact_email: '',
-      contact_phone: '',
-      contact_title: '',
-      billing_email: '',
-      billing_address: '',
-      notes: ''
-    })
-
-    // Options
-    const typeOptions = [
-      { title: 'Advertiser', value: 'advertiser' },
-      { title: 'Sponsor', value: 'sponsor' },
-      { title: 'Partner', value: 'partner' }
-    ]
-
-    const tierOptions = [
-      { title: 'Premium', value: 'premium' },
-      { title: 'Standard', value: 'standard' },
-      { title: 'Basic', value: 'basic' }
-    ]
-
-    const statusOptions = [
-      { title: 'Active', value: 'active' },
-      { title: 'Inactive', value: 'inactive' },
-      { title: 'All', value: 'all' }
-    ]
-
-    const headers = [
-      { title: 'Company', key: 'company_name', sortable: true },
-      { title: 'Type', key: 'customer_type', sortable: true, width: 120 },
-      { title: 'Tier', key: 'tier', sortable: true, width: 100 },
-      { title: 'Contact', key: 'contact_name', sortable: true },
-      { title: 'Email', key: 'contact_email', sortable: false },
-      { title: 'Active', key: 'is_active', sortable: true, width: 80 },
-      { title: 'Actions', key: 'actions', sortable: false, width: 140 }
-    ]
-
-    // Auth helper
-    const getAuthHeaders = () => {
-      const token = localStorage.getItem('auth-token')
-      return token ? { 'Authorization': `Bearer ${token}` } : {}
-    }
-
-    // Computed
-    const filteredCustomers = computed(() => {
-      let items = [...customers.value]
-
-      if (filterStatus.value === 'active') {
-        items = items.filter(c => c.is_active)
-      } else if (filterStatus.value === 'inactive') {
-        items = items.filter(c => !c.is_active)
-      }
-
-      if (filterType.value) {
-        items = items.filter(c => c.customer_type === filterType.value)
-      }
-
-      if (searchQuery.value) {
-        const query = searchQuery.value.toLowerCase()
-        items = items.filter(c =>
-          c.company_name?.toLowerCase().includes(query) ||
-          c.contact_name?.toLowerCase().includes(query) ||
-          c.contact_email?.toLowerCase().includes(query)
-        )
-      }
-
-      return items
-    })
-
-    // Methods
-    const loadCustomers = async () => {
-      loading.value = true
-      try {
-        const response = await axios.get('/api/customers/', {
-          headers: getAuthHeaders(),
-          params: { is_active: null, limit: 500 }
-        })
-        customers.value = response.data.customers || []
-      } catch (error) {
-        console.error('Failed to load customers:', error)
-      } finally {
-        loading.value = false
-      }
-    }
-
-    const openCreateDialog = () => {
-      editingCustomer.value = null
-      formData.value = {
-        company_name: '',
-        display_name: '',
-        customer_type: 'advertiser',
-        tier: 'standard',
-        industry: '',
-        contact_name: '',
-        contact_email: '',
-        contact_phone: '',
-        contact_title: '',
-        billing_email: '',
-        billing_address: '',
-        notes: ''
-      }
-      dialogOpen.value = true
-    }
-
-    const editCustomer = (customer) => {
-      editingCustomer.value = customer
-      formData.value = { ...customer }
-      dialogOpen.value = true
-    }
-
-    const saveCustomer = async () => {
-      if (!formData.value.company_name) {
-        return
-      }
-
-      saving.value = true
-      try {
-        if (editingCustomer.value) {
-          await axios.patch(`/api/customers/${editingCustomer.value.asset_id}`, formData.value, {
-            headers: getAuthHeaders()
-          })
-        } else {
-          await axios.post('/api/customers/', formData.value, {
-            headers: getAuthHeaders()
-          })
-        }
-        dialogOpen.value = false
-        await loadCustomers()
-      } catch (error) {
-        console.error('Failed to save customer:', error)
-        showSnackbar(`Failed to save: ${error.response?.data?.detail || error.message}`)
-      } finally {
-        saving.value = false
-      }
-    }
-
-    const toggleActive = async (customer) => {
-      try {
-        await axios.patch(`/api/customers/${customer.asset_id}`, {
-          is_active: !customer.is_active
-        }, {
-          headers: getAuthHeaders()
-        })
-        await loadCustomers()
-      } catch (error) {
-        console.error('Failed to toggle customer:', error)
-      }
-    }
-
-    const confirmDelete = (customer) => {
-      deletingCustomer.value = customer
-      deleteDialogOpen.value = true
-    }
-
-    const deleteCustomer = async () => {
-      if (!deletingCustomer.value) return
-
-      deleting.value = true
-      try {
-        await axios.delete(`/api/customers/${deletingCustomer.value.asset_id}`, {
-          headers: getAuthHeaders(),
-          params: { hard_delete: true }
-        })
-        deleteDialogOpen.value = false
-        deletingCustomer.value = null
-        await loadCustomers()
-      } catch (error) {
-        console.error('Failed to delete customer:', error)
-        showSnackbar(`Failed to delete: ${error.response?.data?.detail || error.message}`)
-      } finally {
-        deleting.value = false
-      }
-    }
-
-    const formatType = (type) => {
-      if (!type) return ''
-      return type.charAt(0).toUpperCase() + type.slice(1)
-    }
-
-    const getTypeColor = (type) => {
-      const colors = {
-        advertiser: 'green',
-        sponsor: 'purple',
-        partner: 'blue'
-      }
-      return colors[type] || 'grey'
-    }
-
-    const getTierColor = (tier) => {
-      const colors = {
-        premium: 'amber',
-        standard: 'blue-grey',
-        basic: 'grey'
-      }
-      return colors[tier] || 'grey'
-    }
-
-    // Lifecycle
-    onMounted(() => {
-      loadCustomers()
-    })
-
-    return {
-      loading,
-      saving,
-      deleting,
-      customers,
-      searchQuery,
-      filterType,
-      filterStatus,
-      dialogOpen,
-      deleteDialogOpen,
-      editingCustomer,
-      deletingCustomer,
-      formRef,
-      formData,
-      typeOptions,
-      tierOptions,
-      statusOptions,
-      headers,
-      filteredCustomers,
-      openCreateDialog,
-      editCustomer,
-      saveCustomer,
-      toggleActive,
-      confirmDelete,
-      deleteCustomer,
-      formatType,
-      getTypeColor,
-      getTierColor,
-      snackbar,
-      showSnackbar
-    }
+    customers.value = response.data.customers || []
+  } catch (error) {
+    console.error('Failed to load customers:', error)
+  } finally {
+    loading.value = false
   }
 }
+
+const openCreateDialog = () => {
+  editingCustomer.value = null
+  formData.value = {
+    company_name: '',
+    display_name: '',
+    customer_type: 'advertiser',
+    tier: 'standard',
+    industry: '',
+    contact_name: '',
+    contact_email: '',
+    contact_phone: '',
+    contact_title: '',
+    billing_email: '',
+    billing_address: '',
+    notes: ''
+  }
+  dialogOpen.value = true
+}
+
+const editCustomer = (customer) => {
+  editingCustomer.value = customer
+  formData.value = { ...customer }
+  dialogOpen.value = true
+}
+
+const saveCustomer = async () => {
+  if (!formData.value.company_name) {
+    return
+  }
+
+  saving.value = true
+  try {
+    if (editingCustomer.value) {
+      await axios.patch(`/api/customers/${editingCustomer.value.asset_id}`, formData.value, {
+        headers: getAuthHeaders()
+      })
+    } else {
+      await axios.post('/api/customers/', formData.value, {
+        headers: getAuthHeaders()
+      })
+    }
+    dialogOpen.value = false
+    await loadCustomers()
+  } catch (error) {
+    console.error('Failed to save customer:', error)
+    showSnackbar(`Failed to save: ${error.response?.data?.detail || error.message}`)
+  } finally {
+    saving.value = false
+  }
+}
+
+const toggleActive = async (customer) => {
+  try {
+    await axios.patch(`/api/customers/${customer.asset_id}`, {
+      is_active: !customer.is_active
+    }, {
+      headers: getAuthHeaders()
+    })
+    await loadCustomers()
+  } catch (error) {
+    console.error('Failed to toggle customer:', error)
+  }
+}
+
+const confirmDelete = (customer) => {
+  deletingCustomer.value = customer
+  deleteDialogOpen.value = true
+}
+
+const deleteCustomer = async () => {
+  if (!deletingCustomer.value) return
+
+  deleting.value = true
+  try {
+    await axios.delete(`/api/customers/${deletingCustomer.value.asset_id}`, {
+      headers: getAuthHeaders(),
+      params: { hard_delete: true }
+    })
+    deleteDialogOpen.value = false
+    deletingCustomer.value = null
+    await loadCustomers()
+  } catch (error) {
+    console.error('Failed to delete customer:', error)
+    showSnackbar(`Failed to delete: ${error.response?.data?.detail || error.message}`)
+  } finally {
+    deleting.value = false
+  }
+}
+
+const formatType = (type) => {
+  if (!type) return ''
+  return type.charAt(0).toUpperCase() + type.slice(1)
+}
+
+const getTypeColor = (type) => {
+  const colors = {
+    advertiser: 'green',
+    sponsor: 'purple',
+    partner: 'blue'
+  }
+  return colors[type] || 'grey'
+}
+
+const getTierColor = (tier) => {
+  const colors = {
+    premium: 'amber',
+    standard: 'blue-grey',
+    basic: 'grey'
+  }
+  return colors[tier] || 'grey'
+}
+
+// Lifecycle
+onMounted(() => {
+  loadCustomers()
+})
 </script>
 
 <style scoped>

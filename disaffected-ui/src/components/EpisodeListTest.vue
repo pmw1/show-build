@@ -16,45 +16,32 @@
   </div>
 </template>
 
-<script>
-import axios from 'axios';
+<script setup>
+import { ref } from 'vue'
+import axios from 'axios'
 
-export default {
-  name: 'EpisodeListTest',
-  data() {
-    return {
-      episodes: [],
-      loading: false,
-      error: null,
-      rawData: null,
-    };
-  },
-  methods: {
-    async fetchEpisodes() {
-      this.loading = true;
-      this.error = null;
-      this.rawData = null;
-      try {
-        const response = await axios.get('/api/episodes');
-        this.rawData = response.data;
-        const episodesData = response.data.episodes || response.data;
+const episodes = ref([])
+const loading = ref(false)
+const error = ref(null)
+const rawData = ref(null)
 
-        if (Array.isArray(episodesData)) {
-            this.episodes = episodesData.map(ep => ({
-              title: `${ep.episode_number}: ${ep.title || 'Untitled'}`,
-              value: ep.episode_number,
-            }));
-        } else {
-            this.episodes = [];
-        }
-      } catch (err) {
-        this.error = 'Failed to fetch episodes. See console for details.';
-      } finally {
-        this.loading = false;
-      }
-    },
-  },
-};
+async function fetchEpisodes() {
+  loading.value = true
+  error.value = null
+  rawData.value = null
+  try {
+    const response = await axios.get('/api/episodes')
+    rawData.value = response.data
+    const episodesData = response.data.episodes || response.data
+    episodes.value = Array.isArray(episodesData)
+      ? episodesData.map(ep => ({ title: `${ep.episode_number}: ${ep.title || 'Untitled'}`, value: ep.episode_number }))
+      : []
+  } catch {
+    error.value = 'Failed to fetch episodes. See console for details.'
+  } finally {
+    loading.value = false
+  }
+}
 </script>
 
 <style scoped>

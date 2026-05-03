@@ -113,13 +113,13 @@ class SegmentLLMExtractor:
                         "temperature": row[2] or 0.3,
                         "max_tokens": row[3] or 2500,
                         "service": row[4] or "ollama",
-                        "model": row[5] or "gemma3:latest"
+                        "model": row[5] or "qwen2.5:latest"
                     }
                 )
         except Exception as e:
             logger.warning(f"Failed to load prompt override: {e}")
 
-        # Return defaults - using gemma3 for better entity extraction
+        # Return defaults
         return (
             DEFAULT_SYSTEM_PROMPT,
             DEFAULT_USER_PROMPT,
@@ -127,7 +127,7 @@ class SegmentLLMExtractor:
                 "temperature": 0.3,
                 "max_tokens": 2500,
                 "service": "ollama",
-                "model": "gemma3:latest"
+                "model": "qwen2.5:latest"
             }
         )
 

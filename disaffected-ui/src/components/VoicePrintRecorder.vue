@@ -125,219 +125,150 @@
   </v-card>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 
-export default {
-  name: 'VoicePrintRecorder',
-  data() {
-    return {
-      recordingState: 'idle', // 'idle', 'recording', 'completed'
-      mediaRecorder: null,
-      audioChunks: [],
-      audioBlob: null,
-      recordingTime: 0,
-      recordingInterval: null,
-      currentParagraphIndex: 0,
-      scrollOffset: 0,
-      scrollInterval: null,
-      calculatedWPM: null,
-      wordCount: 0,
-      error: '',
-      uploading: false,
+const emit = defineEmits(['voice-profile-updated'])
 
-      // Sample reading text (can be customized)
-      readingText: [
-        "Welcome to the voice print recording system. This tool will help us understand your natural speaking rhythm and create a unique profile for your voice.",
-        "As you read this text aloud, the system is recording your audio and measuring how quickly you speak. This measurement is called words per minute, or WPM.",
-        "Everyone has their own natural speaking pace. Some people speak quickly, others more slowly. There's no right or wrong speed - we just want to capture your authentic voice.",
-        "The recording will also be used to create a voice sample for text-to-speech synthesis. This means in the future, the system might be able to generate speech that sounds like you.",
-        "Please read naturally and clearly. Imagine you're narrating a documentary or reading the news. Take your time and enunciate each word.",
-        "Thank you for participating in this voice profiling process. Your unique vocal characteristics will be saved and used to enhance your experience in the system."
-      ]
+const recordingState = ref('idle')
+let mediaRecorder = null
+let audioChunks = []
+const audioBlob = ref(null)
+const recordingTime = ref(0)
+let recordingInterval = null
+const currentParagraphIndex = ref(0)
+const scrollOffset = ref(0)
+let scrollInterval = null
+const calculatedWPM = ref(null)
+const wordCount = ref(0)
+const error = ref('')
+const uploading = ref(false)
+const viewport = ref(null)
+
+const readingText = [
+  "Welcome to the voice print recording system. This tool will help us understand your natural speaking rhythm and create a unique profile for your voice.",
+  "As you read this text aloud, the system is recording your audio and measuring how quickly you speak. This measurement is called words per minute, or WPM.",
+  "Everyone has their own natural speaking pace. Some people speak quickly, others more slowly. There's no right or wrong speed - we just want to capture your authentic voice.",
+  "The recording will also be used to create a voice sample for text-to-speech synthesis. This means in the future, the system might be able to generate speech that sounds like you.",
+  "Please read naturally and clearly. Imagine you're narrating a documentary or reading the news. Take your time and enunciate each word.",
+  "Thank you for participating in this voice profiling process. Your unique vocal characteristics will be saved and used to enhance your experience in the system."
+]
+
+const scrollProgress = computed(() => {
+  if (readingText.length === 0) return 0
+  return (currentParagraphIndex.value / (readingText.length - 1)) * 100
+})
+
+function scrollToCurrentParagraph() {
+  if (!viewport.value) return
+  const paragraphHeight = 100
+  scrollOffset.value = -(currentParagraphIndex.value * paragraphHeight)
+}
+
+function startAutoScroll() {
+  const estimatedSecondsPerParagraph = readingText.map(p => p.split(/\s+/).length / 2.5)
+  const totalEstimatedTime = estimatedSecondsPerParagraph.reduce((a, b) => a + b, 0)
+  const scrollSpeed = Math.max(totalEstimatedTime / readingText.length, 5)
+
+  let lastScrollTime = 0
+  scrollInterval = setInterval(() => {
+    if (currentParagraphIndex.value < readingText.length - 1) {
+      if (recordingTime.value - lastScrollTime >= Math.round(scrollSpeed) && recordingTime.value > 0) {
+        lastScrollTime = recordingTime.value
+        currentParagraphIndex.value++
+        nextTick(scrollToCurrentParagraph)
+      }
     }
-  },
-  computed: {
-    scrollProgress() {
-      if (this.readingText.length === 0) return 0
-      return (this.currentParagraphIndex / (this.readingText.length - 1)) * 100
-    }
-  },
-  methods: {
-    async startRecording() {
-      try {
-        // Request microphone access
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  }, 1000)
+}
 
-        // Create MediaRecorder
-        this.mediaRecorder = new MediaRecorder(stream)
-        this.audioChunks = []
-
-        this.mediaRecorder.ondataavailable = (event) => {
-          this.audioChunks.push(event.data)
-        }
-
-        this.mediaRecorder.onstop = () => {
-          this.audioBlob = new Blob(this.audioChunks, { type: 'audio/wav' })
-          this.recordingState = 'completed'
-          this.calculateWPM()
-        }
-
-        // Start recording
-        this.mediaRecorder.start()
-        this.recordingState = 'recording'
-
-        // Start timer
-        this.recordingTime = 0
-        this.recordingInterval = setInterval(() => {
-          this.recordingTime++
-        }, 1000)
-
-        // Start auto-scroll
-        this.startAutoScroll()
-
-        // Count words in reading text
-        this.wordCount = this.readingText.join(' ').split(/\s+/).filter(w => w.length > 0).length
-
-      } catch (error) {
-        console.error('Error starting recording:', error)
-        this.error = 'Failed to access microphone. Please check permissions.'
-      }
-    },
-
-    stopRecording() {
-      if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-        this.mediaRecorder.stop()
-
-        // Stop all audio tracks
-        this.mediaRecorder.stream.getTracks().forEach(track => track.stop())
-      }
-
-      // Stop timer
-      if (this.recordingInterval) {
-        clearInterval(this.recordingInterval)
-        this.recordingInterval = null
-      }
-
-      // Stop scroll
-      if (this.scrollInterval) {
-        clearInterval(this.scrollInterval)
-        this.scrollInterval = null
-      }
-    },
-
-    startAutoScroll() {
-      // Auto-scroll based on average reading speed
-      // Assume average 150 WPM = 2.5 words/second
-      const estimatedSecondsPerParagraph = this.readingText.map(p => {
-        const words = p.split(/\s+/).length
-        return words / 2.5 // 2.5 words per second
-      })
-
-      const totalEstimatedTime = estimatedSecondsPerParagraph.reduce((a, b) => a + b, 0)
-      const scrollSpeed = Math.max(totalEstimatedTime / this.readingText.length, 5) // Minimum 5 seconds per paragraph
-
-      let lastScrollTime = 0
-      this.scrollInterval = setInterval(() => {
-        // Auto-advance paragraph based on elapsed time
-        if (this.currentParagraphIndex < this.readingText.length - 1) {
-          const shouldAdvance = this.recordingTime - lastScrollTime >= Math.round(scrollSpeed)
-          if (shouldAdvance && this.recordingTime > 0) {
-            lastScrollTime = this.recordingTime
-            this.currentParagraphIndex++
-            this.$nextTick(() => {
-              this.scrollToCurrentParagraph()
-            })
-          }
-        }
-      }, 1000)
-    },
-
-    scrollToCurrentParagraph() {
-      // Smooth scroll to current paragraph
-      const viewport = this.$refs.viewport
-      if (!viewport) return
-
-      const paragraphHeight = 100 // Approximate height per paragraph
-      this.scrollOffset = -(this.currentParagraphIndex * paragraphHeight)
-    },
-
-    calculateWPM() {
-      if (this.wordCount > 0 && this.recordingTime > 0) {
-        this.calculatedWPM = (this.wordCount / this.recordingTime) * 60
-      }
-    },
-
-    async uploadVoiceSample() {
-      if (!this.audioBlob) {
-        this.error = 'No audio recording found'
-        return
-      }
-
-      this.uploading = true
-      this.error = ''
-
-      try {
-        const formData = new FormData()
-        formData.append('audio_file', this.audioBlob, 'voice_sample.wav')
-        formData.append('reading_text', this.readingText.join('\n\n'))
-        formData.append('reading_duration_seconds', this.recordingTime)
-        formData.append('word_count', this.wordCount)
-
-        const response = await axios.post('/api/voice-samples/upload', formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          }
-        })
-
-        console.log('Voice sample uploaded:', response.data)
-
-        this.$emit('voice-profile-updated', response.data)
-
-        // Show success message
-        this.error = ''
-        this.recordingState = 'idle'
-        this.reset()
-
-      } catch (error) {
-        console.error('Upload failed:', error)
-        this.error = error.response?.data?.detail || 'Failed to upload voice sample'
-      } finally {
-        this.uploading = false
-      }
-    },
-
-    reset() {
-      this.recordingState = 'idle'
-      this.audioChunks = []
-      this.audioBlob = null
-      this.recordingTime = 0
-      this.currentParagraphIndex = 0
-      this.scrollOffset = 0
-      this.calculatedWPM = null
-      this.error = ''
-
-      if (this.recordingInterval) {
-        clearInterval(this.recordingInterval)
-        this.recordingInterval = null
-      }
-
-      if (this.scrollInterval) {
-        clearInterval(this.scrollInterval)
-        this.scrollInterval = null
-      }
-    },
-
-    formatTime(seconds) {
-      const mins = Math.floor(seconds / 60)
-      const secs = seconds % 60
-      return `${mins}:${secs.toString().padStart(2, '0')}`
-    }
-  },
-  beforeUnmount() {
-    this.reset()
+function calculateWPM() {
+  if (wordCount.value > 0 && recordingTime.value > 0) {
+    calculatedWPM.value = (wordCount.value / recordingTime.value) * 60
   }
 }
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    mediaRecorder = new MediaRecorder(stream)
+    audioChunks = []
+
+    mediaRecorder.ondataavailable = (event) => { audioChunks.push(event.data) }
+    mediaRecorder.onstop = () => {
+      audioBlob.value = new Blob(audioChunks, { type: 'audio/wav' })
+      recordingState.value = 'completed'
+      calculateWPM()
+    }
+
+    mediaRecorder.start()
+    recordingState.value = 'recording'
+    recordingTime.value = 0
+    recordingInterval = setInterval(() => { recordingTime.value++ }, 1000)
+    startAutoScroll()
+    wordCount.value = readingText.join(' ').split(/\s+/).filter(w => w.length > 0).length
+  } catch (err) {
+    console.error('Error starting recording:', err)
+    error.value = 'Failed to access microphone. Please check permissions.'
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder?.state === 'recording') {
+    mediaRecorder.stop()
+    mediaRecorder.stream.getTracks().forEach(track => track.stop())
+  }
+  if (recordingInterval) { clearInterval(recordingInterval); recordingInterval = null }
+  if (scrollInterval) { clearInterval(scrollInterval); scrollInterval = null }
+}
+
+async function uploadVoiceSample() {
+  if (!audioBlob.value) { error.value = 'No audio recording found'; return }
+  uploading.value = true
+  error.value = ''
+  try {
+    const formData = new FormData()
+    formData.append('audio_file', audioBlob.value, 'voice_sample.wav')
+    formData.append('reading_text', readingText.join('\n\n'))
+    formData.append('reading_duration_seconds', recordingTime.value)
+    formData.append('word_count', wordCount.value)
+    const response = await axios.post('/api/voice-samples/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    console.log('Voice sample uploaded:', response.data)
+    emit('voice-profile-updated', response.data)
+    error.value = ''
+    recordingState.value = 'idle'
+    reset()
+  } catch (err) {
+    console.error('Upload failed:', err)
+    error.value = err.response?.data?.detail || 'Failed to upload voice sample'
+  } finally {
+    uploading.value = false
+  }
+}
+
+function reset() {
+  recordingState.value = 'idle'
+  audioChunks = []
+  audioBlob.value = null
+  recordingTime.value = 0
+  currentParagraphIndex.value = 0
+  scrollOffset.value = 0
+  calculatedWPM.value = null
+  error.value = ''
+  if (recordingInterval) { clearInterval(recordingInterval); recordingInterval = null }
+  if (scrollInterval) { clearInterval(scrollInterval); scrollInterval = null }
+}
+
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+}
+
+onBeforeUnmount(reset)
 </script>
 
 <style scoped>

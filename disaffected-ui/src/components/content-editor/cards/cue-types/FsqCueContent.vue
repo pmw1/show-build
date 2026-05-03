@@ -92,43 +92,53 @@
       </div>
     </div>
 
-    <!-- Bottom: Full-width Style Controls -->
-    <div class="fsq-compact-controls fsq-compact-controls--wide" @click.stop>
-      <!-- Font Size Slider - full width -->
+    <!-- Bottom: Collapsible Style Controls -->
+    <div class="fsq-adjustments-toggle" @click.stop="adjustmentsOpen = !adjustmentsOpen">
+      <v-icon size="small" class="fsq-toggle-icon" :class="{ 'fsq-toggle-icon--open': adjustmentsOpen }">mdi-chevron-right</v-icon>
+      <span class="fsq-toggle-label">Adjustments</span>
+      <div class="fsq-toggle-line"></div>
+    </div>
+    <div v-show="adjustmentsOpen" class="fsq-compact-controls fsq-compact-controls--wide" @click.stop>
+      <!-- Font Size Slider - full width. Slider operates in REAL canvas
+           pixels (60-300px on a 1080px canvas) so the displayed value
+           matches the rendered PNG size exactly. The underlying storage
+           still uses the legacy 1/4-scale UI value (mapped via a computed
+           getter/setter), so existing data and the downstream regenerate
+           pipeline keep working without migration. -->
       <div class="fsq-control-row fsq-slider-row fsq-slider-row--full">
         <span class="fsq-control-label">Quote Size</span>
         <v-slider
-          v-model="localFontSize"
-          :min="15"
-          :max="50"
-          :step="1"
+          v-model="localFontSizePx"
+          :min="60"
+          :max="300"
+          :step="4"
           density="compact"
           hide-details
           thumb-label
           class="fsq-control-slider"
-          @update:model-value="emitParamChange('fontSize', $event)"
+          @update:model-value="emitParamChange('fontSize', localFontSize)"
         />
-        <span class="fsq-slider-value">{{ localFontSize }}px</span>
+        <span class="fsq-slider-value">{{ localFontSizePx }}px</span>
         <v-btn size="x-small" variant="text" color="deep-purple" class="fsq-apply-all-btn" @click.stop="$emit('apply-all-fsq', { param: 'fontSize', value: localFontSize })">
           Apply All FSQ
           <v-tooltip activator="parent" location="top">Set this font size on every FSQ in the episode</v-tooltip>
         </v-btn>
       </div>
-      <!-- Attribution Size Slider - full width -->
+      <!-- Attribution Size Slider - same real-px treatment as Quote Size. -->
       <div class="fsq-control-row fsq-slider-row fsq-slider-row--full">
         <span class="fsq-control-label">Attrib Size</span>
         <v-slider
-          v-model="localAttributionSize"
-          :min="8"
-          :max="60"
-          :step="1"
+          v-model="localAttributionSizePx"
+          :min="32"
+          :max="240"
+          :step="4"
           density="compact"
           hide-details
           thumb-label
           class="fsq-control-slider"
-          @update:model-value="emitParamChange('attributionSize', $event)"
+          @update:model-value="emitParamChange('attributionSize', localAttributionSize)"
         />
-        <span class="fsq-slider-value">{{ localAttributionSize }}px</span>
+        <span class="fsq-slider-value">{{ localAttributionSizePx }}px</span>
         <v-btn size="x-small" variant="text" color="deep-purple" class="fsq-apply-all-btn" @click.stop="$emit('apply-all-fsq', { param: 'attributionSize', value: localAttributionSize })">
           Apply All FSQ
           <v-tooltip activator="parent" location="top">Set this attribution size on every FSQ in the episode</v-tooltip>
@@ -269,132 +279,150 @@
   </div>
 </template>
 
-<script>
-import { FSQ_DEFAULTS, FSQ_FONT_MAP, FSQ_COLORS, computeLineHeight, computeBlackBarStyle } from '../../../../utils/fsqLayout.js';
+<script setup>
+import { ref, computed } from 'vue';
+import { FSQ_DEFAULTS, FSQ_FONT_MAP, FSQ_COLORS, FSQ_PNG_SCALE, fsqPreviewCanvasHeightUnit, computeLineHeight, computeBlackBarStyle } from '../../../../utils/fsqLayout.js';
 
-export default {
-  name: 'FsqCueContent',
-  emits: ['edit-fsq', 'delete', 'generate-png', 'download-png', 'open-fsq-preview', 'update-meta', 'apply-all-fsq'],
-  props: {
-    cueData: {
-      type: Object,
-      required: true
-    },
-    fsqDirty: {
-      type: Boolean,
-      default: true
-    },
-    generatingPNG: {
-      type: Boolean,
-      default: false
-    },
-    fsqGenerationStatus: {
-      type: String,
-      default: null
-    },
-    fsqBackgroundVideoUrl: {
-      type: String,
-      default: '/assets/preview-background.mp4'
-    }
+const props = defineProps({
+  cueData: {
+    type: Object,
+    required: true
   },
-  data() {
-    return {
-      // FSQ editable parameters (local state)
-      localFontFamily: this.cueData?.fontFamily || 'sans-serif',
-      localFontSize: parseInt(this.cueData?.fontSize) || 34,
-      localAttributionSize: parseInt(this.cueData?.attributionSize) || 16,
-      localBoxHeight: parseInt(this.cueData?.boxHeight) || 75,
-      localBoxOpacity: parseInt(this.cueData?.boxOpacity) || 75,
-      localLineSpacing: parseInt(this.cueData?.lineSpacing) || 22,
-      localAlignment: this.cueData?.alignment || this.cueData?.style || 'center',
-      // Font family options
-      fontFamilyOptions: [
-        { title: 'Sans-Serif', value: 'sans-serif' },
-        { title: 'Serif', value: 'serif' }
-      ]
-    };
+  fsqDirty: {
+    type: Boolean,
+    default: true
   },
-  computed: {
-    fsqStatusText() {
-      const map = { queued: 'Queued', generating: 'Generating...', completed: 'Complete', failed: 'Failed' };
-      return map[this.fsqGenerationStatus] || '';
-    },
-    fsqStatusChipColor() {
-      const map = { queued: 'info', generating: 'warning', completed: 'success', failed: 'error' };
-      return map[this.fsqGenerationStatus] || 'grey';
-    },
-    fsqStatusChipIcon() {
-      const map = { queued: 'mdi-clock-outline', generating: 'mdi-loading', completed: 'mdi-check-circle', failed: 'mdi-alert-circle' };
-      return map[this.fsqGenerationStatus] || 'mdi-help-circle';
-    },
-    fsqBlackBarStyle() {
-      return computeBlackBarStyle(this.localBoxHeight, this.localBoxOpacity);
-    },
-    fsqPreviewStyle() {
-      const alignment = this.localAlignment || FSQ_DEFAULTS.alignment;
-      return {
-        textAlign: alignment,
-        justifyContent: alignment === 'center' ? 'center' : alignment === 'right' ? 'flex-end' : 'flex-start'
-      };
-    },
-    fsqPreviewTextStyle() {
-      const fontFamily = this.localFontFamily || FSQ_DEFAULTS.fontFamily;
-      const fontSize = this.localFontSize || FSQ_DEFAULTS.fontSize;
-      const lineSpacing = this.localLineSpacing || FSQ_DEFAULTS.lineSpacing;
-      const alignment = this.localAlignment || FSQ_DEFAULTS.alignment;
-      const scaledFontSize = Math.max(10, fontSize * 0.5);
-      return {
-        fontFamily: FSQ_FONT_MAP[fontFamily] || FSQ_FONT_MAP['sans-serif'],
-        fontSize: `${scaledFontSize}px`,
-        lineHeight: computeLineHeight(lineSpacing),
-        color: FSQ_COLORS.text,
-        textAlign: alignment,
-        width: '100%'
-      };
-    },
-    fsqPreviewAttributionStyle() {
-      const fontFamily = this.localFontFamily || FSQ_DEFAULTS.fontFamily;
-      const alignment = this.localAlignment || FSQ_DEFAULTS.alignment;
-      const quoteFontSize = this.localFontSize || FSQ_DEFAULTS.fontSize;
-      let attrSize;
-      if (this.localAttributionSize) {
-        attrSize = this.localAttributionSize * 0.25;
-      } else {
-        attrSize = quoteFontSize * 0.5 * FSQ_DEFAULTS.attributionRatio;
-      }
-      const scaledFontSize = Math.max(6, attrSize);
-      return {
-        fontFamily: FSQ_FONT_MAP[fontFamily] || FSQ_FONT_MAP['sans-serif'],
-        fontSize: `${scaledFontSize}px`,
-        color: FSQ_COLORS.attribution,
-        marginTop: '8px',
-        textAlign: alignment === 'center' ? 'right' : 'left',
-        width: '100%'
-      };
-    }
+  generatingPNG: {
+    type: Boolean,
+    default: false
   },
-  methods: {
-    emitParamChange(paramName, value) {
-      console.log(`FSQ param changed: ${paramName} = ${value}`);
-      this.$emit('update-meta', {
-        assetId: this.cueData.assetId,
-        field: paramName,
-        value: value
-      });
-    },
-    revertFsqChanges() {
-      console.log('Reverting FSQ changes to saved values');
-      this.localFontFamily = this.cueData?.fontFamily || 'sans-serif';
-      this.localFontSize = parseInt(this.cueData?.fontSize) || 34;
-      this.localAttributionSize = parseInt(this.cueData?.attributionSize) || 16;
-      this.localBoxHeight = parseInt(this.cueData?.boxHeight) || 75;
-      this.localBoxOpacity = parseInt(this.cueData?.boxOpacity) || 75;
-      this.localLineSpacing = parseInt(this.cueData?.lineSpacing) || 22;
-      this.localAlignment = this.cueData?.alignment || this.cueData?.style || 'center';
-    }
+  fsqGenerationStatus: {
+    type: String,
+    default: null
   },
-  expose: ['localFontSize', 'localAttributionSize', 'localBoxHeight', 'localBoxOpacity', 'localLineSpacing', 'localAlignment', 'localFontFamily']
-};
+  fsqBackgroundVideoUrl: {
+    type: String,
+    default: '/assets/preview-background.mp4'
+  }
+});
+
+const emit = defineEmits(['edit-fsq', 'delete', 'generate-png', 'download-png', 'open-fsq-preview', 'update-meta', 'apply-all-fsq']);
+
+// Collapsible adjustments panel
+const adjustmentsOpen = ref(false);
+
+// data - FSQ editable parameters (local state)
+const localFontFamily = ref(props.cueData?.fontFamily || FSQ_DEFAULTS.fontFamily);
+const localFontSize = ref(parseInt(props.cueData?.fontSize) || FSQ_DEFAULTS.fontSize);
+const localAttributionSize = ref(parseInt(props.cueData?.attributionSize) || FSQ_DEFAULTS.attributionSize);
+const localBoxHeight = ref(parseInt(props.cueData?.boxHeight) || FSQ_DEFAULTS.boxHeight);
+const localBoxOpacity = ref(parseInt(props.cueData?.boxOpacity) || FSQ_DEFAULTS.boxOpacity);
+const localLineSpacing = ref(parseInt(props.cueData?.lineSpacing) || FSQ_DEFAULTS.lineSpacing);
+const localAlignment = ref(props.cueData?.alignment || props.cueData?.style || FSQ_DEFAULTS.alignment);
+const fontFamilyOptions = ref([
+  { title: 'Sans-Serif', value: 'sans-serif' },
+  { title: 'Serif', value: 'serif' }
+]);
+
+// Slider bridges: present-and-edit values in REAL canvas-pixel units while
+// keeping the underlying refs in legacy 1/4-scale units (the unit downstream
+// regenerate code, batch render, and stored cue blocks all expect). The
+// slider's displayed/scrolled value matches the rendered PNG exactly, so
+// "Quote Size 100px" really means 100 pixels on the 1080-tall canvas.
+const localFontSizePx = computed({
+  get: () => Math.round(localFontSize.value * FSQ_PNG_SCALE),
+  set: (px) => { localFontSize.value = Math.max(1, Math.round(px / FSQ_PNG_SCALE)); }
+});
+const localAttributionSizePx = computed({
+  get: () => Math.round(localAttributionSize.value * FSQ_PNG_SCALE),
+  set: (px) => { localAttributionSize.value = Math.max(1, Math.round(px / FSQ_PNG_SCALE)); }
+});
+
+// computed
+const fsqStatusText = computed(() => {
+  const map = { queued: 'Queued', generating: 'Generating...', completed: 'Complete', failed: 'Failed' };
+  return map[props.fsqGenerationStatus] || '';
+});
+
+const fsqStatusChipColor = computed(() => {
+  const map = { queued: 'info', generating: 'warning', completed: 'success', failed: 'error' };
+  return map[props.fsqGenerationStatus] || 'grey';
+});
+
+const fsqStatusChipIcon = computed(() => {
+  const map = { queued: 'mdi-clock-outline', generating: 'mdi-loading', completed: 'mdi-check-circle', failed: 'mdi-alert-circle' };
+  return map[props.fsqGenerationStatus] || 'mdi-help-circle';
+});
+
+const fsqBlackBarStyle = computed(() => {
+  return computeBlackBarStyle(localBoxHeight.value, localBoxOpacity.value);
+});
+
+const fsqPreviewStyle = computed(() => {
+  const alignment = localAlignment.value || FSQ_DEFAULTS.alignment;
+  return {
+    textAlign: alignment,
+    justifyContent: alignment === 'center' ? 'center' : alignment === 'right' ? 'flex-end' : 'flex-start'
+  };
+});
+
+const fsqPreviewTextStyle = computed(() => {
+  const fontFamily = localFontFamily.value || FSQ_DEFAULTS.fontFamily;
+  const fontSize = localFontSize.value || FSQ_DEFAULTS.fontSize;
+  const lineSpacing = localLineSpacing.value || FSQ_DEFAULTS.lineSpacing;
+  const alignment = localAlignment.value || FSQ_DEFAULTS.alignment;
+  // Size as a fraction of the preview's container height — same fraction the
+  // PNG renderer occupies of the 1080px canvas. Makes preview WYSIWYG.
+  return {
+    fontFamily: FSQ_FONT_MAP[fontFamily] || FSQ_FONT_MAP['sans-serif'],
+    fontSize: fsqPreviewCanvasHeightUnit(fontSize),
+    lineHeight: computeLineHeight(lineSpacing),
+    color: FSQ_COLORS.text,
+    textAlign: alignment,
+    width: '100%'
+  };
+});
+
+const fsqPreviewAttributionStyle = computed(() => {
+  const fontFamily = localFontFamily.value || FSQ_DEFAULTS.fontFamily;
+  const alignment = localAlignment.value || FSQ_DEFAULTS.alignment;
+  const quoteFontSize = localFontSize.value || FSQ_DEFAULTS.fontSize;
+  // If an explicit attribution size is set, use it; otherwise derive from
+  // the quote font × attributionRatio (matches renderer's auto-fallback).
+  const effectiveSize = localAttributionSize.value
+    || quoteFontSize * FSQ_DEFAULTS.attributionRatio;
+  return {
+    fontFamily: FSQ_FONT_MAP[fontFamily] || FSQ_FONT_MAP['sans-serif'],
+    fontSize: fsqPreviewCanvasHeightUnit(effectiveSize),
+    color: FSQ_COLORS.attribution,
+    marginTop: '8px',
+    textAlign: alignment === 'center' ? 'right' : 'left',
+    width: '100%'
+  };
+});
+
+// methods
+function emitParamChange(paramName, value) {
+  console.log(`FSQ param changed: ${paramName} = ${value}`);
+  emit('update-meta', {
+    assetId: props.cueData.assetId,
+    field: paramName,
+    value: value
+  });
+}
+
+function revertFsqChanges() {
+  console.log('Reverting FSQ changes to saved values');
+  localFontFamily.value = props.cueData?.fontFamily || 'sans-serif';
+  localFontSize.value = parseInt(props.cueData?.fontSize) || 34;
+  localAttributionSize.value = parseInt(props.cueData?.attributionSize) || 16;
+  localBoxHeight.value = parseInt(props.cueData?.boxHeight) || 75;
+  localBoxOpacity.value = parseInt(props.cueData?.boxOpacity) || 75;
+  localLineSpacing.value = parseInt(props.cueData?.lineSpacing) || 22;
+  localAlignment.value = props.cueData?.alignment || props.cueData?.style || 'center';
+}
+
+defineExpose({ localFontSize, localAttributionSize, localBoxHeight, localBoxOpacity, localLineSpacing, localAlignment, localFontFamily });
 </script>
 
 <style scoped>
@@ -429,6 +457,10 @@ export default {
   overflow: hidden;
   background: #000;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  /* Size containment so descendant `cqh` units resolve against this box's
+     height. Together with the fixed 16/9 aspect ratio this makes the
+     preview text occupy the same canvas-fraction as the PNG renderer. */
+  container-type: size;
 }
 
 .fsq-large-preview.clickable {
@@ -534,6 +566,44 @@ export default {
 .fsq-status-chip {
   display: flex;
   justify-content: center;
+}
+
+.fsq-adjustments-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 2px 8px;
+  user-select: none;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.fsq-adjustments-toggle:hover {
+  opacity: 1;
+}
+
+.fsq-toggle-icon {
+  transition: transform 0.2s;
+}
+
+.fsq-toggle-icon--open {
+  transform: rotate(90deg);
+}
+
+.fsq-toggle-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.5);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.fsq-toggle-line {
+  flex: 1;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.12);
 }
 
 .fsq-compact-controls {

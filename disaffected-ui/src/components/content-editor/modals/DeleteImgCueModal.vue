@@ -61,40 +61,37 @@
   </v-dialog>
 </template>
 
-<script>
-export default {
-  name: 'DeleteImgCueModal',
-  emits: ['update:show', 'delete-with-assets', 'delete-preserve-assets'],
-  props: {
-    show: {
-      type: Boolean,
-      default: false
-    },
-    cueSlug: {
-      type: String,
-      default: ''
-    },
-    imagePath: {
-      type: String,
-      default: ''
-    }
+<script setup>
+defineProps({
+  show: {
+    type: Boolean,
+    default: false
   },
-  methods: {
-    deleteWithAssets() {
-      this.$emit('delete-with-assets');
-      this.$emit('update:show', false);
-    },
-
-    deletePreserveAssets() {
-      this.$emit('delete-preserve-assets');
-      this.$emit('update:show', false);
-    },
-
-    cancel() {
-      this.$emit('update:show', false);
-    }
+  cueSlug: {
+    type: String,
+    default: ''
+  },
+  imagePath: {
+    type: String,
+    default: ''
   }
-};
+})
+
+const emit = defineEmits(['update:show', 'delete-with-assets', 'delete-preserve-assets'])
+
+function deleteWithAssets() {
+  emit('delete-with-assets')
+  emit('update:show', false)
+}
+
+function deletePreserveAssets() {
+  emit('delete-preserve-assets')
+  emit('update:show', false)
+}
+
+function cancel() {
+  emit('update:show', false)
+}
 </script>
 
 <style scoped>

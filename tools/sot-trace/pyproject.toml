@@ -1,0 +1,21 @@
+[project]
+name = "sot-trace"
+version = "0.1.0"
+description = "Read-only TUI observer for the SOT processing pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "textual>=0.85",
+    "psycopg[binary]>=3.2",
+    "redis>=5.0",
+    "watchdog>=5.0",
+    "click>=8.1",
+    "celery>=5.4",
+    "docker>=7.1",
+]
+
+[project.scripts]
+sot-trace = "sot_trace.__main__:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

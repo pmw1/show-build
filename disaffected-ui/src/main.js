@@ -9,7 +9,7 @@ import Toast from 'vue-toastification'
 import 'vue-toastification/dist/index.css'
 import './styles/vuetify-fixes.css'
 import './assets/styles/llm-visual-feedback.css'
-import { initializeXtts } from '@/composables/useXtts'
+import { initializeTts } from '@/composables/useTts'
 
 loadFonts()
 
@@ -92,9 +92,9 @@ app.config.globalProperties.$axios = axiosInstance;
 app.mount('#app')
 appElement.__vue_app__ = app
 
-// Initialize XTTS configuration
-initializeXtts().then(() => {
-  console.log('XTTS configuration initialized')
+// Initialize TTS configuration
+initializeTts().then(() => {
+  console.log('TTS configuration initialized')
 }).catch((error) => {
-  console.error('Failed to initialize XTTS:', error)
+  console.error('Failed to initialize TTS:', error)
 })

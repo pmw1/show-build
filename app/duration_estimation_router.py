@@ -92,25 +92,42 @@ class DurationEstimator:
         self.user_id = user_id
         self.settings = settings
     
-    def estimate_segment_duration_by_assetid(self, asset_id: str, 
+    def estimate_segment_duration_by_assetid(self, asset_id: str,
                                            update_file: bool = True) -> SegmentDurationResult:
-        """Estimate duration for a single segment by AssetID."""
+        """Estimate duration for a single segment by AssetID.
+
+        Database-first: looks up RundownItem by asset_id in DB.
+        Falls back to filesystem scan only if DB lookup fails.
+        """
+        from models_v2 import RundownItem, Rundown, Episode
+
         try:
-            # Find segment file by AssetID
+            # Database-first: find by asset_id
+            db_item = self.db.query(RundownItem).filter(
+                RundownItem.asset_id == str(asset_id)
+            ).first()
+
+            if db_item and db_item.script_content:
+                return self._estimate_from_db_item(db_item, update_file)
+
+            if not db_item:
+                raise HTTPException(status_code=404, detail=f"Segment with AssetID {asset_id} not found in database")
+
+            # DB item exists but has no script_content - try filesystem fallback
             segment_file_info = self._find_segment_by_assetid(asset_id)
-            if not segment_file_info:
-                raise HTTPException(status_code=404, detail=f"Segment with AssetID {asset_id} not found")
-            
-            segment_file = segment_file_info['file_path']
-            segment_name = segment_file_info['segment_name']
-            episode_number = segment_file_info['episode_number']
-            
-            if not segment_file.exists():
-                raise HTTPException(status_code=404, detail=f"Segment file not found at {segment_file}")
-            
-            # Use the common estimation logic
-            return self._estimate_segment_duration_common(segment_file, segment_name, episode_number, update_file)
-            
+            if segment_file_info and segment_file_info['file_path'].exists():
+                logger.info(f"AssetID {asset_id} has no script_content in DB, falling back to filesystem")
+                return self._estimate_segment_duration_common(
+                    segment_file_info['file_path'],
+                    segment_file_info['segment_name'],
+                    segment_file_info['episode_number'],
+                    update_file
+                )
+
+            raise HTTPException(status_code=404, detail=f"Segment with AssetID {asset_id} has no content in DB or filesystem")
+
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Failed to estimate duration for AssetID {asset_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Duration estimation failed: {str(e)}")
@@ -134,6 +151,81 @@ class DurationEstimator:
             logger.error(f"Failed to estimate duration for segment {segment_name}: {e}")
             raise HTTPException(status_code=500, detail=f"Duration estimation failed: {str(e)}")
     
+    def _estimate_from_db_item(self, db_item, update_db: bool = True) -> SegmentDurationResult:
+        """Estimate duration from a database RundownItem's script_content."""
+        from models_v2 import RundownItem, Rundown, Episode
+
+        content = db_item.script_content or ''
+        segment_name = db_item.slug or db_item.title or f"item-{db_item.id}"
+        original_duration = db_item.duration
+
+        # Find episode number for the result
+        episode_number = "unknown"
+        if db_item.rundown:
+            rundown = db_item.rundown
+            if rundown.episode:
+                episode_number = rundown.episode.episode_number or "unknown"
+
+        # Parse content into body and cue blocks
+        body_content, cue_blocks = self._parse_segment_content(content)
+
+        # Calculate speech duration
+        speech_word_count = self._count_words(body_content)
+        speech_duration = speech_word_count / self.settings.speech_wpm * 60
+
+        # Analyze cue blocks
+        cue_analyses = []
+        sot_duration = 0.0
+        fsq_duration = 0.0
+        adlib_duration = 0.0
+
+        for cue_data in cue_blocks:
+            analysis = self._analyze_cue_block(cue_data)
+            cue_analyses.append(analysis)
+
+            if analysis.cue_type == "SOT" and self.settings.include_sots:
+                if analysis.calculated_duration:
+                    sot_duration += self._parse_duration_to_seconds(analysis.calculated_duration)
+            elif analysis.cue_type == "FSQ" and self.settings.include_fsqs:
+                if analysis.calculated_duration:
+                    fsq_duration += self._parse_duration_to_seconds(analysis.calculated_duration)
+            elif analysis.cue_type == "ADLIB" and self.settings.include_adlibs:
+                if analysis.calculated_duration:
+                    adlib_duration += self._parse_duration_to_seconds(analysis.calculated_duration)
+
+        total_seconds = speech_duration + sot_duration + fsq_duration + adlib_duration
+        total_duration_formatted = self._seconds_to_duration_string(total_seconds)
+
+        # Update duration in database
+        duration_updated = False
+        if update_db:
+            try:
+                db_item.duration = total_duration_formatted
+                self.db.commit()
+                duration_updated = True
+                logger.info(f"Updated duration in DB for {segment_name}: {total_duration_formatted}")
+            except Exception as e:
+                logger.error(f"Failed to update duration in DB: {e}")
+                self.db.rollback()
+
+        return SegmentDurationResult(
+            success=True,
+            message=f"Calculated duration for segment {segment_name} (from database)",
+            file_path=f"database:rundown_items.id={db_item.id}",
+            segment_name=segment_name,
+            original_duration=original_duration,
+            calculated_duration=total_duration_formatted,
+            speech_word_count=speech_word_count,
+            speech_duration_seconds=speech_duration,
+            sot_duration_seconds=sot_duration,
+            fsq_duration_seconds=fsq_duration,
+            adlib_duration_seconds=adlib_duration,
+            total_duration_seconds=total_seconds,
+            cues_analyzed=cue_analyses,
+            settings_used=self.settings,
+            duration_updated=duration_updated
+        )
+
     def _find_segment_by_assetid(self, asset_id: str) -> Optional[Dict[str, Any]]:
         """Find segment file path by AssetID by scanning filesystem."""
         if not EPISODES_ROOT.exists():
@@ -243,37 +335,70 @@ class DurationEstimator:
             raise HTTPException(status_code=500, detail=f"Duration estimation failed: {str(e)}")
     
     def estimate_episode_duration(self, episode_number: str, update_files: bool = True) -> EpisodeDurationResult:
-        """Estimate durations for all segments in an episode."""
+        """Estimate durations for all segments in an episode.
+
+        Database-first: queries RundownItems from DB.
+        Falls back to filesystem if no DB rundown found.
+        """
+        from models_v2 import RundownItem, Rundown, Episode
+
         try:
-            episode_path = EPISODES_ROOT / episode_number
-            rundown_path = episode_path / "rundown"
-            
-            if not rundown_path.exists():
-                raise HTTPException(status_code=404, detail=f"Episode {episode_number} rundown not found")
-            
             segment_results = []
             total_episode_seconds = 0.0
             segments_updated = 0
-            
-            # Process all segment files
-            for segment_file in sorted(rundown_path.glob("*.md")):
-                segment_name = segment_file.stem
-                
-                try:
-                    result = self.estimate_segment_duration(episode_number, segment_name, update_files)
-                    segment_results.append(result)
-                    total_episode_seconds += result.total_duration_seconds
-                    
-                    if result.duration_updated:
-                        segments_updated += 1
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to process segment {segment_name}: {e}")
-                    # Continue processing other segments
-                    continue
-            
+
+            # Database-first: find episode and its rundown items
+            episode = self.db.query(Episode).filter(
+                Episode.episode_number == episode_number
+            ).first()
+
+            db_items = []
+            if episode:
+                rundown = self.db.query(Rundown).filter(
+                    Rundown.episode_id == episode.id
+                ).first()
+                if rundown:
+                    db_items = self.db.query(RundownItem).filter(
+                        RundownItem.rundown_id == rundown.id
+                    ).order_by(RundownItem.order_in_rundown).all()
+
+            if db_items:
+                # Process from database
+                for db_item in db_items:
+                    if not db_item.script_content:
+                        continue
+                    try:
+                        result = self._estimate_from_db_item(db_item, update_files)
+                        segment_results.append(result)
+                        total_episode_seconds += result.total_duration_seconds
+                        if result.duration_updated:
+                            segments_updated += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to process DB item {db_item.asset_id}: {e}")
+                        continue
+            else:
+                # Filesystem fallback
+                episode_path = EPISODES_ROOT / episode_number
+                rundown_path = episode_path / "rundown"
+
+                if not rundown_path.exists():
+                    raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found in database or filesystem")
+
+                logger.info(f"No DB rundown for episode {episode_number}, falling back to filesystem")
+                for segment_file in sorted(rundown_path.glob("*.md")):
+                    segment_name = segment_file.stem
+                    try:
+                        result = self.estimate_segment_duration(episode_number, segment_name, update_files)
+                        segment_results.append(result)
+                        total_episode_seconds += result.total_duration_seconds
+                        if result.duration_updated:
+                            segments_updated += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to process segment {segment_name}: {e}")
+                        continue
+
             total_episode_duration = self._seconds_to_duration_string(total_episode_seconds)
-            
+
             return EpisodeDurationResult(
                 success=True,
                 message=f"Processed {len(segment_results)} segments in episode {episode_number}",
@@ -285,7 +410,9 @@ class DurationEstimator:
                 segment_results=segment_results,
                 settings_used=self.settings
             )
-            
+
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Failed to estimate episode duration for {episode_number}: {e}")
             raise HTTPException(status_code=500, detail=f"Episode duration estimation failed: {str(e)}")

@@ -77,156 +77,242 @@
   </v-dialog>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, nextTick, getCurrentInstance, onMounted, onBeforeUnmount } from 'vue';
 import axios from 'axios';
-import { cueModalMixin } from '@/mixins/cueModalMixin';
+import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap';
+import { useScreenFlash } from '@/composables/useScreenFlash';
 
-export default {
-  name: 'RifModal',
-  mixins: [cueModalMixin],
-  props: {
-    show: Boolean,
-    episode: String,
-    duplicateSlugs: {
-      type: Array,
-      default: () => []
-    },
-    editCueData: {
-      type: Object,
-      default: null
-    },
-    cueType: {
-      type: String,
-      default: 'rif'
-    }
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
   },
-  data() {
-    return {
-      slug: '',
-      hours: '00',
-      minutes: '01',
-      seconds: '00'
-    };
+  episode: String, // eslint-disable-line no-unused-vars
+  duplicateSlugs: {
+    type: Array,
+    default: () => []
   },
-  computed: {
-    duration() {
-      return `${this.hours}:${this.minutes}:${this.seconds}`;
-    }
+  editCueData: {
+    type: Object,
+    default: null
   },
-  methods: {
-    // --- Time spinner methods ---
-    pad(val) {
-      return String(val).padStart(2, '0');
-    },
-    clamp(val, min, max) {
-      const n = parseInt(val, 10);
-      if (isNaN(n)) return min;
-      return Math.min(Math.max(n, min), max);
-    },
-    onHoursInput(e) {
-      const raw = e.target.value.replace(/\D/g, '');
-      this.hours = this.pad(this.clamp(raw, 0, 99));
-    },
-    onMinutesInput(e) {
-      const raw = e.target.value.replace(/\D/g, '');
-      this.minutes = this.pad(this.clamp(raw, 0, 59));
-    },
-    onSecondsInput(e) {
-      const raw = e.target.value.replace(/\D/g, '');
-      this.seconds = this.pad(this.clamp(raw, 0, 59));
-    },
-    incrementHours() { this.hours = this.pad(this.clamp(parseInt(this.hours) + 1, 0, 99)); },
-    decrementHours() { this.hours = this.pad(this.clamp(parseInt(this.hours) - 1, 0, 99)); },
-    incrementMinutes() { this.minutes = this.pad((parseInt(this.minutes) + 1) % 60); },
-    decrementMinutes() { this.minutes = this.pad((parseInt(this.minutes) + 59) % 60); },
-    incrementSeconds() { this.seconds = this.pad((parseInt(this.seconds) + 1) % 60); },
-    decrementSeconds() { this.seconds = this.pad((parseInt(this.seconds) + 59) % 60); },
-    handleTimeKeydown(event, field) {
-      if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        if (field === 'hours') this.incrementHours();
-        else if (field === 'minutes') this.incrementMinutes();
-        else this.incrementSeconds();
-      } else if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        if (field === 'hours') this.decrementHours();
-        else if (field === 'minutes') this.decrementMinutes();
-        else this.decrementSeconds();
-      }
-    },
-    parseDuration(dur) {
-      if (!dur) return;
-      const parts = dur.split(':');
-      if (parts.length === 3) {
-        this.hours = this.pad(this.clamp(parts[0], 0, 99));
-        this.minutes = this.pad(this.clamp(parts[1], 0, 59));
-        this.seconds = this.pad(this.clamp(parts[2], 0, 59));
-      }
-    },
+  cueType: {
+    type: String,
+    default: 'rif'
+  }
+});
 
-    // --- Submit / Reset ---
-    async handleSubmit() {
-      if (!this.slug) return;
-      await this.submit();
-    },
-    async submit() {
-      const normalizedSlug = this.slug.toLowerCase().replace(/['".,!?]/g, '').replace(/\s+/g, '-');
-      try {
-        const formData = new FormData();
-        formData.append('type', 'rif');
-        formData.append('slug', normalizedSlug);
-        const response = await axios.post('/assetid/generate-legacy', formData, {
-          headers: {
-            'Accept': 'application/json',
-            'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
-          }
-        });
-        const assetID = response.data.id;
+const emit = defineEmits(['update:show', 'submit', 'abort']);
 
-        this.$emit('submit', {
-          slug: normalizedSlug,
-          duration: this.duration,
-          assetID
-        });
-        this.$toast.success('RIF cue added');
-        this.reset();
-      } catch (error) {
-        console.error('Failed to add RIF cue:', error);
-        this.$toast.error('Failed to add RIF cue');
-      }
-    },
-    reset() {
-      this.slug = '';
-      this.hours = '00';
-      this.minutes = '01';
-      this.seconds = '00';
-      this.$emit('update:show', false);
-    },
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.handleAbort();
-      }
-    }
-  },
-  watch: {
-    show(val) {
-      if (val && this.editCueData) {
-        this.slug = this.editCueData.slug || '';
-        this.parseDuration(this.editCueData.duration);
-      } else if (!val) {
-        this.reset();
-      }
-    }
-  },
-  mounted() {
-    document.addEventListener('keydown', this.handleKeydown);
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown);
+// $toast access
+const $toast = getCurrentInstance()?.appContext.config.globalProperties.$toast;
+
+// Template refs
+const slugField = ref(null);
+
+// Data
+const slug = ref('');
+const hours = ref('00');
+const minutes = ref('01');
+const seconds = ref('00');
+let keydownHandler = null;
+
+// Computed
+const duration = computed(() => `${hours.value}:${minutes.value}:${seconds.value}`);
+
+// Mixin-inlined computed: color theming (unused in template but kept for consistency)
+const cueColor = computed(() => { // eslint-disable-line no-unused-vars
+  const colorName = getColorValue(props.cueType.toLowerCase());
+  return resolveVuetifyColor(colorName);
+});
+
+const cueColorLight = computed(() => { // eslint-disable-line no-unused-vars
+  const color = cueColor.value;
+  if (!color || !color.startsWith('#')) return '#f5f5f5';
+  const hex = color.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  const lighten = (c) => Math.round(c + (255 - c) * 0.8);
+  const newR = lighten(r).toString(16).padStart(2, '0');
+  const newG = lighten(g).toString(16).padStart(2, '0');
+  const newB = lighten(b).toString(16).padStart(2, '0');
+  return `#${newR}${newG}${newB}`;
+});
+
+// --- Time spinner methods ---
+function pad(val) {
+  return String(val).padStart(2, '0');
+}
+
+function clamp(val, min, max) {
+  const n = parseInt(val, 10);
+  if (isNaN(n)) return min;
+  return Math.min(Math.max(n, min), max);
+}
+
+function onHoursInput(e) {
+  const raw = e.target.value.replace(/\D/g, '');
+  hours.value = pad(clamp(raw, 0, 99));
+}
+
+function onMinutesInput(e) {
+  const raw = e.target.value.replace(/\D/g, '');
+  minutes.value = pad(clamp(raw, 0, 59));
+}
+
+function onSecondsInput(e) {
+  const raw = e.target.value.replace(/\D/g, '');
+  seconds.value = pad(clamp(raw, 0, 59));
+}
+
+function incrementHours() { hours.value = pad(clamp(parseInt(hours.value) + 1, 0, 99)); }
+function decrementHours() { hours.value = pad(clamp(parseInt(hours.value) - 1, 0, 99)); }
+function incrementMinutes() { minutes.value = pad((parseInt(minutes.value) + 1) % 60); }
+function decrementMinutes() { minutes.value = pad((parseInt(minutes.value) + 59) % 60); }
+function incrementSeconds() { seconds.value = pad((parseInt(seconds.value) + 1) % 60); }
+function decrementSeconds() { seconds.value = pad((parseInt(seconds.value) + 59) % 60); }
+
+function handleTimeKeydown(event, field) {
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    if (field === 'hours') incrementHours();
+    else if (field === 'minutes') incrementMinutes();
+    else incrementSeconds();
+  } else if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    if (field === 'hours') decrementHours();
+    else if (field === 'minutes') decrementMinutes();
+    else decrementSeconds();
   }
 }
+
+function parseDuration(dur) {
+  if (!dur) return;
+  const parts = dur.split(':');
+  if (parts.length === 3) {
+    hours.value = pad(clamp(parts[0], 0, 99));
+    minutes.value = pad(clamp(parts[1], 0, 59));
+    seconds.value = pad(clamp(parts[2], 0, 59));
+  }
+}
+
+// Mixin-inlined: keyboard handlers
+function setupKeyboardHandlers() {
+  keydownHandler = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      handleAbort();
+      return;
+    }
+    if (event.shiftKey && event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      handleSubmit();
+      return;
+    }
+  };
+  document.addEventListener('keydown', keydownHandler, true);
+}
+
+function removeKeyboardHandlers() {
+  if (keydownHandler) {
+    document.removeEventListener('keydown', keydownHandler, true);
+    keydownHandler = null;
+  }
+}
+
+// Mixin-inlined: focus slug field
+function focusSlugField() {
+  const field = slugField.value;
+  if (field) {
+    const input = field.$el?.querySelector('input') || field;
+    if (input && input.focus) {
+      input.focus();
+    }
+  }
+}
+
+// Mixin-inlined: abort with flash
+function handleAbort() {
+  const { flashUrgent } = useScreenFlash();
+  flashUrgent('ABORT', '#F44336', 500);
+  emit('update:show', false);
+  emit('abort');
+}
+
+// --- Submit / Reset ---
+async function handleSubmit() {
+  if (!slug.value) return;
+  await submit();
+}
+
+async function submit() {
+  const normalizedSlug = slug.value.toLowerCase().replace(/['".,!?]/g, '').replace(/\s+/g, '-');
+  try {
+    const formData = new FormData();
+    formData.append('type', 'rif');
+    formData.append('slug', normalizedSlug);
+    const response = await axios.post('/assetid/generate-legacy', formData, {
+      headers: {
+        'Accept': 'application/json',
+        'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
+      }
+    });
+    const assetID = response.data.id;
+
+    emit('submit', {
+      slug: normalizedSlug,
+      duration: duration.value,
+      assetID
+    });
+    $toast?.success('RIF cue added');
+    reset();
+  } catch (error) {
+    console.error('Failed to add RIF cue:', error);
+    $toast?.error('Failed to add RIF cue');
+  }
+}
+
+function reset() {
+  slug.value = '';
+  hours.value = '00';
+  minutes.value = '01';
+  seconds.value = '00';
+  emit('update:show', false);
+}
+
+// Watch
+watch(() => props.show, (val) => {
+  if (val) {
+    if (props.editCueData) {
+      slug.value = props.editCueData.slug || '';
+      parseDuration(props.editCueData.duration);
+    }
+    setupKeyboardHandlers();
+    nextTick(() => {
+      focusSlugField();
+    });
+  } else {
+    removeKeyboardHandlers();
+    reset();
+  }
+});
+
+onMounted(() => {
+  if (props.show) {
+    setupKeyboardHandlers();
+    nextTick(() => {
+      focusSlugField();
+    });
+  }
+});
+
+onBeforeUnmount(() => {
+  removeKeyboardHandlers();
+});
 </script>
 
 <style scoped>

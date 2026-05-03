@@ -122,6 +122,58 @@
         </div>
       </template>
 
+      <!-- Scripts list -->
+      <template v-else-if="activeTab === 'scripts'">
+        <div v-if="scriptsData.length === 0" class="text-center py-4">
+          <p class="text-caption text-grey">No generated scripts</p>
+          <p class="text-caption text-grey">Use Workflow Tools to generate scripts</p>
+        </div>
+        <div v-else class="scripts-list">
+          <div v-for="doc in scriptsData" :key="doc.filename" class="script-entry">
+            <div class="script-row d-flex align-center">
+              <v-icon size="small" :color="getScriptIconColor(doc.format)" class="mr-2">{{ doc.icon }}</v-icon>
+              <div class="flex-grow-1" style="min-width: 0;">
+                <div class="script-name text-body-2 font-weight-medium">{{ doc.label }}</div>
+                <div class="text-caption text-grey d-flex align-center ga-2">
+                  <v-chip size="x-small" color="primary" variant="tonal" style="height: 14px; font-size: 0.6rem;">R{{ doc.revision || '?' }}</v-chip>
+                  <span>{{ doc.format?.toUpperCase() }}</span>
+                  <span v-if="doc.size_formatted">{{ doc.size_formatted }}</span>
+                </div>
+              </div>
+              <v-btn icon size="x-small" variant="text" color="primary" @click="openScript(doc)">
+                <v-icon size="small">mdi-open-in-new</v-icon>
+                <v-tooltip activator="parent" location="top">Preview</v-tooltip>
+              </v-btn>
+              <v-btn icon size="x-small" variant="text" color="grey" @click="downloadScript(doc)">
+                <v-icon size="small">mdi-download</v-icon>
+                <v-tooltip activator="parent" location="top">Download</v-tooltip>
+              </v-btn>
+            </div>
+            <!-- Older revisions -->
+            <div v-if="doc.pastRevisions && doc.pastRevisions.length > 0">
+              <v-btn size="x-small" variant="text" color="grey" class="mt-1 mb-1" @click="toggleOlderRevisions(doc.type + '_' + doc.format)">
+                <v-icon size="x-small" :class="{ 'rotate-90': scriptRevisionsOpen[doc.type + '_' + doc.format] }">mdi-chevron-right</v-icon>
+                Older revisions ({{ doc.pastRevisions.length }})
+              </v-btn>
+              <v-expand-transition>
+                <div v-if="scriptRevisionsOpen[doc.type + '_' + doc.format]" class="older-revisions ml-4">
+                  <div v-for="rev in doc.pastRevisions" :key="rev.filename" class="revision-row d-flex align-center py-1">
+                    <v-chip size="x-small" variant="tonal" color="grey" style="height: 14px; font-size: 0.55rem;" class="mr-2">R{{ rev.revision || '?' }}</v-chip>
+                    <span class="text-caption text-grey flex-grow-1">{{ rev.modified_formatted }}</span>
+                    <v-btn icon size="x-small" variant="text" color="grey" @click="openScript(rev)">
+                      <v-icon size="x-small">mdi-open-in-new</v-icon>
+                    </v-btn>
+                    <v-btn icon size="x-small" variant="text" color="grey" @click="downloadScript(rev)">
+                      <v-icon size="x-small">mdi-download</v-icon>
+                    </v-btn>
+                  </div>
+                </div>
+              </v-expand-transition>
+            </div>
+          </div>
+        </div>
+      </template>
+
       <!-- Flat list for scheduled/other -->
       <template v-else>
         <div v-if="filteredItems.length === 0" class="text-center py-4">
@@ -184,537 +236,657 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, reactive, computed, watch } from 'vue'
 import { fetchJson } from '@/utils/apiHelpers'
 
-export default {
-  name: 'AssetPoolPanel',
-  props: {
-    episodeNumber: {
-      type: String,
-      default: null
-    },
-    rundownItems: {
-      type: Array,
-      default: () => []
-    },
-    panelWidth: {
-      type: String,
-      default: 'wide'
-    }
+const props = defineProps({
+  episodeNumber: {
+    type: String,
+    default: null
   },
-  emits: ['place-item', 'create-new-item'],
-  data() {
-    return {
-      activeTab: 'whiteboard',
-      searchQuery: '',
-      loading: false,
-      categories: [
-        { label: 'Whiteboard', value: 'whiteboard' },
-        { label: 'Scheduled', value: 'scheduled' }
-      ],
-      itemsCache: {},
-      currentItems: [],
-      whiteboardTree: [],
-      expandedParents: {},
-      // Drag state
-      dragSource: null,
-      dropTarget: null,
-      dragLeaveTimer: null
-    }
+  rundownItems: {
+    type: Array,
+    default: () => []
   },
-  computed: {
-    activeCategoryLabel() {
-      const cat = this.categories.find(c => c.value === this.activeTab)
-      return cat ? cat.label : ''
-    },
-    filteredItems() {
-      if (!this.searchQuery) return this.currentItems
-      const q = this.searchQuery.toLowerCase()
-      return this.currentItems.filter(item =>
-        (item.title || '').toLowerCase().includes(q) ||
-        (item.slug || '').toLowerCase().includes(q) ||
-        (item.customer || '').toLowerCase().includes(q) ||
-        (item.url || '').toLowerCase().includes(q)
+  panelWidth: {
+    type: String,
+    default: 'wide'
+  }
+})
+
+const emit = defineEmits(['place-item', 'create-new-item'])
+
+// ── Reactive state ──
+const activeTab = ref('whiteboard')
+const searchQuery = ref('')
+const loading = ref(false)
+const categories = ref([
+  { label: 'Whiteboard', value: 'whiteboard' },
+  { label: 'Scripts', value: 'scripts' },
+  { label: 'Scheduled', value: 'scheduled' }
+])
+const scriptsData = ref([]) // [{type, label, format, latest: doc, pastRevisions: [doc,...]}]
+const scriptRevisionsOpen = reactive({}) // { 'host_full_pdf': true } toggles
+const itemsCache = reactive({})
+const currentItems = ref([])
+const whiteboardTree = ref([])
+const expandedParents = reactive({})
+// Drag state
+const dragSource = ref(null)
+const dropTarget = ref(null)
+let dragLeaveTimer = null
+
+// ── Computed ──
+const activeCategoryLabel = computed(() => {
+  const cat = categories.value.find(c => c.value === activeTab.value)
+  return cat ? cat.label : ''
+})
+
+const filteredItems = computed(() => {
+  if (!searchQuery.value) return currentItems.value
+  const q = searchQuery.value.toLowerCase()
+  return currentItems.value.filter(item =>
+    (item.title || '').toLowerCase().includes(q) ||
+    (item.slug || '').toLowerCase().includes(q) ||
+    (item.customer || '').toLowerCase().includes(q) ||
+    (item.url || '').toLowerCase().includes(q)
+  )
+})
+
+const filteredTree = computed(() => {
+  if (!searchQuery.value) return whiteboardTree.value
+  const q = searchQuery.value.toLowerCase()
+  return whiteboardTree.value.map(node => {
+    if (node.isParent) {
+      const filteredChildren = node.children.filter(c =>
+        (c.title || '').toLowerCase().includes(q) ||
+        (c.url || '').toLowerCase().includes(q)
       )
-    },
-    filteredTree() {
-      if (!this.searchQuery) return this.whiteboardTree
-      const q = this.searchQuery.toLowerCase()
-      return this.whiteboardTree.map(node => {
-        if (node.isParent) {
-          const filteredChildren = node.children.filter(c =>
-            (c.title || '').toLowerCase().includes(q) ||
-            (c.url || '').toLowerCase().includes(q)
-          )
-          const parentMatches = (node.title || '').toLowerCase().includes(q)
-          if (parentMatches || filteredChildren.length > 0) {
-            return { ...node, children: parentMatches ? node.children : filteredChildren }
-          }
-          return null
-        }
-        if ((node.title || '').toLowerCase().includes(q) || (node.url || '').toLowerCase().includes(q)) {
-          return node
-        }
-        return null
-      }).filter(Boolean)
-    },
-    placedAssetIds() {
-      const ids = new Set()
-      for (const ri of this.rundownItems) {
-        if (ri.library_asset_id) ids.add(ri.library_asset_id)
-        if (ri.asset_id) ids.add(ri.asset_id)
+      const parentMatches = (node.title || '').toLowerCase().includes(q)
+      if (parentMatches || filteredChildren.length > 0) {
+        return { ...node, children: parentMatches ? node.children : filteredChildren }
       }
-      return ids
+      return null
     }
-  },
-  watch: {
-    activeTab: {
-      handler(newVal) {
-        this.loadCategory(newVal)
-      },
-      immediate: true
+    if ((node.title || '').toLowerCase().includes(q) || (node.url || '').toLowerCase().includes(q)) {
+      return node
     }
-  },
-  methods: {
-    async loadCategory(category) {
-      if (this.itemsCache[category]) {
-        if (category === 'whiteboard') {
-          this.whiteboardTree = this.itemsCache[category]
-        } else {
-          this.currentItems = this.itemsCache[category]
-        }
-        return
-      }
+    return null
+  }).filter(Boolean)
+})
 
-      this.loading = true
-      this.currentItems = []
+const placedAssetIds = computed(() => {
+  const ids = new Set()
+  for (const ri of props.rundownItems) {
+    if (ri.library_asset_id) ids.add(ri.library_asset_id)
+    if (ri.asset_id) ids.add(ri.asset_id)
+  }
+  return ids
+})
 
-      try {
-        if (category === 'whiteboard') {
-          await this.loadWhiteboardItems()
-          return
-        }
+// ── Watch ──
+watch(activeTab, (newVal) => {
+  loadCategory(newVal)
+}, { immediate: true })
 
-        if (category === 'scheduled') {
-          const [adsData, promosData] = await Promise.all([
-            fetchJson('/api/content-library/?item_type=ad&is_active=true&limit=100'),
-            fetchJson('/api/content-library/?item_type=promo&is_active=true&limit=100')
-          ])
-          const ads = (adsData?.items || adsData || []).map(i => ({ ...i, _subtype: 'ad' }))
-          const promos = (promosData?.items || promosData || []).map(i => ({ ...i, _subtype: 'promo' }))
-          const items = [...ads, ...promos]
-          this.itemsCache[category] = items
-          this.currentItems = items
-          return
-        }
-
-        const data = await fetchJson(`/api/content-library/?item_type=${category}&is_active=true&limit=100`)
-        const items = data?.items || data || []
-        this.itemsCache[category] = items
-        this.currentItems = items
-      } catch (error) {
-        console.error(`Error loading ${category} items:`, error)
-        this.currentItems = []
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async loadWhiteboardItems() {
-      if (!this.episodeNumber) {
-        this.whiteboardTree = []
-        this.loading = false
-        return
-      }
-
-      try {
-        const data = await fetchJson(`/api/whiteboard/${this.episodeNumber}`)
-
-        const wbItems = data?.items || []
-        const nodeLinks = data?.node_links || []
-
-        const itemMap = {}
-        for (const item of wbItems) {
-          itemMap[item.id] = item
-        }
-
-        const parentChildren = {}
-        const childOfParent = new Set()
-
-        for (const link of nodeLinks) {
-          const srcIdx = link.source_index != null ? link.source_index : null
-          const tgtIdx = link.target_index != null ? link.target_index : null
-          const src = srcIdx != null ? wbItems[srcIdx] : itemMap[link.source_item_id]
-          const tgt = tgtIdx != null ? wbItems[tgtIdx] : itemMap[link.target_item_id]
-          if (!src || !tgt) continue
-
-          if (src.item_type === 'parent') {
-            if (!parentChildren[src.id]) parentChildren[src.id] = new Set()
-            parentChildren[src.id].add(tgt.id)
-            childOfParent.add(tgt.id)
-          }
-          if (tgt.item_type === 'parent') {
-            if (!parentChildren[tgt.id]) parentChildren[tgt.id] = new Set()
-            parentChildren[tgt.id].add(src.id)
-            childOfParent.add(src.id)
-          }
-        }
-
-        const tree = []
-
-        for (const item of wbItems) {
-          if (item.item_type === 'parent') {
-            const childIds = parentChildren[item.id] || new Set()
-            const children = [...childIds].map(cid => this.transformItem(itemMap[cid])).filter(Boolean)
-            tree.push({
-              id: item.id,
-              isParent: true,
-              title: item.title || 'Untitled Group',
-              description: item.text_content,
-              social_metadata: item.social_metadata,
-              children: children
-            })
-            this.expandedParents[item.id] = true
-          }
-        }
-
-        for (const item of wbItems) {
-          if (item.item_type !== 'parent' && !childOfParent.has(item.id)) {
-            tree.push(this.transformItem(item))
-          }
-        }
-
-        this.whiteboardTree = tree
-        this.itemsCache['whiteboard'] = tree
-      } catch (error) {
-        console.error('Error loading whiteboard items:', error)
-        this.whiteboardTree = []
-      } finally {
-        this.loading = false
-      }
-    },
-
-    transformItem(item) {
-      if (!item) return null
-      const sm = item.social_metadata || {}
-      let title = item.title || sm.author_name || sm.title || ''
-
-      if (item.item_type === 'link') {
-        const handle = sm.author_handle ? `@${sm.author_handle}` : ''
-        const text = sm.tweet_text || sm.post_text || ''
-        title = title || text.substring(0, 60) || item.url || 'Link'
-        if (handle && !title.includes(handle)) title = `${handle}: ${title}`
-      } else if (item.item_type === 'text') {
-        title = title || (item.text_content || '').substring(0, 60) || 'Text note'
-      } else if (item.item_type === 'image') {
-        title = title || item.caption || 'Image'
-      } else if (item.item_type === 'video') {
-        title = title || 'Video'
-      } else if (item.item_type === 'audio') {
-        title = title || 'Audio'
-      } else if (item.item_type === 'code') {
-        title = title || 'Code snippet'
-      } else if (item.item_type === 'markdown') {
-        title = title || 'Markdown'
-      } else if (item.item_type === 'html') {
-        title = title || 'HTML embed'
-      } else {
-        title = title || item.item_type || 'Item'
-      }
-
-      return {
-        id: item.id,
-        isParent: false,
-        title: title,
-        item_type: item.item_type,
-        url: item.url,
-        media_url: item.media_url,
-        asset_id: item.media_asset_id,
-        social_metadata: sm
-      }
-    },
-
-    toggleParentExpand(parentId) {
-      this.expandedParents[parentId] = !this.expandedParents[parentId]
-    },
-
-    // ── Drag and drop ──
-
-    onDragStart(event, level, index, parentId, node) {
-      this.dragSource = { level, index, parentId, node }
-      event.dataTransfer.effectAllowed = 'move'
-      event.target.classList.add('dragging')
-    },
-
-    onParentDragOver(event, parentNode) {
-      if (!this.dragSource) return
-      if (this.dragSource.node?.id === parentNode.id) return
-      clearTimeout(this.dragLeaveTimer)
-      event.dataTransfer.dropEffect = 'move'
-      this.dropTarget = { type: 'into', parentId: parentNode.id }
-    },
-
-    onChildDragOver(event, parentNode) {
-      if (!this.dragSource) return
-      clearTimeout(this.dragLeaveTimer)
-      event.dataTransfer.dropEffect = 'move'
-      this.dropTarget = { type: 'into', parentId: parentNode.id }
-    },
-
-    onOrphanDragOver(event, nodeIdx) {
-      if (!this.dragSource) return
-      clearTimeout(this.dragLeaveTimer)
-      event.dataTransfer.dropEffect = 'move'
-      this.dropTarget = { type: 'reorder', orphanIdx: nodeIdx }
-    },
-
-    onDragLeave() {
-      clearTimeout(this.dragLeaveTimer)
-      this.dragLeaveTimer = setTimeout(() => {
-        this.dropTarget = null
-      }, 50)
-    },
-
-    onDragEnd(event) {
-      event.target.classList.remove('dragging')
-      this.dragSource = null
-      this.dropTarget = null
-    },
-
-    async onDropIntoParent(event, parentNode) {
-      event.preventDefault()
-      const src = this.dragSource
-      this.dropTarget = null
-      if (!src || !src.node) return
-      // Don't drop parent onto itself or a child already in this parent
-      if (src.node.id === parentNode.id) return
-      if (src.level === 'child' && src.parentId === parentNode.id) return
-
-      const draggedItem = src.node
-      const tree = this.whiteboardTree
-
-      // Remove from source
-      if (src.level === 'top') {
-        const idx = tree.findIndex(n => n.id === draggedItem.id)
-        if (idx >= 0) tree.splice(idx, 1)
-      } else if (src.level === 'child') {
-        const srcParent = tree.find(n => n.id === src.parentId)
-        if (srcParent) {
-          const idx = srcParent.children.findIndex(c => c.id === draggedItem.id)
-          if (idx >= 0) srcParent.children.splice(idx, 1)
-        }
-      }
-
-      // Add to target parent
-      parentNode.children.push(draggedItem)
-      this.expandedParents[parentNode.id] = true
-
-      // Create node_link in backend
-      await this.createNodeLink(draggedItem.id, parentNode.id)
-
-      this.dragSource = null
-      this.itemsCache['whiteboard'] = [...tree]
-    },
-
-    async onDropReorder(event, targetIdx) {
-      event.preventDefault()
-      const src = this.dragSource
-      this.dropTarget = null
-      if (!src) return
-
-      const tree = this.whiteboardTree
-
-      if (src.level === 'top' && src.index !== targetIdx) {
-        const item = tree.splice(src.index, 1)[0]
-        tree.splice(targetIdx > src.index ? targetIdx : targetIdx, 0, item)
-      }
-
-      this.dragSource = null
-      this.itemsCache['whiteboard'] = [...tree]
-    },
-
-    async createNodeLink(sourceItemId, targetItemId) {
-      if (!this.episodeNumber) return
-      try {
-        await fetchJson(`/api/whiteboard/${this.episodeNumber}/link-nodes`, {
-          method: 'POST',
-          body: JSON.stringify({
-            source_item_id: sourceItemId,
-            target_item_id: targetItemId
-          })
-        })
-        console.log(`Created node link: ${sourceItemId} -> ${targetItemId}`)
-      } catch (error) {
-        console.error('Failed to create node link:', error)
-      }
-    },
-
-    // ── Badge resolvers ──
-
-    parentNodeColor(node) {
-      const sm = node.social_metadata || {}
-      return sm.parentNodeColor || '#6A1B9A'
-    },
-
-    parentBadgeLabel(node) {
-      const sm = node.social_metadata || {}
-      return sm.parentNodeType || 'Group'
-    },
-
-    parentBadgeIcon(node) {
-      const sm = node.social_metadata || {}
-      return sm.parentNodeIcon || 'mdi-folder-outline'
-    },
-
-    parentBadgeColor(node) {
-      const sm = node.social_metadata || {}
-      return sm.parentNodeColor || '#6A1B9A'
-    },
-
-    parentBadgeBg(node) {
-      const color = this.parentBadgeColor(node)
-      const r = parseInt(color.slice(1, 3), 16)
-      const g = parseInt(color.slice(3, 5), 16)
-      const b = parseInt(color.slice(5, 7), 16)
-      return `rgba(${r}, ${g}, ${b}, 0.12)`
-    },
-
-    whiteboardTypeColor(type) {
-      const colors = { link: 'blue', text: 'grey', image: 'green', video: 'red', audio: 'orange', markdown: 'teal', code: 'indigo', html: 'deep-purple' }
-      return colors[type] || 'grey'
-    },
-
-    whiteboardTypeBg(type) {
-      const bgs = {
-        link: '#E3F2FD', text: '#F5F5F5', image: '#E8F5E9', video: '#FFEBEE',
-        audio: '#FFF3E0', markdown: '#E0F2F1', code: '#E8EAF6', html: '#F3E5F5'
-      }
-      return bgs[type] || '#F5F5F5'
-    },
-
-    whiteboardTypeFg(type) {
-      const fgs = {
-        link: '#1565C0', text: '#616161', image: '#2E7D32', video: '#C62828',
-        audio: '#E65100', markdown: '#00695C', code: '#283593', html: '#6A1B9A'
-      }
-      return fgs[type] || '#616161'
-    },
-
-    whiteboardTypeIcon(type) {
-      const icons = {
-        link: 'mdi-link', text: 'mdi-text', image: 'mdi-image', video: 'mdi-video',
-        audio: 'mdi-music-note', markdown: 'mdi-language-markdown',
-        code: 'mdi-code-braces', html: 'mdi-language-html5'
-      }
-      return icons[type] || 'mdi-card-outline'
-    },
-
-    resolveBadgeLabel(item) {
-      if (item.item_type !== 'link') return item.item_type
-
-      const url = (item.url || '').toLowerCase()
-      const sm = item.social_metadata || {}
-      const platform = sm.platform || ''
-
-      if (platform === 'x' || platform === 'twitter' || /\b(x\.com|twitter\.com)\b/.test(url)) {
-        if (/\/status\/\d+/.test(url)) {
-          if (sm.conversation_id && sm.tweet_id && sm.conversation_id !== sm.tweet_id) return 'X-Reply'
-          return 'X-Post'
-        }
-        if (/\/lists\//.test(url)) return 'X-List'
-        if (/\/spaces\//.test(url)) return 'X-Space'
-        if (/\/(x|twitter)\.com\/[^/]+\/?$/.test(url) || /\/(x|twitter)\.com\/@[^/]+\/?$/.test(url)) return 'X-Profile'
-        return 'X-Link'
-      }
-      if (/tiktok\.com/.test(url)) {
-        if (/\/video\/\d+/.test(url)) return 'TikTok'
-        if (/\/@[^/]+\/?$/.test(url)) return 'TikTok-Profile'
-        return 'TikTok'
-      }
-      if (/youtube\.com|youtu\.be/.test(url)) {
-        if (/\/watch\?|youtu\.be\//.test(url)) return 'YouTube'
-        if (/\/shorts\//.test(url)) return 'YT-Short'
-        if (/\/@|\/channel\/|\/c\//.test(url)) return 'YT-Channel'
-        if (/\/playlist/.test(url)) return 'YT-Playlist'
-        return 'YouTube'
-      }
-      if (/instagram\.com/.test(url)) {
-        if (/\/p\//.test(url)) return 'IG-Post'
-        if (/\/reel\//.test(url)) return 'IG-Reel'
-        if (/\/stories\//.test(url)) return 'IG-Story'
-        return 'Instagram'
-      }
-      if (/rumble\.com/.test(url)) return 'Rumble'
-      if (/soundcloud\.com/.test(url)) return 'SoundCloud'
-      if (/reddit\.com/.test(url)) {
-        if (/\/comments\//.test(url)) return 'Reddit-Post'
-        if (/\/r\/[^/]+\/?$/.test(url)) return 'Subreddit'
-        return 'Reddit'
-      }
-      if (url) {
-        try {
-          const domain = new URL(url).hostname.replace('www.', '')
-          return domain.split('.')[0]
-        } catch { /* ignore */ }
-      }
-      return 'Link'
-    },
-
-    resolveBadgeIcon(item) {
-      if (item.item_type !== 'link') return this.whiteboardTypeIcon(item.item_type)
-      const label = this.resolveBadgeLabel(item)
-      if (label.startsWith('X-')) return 'mdi-twitter'
-      if (label.startsWith('TikTok')) return 'mdi-music-note-eighth'
-      if (label.startsWith('YouTube') || label.startsWith('YT-')) return 'mdi-youtube'
-      if (label.startsWith('IG-') || label === 'Instagram') return 'mdi-instagram'
-      if (label === 'Rumble') return 'mdi-video'
-      if (label === 'SoundCloud') return 'mdi-soundcloud'
-      if (label.startsWith('Reddit') || label === 'Subreddit') return 'mdi-reddit'
-      return 'mdi-link'
-    },
-
-    resolveBadgeBg(item) {
-      const label = this.resolveBadgeLabel(item)
-      if (label.startsWith('X-')) return '#E3F2FD'
-      if (label.startsWith('TikTok')) return '#FCE4EC'
-      if (label.startsWith('YouTube') || label.startsWith('YT-')) return '#FFEBEE'
-      if (label.startsWith('IG-') || label === 'Instagram') return '#F3E5F5'
-      if (label === 'Rumble') return '#E8F5E9'
-      if (label === 'SoundCloud') return '#FFF3E0'
-      if (label.startsWith('Reddit') || label === 'Subreddit') return '#FFF3E0'
-      return this.whiteboardTypeBg(item.item_type)
-    },
-
-    resolveBadgeFg(item) {
-      const label = this.resolveBadgeLabel(item)
-      if (label.startsWith('X-')) return '#1565C0'
-      if (label.startsWith('TikTok')) return '#C2185B'
-      if (label.startsWith('YouTube') || label.startsWith('YT-')) return '#C62828'
-      if (label.startsWith('IG-') || label === 'Instagram') return '#6A1B9A'
-      if (label === 'Rumble') return '#2E7D32'
-      if (label === 'SoundCloud') return '#E65100'
-      if (label.startsWith('Reddit') || label === 'Subreddit') return '#E65100'
-      return this.whiteboardTypeFg(item.item_type)
-    },
-
-    isPlaced(item) {
-      return this.placedAssetIds.has(item.asset_id) || this.placedAssetIds.has(String(item.id))
-    },
-
-    placeItem(item) {
-      this.$emit('place-item', { libraryItem: item })
-    },
-
-    refreshCategory(category) {
-      delete this.itemsCache[category || this.activeTab]
-      this.loadCategory(category || this.activeTab)
+// ── Methods ──
+async function loadCategory(category) {
+  if (itemsCache[category]) {
+    if (category === 'whiteboard') {
+      whiteboardTree.value = itemsCache[category]
+    } else {
+      currentItems.value = itemsCache[category]
     }
+    return
+  }
+
+  loading.value = true
+  currentItems.value = []
+
+  try {
+    if (category === 'whiteboard') {
+      await loadWhiteboardItems()
+      return
+    }
+
+    if (category === 'scripts') {
+      await loadScripts()
+      return
+    }
+
+    if (category === 'scheduled') {
+      const [adsData, promosData] = await Promise.all([
+        fetchJson('/api/content-library/?item_type=ad&is_active=true&limit=100'),
+        fetchJson('/api/content-library/?item_type=promo&is_active=true&limit=100')
+      ])
+      const ads = (adsData?.items || adsData || []).map(i => ({ ...i, _subtype: 'ad' }))
+      const promos = (promosData?.items || promosData || []).map(i => ({ ...i, _subtype: 'promo' }))
+      const items = [...ads, ...promos]
+      itemsCache[category] = items
+      currentItems.value = items
+      return
+    }
+
+    const data = await fetchJson(`/api/content-library/?item_type=${category}&is_active=true&limit=100`)
+    const items = data?.items || data || []
+    itemsCache[category] = items
+    currentItems.value = items
+  } catch (error) {
+    console.error(`Error loading ${category} items:`, error)
+    currentItems.value = []
+  } finally {
+    loading.value = false
   }
 }
+
+async function loadWhiteboardItems() {
+  if (!props.episodeNumber) {
+    whiteboardTree.value = []
+    loading.value = false
+    return
+  }
+
+  try {
+    const data = await fetchJson(`/api/whiteboard/${props.episodeNumber}`)
+
+    const wbItems = data?.items || []
+    const nodeLinks = data?.node_links || []
+
+    const itemMap = {}
+    for (const item of wbItems) {
+      itemMap[item.id] = item
+    }
+
+    const parentChildren = {}
+    const childOfParent = new Set()
+
+    for (const link of nodeLinks) {
+      const srcIdx = link.source_index != null ? link.source_index : null
+      const tgtIdx = link.target_index != null ? link.target_index : null
+      const src = srcIdx != null ? wbItems[srcIdx] : itemMap[link.source_item_id]
+      const tgt = tgtIdx != null ? wbItems[tgtIdx] : itemMap[link.target_item_id]
+      if (!src || !tgt) continue
+
+      if (src.item_type === 'parent') {
+        if (!parentChildren[src.id]) parentChildren[src.id] = new Set()
+        parentChildren[src.id].add(tgt.id)
+        childOfParent.add(tgt.id)
+      }
+      if (tgt.item_type === 'parent') {
+        if (!parentChildren[tgt.id]) parentChildren[tgt.id] = new Set()
+        parentChildren[tgt.id].add(src.id)
+        childOfParent.add(src.id)
+      }
+    }
+
+    const tree = []
+
+    for (const item of wbItems) {
+      if (item.item_type === 'parent') {
+        const childIds = parentChildren[item.id] || new Set()
+        const children = [...childIds].map(cid => transformItem(itemMap[cid])).filter(Boolean)
+        tree.push({
+          id: item.id,
+          isParent: true,
+          title: item.title || 'Untitled Group',
+          description: item.text_content,
+          social_metadata: item.social_metadata,
+          children: children
+        })
+        expandedParents[item.id] = true
+      }
+    }
+
+    for (const item of wbItems) {
+      if (item.item_type !== 'parent' && !childOfParent.has(item.id)) {
+        tree.push(transformItem(item))
+      }
+    }
+
+    whiteboardTree.value = tree
+    itemsCache['whiteboard'] = tree
+  } catch (error) {
+    console.error('Error loading whiteboard items:', error)
+    whiteboardTree.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadScripts() {
+  if (!props.episodeNumber) {
+    scriptsData.value = []
+    loading.value = false
+    return
+  }
+  try {
+    const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+    const response = await fetch(`/api/scripts/episode/${props.episodeNumber}/generated`, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json()
+    scriptsData.value = (data.documents || []).map(doc => ({
+      ...doc,
+      label: formatScriptName(doc.type),
+      icon: getScriptIcon(doc.format)
+    }))
+  } catch (error) {
+    console.error('Error loading scripts:', error)
+    scriptsData.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+function refreshScripts() {
+  delete itemsCache['scripts']
+  loadCategory('scripts')
+}
+
+function formatScriptName(type) {
+  const map = {
+    host_full: 'Host Script',
+    host_clean: 'Host Clean',
+    production: 'Director Script',
+    host_script: 'Host Script (Legacy)',
+    media_list: 'Media List',
+    show_caller: 'Show Caller',
+    prompter: 'Prompter'
+  }
+  return map[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function getScriptIcon(format) {
+  if (format === 'pdf') return 'mdi-file-pdf-box'
+  if (format === 'html') return 'mdi-language-html5'
+  if (format === 'txt') return 'mdi-file-document-outline'
+  return 'mdi-file-outline'
+}
+
+function getScriptIconColor(format) {
+  if (format === 'pdf') return 'red'
+  if (format === 'html') return 'orange'
+  return 'grey'
+}
+
+function toggleOlderRevisions(key) {
+  scriptRevisionsOpen[key] = !scriptRevisionsOpen[key]
+}
+
+function openScript(doc) {
+  // doc.url is a root-relative path like "/episodes/0225/scripts/current/FILE.pdf"
+  // served by the FastAPI StaticFiles mount at /episodes (see app/main.py). The
+  // Vue dev server proxies /episodes -> backend, so use the URL as-is.
+  // Do NOT prepend /api — the static mount lives outside the /api prefix.
+  const url = doc.url
+  if (url) window.open(url, '_blank')
+}
+
+function downloadScript(doc) {
+  const url = doc.url
+  if (!url) return
+  const a = document.createElement('a')
+  a.href = url
+  a.download = doc.filename
+  a.click()
+}
+
+// Expose refresh for parent to call after generation
+// (expose merged into the defineExpose at end of script)
+
+function transformItem(item) {
+  if (!item) return null
+  const sm = item.social_metadata || {}
+  let title = item.title || sm.author_name || sm.title || ''
+
+  if (item.item_type === 'link') {
+    const handle = sm.author_handle ? `@${sm.author_handle}` : ''
+    const text = sm.tweet_text || sm.post_text || ''
+    title = title || text.substring(0, 60) || item.url || 'Link'
+    if (handle && !title.includes(handle)) title = `${handle}: ${title}`
+  } else if (item.item_type === 'text') {
+    title = title || (item.text_content || '').substring(0, 60) || 'Text note'
+  } else if (item.item_type === 'image') {
+    title = title || item.caption || 'Image'
+  } else if (item.item_type === 'video') {
+    title = title || 'Video'
+  } else if (item.item_type === 'audio') {
+    title = title || 'Audio'
+  } else if (item.item_type === 'code') {
+    title = title || 'Code snippet'
+  } else if (item.item_type === 'markdown') {
+    title = title || 'Markdown'
+  } else if (item.item_type === 'html') {
+    title = title || 'HTML embed'
+  } else {
+    title = title || item.item_type || 'Item'
+  }
+
+  return {
+    id: item.id,
+    isParent: false,
+    title: title,
+    item_type: item.item_type,
+    url: item.url,
+    media_url: item.media_url,
+    asset_id: item.media_asset_id,
+    social_metadata: sm
+  }
+}
+
+function toggleParentExpand(parentId) {
+  expandedParents[parentId] = !expandedParents[parentId]
+}
+
+// ── Drag and drop ──
+
+function onDragStart(event, level, index, parentId, node) {
+  dragSource.value = { level, index, parentId, node }
+  event.dataTransfer.effectAllowed = 'move'
+  event.target.classList.add('dragging')
+}
+
+function onParentDragOver(event, parentNode) {
+  if (!dragSource.value) return
+  if (dragSource.value.node?.id === parentNode.id) return
+  clearTimeout(dragLeaveTimer)
+  event.dataTransfer.dropEffect = 'move'
+  dropTarget.value = { type: 'into', parentId: parentNode.id }
+}
+
+function onChildDragOver(event, parentNode) {
+  if (!dragSource.value) return
+  clearTimeout(dragLeaveTimer)
+  event.dataTransfer.dropEffect = 'move'
+  dropTarget.value = { type: 'into', parentId: parentNode.id }
+}
+
+function onOrphanDragOver(event, nodeIdx) {
+  if (!dragSource.value) return
+  clearTimeout(dragLeaveTimer)
+  event.dataTransfer.dropEffect = 'move'
+  dropTarget.value = { type: 'reorder', orphanIdx: nodeIdx }
+}
+
+function onDragLeave() {
+  clearTimeout(dragLeaveTimer)
+  dragLeaveTimer = setTimeout(() => {
+    dropTarget.value = null
+  }, 50)
+}
+
+function onDragEnd(event) {
+  event.target.classList.remove('dragging')
+  dragSource.value = null
+  dropTarget.value = null
+}
+
+async function onDropIntoParent(event, parentNode) {
+  event.preventDefault()
+  const src = dragSource.value
+  dropTarget.value = null
+  if (!src || !src.node) return
+  // Don't drop parent onto itself or a child already in this parent
+  if (src.node.id === parentNode.id) return
+  if (src.level === 'child' && src.parentId === parentNode.id) return
+
+  const draggedItem = src.node
+  const tree = whiteboardTree.value
+
+  // Remove from source
+  if (src.level === 'top') {
+    const idx = tree.findIndex(n => n.id === draggedItem.id)
+    if (idx >= 0) tree.splice(idx, 1)
+  } else if (src.level === 'child') {
+    const srcParent = tree.find(n => n.id === src.parentId)
+    if (srcParent) {
+      const idx = srcParent.children.findIndex(c => c.id === draggedItem.id)
+      if (idx >= 0) srcParent.children.splice(idx, 1)
+    }
+  }
+
+  // Add to target parent
+  parentNode.children.push(draggedItem)
+  expandedParents[parentNode.id] = true
+
+  // Create node_link in backend
+  await createNodeLink(draggedItem.id, parentNode.id)
+
+  dragSource.value = null
+  itemsCache['whiteboard'] = [...tree]
+}
+
+async function onDropReorder(event, targetIdx) {
+  event.preventDefault()
+  const src = dragSource.value
+  dropTarget.value = null
+  if (!src) return
+
+  const tree = whiteboardTree.value
+
+  if (src.level === 'top' && src.index !== targetIdx) {
+    const item = tree.splice(src.index, 1)[0]
+    tree.splice(targetIdx > src.index ? targetIdx : targetIdx, 0, item)
+  }
+
+  dragSource.value = null
+  itemsCache['whiteboard'] = [...tree]
+}
+
+async function createNodeLink(sourceItemId, targetItemId) {
+  if (!props.episodeNumber) return
+  try {
+    await fetchJson(`/api/whiteboard/${props.episodeNumber}/link-nodes`, {
+      method: 'POST',
+      body: JSON.stringify({
+        source_item_id: sourceItemId,
+        target_item_id: targetItemId
+      })
+    })
+    console.log(`Created node link: ${sourceItemId} -> ${targetItemId}`)
+  } catch (error) {
+    console.error('Failed to create node link:', error)
+  }
+}
+
+// ── Badge resolvers ──
+
+function parentNodeColor(node) { // eslint-disable-line no-unused-vars
+  const sm = node.social_metadata || {}
+  return sm.parentNodeColor || '#6A1B9A'
+}
+
+function parentBadgeLabel(node) {
+  const sm = node.social_metadata || {}
+  return sm.parentNodeType || 'Group'
+}
+
+function parentBadgeIcon(node) {
+  const sm = node.social_metadata || {}
+  return sm.parentNodeIcon || 'mdi-folder-outline'
+}
+
+function parentBadgeColor(node) {
+  const sm = node.social_metadata || {}
+  return sm.parentNodeColor || '#6A1B9A'
+}
+
+function parentBadgeBg(node) {
+  const color = parentBadgeColor(node)
+  const r = parseInt(color.slice(1, 3), 16)
+  const g = parseInt(color.slice(3, 5), 16)
+  const b = parseInt(color.slice(5, 7), 16)
+  return `rgba(${r}, ${g}, ${b}, 0.12)`
+}
+
+function whiteboardTypeColor(type) { // eslint-disable-line no-unused-vars
+  const colors = { link: 'blue', text: 'grey', image: 'green', video: 'red', audio: 'orange', markdown: 'teal', code: 'indigo', html: 'deep-purple' }
+  return colors[type] || 'grey'
+}
+
+function whiteboardTypeBg(type) {
+  const bgs = {
+    link: '#E3F2FD', text: '#F5F5F5', image: '#E8F5E9', video: '#FFEBEE',
+    audio: '#FFF3E0', markdown: '#E0F2F1', code: '#E8EAF6', html: '#F3E5F5'
+  }
+  return bgs[type] || '#F5F5F5'
+}
+
+function whiteboardTypeFg(type) {
+  const fgs = {
+    link: '#1565C0', text: '#616161', image: '#2E7D32', video: '#C62828',
+    audio: '#E65100', markdown: '#00695C', code: '#283593', html: '#6A1B9A'
+  }
+  return fgs[type] || '#616161'
+}
+
+function whiteboardTypeIcon(type) {
+  const icons = {
+    link: 'mdi-link', text: 'mdi-text', image: 'mdi-image', video: 'mdi-video',
+    audio: 'mdi-music-note', markdown: 'mdi-language-markdown',
+    code: 'mdi-code-braces', html: 'mdi-language-html5'
+  }
+  return icons[type] || 'mdi-card-outline'
+}
+
+function resolveBadgeLabel(item) {
+  if (item.item_type !== 'link') return item.item_type
+
+  const url = (item.url || '').toLowerCase()
+  const sm = item.social_metadata || {}
+  const platform = sm.platform || ''
+
+  if (platform === 'x' || platform === 'twitter' || /\b(x\.com|twitter\.com)\b/.test(url)) {
+    if (/\/status\/\d+/.test(url)) {
+      if (sm.conversation_id && sm.tweet_id && sm.conversation_id !== sm.tweet_id) return 'X-Reply'
+      return 'X-Post'
+    }
+    if (/\/lists\//.test(url)) return 'X-List'
+    if (/\/spaces\//.test(url)) return 'X-Space'
+    if (/\/(x|twitter)\.com\/[^/]+\/?$/.test(url) || /\/(x|twitter)\.com\/@[^/]+\/?$/.test(url)) return 'X-Profile'
+    return 'X-Link'
+  }
+  if (/tiktok\.com/.test(url)) {
+    if (/\/video\/\d+/.test(url)) return 'TikTok'
+    if (/\/@[^/]+\/?$/.test(url)) return 'TikTok-Profile'
+    return 'TikTok'
+  }
+  if (/youtube\.com|youtu\.be/.test(url)) {
+    if (/\/watch\?|youtu\.be\//.test(url)) return 'YouTube'
+    if (/\/shorts\//.test(url)) return 'YT-Short'
+    if (/\/@|\/channel\/|\/c\//.test(url)) return 'YT-Channel'
+    if (/\/playlist/.test(url)) return 'YT-Playlist'
+    return 'YouTube'
+  }
+  if (/instagram\.com/.test(url)) {
+    if (/\/p\//.test(url)) return 'IG-Post'
+    if (/\/reel\//.test(url)) return 'IG-Reel'
+    if (/\/stories\//.test(url)) return 'IG-Story'
+    return 'Instagram'
+  }
+  if (/rumble\.com/.test(url)) return 'Rumble'
+  if (/soundcloud\.com/.test(url)) return 'SoundCloud'
+  if (/reddit\.com/.test(url)) {
+    if (/\/comments\//.test(url)) return 'Reddit-Post'
+    if (/\/r\/[^/]+\/?$/.test(url)) return 'Subreddit'
+    return 'Reddit'
+  }
+  if (url) {
+    try {
+      const domain = new URL(url).hostname.replace('www.', '')
+      return domain.split('.')[0]
+    } catch { /* ignore */ }
+  }
+  return 'Link'
+}
+
+function resolveBadgeIcon(item) {
+  if (item.item_type !== 'link') return whiteboardTypeIcon(item.item_type)
+  const label = resolveBadgeLabel(item)
+  if (label.startsWith('X-')) return 'mdi-twitter'
+  if (label.startsWith('TikTok')) return 'mdi-music-note-eighth'
+  if (label.startsWith('YouTube') || label.startsWith('YT-')) return 'mdi-youtube'
+  if (label.startsWith('IG-') || label === 'Instagram') return 'mdi-instagram'
+  if (label === 'Rumble') return 'mdi-video'
+  if (label === 'SoundCloud') return 'mdi-soundcloud'
+  if (label.startsWith('Reddit') || label === 'Subreddit') return 'mdi-reddit'
+  return 'mdi-link'
+}
+
+function resolveBadgeBg(item) {
+  const label = resolveBadgeLabel(item)
+  if (label.startsWith('X-')) return '#E3F2FD'
+  if (label.startsWith('TikTok')) return '#FCE4EC'
+  if (label.startsWith('YouTube') || label.startsWith('YT-')) return '#FFEBEE'
+  if (label.startsWith('IG-') || label === 'Instagram') return '#F3E5F5'
+  if (label === 'Rumble') return '#E8F5E9'
+  if (label === 'SoundCloud') return '#FFF3E0'
+  if (label.startsWith('Reddit') || label === 'Subreddit') return '#FFF3E0'
+  return whiteboardTypeBg(item.item_type)
+}
+
+function resolveBadgeFg(item) {
+  const label = resolveBadgeLabel(item)
+  if (label.startsWith('X-')) return '#1565C0'
+  if (label.startsWith('TikTok')) return '#C2185B'
+  if (label.startsWith('YouTube') || label.startsWith('YT-')) return '#C62828'
+  if (label.startsWith('IG-') || label === 'Instagram') return '#6A1B9A'
+  if (label === 'Rumble') return '#2E7D32'
+  if (label === 'SoundCloud') return '#E65100'
+  if (label.startsWith('Reddit') || label === 'Subreddit') return '#E65100'
+  return whiteboardTypeFg(item.item_type)
+}
+
+function isPlaced(item) {
+  return placedAssetIds.value.has(item.asset_id) || placedAssetIds.value.has(String(item.id))
+}
+
+function placeItem(item) {
+  emit('place-item', { libraryItem: item })
+}
+
+function refreshCategory(category) {
+  delete itemsCache[category || activeTab.value]
+  loadCategory(category || activeTab.value)
+}
+
+// Expose methods that parent may call via template ref
+defineExpose({ refreshCategory, refreshScripts })
 </script>
 
 <style scoped>
+/* Scripts section */
+.scripts-list {
+  padding: 4px;
+}
+.script-entry {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 6px 4px;
+}
+.script-entry:last-child {
+  border-bottom: none;
+}
+.script-name {
+  font-size: 0.8rem !important;
+  line-height: 1.2;
+}
+.older-revisions {
+  border-left: 2px solid rgba(0, 0, 0, 0.08);
+  padding-left: 6px;
+}
+.revision-row {
+  border-bottom: 1px dotted rgba(0, 0, 0, 0.06);
+}
+.revision-row:last-child {
+  border-bottom: none;
+}
+.rotate-90 {
+  transform: rotate(90deg);
+  transition: transform 0.2s;
+}
+
 .asset-pool-panel {
   display: flex;
   flex-direction: column;

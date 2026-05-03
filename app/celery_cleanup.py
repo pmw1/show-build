@@ -122,19 +122,4 @@ def cleanup_old_completed_jobs(days_to_keep=30):
         db.close()
 
 
-# Configure Celery Beat schedule
-celery_app.conf.beat_schedule = {
-    'cleanup-orphaned-jobs-every-5-min': {
-        'task': 'cleanup_orphaned_jobs',
-        'schedule': 300.0,  # Every 5 minutes
-    },
-    'cleanup-old-jobs-daily': {
-        'task': 'cleanup_old_completed_jobs',
-        'schedule': 86400.0,  # Every 24 hours
-        'args': (30,)  # Keep last 30 days
-    },
-}
-
-# Configure timezone
-celery_app.conf.timezone = 'UTC'
-celery_app.conf.enable_utc = True
+# Beat schedule moved to celery_app.py so it loads when beat starts

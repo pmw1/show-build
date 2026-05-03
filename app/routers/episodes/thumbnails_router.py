@@ -17,74 +17,49 @@ router = APIRouter()
 
 @router.get("/{episode_number}/thumbnails")
 async def get_episode_thumbnails(episode_number: str) -> Dict[str, Any]:
-    """Get available thumbnail/poster images for an episode.
+    """Get candidate thumbnail images for an episode.
 
-    Searches the thumbnails directory (and one level of subdirectories) and
-    the exports directory for poster images matching patterns like:
-    - poster_16x9.jpg, poster16x9.jpg, Poster_16x9.jpg
-    - poster_16x9_2.png (versioned)
-    - poster16x9-monday.jpg (suffixed variants)
-
-    Returns list of available thumbnails with URLs for frontend display.
+    Scans {episode_dir}/exports/thumbnails/ and one level of its subdirectories
+    for any .jpg or .png file. The feature image (poster) is chosen by the
+    user in the interface and persisted in the database; it is not inferred
+    from the filename.
     """
     from core.paths import paths as path_manager
 
     try:
         episode_num = path_manager._normalize_episode_id(episode_number)
         episode_dir = path_manager.get_episode_dir(episode_number)
-        exports_dir = path_manager.get_exports_dir(episode_number)
-        thumbnails_dir = episode_dir / "thumbnails"
+        thumbnails_dir = episode_dir / "exports" / "thumbnails"
 
-        # Pattern to match poster files (case-insensitive)
-        # Matches any file starting with "poster" and an image extension.
-        # Files with "16x9" in the name get higher confidence.
-        poster_pattern = re.compile(
-            r'^poster[_-]?.*\.(jpg|jpeg|png|webp)$',
-            re.IGNORECASE
-        )
-        high_confidence_pattern = re.compile(
-            r'^poster[_-]?16x9',
-            re.IGNORECASE
-        )
+        image_pattern = re.compile(r'\.(jpg|png)$', re.IGNORECASE)
 
         thumbnails = []
         seen_paths = set()
 
         def scan_directory(directory, url_prefix):
-            """Scan a directory for matching poster files."""
             if not directory.exists():
                 return
             for file in directory.iterdir():
-                if file.is_file() and poster_pattern.match(file.name):
+                if file.is_file() and image_pattern.search(file.name):
                     real_path = file.resolve()
                     if real_path in seen_paths:
                         continue
                     seen_paths.add(real_path)
-                    url = f"{url_prefix}/{file.name}"
-                    mtime = file.stat().st_mtime
-                    confidence = "high" if high_confidence_pattern.match(file.name) else "normal"
                     thumbnails.append({
                         "filename": file.name,
-                        "url": url,
-                        "modified": mtime,
-                        "size": file.stat().st_size,
-                        "confidence": confidence
+                        "url": f"{url_prefix}/{file.name}",
+                        "modified": file.stat().st_mtime,
+                        "size": file.stat().st_size
                     })
 
-        # Search thumbnails/ directory and one level of subdirectories
         if thumbnails_dir.exists():
-            scan_directory(thumbnails_dir, f"/episodes/{episode_num}/thumbnails")
+            scan_directory(thumbnails_dir, f"/episodes/{episode_num}/exports/thumbnails")
             for subdir in thumbnails_dir.iterdir():
                 if subdir.is_dir():
-                    scan_directory(subdir, f"/episodes/{episode_num}/thumbnails/{subdir.name}")
+                    scan_directory(subdir, f"/episodes/{episode_num}/exports/thumbnails/{subdir.name}")
 
-        # Also search exports/ directory (legacy location)
-        scan_directory(exports_dir, f"/episodes/{episode_num}/exports")
+        thumbnails.sort(key=lambda x: -x["modified"])
 
-        # Sort by confidence (high first), then modification time (newest first)
-        thumbnails.sort(key=lambda x: (0 if x["confidence"] == "high" else 1, -x["modified"]))
-
-        # Determine selected thumbnail (first one by default, or from database if stored)
         selected = thumbnails[0]["url"] if thumbnails else None
 
         logger.info(f"Found {len(thumbnails)} thumbnail(s) for episode {episode_number}")

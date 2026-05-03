@@ -13,58 +13,27 @@
   </v-dialog>
 </template>
 
-<script>
-import TemplatesView from '@/views/TemplatesView.vue';
+<script setup>
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import TemplatesView from '@/views/TemplatesView.vue'
 
-export default {
-  name: 'TemplateManagerModal',
-  components: {
-    TemplatesView,
-  },
-  props: {
-    visible: {
-      type: Boolean,
-      default: false,
-    },
-  },
-  data() {
-    return {
-      dialog: this.visible,
-    };
-  },
-  watch: {
-    visible(newVal) {
-      this.dialog = newVal;
-    },
-    dialog(newVal) {
-      if (!newVal) {
-        this.$emit('update:visible', false);
-      }
-    },
-  },
-  methods: {
-    closeModal() {
-      this.$emit('update:visible', false);
-    },
-    onTemplateSelected(template) {
-      this.$emit('template-selected', template);
-      this.closeModal();
-    },
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.dialog) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.closeModal();
-      }
-    },
-  },
-  mounted() {
-    document.addEventListener('keydown', this.handleKeydown);
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown);
-  },
-};
+const props = defineProps({ visible: { type: Boolean, default: false } })
+const emit = defineEmits(['update:visible', 'template-selected'])
+
+const dialog = ref(props.visible)
+
+watch(() => props.visible, (val) => { dialog.value = val })
+watch(dialog, (val) => { if (!val) emit('update:visible', false) })
+
+function closeModal() { emit('update:visible', false) }
+function onTemplateSelected(template) { emit('template-selected', template); closeModal() }
+function handleKeydown(event) {
+  if (event.key === 'Escape' && dialog.value) { event.preventDefault(); event.stopPropagation(); closeModal() }
+}
+onMounted(() => document.addEventListener('keydown', handleKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
+
+void TemplatesView
 </script>
 
 <style scoped>

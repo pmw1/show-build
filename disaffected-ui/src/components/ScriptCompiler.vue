@@ -128,231 +128,140 @@
   </v-card>
 </template>
 
-<script>
-export default {
-  name: 'ScriptCompiler',
-  
-  data() {
-    return {
-      episodeId: '',
-      outputFormat: 'html',
-      includeCues: true,
-      validateOnly: false,
-      
-      // Compilation state
-      isCompiling: false,
-      compilationStatus: null,
-      compilationResult: null,
-      currentJobId: null,
-      
-      // WebSocket connection
-      websocket: null,
-      clientId: `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      
-      // Real-time logging
-      logMessages: [],
-      
-      // Options
-      formatOptions: [
-        { text: 'HTML', value: 'html' },
-        { text: 'PDF', value: 'pdf' },
-        { text: 'Text', value: 'txt' }
-      ],
-      
-      // Validation rules
-      episodeRules: [
-        v => !!v || 'Episode number is required',
-        v => /^\d{4}$/.test(v) || 'Episode number must be 4 digits (e.g., 0225)'
-      ]
-    }
-  },
-  
-  computed: {
-    isValidEpisode() {
-      return /^\d{4}$/.test(this.episodeId)
-    }
-  },
-  
-  mounted() {
-    this.initializeWebSocket()
-  },
-  
-  beforeUnmount() {
-    if (this.websocket) {
-      this.websocket.close()
-    }
-  },
-  
-  methods: {
-    initializeWebSocket() {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${protocol}//${window.location.host}/ws/${this.clientId}`
-      
-      this.websocket = new WebSocket(wsUrl)
-      
-      this.websocket.onopen = () => {
-        console.log('WebSocket connected for real-time updates')
-        this.addLogMessage('WebSocket connected')
-      }
-      
-      this.websocket.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        this.handleWebSocketMessage(data)
-      }
-      
-      this.websocket.onclose = () => {
-        console.log('WebSocket disconnected')
-        this.addLogMessage('WebSocket disconnected')
-        
-        // Reconnect after delay if we're still compiling
-        if (this.isCompiling) {
-          setTimeout(() => this.initializeWebSocket(), 3000)
-        }
-      }
-      
-      this.websocket.onerror = (error) => {
-        console.error('WebSocket error:', error)
-        this.addLogMessage('WebSocket error occurred')
-      }
-    },
-    
-    handleWebSocketMessage(data) {
-      if (data.type === 'job_update' && data.job_id === this.currentJobId) {
-        this.updateCompilationStatus(data.data)
-      } else if (data.type === 'job_status' && data.job_id === this.currentJobId) {
-        this.updateCompilationStatus(data.data)
-      }
-    },
-    
-    async startCompilation() {
-      if (!this.isValidEpisode) return
-      
-      this.isCompiling = true
-      this.compilationStatus = { 
-        status: 'starting', 
-        progress: 0, 
-        message: 'Starting compilation...' 
-      }
-      this.compilationResult = null
-      this.logMessages = []
-      this.addLogMessage('Starting script compilation...')
-      
-      try {
-        const response = await this.$api.post(`/episodes/${this.episodeId}/compile-script`, {
-          output_format: this.outputFormat,
-          include_cues: this.includeCues,
-          validate_only: this.validateOnly
-        })
-        
-        this.currentJobId = response.data.job_id
-        this.addLogMessage(`Job started with ID: ${this.currentJobId}`)
-        
-        // Subscribe to job updates via WebSocket
-        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-          this.websocket.send(JSON.stringify({
-            type: 'subscribe_job',
-            job_id: this.currentJobId
-          }))
-        }
-        
-      } catch (error) {
-        console.error('Compilation failed:', error)
-        this.handleCompilationError(error)
-      }
-    },
-    
-    updateCompilationStatus(statusData) {
-      this.compilationStatus = {
-        status: statusData.status,
-        progress: statusData.progress || 0,
-        message: statusData.message || statusData.status
-      }
-      
-      this.addLogMessage(`Status: ${statusData.status} (${statusData.progress || 0}%)`)
-      
-      if (statusData.status === 'completed') {
-        this.handleCompilationComplete(statusData)
-      } else if (statusData.status === 'failed') {
-        this.handleCompilationError({ message: statusData.message })
-      }
-    },
-    
-    handleCompilationComplete(statusData) {
-      this.isCompiling = false
-      this.compilationResult = statusData.result || statusData
-      
-      this.addLogMessage('Compilation completed successfully!')
-      
-      if (this.compilationResult.output_path) {
-        this.addLogMessage(`Output saved to: ${this.compilationResult.output_path}`)
-      }
-      
-      this.$emit('compilation-complete', {
-        episodeId: this.episodeId,
-        result: this.compilationResult
-      })
-    },
-    
-    handleCompilationError(error) {
-      this.isCompiling = false
-      this.compilationStatus = {
-        status: 'failed',
-        progress: 0,
-        message: error.message || 'Compilation failed'
-      }
-      
-      this.addLogMessage(`Error: ${error.message || 'Unknown error'}`)
-      
-      this.$emit('compilation-error', {
-        episodeId: this.episodeId,
-        error: error
-      })
-    },
-    
-    getStatusColor() {
-      if (!this.compilationStatus) return 'grey'
-      
-      switch (this.compilationStatus.status) {
-        case 'completed': return 'success'
-        case 'failed': return 'error'
-        case 'running': case 'starting': return 'info'
-        default: return 'grey'
-      }
-    },
-    
-    getStatusIcon() {
-      if (!this.compilationStatus) return 'mdi-help'
-      
-      switch (this.compilationStatus.status) {
-        case 'completed': return 'mdi-check-circle'
-        case 'failed': return 'mdi-alert-circle'
-        case 'running': case 'starting': return 'mdi-loading'
-        default: return 'mdi-information'
-      }
-    },
-    
-    addLogMessage(message) {
-      const timestamp = new Date().toLocaleTimeString()
-      this.logMessages.push({ timestamp, message })
-      
-      // Keep only last 20 messages
-      if (this.logMessages.length > 20) {
-        this.logMessages.shift()
-      }
-    },
-    
-    downloadScript() {
-      if (this.compilationResult && this.compilationResult.output_path) {
-        // This would need to be implemented on the server side
-        // For now, just open the file path info
-        this.$emit('download-requested', {
-          episodeId: this.episodeId,
-          filePath: this.compilationResult.output_path
-        })
-      }
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
+
+const emit = defineEmits(['compilation-complete', 'compilation-error', 'download-requested'])
+
+const episodeId = ref('')
+const outputFormat = ref('html')
+const includeCues = ref(true)
+const validateOnly = ref(false)
+const isCompiling = ref(false)
+const compilationStatus = ref(null)
+const compilationResult = ref(null)
+const currentJobId = ref(null)
+const logMessages = ref([])
+let websocket = null
+const clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+const formatOptions = [
+  { text: 'HTML', value: 'html' },
+  { text: 'PDF', value: 'pdf' },
+  { text: 'Text', value: 'txt' }
+]
+const episodeRules = [
+  v => !!v || 'Episode number is required',
+  v => /^\d{4}$/.test(v) || 'Episode number must be 4 digits (e.g., 0225)'
+]
+
+const isValidEpisode = computed(() => /^\d{4}$/.test(episodeId.value))
+
+function addLogMessage(message) {
+  const timestamp = new Date().toLocaleTimeString()
+  logMessages.value.push({ timestamp, message })
+  if (logMessages.value.length > 20) logMessages.value.shift()
+}
+
+function initializeWebSocket() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${window.location.host}/ws/${clientId}`
+  websocket = new WebSocket(wsUrl)
+
+  websocket.onopen = () => {
+    console.log('WebSocket connected for real-time updates')
+    addLogMessage('WebSocket connected')
+  }
+  websocket.onmessage = (event) => {
+    const data = JSON.parse(event.data)
+    if ((data.type === 'job_update' || data.type === 'job_status') && data.job_id === currentJobId.value) {
+      updateCompilationStatus(data.data)
     }
   }
+  websocket.onclose = () => {
+    console.log('WebSocket disconnected')
+    addLogMessage('WebSocket disconnected')
+    if (isCompiling.value) setTimeout(initializeWebSocket, 3000)
+  }
+  websocket.onerror = (error) => {
+    console.error('WebSocket error:', error)
+    addLogMessage('WebSocket error occurred')
+  }
 }
+
+function updateCompilationStatus(statusData) {
+  compilationStatus.value = {
+    status: statusData.status,
+    progress: statusData.progress || 0,
+    message: statusData.message || statusData.status
+  }
+  addLogMessage(`Status: ${statusData.status} (${statusData.progress || 0}%)`)
+  if (statusData.status === 'completed') handleCompilationComplete(statusData)
+  else if (statusData.status === 'failed') handleCompilationError({ message: statusData.message })
+}
+
+function handleCompilationComplete(statusData) {
+  isCompiling.value = false
+  compilationResult.value = statusData.result || statusData
+  addLogMessage('Compilation completed successfully!')
+  if (compilationResult.value.output_path) addLogMessage(`Output saved to: ${compilationResult.value.output_path}`)
+  emit('compilation-complete', { episodeId: episodeId.value, result: compilationResult.value })
+}
+
+function handleCompilationError(error) {
+  isCompiling.value = false
+  compilationStatus.value = { status: 'failed', progress: 0, message: error.message || 'Compilation failed' }
+  addLogMessage(`Error: ${error.message || 'Unknown error'}`)
+  emit('compilation-error', { episodeId: episodeId.value, error })
+}
+
+async function startCompilation() {
+  if (!isValidEpisode.value) return
+  isCompiling.value = true
+  compilationStatus.value = { status: 'starting', progress: 0, message: 'Starting compilation...' }
+  compilationResult.value = null
+  logMessages.value = []
+  addLogMessage('Starting script compilation...')
+
+  try {
+    const instance = getCurrentInstance()
+    const api = instance?.appContext.config.globalProperties.$api
+    const response = await api.post(`/episodes/${episodeId.value}/compile-script`, {
+      output_format: outputFormat.value,
+      include_cues: includeCues.value,
+      validate_only: validateOnly.value
+    })
+    currentJobId.value = response.data.job_id
+    addLogMessage(`Job started with ID: ${currentJobId.value}`)
+    if (websocket?.readyState === WebSocket.OPEN) {
+      websocket.send(JSON.stringify({ type: 'subscribe_job', job_id: currentJobId.value }))
+    }
+  } catch (error) {
+    console.error('Compilation failed:', error)
+    handleCompilationError(error)
+  }
+}
+
+function getStatusColor() {
+  if (!compilationStatus.value) return 'grey'
+  const map = { completed: 'success', failed: 'error', running: 'info', starting: 'info' }
+  return map[compilationStatus.value.status] || 'grey'
+}
+
+function getStatusIcon() {
+  if (!compilationStatus.value) return 'mdi-help'
+  const map = { completed: 'mdi-check-circle', failed: 'mdi-alert-circle', running: 'mdi-loading', starting: 'mdi-loading' }
+  return map[compilationStatus.value.status] || 'mdi-information'
+}
+
+function downloadScript() {
+  if (compilationResult.value?.output_path) {
+    emit('download-requested', { episodeId: episodeId.value, filePath: compilationResult.value.output_path })
+  }
+}
+
+onMounted(initializeWebSocket)
+onBeforeUnmount(() => { websocket?.close() })
 </script>
 
 <style scoped>

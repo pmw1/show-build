@@ -781,961 +781,996 @@
   </v-snackbar>
 </template>
 
-<script>
-import EpisodeSelector from "./EpisodeSelector.vue";
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, getCurrentInstance } from 'vue'
+import EpisodeSelector from "./EpisodeSelector.vue" // eslint-disable-line no-unused-vars
 import axios from "axios"
 import { getColorValue, resolveVuetifyColor } from '../utils/themeColorMap'
 
-export default {
-  name: "StackManager",
-  components: { EpisodeSelector },
-  data() {
-    return {
-      segments: [],
-      selectedEpisode: null,
-      episodes: [],
-      episodeInfo: null,     // Episode info from info.md
-      selectedItem: null,    // Currently selected rundown item
-      loading: false,
-      isDragging: false,
-      draggedIndex: null,
-      dragOverIndex: null,
-      dragError: null,
-      showUnavailableDialog: false,
-      showCompileDialog: false,
-      showPrintDialog: false,
-      showAddItemDialog: false,
-      showEditEpisodeDialog: false,
-      compileTarget: 'director',
-      printTarget: 'director',
-      singleClickActive: false,
-      doubleClickActive: false,
-      clickTimer: null,
-      showClickOverlay: false,
-      clickType: '',
-      creatingItem: false,
-      updatingEpisode: false,
-      showEpisodeDetails: false,
-      editableEpisodeInfo: {
-        title: '',
-        subtitle: '',
-        duration: '',
-        guest: '',
-        tags: '',
-        slug: '',
-        status: '',
-        airdate: ''
-      },
-      inlineEpisodeInfo: {
-        title: '',
-        subtitle: '',
-        duration: '',
-        guest: '',
-        tags: '',
-        slug: '',
-        status: '',
-        airdate: ''
-      },
-      newItem: {
-        title: '',
-        type: 'segment',
-        slug: '',
-        duration: '00:05:30',
-        description: '',
-        guests: '',
-        tags: ''
-      },
-      itemTypes: [
-        { title: 'Segment', value: 'segment' },
-        { title: 'Advertisement', value: 'ad' },
-        { title: 'Promo', value: 'promo' },
-        { title: 'Call to Action', value: 'cta' },
-        { title: 'Transition', value: 'trans' },
-        { title: 'Unknown', value: 'unknown' }
-      ],
-      snackbar: {
-        show: false,
-        message: '',
-        color: 'success',
-        timeout: 4000
-      }
-    };
-  },
-  computed: {
-    segmentCount() {
-      return this.segments.filter(item => item.type === 'segment').length;
-    },
-    promoCount() {
-      return this.segments.filter(item => item.type === 'promo').length;
-    },
-    advertCount() {
-      return this.segments.filter(item => item.type === 'ad').length;
-    },
-    transCount() {
-      return this.segments.filter(item => item.type === 'trans').length;
-    },
-    ctaCount() {
-      return this.segments.filter(item => item.type === 'cta').length;
-    },
-    isNewItemValid() {
-      return this.newItem.title.trim() && 
-             this.newItem.slug.trim() && 
-             this.newItem.type;
-    },
-    modalThemeColor() {
-      if (!this.newItem.type) {
-        return 'primary'; // Default blue theme
-      }
-      const color = getColorValue(this.newItem.type.toLowerCase());
-      
-      // Map colormap values to valid Vuetify theme colors
-      const colorMapping = {
-        'purple-accent': 'purple',
-        'blue-accent': 'blue', 
-        'green-accent': 'green',
-        'red-accent': 'red',
-        'yellow-accent': 'yellow',
-        'grey-light': 'grey',
-        'purple': 'purple',
-        'blue': 'blue',
-        'green': 'green', 
-        'red': 'red',
-        'yellow': 'yellow',
-        'grey': 'grey',
-        'indigo': 'indigo',
-        'teal': 'teal',
-        'cyan': 'cyan',
-        'pink': 'pink',
-        'orange': 'orange'
-      };
-      
-      return colorMapping[color] || 'primary';
-    },
-    modalThemeColorRgb() {
-      const colorName = this.modalThemeColor;
-      
-      // Use direct color values to ensure they always work
-      const directColors = {
-        'purple': '#9C27B0',
-        'blue': '#2196F3', 
-        'green': '#4CAF50',
-        'red': '#F44336',
-        'yellow': '#FFC107',
-        'grey': '#9E9E9E',
-        'indigo': '#3F51B5',
-        'teal': '#009688',
-        'cyan': '#00BCD4',
-        'pink': '#E91E63',
-        'orange': '#FF9800',
-        'primary': '#1976D2'
-      };
-      
-      return directColors[colorName] || directColors['primary'];
-    }
-  },
-  watch: {
-    // REMOVED route-based watchers
-  },
-  methods: {
-    showSnackbar(message, color = 'success') {
-      this.snackbar.message = message;
-      this.snackbar.color = color;
-      this.snackbar.show = true;
-    },
-    loadEpisodeFromSession() {
-      const savedEpisodeId = sessionStorage.getItem('currentEpisodeId');
-      if (savedEpisodeId && this.episodes.length > 0) {
-        const episode = this.episodes.find(e => e.id === parseInt(savedEpisodeId));
-        if (episode) {
-          this.selectedEpisode = episode.value;
-        } else {
-          // Fallback to the latest episode if saved one isn't in the list
-          this.selectLatestEpisode();
-        }
-      } else if (this.episodes.length > 0) {
-        this.selectLatestEpisode();
-      }
-      
-      if (this.selectedEpisode) {
-        this.loadEpisode(this.selectedEpisode);
-      }
-    },
+const emit = defineEmits(['select-item', 'edit-item']) // eslint-disable-line no-unused-vars
 
-    selectLatestEpisode() {
-      const latestEpisode = this.episodes.reduce((latest, current) => {
-        return (latest.id > current.id) ? latest : current;
-      });
-      this.selectedEpisode = latestEpisode.value;
-      sessionStorage.setItem('currentEpisodeId', latestEpisode.id);
-    },
+// Get vuetify instance
+const instance = getCurrentInstance()
+const vuetifyInstance = computed(() => instance?.proxy?.$vuetify)
 
-    async handleEpisodeChange(newEpisode) {
-      if (newEpisode && newEpisode.value !== this.selectedEpisode) {
-        this.selectedEpisode = newEpisode.value;
-        sessionStorage.setItem('currentEpisodeId', newEpisode.id);
-        await this.loadEpisode(newEpisode.value);
-      }
-    },
-    async fetchEpisodes() {
-      this.loading = true;
-      try {
-        const response = await axios.get('/api/episodes');
-        
-        // The API returns { episodes: [...] }
-        const episodesData = response.data.episodes || [];
-        this.episodes = episodesData.map(ep => ({
-          id: ep.id,
-          title: ep.title || `Episode ${ep.episode_number}`,
-          // Use episode_number for the value, padded to 4 digits
-          value: ep.episode_number ? ep.episode_number.padStart(4, '0') : ep.id
-        }));
+// Template ref
+const rundownList = ref(null) // eslint-disable-line no-unused-vars
 
-        // After fetching, determine the initial episode
-        this.loadEpisodeFromSession();
+// Undefined in original Options API (used in template but never declared)
+const selectedItemIndex = ref(null) // eslint-disable-line no-unused-vars
+const editingItemIndex = ref(null) // eslint-disable-line no-unused-vars
+const rundownPanelWidth = ref(null) // eslint-disable-line no-unused-vars
 
-      } catch (err) {
-        // console.error("Failed to fetch episodes:", err);
-      } finally {
-        this.loading = false;
-      }
-    },
-    async fetchEpisodeInfo(episodeId) {
-      if (!episodeId) return;
-      
-      try {
-        const response = await axios.get(
-          `/api/episodes/${episodeId}/info`
-        );
-        
-        this.episodeInfo = response.data.info;
-        
-        // Also populate inline editing fields
-        this.populateInlineEpisodeInfo();
-      } catch (err) {
-        this.episodeInfo = null;
-        this.clearInlineEpisodeInfo();
-      }
-    },
-    populateInlineEpisodeInfo() {
-      if (this.episodeInfo) {
-        this.inlineEpisodeInfo = {
-          title: this.episodeInfo.title || '',
-          subtitle: this.episodeInfo.subtitle || '',
-          duration: this.episodeInfo.duration || '',
-          guest: this.episodeInfo.guest || '',
-          tags: Array.isArray(this.episodeInfo.tags) ? this.episodeInfo.tags.join(', ') : (this.episodeInfo.tags || ''),
-          slug: this.episodeInfo.slug || '',
-          status: this.episodeInfo.status || '',
-          airdate: this.episodeInfo.airdate || ''
-        };
-      }
-    },
-    async loadEpisode(episodeId) {
-      if (!episodeId) return;
-      
-      this.loading = true;
-      try {
-        // Fetch both rundown segments and episode info in parallel
-        const [rundownResponse] = await Promise.all([
-          axios.get(`/api/episodes/${episodeId}/rundown`),
-          this.fetchEpisodeInfo(episodeId)
-        ]);
-        
-        if (rundownResponse.data && Array.isArray(rundownResponse.data.items)) {
-            this.segments = rundownResponse.data.items.map((item, index) => ({
-            ...item,
-            filename: item.filename || `item-${index}-${Date.now()}`, // Ensure filename always exists
-            id: item.id || `item-${Math.random().toString(36).substr(2, 9)}`
-          })).filter(item => item.filename && item.filename.trim() !== '');
-        } else {
-            this.segments = [];
-        }
-      } catch (err) {
-        this.segments = [];
-      } finally {
-        this.loading = false;
-      }
-    },
-    async saveChanges() {
-      try {
-        const payload = { segments: this.segments.map(segment => ({ filename: segment.filename })) };
-        await axios.post(
-          `/api/episodes/${this.selectedEpisode}/reorder`,
-          payload
-        );
-        this.showSnackbar("Rundown reordered successfully!");
-      } catch (err) {
-        this.showSnackbar("Failed to save rundown: " + err.message, "error");
-      }
-    },
-    revertChanges() {
-      this.showUnavailableDialog = true;
-    },
-    compileRundown() {
-      this.showCompileDialog = true;
-    },
-    handleCompile() {
-      this.showCompileDialog = false;
-      // Implement actual compilation
-    },
-    printRundown() {
-      this.showPrintDialog = true;
-    },
-    handlePrint() {
-      this.showPrintDialog = false;
-      // Implement actual printing
-    },
-    
-    // Selection management methods
-    clearSelection() {
-      this.selectedItem = null;
-    },
-    
-    editSelectedItem() {
-      if (!this.selectedItem) return;
-      // TODO: Implement edit functionality - could open a modal or navigate to edit page
-      this.showSnackbar(`Edit functionality for "${this.selectedItem.slug}" will be implemented soon!`, "info");
-    },
-    
-    duplicateSelectedItem() {
-      if (!this.selectedItem) return;
-      // TODO: Create a copy of the selected item
-      this.showSnackbar(`Duplicate functionality for "${this.selectedItem.slug}" will be implemented soon!`, "info");
-    },
-    
-    moveSelectedItem() {
-      if (!this.selectedItem) return;
-      // TODO: Implement move to specific position functionality
-      this.showSnackbar(`Move functionality for "${this.selectedItem.slug}" will be implemented soon!`, "info");
-    },
-    
-    async deleteSelectedItem() {
-      if (!this.selectedItem) return;
-      
-      const confirmed = confirm(`Are you sure you want to delete "${this.selectedItem.slug}"?`);
-      if (!confirmed) return;
-      
-      try {
-        // TODO: Implement actual delete API call
-        
-        // For now, just remove from local array
-        const index = this.segments.findIndex(item => 
-          item.filename === this.selectedItem.filename
-        );
-        if (index !== -1) {
-          this.segments.splice(index, 1);
-          this.selectedItem = null;
-          this.showSnackbar('Item deleted successfully! (Note: This is currently local only)');
-        }
-      } catch (error) {
-        this.showSnackbar('Failed to delete item: ' + error.message, 'error');
-      }
-    },
-    
-    // New item creation methods
-    async createNewItem() {
-      if (!this.isNewItemValid) return;
-      
-      this.creatingItem = true;
-      try {
-        const response = await axios.post(
-          `/api/episodes/${this.selectedEpisode}/item`,
-          this.newItem
-        );
-        
-        // Show success message
-        this.showSnackbar(`Successfully created: ${response.data.filename}`);
-        
-        // Reset form and close dialog
-        this.resetNewItemForm();
-        this.showAddItemDialog = false;
-        
-        // Reload the rundown to show the new item
-        await this.loadEpisode(this.selectedEpisode);
-        
-      } catch (err) {
-        this.showSnackbar("Failed to create new rundown item: " + (err.response?.data?.detail || err.message), "error");
-      } finally {
-        this.creatingItem = false;
-      }
-    },
-    cancelAddItem() {
-      this.resetNewItemForm();
-      this.showAddItemDialog = false;
-    },
-    resetNewItemForm() {
-      this.newItem = {
-        title: '',
-        type: 'segment',
-        slug: '',
-        duration: '00:05:30',
-        description: '',
-        guests: '',
-        tags: ''
-      };
-    },
-    resolveTypeClass(type) {
-      if (!type || type === 'unknown') {
-        return 'bg-grey-light';
-      }
-      
-      const normalizedType = type.toLowerCase();
-      
-      const color = getColorValue(normalizedType);
-      const cssClass = `bg-${color}`;
-      
-      return cssClass;
-    },
-    getItemBackgroundStyle(type) {
-      if (!type || type === 'unknown') {
-        return { backgroundColor: '#F5F5F5' }; // grey-light fallback
-      }
-      
-      const normalizedType = type.toLowerCase();
-      const colorName = getColorValue(normalizedType);
-      const backgroundColor = resolveVuetifyColor(colorName, this.$vuetify);
-      
-      return { backgroundColor };
-    },
-    dragStart() {
-      this.isDragging = true;
-      const dragLightColor = getColorValue('draglight');
-      const highlightColor = getColorValue('highlight');
-      const droplineColor = getColorValue('dropline');  // Add dropline color
-    
-      // Set all CSS custom properties
-      document.documentElement.style.setProperty('--highlight-color', `rgb(var(--v-theme-${highlightColor}))`);
-      document.documentElement.style.setProperty('--draglight-color', `rgb(var(--v-theme-${dragLightColor}))`);
-      document.documentElement.style.setProperty('--dropline-color', `rgb(var(--v-theme-${droplineColor}))`);
+// Data
+const segments = ref([])
+const selectedEpisode = ref(null)
+const episodes = ref([])
+const episodeInfo = ref(null)
+const selectedItem = ref(null)
+const loading = ref(false)
+const isDragging = ref(false)
+const draggedIndex = ref(null)
+const dragOverIndex = ref(null)
+const dragError = ref(null) // eslint-disable-line no-unused-vars
+const showUnavailableDialog = ref(false)
+const showCompileDialog = ref(false)
+const showPrintDialog = ref(false)
+const showAddItemDialog = ref(false)
+const showEditEpisodeDialog = ref(false)
+const compileTarget = ref('director')
+const printTarget = ref('director')
+const singleClickActive = ref(false)
+const doubleClickActive = ref(false)
+let clickTimer = null
+const showClickOverlay = ref(false)
+const clickType = ref('')
+const creatingItem = ref(false)
+const updatingEpisode = ref(false)
+const showEpisodeDetails = ref(false)
+const editableEpisodeInfo = ref({
+  title: '',
+  subtitle: '',
+  duration: '',
+  guest: '',
+  tags: '',
+  slug: '',
+  status: '',
+  airdate: ''
+})
+const inlineEpisodeInfo = ref({
+  title: '',
+  subtitle: '',
+  duration: '',
+  guest: '',
+  tags: '',
+  slug: '',
+  status: '',
+  airdate: ''
+})
+const newItem = ref({
+  title: '',
+  type: 'segment',
+  slug: '',
+  duration: '00:05:30',
+  description: '',
+  guests: '',
+  tags: ''
+})
+const itemTypes = ref([ // eslint-disable-line no-unused-vars
+  { title: 'Segment', value: 'segment' },
+  { title: 'Advertisement', value: 'ad' },
+  { title: 'Promo', value: 'promo' },
+  { title: 'Call to Action', value: 'cta' },
+  { title: 'Transition', value: 'trans' },
+  { title: 'Unknown', value: 'unknown' }
+])
+const snackbar = ref({
+  show: false,
+  message: '',
+  color: 'success',
+  timeout: 4000
+})
 
-      // Force a reflow to ensure animation triggers consistently
-      requestAnimationFrame(() => {
-        document.body.offsetHeight;
-      });
-    },
-    dragEnd() {
-      this.isDragging = false;
-
-      // Force animation reset
-      requestAnimationFrame(() => {
-        document.body.offsetHeight;
-      });
-    },
-    handleDragChange(/*evt*/) {
-      // Validate new order if needed
-    },
-    handleSingleClick(item) {
-      clearTimeout(this.clickTimer);
-      this.clickTimer = setTimeout(() => {
-        if (!this.doubleClickActive) {
-          
-          // Set selected item
-          this.selectedItem = item;
-          
-          // Visual feedback
-          this.singleClickActive = true;
-          this.clickType = 'single';
-          this.showClickOverlay = true;
-          setTimeout(() => {
-            this.singleClickActive = false;
-            this.showClickOverlay = false;
-          }, 300);
-        }
-      }, 200);
-    },
-    handleDoubleClick(item) {
-      clearTimeout(this.clickTimer);
-      this.doubleClickActive = true;
-      
-      // Select the item and open edit
-      this.selectedItem = item;
-      
-      // Show visual feedback
-      this.clickType = 'double';
-      this.showClickOverlay = true;
-      
-      // Quick edit action (for now just call edit)
-      setTimeout(() => {
-        this.editSelectedItem();
-        this.doubleClickActive = false;
-        this.showClickOverlay = false;
-      }, 200);
-    },
-    
-    // Handle clicks on empty space to clear selection
-    handleContainerClick(event) {
-      // Only clear selection if clicking on the container itself, not child elements
-      if (event.target === event.currentTarget) {
-        this.clearSelection();
-      }
-    },
-    
-    // Keyboard shortcuts
-    handleKeydown(event) {
-      // Only handle shortcuts when not typing in inputs
-      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-        return;
-      }
-      
-      if (!this.selectedItem) return;
-      
-      switch (event.key) {
-        case 'Delete':
-        case 'Backspace':
-          event.preventDefault();
-          this.deleteSelectedItem();
-          break;
-        case 'Enter':
-          event.preventDefault();
-          this.editSelectedItem();
-          break;
-        case 'Escape':
-          event.preventDefault();
-          this.clearSelection();
-          break;
-        case 'd':
-          if (event.ctrlKey || event.metaKey) {
-            event.preventDefault();
-            this.duplicateSelectedItem();
-          }
-          break;
-        case 'ArrowUp':
-          event.preventDefault();
-          this.selectPreviousItem();
-          break;
-        case 'ArrowDown':
-          event.preventDefault();
-          this.selectNextItem();
-          break;
-      }
-    },
-    
-    // Navigation methods
-    selectPreviousItem() {
-      if (!this.selectedItem || this.segments.length === 0) return;
-      
-      const currentIndex = this.segments.findIndex(item => 
-        item.filename === this.selectedItem.filename
-      );
-      
-      if (currentIndex > 0) {
-        this.selectedItem = this.segments[currentIndex - 1];
-      }
-    },
-    
-    selectNextItem() {
-      if (!this.selectedItem || this.segments.length === 0) return;
-      
-      const currentIndex = this.segments.findIndex(item => 
-        item.filename === this.selectedItem.filename
-      );
-      
-      if (currentIndex < this.segments.length - 1) {
-        this.selectedItem = this.segments[currentIndex + 1];
-      }
-    },
-    calculateBacktime(currentIndex) {
-      // Calculate backtime: total show duration minus cumulative duration up to current index
-      if (!this.episodeInfo || !this.episodeInfo.duration) {
-        // Fallback to old behavior if no episode info
-        let totalSeconds = 0;
-        try {
-          for (let i = currentIndex; i < this.segments.length; i++) {
-            const duration = this.segments[i].duration || '00:00:00';
-            totalSeconds += this.parseDurationToSeconds(duration);
-          }
-        } catch (error) {
-          return '00:00:00';
-        }
-        return this.formatSecondsToTime(totalSeconds);
-      }
-
-      try {
-        // Get total show duration in seconds
-        const totalShowSeconds = this.parseDurationToSeconds(this.episodeInfo.duration);
-        
-        // Calculate cumulative duration of all segments up to (but not including) current index
-        let cumulativeSeconds = 0;
-        for (let i = 0; i < currentIndex; i++) {
-          const duration = this.segments[i].duration || '00:00:00';
-          cumulativeSeconds += this.parseDurationToSeconds(duration);
-        }
-        
-        // Backtime = total show duration - cumulative duration up to current item
-        const backtimeSeconds = totalShowSeconds - cumulativeSeconds;
-        
-        return this.formatSecondsToTime(Math.max(0, backtimeSeconds));
-      } catch (error) {
-        return '00:00:00';
-      }
-    },
-    
-    parseDurationToSeconds(duration) {
-      // Parse duration string (HH:MM:SS or MM:SS) to total seconds
-      if (!duration || duration === 'N/A') return 0;
-      
-      // Convert to string if it's not already
-      const durationStr = String(duration);
-      
-      const parts = durationStr.split(':');
-      if (parts.length === 3) {
-        // HH:MM:SS format
-        return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
-      } else if (parts.length === 2) {
-        // MM:SS format
-        return parseInt(parts[0]) * 60 + parseInt(parts[1]);
-      }
-      return 0;
-    },
-    
-    formatSecondsToTime(totalSeconds) {
-      // Format seconds back to HH:MM:SS
-      const hours = Math.floor(totalSeconds / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      const seconds = totalSeconds % 60;
-      
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    },
-    async refreshData() {
-      
-      try {
-        this.loading = true;
-        
-        // Save current order mapping (filename -> position in current segments array)
-        const currentOrder = new Map();
-        this.segments.forEach((segment, index) => {
-          if (segment.filename) {
-            currentOrder.set(segment.filename, index);
-          }
-        });
-        
-        // Clear current selection
-        this.selectedItem = null;
-        
-        // Fetch fresh episode list
-        await this.fetchEpisodes();
-        
-        // If we have a selected episode, reload its data while preserving order
-        if (this.selectedEpisode) {
-          await this.loadEpisodePreservingOrder(this.selectedEpisode, currentOrder);
-        }
-        
-        // Show success feedback
-        this.$nextTick(() => {
-          // Do nothing
-        });
-        
-      } catch (error) {
-        // console.error('Error during data refresh:', error);
-      } finally {
-        this.loading = false;
-      }
-    },
-    
-    async loadEpisodePreservingOrder(episodeId, currentOrder) {
-      if (!episodeId) return;
-      
-      try {
-        // Fetch both rundown segments and episode info in parallel
-        const [rundownResponse] = await Promise.all([
-          axios.get(`/api/episodes/${episodeId}/rundown`),
-          this.fetchEpisodeInfo(episodeId)
-        ]);
-        
-        // Process the fresh data
-        const freshSegments = rundownResponse.data.map((entry, index) => ({
-          ...entry.metadata,
-          filename: entry.filename || `item-${index}-${Date.now()}`,
-          type: entry.metadata?.type || 'unknown',
-          slug: entry.metadata?.slug || 'Untitled',
-          id: entry.metadata?.id || `id-${index}`,
-          duration: entry.metadata?.duration || 'N/A'
-        })).filter(item => item.filename && item.filename.trim() !== '');
-        
-        // If we have a current order to preserve, sort the fresh data accordingly
-        if (currentOrder && currentOrder.size > 0) {
-          
-          // Separate items that exist in current order vs new items
-          const orderedItems = [];
-          const newItems = [];
-          
-          freshSegments.forEach(item => {
-            if (currentOrder.has(item.filename)) {
-              orderedItems.push({
-                item,
-                originalIndex: currentOrder.get(item.filename)
-              });
-            } else {
-              newItems.push(item);
-            }
-          });
-          
-          // Sort ordered items by their original position
-          orderedItems.sort((a, b) => a.originalIndex - b.originalIndex);
-          
-          // Combine: preserved order items first, then new items at the end
-          this.segments = [
-            ...orderedItems.map(entry => entry.item),
-            ...newItems
-          ];
-          
-        } else {
-          // No previous order to preserve, use fresh order
-          this.segments = freshSegments;
-        }
-        
-      } catch (err) {
-        // Fallback to regular load
-        await this.loadEpisode(episodeId);
-      }
-    },
-    toggleEpisodeDetails() {
-      this.showEpisodeDetails = !this.showEpisodeDetails;
-    },
-    
-    // Color and theme management methods
-    updateSelectionColors() {
-      // Update CSS custom properties for selection colors
-      const selectionColor = getColorValue('primary') || 'blue';
-      document.documentElement.style.setProperty('--selection-color', `rgb(var(--v-theme-${selectionColor}))`);
-      
-      const droplineColor = getColorValue('yellow') || 'warning';
-      document.documentElement.style.setProperty('--dropline-color', `rgb(var(--v-theme-${droplineColor}))`);
-    },
-    
-    updateModalTheme() {
-      // Update modal theme colors if needed
-      const themeColor = getColorValue('surface') || 'background';
-      document.documentElement.style.setProperty('--modal-bg', `rgb(var(--v-theme-${themeColor}))`);
-    },
-    getTextColorForItem(type) {
-      if (!type || type === 'unknown') {
-        return '#666';
-      }
-      const normalizedType = type.toLowerCase();
-      const color = getColorValue(normalizedType);
-      const isDarkBackground = ['purple-accent', 'blue-accent', 'indigo-accent', 'red-accent'].includes(color);
-      return isDarkBackground ? '#ffffff' : '#000000';
-    },
-    formatDuration(duration) {
-      // Format duration for display
-      if (!duration || duration === 'N/A') return '00:00';
-      return duration;
-    },
-    // Drag and drop event handlers
-    handleDragStart(event, index) {
-      this.draggedIndex = index;
-      this.isDragging = true;
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/html', event.target.innerHTML);
-      
-      // Add visual feedback
-      event.target.style.opacity = '0.5';
-      
-      // Store the dragged item data
-      event.dataTransfer.setData('draggedIndex', index.toString());
-    },
-    
-    handleDragEnd(event) {
-      this.draggedIndex = null;
-      this.dragOverIndex = null;
-      this.isDragging = false;
-      
-      // Reset visual feedback
-      event.target.style.opacity = '1';
-      
-      // Clean up any drag-over styling
-      const draggableItems = this.$refs.rundownList?.querySelectorAll('.draggable-item');
-      if (draggableItems) {
-        draggableItems.forEach(item => {
-          item.classList.remove('drag-over-top', 'drag-over-bottom');
-        });
-      }
-    },
-    
-    handleDragOver(event) {
-      if (event.preventDefault) {
-        event.preventDefault(); // Allow drop
-      }
-      event.dataTransfer.dropEffect = 'move';
-      return false;
-    },
-    
-    handleDragEnter(event, index) {
-      if (this.draggedIndex === null) return;
-      
-      this.dragOverIndex = index;
-      
-      // Add visual feedback for drop zone
-      const rect = event.currentTarget.getBoundingClientRect();
-      const midpoint = rect.top + rect.height / 2;
-      
-      // Clear previous indicators
-      const draggableItems = this.$refs.rundownList?.querySelectorAll('.draggable-item');
-      if (draggableItems) {
-        draggableItems.forEach(item => {
-          item.classList.remove('drag-over-top', 'drag-over-bottom');
-        });
-      }
-      
-      // Add new indicator
-      if (event.clientY < midpoint) {
-        event.currentTarget.classList.add('drag-over-top');
-      } else {
-        event.currentTarget.classList.add('drag-over-bottom');
-      }
-    },
-    
-    handleDragLeave(event) {
-      // Remove visual feedback when leaving
-      event.currentTarget.classList.remove('drag-over-top', 'drag-over-bottom');
-    },
-    
-    handleDrop(event, dropIndex) {
-      if (event.stopPropagation) {
-        event.stopPropagation(); // Stop propagation
-      }
-      
-      if (this.draggedIndex === null || this.draggedIndex === dropIndex) {
-        return false;
-      }
-      
-      // Get the position (before or after)
-      const rect = event.currentTarget.getBoundingClientRect();
-      const midpoint = rect.top + rect.height / 2;
-      const insertAfter = event.clientY >= midpoint;
-      
-      // Calculate the actual insertion index
-      let targetIndex = dropIndex;
-      if (insertAfter && dropIndex >= this.draggedIndex) {
-        targetIndex = dropIndex;
-      } else if (insertAfter) {
-        targetIndex = dropIndex + 1;
-      } else if (!insertAfter && dropIndex > this.draggedIndex) {
-        targetIndex = dropIndex - 1;
-      } else {
-        targetIndex = dropIndex;
-      }
-      
-      // Perform the reorder
-      const draggedItem = this.segments[this.draggedIndex];
-      const newSegments = [...this.segments];
-      
-      // Remove the dragged item
-      newSegments.splice(this.draggedIndex, 1);
-      
-      // Insert at new position
-      if (this.draggedIndex < targetIndex) {
-        newSegments.splice(targetIndex, 0, draggedItem);
-      } else {
-        newSegments.splice(targetIndex, 0, draggedItem);
-      }
-      
-      // Update the segments array
-      this.segments = newSegments;
-      
-      // Clean up
-      this.draggedIndex = null;
-      this.dragOverIndex = null;
-      
-      // Clean up visual indicators
-      const draggableItems = this.$refs.rundownList?.querySelectorAll('.draggable-item');
-      if (draggableItems) {
-        draggableItems.forEach(item => {
-          item.classList.remove('drag-over-top', 'drag-over-bottom');
-        });
-      }
-      
-      return false;
-    },
-    clearInlineEpisodeInfo() {
-      this.inlineEpisodeInfo = {
-        title: '',
-        subtitle: '',
-        duration: '',
-        guest: '',
-        tags: '',
-        slug: '',
-        status: '',
-        airdate: ''
-      };
-    },
-    async saveEpisodeInfo() {
-      if (!this.episodeInfo || !this.selectedEpisode) return;
-      
-      this.updatingEpisode = true;
-      try {
-        // Prepare the data
-        const updateData = {
-          ...this.inlineEpisodeInfo,
-          tags: this.inlineEpisodeInfo.tags ? this.inlineEpisodeInfo.tags.split(',').map(t => t.trim()) : []
-        };
-        
-        // Save the episode info
-        await axios.put(`/api/episodes/${this.selectedEpisode}/info`, updateData);
-        
-        // Update local episodeInfo
-        this.episodeInfo = { ...this.episodeInfo, ...updateData };
-        
-        this.showSnackbar('Episode information saved successfully!');
-      } catch (error) {
-        this.showSnackbar('Failed to save episode information: ' + error.message, 'error');
-      } finally {
-        this.updatingEpisode = false;
-      }
-    },
-    cancelEpisodeEdit() {
-      // Reset to original values
-      this.populateInlineEpisodeInfo();
-      this.showEditEpisodeDialog = false;
-    },
-    async saveEpisodeChanges() {
-      this.updatingEpisode = true;
-      try {
-        // Similar to saveEpisodeInfo but for the dialog
-        const updateData = {
-          ...this.editableEpisodeInfo,
-          tags: this.editableEpisodeInfo.tags ? this.editableEpisodeInfo.tags.split(',').map(t => t.trim()) : []
-        };
-        
-        await axios.put(`/api/episodes/${this.selectedEpisode}/info`, updateData);
-        
-        // Update both local states
-        this.episodeInfo = { ...this.episodeInfo, ...updateData };
-        this.populateInlineEpisodeInfo();
-        
-        this.showEditEpisodeDialog = false;
-        this.showSnackbar('Episode information updated successfully!');
-      } catch (error) {
-        this.showSnackbar('Failed to update episode information: ' + error.message, 'error');
-      } finally {
-        this.updatingEpisode = false;
-      }
-    },
-  },
-  
-  created() {
-    // Initialize colors
-    const highlightColor = getColorValue('highlight');
-    document.documentElement.style.setProperty('--highlight-color', `rgb(var(--v-theme-${highlightColor}))`);
-    this.updateSelectionColors();
-
-    // Initialize modal theme
-    this.updateModalTheme();
-    
-    // Add keyboard event listeners
-    document.addEventListener('keydown', this.handleKeydown);
-  },
-  
-  mounted() {
-    this.fetchEpisodes();  // This will now also trigger loading the episode from session
-  },
-  
-  beforeUnmount() {
-    // Clean up keyboard event listeners
-    document.removeEventListener('keydown', this.handleKeydown);
+// Computed
+const segmentCount = computed(() => {
+  return segments.value.filter(item => item.type === 'segment').length
+})
+const promoCount = computed(() => {
+  return segments.value.filter(item => item.type === 'promo').length
+})
+const advertCount = computed(() => {
+  return segments.value.filter(item => item.type === 'ad').length
+})
+const transCount = computed(() => {
+  return segments.value.filter(item => item.type === 'trans').length
+})
+const ctaCount = computed(() => {
+  return segments.value.filter(item => item.type === 'cta').length
+})
+const isNewItemValid = computed(() => {
+  return newItem.value.title.trim() &&
+         newItem.value.slug.trim() &&
+         newItem.value.type
+})
+const modalThemeColor = computed(() => {
+  if (!newItem.value.type) {
+    return 'primary' // Default blue theme
   }
-};
+  const color = getColorValue(newItem.value.type.toLowerCase())
+
+  // Map colormap values to valid Vuetify theme colors
+  const colorMapping = {
+    'purple-accent': 'purple',
+    'blue-accent': 'blue',
+    'green-accent': 'green',
+    'red-accent': 'red',
+    'yellow-accent': 'yellow',
+    'grey-light': 'grey',
+    'purple': 'purple',
+    'blue': 'blue',
+    'green': 'green',
+    'red': 'red',
+    'yellow': 'yellow',
+    'grey': 'grey',
+    'indigo': 'indigo',
+    'teal': 'teal',
+    'cyan': 'cyan',
+    'pink': 'pink',
+    'orange': 'orange'
+  }
+
+  return colorMapping[color] || 'primary'
+})
+const modalThemeColorRgb = computed(() => { // eslint-disable-line no-unused-vars
+  const colorName = modalThemeColor.value
+
+  // Use direct color values to ensure they always work
+  const directColors = {
+    'purple': '#9C27B0',
+    'blue': '#2196F3',
+    'green': '#4CAF50',
+    'red': '#F44336',
+    'yellow': '#FFC107',
+    'grey': '#9E9E9E',
+    'indigo': '#3F51B5',
+    'teal': '#009688',
+    'cyan': '#00BCD4',
+    'pink': '#E91E63',
+    'orange': '#FF9800',
+    'primary': '#1976D2'
+  }
+
+  return directColors[colorName] || directColors['primary']
+})
+
+// Methods
+function showSnackbar(message, color = 'success') {
+  snackbar.value.message = message
+  snackbar.value.color = color
+  snackbar.value.show = true
+}
+
+function loadEpisodeFromSession() {
+  const savedEpisodeId = sessionStorage.getItem('currentEpisodeId')
+  if (savedEpisodeId && episodes.value.length > 0) {
+    const episode = episodes.value.find(e => e.id === parseInt(savedEpisodeId))
+    if (episode) {
+      selectedEpisode.value = episode.value
+    } else {
+      // Fallback to the latest episode if saved one isn't in the list
+      selectLatestEpisode()
+    }
+  } else if (episodes.value.length > 0) {
+    selectLatestEpisode()
+  }
+
+  if (selectedEpisode.value) {
+    loadEpisode(selectedEpisode.value)
+  }
+}
+
+function selectLatestEpisode() {
+  const latestEpisode = episodes.value.reduce((latest, current) => {
+    return (latest.id > current.id) ? latest : current
+  })
+  selectedEpisode.value = latestEpisode.value
+  sessionStorage.setItem('currentEpisodeId', latestEpisode.id)
+}
+
+async function handleEpisodeChange(newEpisode) {
+  if (newEpisode && newEpisode.value !== selectedEpisode.value) {
+    selectedEpisode.value = newEpisode.value
+    sessionStorage.setItem('currentEpisodeId', newEpisode.id)
+    await loadEpisode(newEpisode.value)
+  }
+}
+
+async function fetchEpisodes() {
+  loading.value = true
+  try {
+    const response = await axios.get('/api/episodes')
+
+    // The API returns { episodes: [...] }
+    const episodesData = response.data.episodes || []
+    episodes.value = episodesData.map(ep => ({
+      id: ep.id,
+      title: ep.title || `Episode ${ep.episode_number}`,
+      // Use episode_number for the value, padded to 4 digits
+      value: ep.episode_number ? ep.episode_number.padStart(4, '0') : ep.id
+    }))
+
+    // After fetching, determine the initial episode
+    loadEpisodeFromSession()
+
+  } catch (err) { // eslint-disable-line no-unused-vars
+    // console.error("Failed to fetch episodes:", err)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function fetchEpisodeInfo(episodeId) {
+  if (!episodeId) return
+
+  try {
+    const response = await axios.get(
+      `/api/episodes/${episodeId}/info`
+    )
+
+    episodeInfo.value = response.data.info
+
+    // Also populate inline editing fields
+    populateInlineEpisodeInfo()
+  } catch (err) { // eslint-disable-line no-unused-vars
+    episodeInfo.value = null
+    clearInlineEpisodeInfo()
+  }
+}
+
+function populateInlineEpisodeInfo() {
+  if (episodeInfo.value) {
+    inlineEpisodeInfo.value = {
+      title: episodeInfo.value.title || '',
+      subtitle: episodeInfo.value.subtitle || '',
+      duration: episodeInfo.value.duration || '',
+      guest: episodeInfo.value.guest || '',
+      tags: Array.isArray(episodeInfo.value.tags) ? episodeInfo.value.tags.join(', ') : (episodeInfo.value.tags || ''),
+      slug: episodeInfo.value.slug || '',
+      status: episodeInfo.value.status || '',
+      airdate: episodeInfo.value.airdate || ''
+    }
+  }
+}
+
+async function loadEpisode(episodeId) {
+  if (!episodeId) return
+
+  loading.value = true
+  try {
+    // Fetch both rundown segments and episode info in parallel
+    const [rundownResponse] = await Promise.all([
+      axios.get(`/api/episodes/${episodeId}/rundown`),
+      fetchEpisodeInfo(episodeId)
+    ])
+
+    if (rundownResponse.data && Array.isArray(rundownResponse.data.items)) {
+        segments.value = rundownResponse.data.items.map((item, index) => ({
+        ...item,
+        filename: item.filename || `item-${index}-${Date.now()}`, // Ensure filename always exists
+        id: item.id || `item-${Math.random().toString(36).substr(2, 9)}`
+      })).filter(item => item.filename && item.filename.trim() !== '')
+    } else {
+        segments.value = []
+    }
+  } catch (err) { // eslint-disable-line no-unused-vars
+    segments.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+async function saveChanges() {
+  try {
+    const payload = { segments: segments.value.map(segment => ({ filename: segment.filename })) }
+    await axios.post(
+      `/api/episodes/${selectedEpisode.value}/reorder`,
+      payload
+    )
+    showSnackbar("Rundown reordered successfully!")
+  } catch (err) {
+    showSnackbar("Failed to save rundown: " + err.message, "error")
+  }
+}
+
+function revertChanges() {
+  showUnavailableDialog.value = true
+}
+
+function compileRundown() {
+  showCompileDialog.value = true
+}
+
+function handleCompile() {
+  showCompileDialog.value = false
+  // Implement actual compilation
+}
+
+function printRundown() {
+  showPrintDialog.value = true
+}
+
+function handlePrint() {
+  showPrintDialog.value = false
+  // Implement actual printing
+}
+
+// Selection management methods
+function clearSelection() {
+  selectedItem.value = null
+}
+
+function editSelectedItem() {
+  if (!selectedItem.value) return
+  // TODO: Implement edit functionality - could open a modal or navigate to edit page
+  showSnackbar(`Edit functionality for "${selectedItem.value.slug}" will be implemented soon!`, "info")
+}
+
+function duplicateSelectedItem() {
+  if (!selectedItem.value) return
+  // TODO: Create a copy of the selected item
+  showSnackbar(`Duplicate functionality for "${selectedItem.value.slug}" will be implemented soon!`, "info")
+}
+
+function moveSelectedItem() {
+  if (!selectedItem.value) return
+  // TODO: Implement move to specific position functionality
+  showSnackbar(`Move functionality for "${selectedItem.value.slug}" will be implemented soon!`, "info")
+}
+
+async function deleteSelectedItem() {
+  if (!selectedItem.value) return
+
+  const confirmed = confirm(`Are you sure you want to delete "${selectedItem.value.slug}"?`)
+  if (!confirmed) return
+
+  try {
+    // TODO: Implement actual delete API call
+
+    // For now, just remove from local array
+    const index = segments.value.findIndex(item =>
+      item.filename === selectedItem.value.filename
+    )
+    if (index !== -1) {
+      segments.value.splice(index, 1)
+      selectedItem.value = null
+      showSnackbar('Item deleted successfully! (Note: This is currently local only)')
+    }
+  } catch (error) {
+    showSnackbar('Failed to delete item: ' + error.message, 'error')
+  }
+}
+
+// New item creation methods
+async function createNewItem() {
+  if (!isNewItemValid.value) return
+
+  creatingItem.value = true
+  try {
+    const response = await axios.post(
+      `/api/episodes/${selectedEpisode.value}/item`,
+      newItem.value
+    )
+
+    // Show success message
+    showSnackbar(`Successfully created: ${response.data.filename}`)
+
+    // Reset form and close dialog
+    resetNewItemForm()
+    showAddItemDialog.value = false
+
+    // Reload the rundown to show the new item
+    await loadEpisode(selectedEpisode.value)
+
+  } catch (err) {
+    showSnackbar("Failed to create new rundown item: " + (err.response?.data?.detail || err.message), "error")
+  } finally {
+    creatingItem.value = false
+  }
+}
+
+function cancelAddItem() {
+  resetNewItemForm()
+  showAddItemDialog.value = false
+}
+
+function resetNewItemForm() {
+  newItem.value = {
+    title: '',
+    type: 'segment',
+    slug: '',
+    duration: '00:05:30',
+    description: '',
+    guests: '',
+    tags: ''
+  }
+}
+
+function resolveTypeClass(type) { // eslint-disable-line no-unused-vars
+  if (!type || type === 'unknown') {
+    return 'bg-grey-light'
+  }
+
+  const normalizedType = type.toLowerCase()
+
+  const color = getColorValue(normalizedType)
+  const cssClass = `bg-${color}`
+
+  return cssClass
+}
+
+function getItemBackgroundStyle(type) {
+  if (!type || type === 'unknown') {
+    return { backgroundColor: '#F5F5F5' } // grey-light fallback
+  }
+
+  const normalizedType = type.toLowerCase()
+  const colorName = getColorValue(normalizedType)
+  const backgroundColor = resolveVuetifyColor(colorName, vuetifyInstance.value)
+
+  return { backgroundColor }
+}
+
+function dragStart() { // eslint-disable-line no-unused-vars
+  isDragging.value = true
+  const dragLightColor = getColorValue('draglight')
+  const highlightColor = getColorValue('highlight')
+  const droplineColor = getColorValue('dropline')  // Add dropline color
+
+  // Set all CSS custom properties
+  document.documentElement.style.setProperty('--highlight-color', `rgb(var(--v-theme-${highlightColor}))`)
+  document.documentElement.style.setProperty('--draglight-color', `rgb(var(--v-theme-${dragLightColor}))`)
+  document.documentElement.style.setProperty('--dropline-color', `rgb(var(--v-theme-${droplineColor}))`)
+
+  // Force a reflow to ensure animation triggers consistently
+  requestAnimationFrame(() => {
+    document.body.offsetHeight // eslint-disable-line no-unused-expressions
+  })
+}
+
+function dragEnd() { // eslint-disable-line no-unused-vars
+  isDragging.value = false
+
+  // Force animation reset
+  requestAnimationFrame(() => {
+    document.body.offsetHeight // eslint-disable-line no-unused-expressions
+  })
+}
+
+function handleDragChange(/*evt*/) { // eslint-disable-line no-unused-vars
+  // Validate new order if needed
+}
+
+function handleSingleClick(item) { // eslint-disable-line no-unused-vars
+  clearTimeout(clickTimer)
+  clickTimer = setTimeout(() => {
+    if (!doubleClickActive.value) {
+
+      // Set selected item
+      selectedItem.value = item
+
+      // Visual feedback
+      singleClickActive.value = true
+      clickType.value = 'single'
+      showClickOverlay.value = true
+      setTimeout(() => {
+        singleClickActive.value = false
+        showClickOverlay.value = false
+      }, 300)
+    }
+  }, 200)
+}
+
+function handleDoubleClick(item) { // eslint-disable-line no-unused-vars
+  clearTimeout(clickTimer)
+  doubleClickActive.value = true
+
+  // Select the item and open edit
+  selectedItem.value = item
+
+  // Show visual feedback
+  clickType.value = 'double'
+  showClickOverlay.value = true
+
+  // Quick edit action (for now just call edit)
+  setTimeout(() => {
+    editSelectedItem()
+    doubleClickActive.value = false
+    showClickOverlay.value = false
+  }, 200)
+}
+
+// Handle clicks on empty space to clear selection
+function handleContainerClick(event) {
+  // Only clear selection if clicking on the container itself, not child elements
+  if (event.target === event.currentTarget) {
+    clearSelection()
+  }
+}
+
+// Keyboard shortcuts
+function handleKeydown(event) {
+  // Only handle shortcuts when not typing in inputs
+  if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+    return
+  }
+
+  if (!selectedItem.value) return
+
+  switch (event.key) {
+    case 'Delete':
+    case 'Backspace':
+      event.preventDefault()
+      deleteSelectedItem()
+      break
+    case 'Enter':
+      event.preventDefault()
+      editSelectedItem()
+      break
+    case 'Escape':
+      event.preventDefault()
+      clearSelection()
+      break
+    case 'd':
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault()
+        duplicateSelectedItem()
+      }
+      break
+    case 'ArrowUp':
+      event.preventDefault()
+      selectPreviousItem()
+      break
+    case 'ArrowDown':
+      event.preventDefault()
+      selectNextItem()
+      break
+  }
+}
+
+// Navigation methods
+function selectPreviousItem() {
+  if (!selectedItem.value || segments.value.length === 0) return
+
+  const currentIndex = segments.value.findIndex(item =>
+    item.filename === selectedItem.value.filename
+  )
+
+  if (currentIndex > 0) {
+    selectedItem.value = segments.value[currentIndex - 1]
+  }
+}
+
+function selectNextItem() {
+  if (!selectedItem.value || segments.value.length === 0) return
+
+  const currentIndex = segments.value.findIndex(item =>
+    item.filename === selectedItem.value.filename
+  )
+
+  if (currentIndex < segments.value.length - 1) {
+    selectedItem.value = segments.value[currentIndex + 1]
+  }
+}
+
+function calculateBacktime(currentIndex) { // eslint-disable-line no-unused-vars
+  // Calculate backtime: total show duration minus cumulative duration up to current index
+  if (!episodeInfo.value || !episodeInfo.value.duration) {
+    // Fallback to old behavior if no episode info
+    let totalSeconds = 0
+    try {
+      for (let i = currentIndex; i < segments.value.length; i++) {
+        const duration = segments.value[i].duration || '00:00:00'
+        totalSeconds += parseDurationToSeconds(duration)
+      }
+    } catch (error) { // eslint-disable-line no-unused-vars
+      return '00:00:00'
+    }
+    return formatSecondsToTime(totalSeconds)
+  }
+
+  try {
+    // Get total show duration in seconds
+    const totalShowSeconds = parseDurationToSeconds(episodeInfo.value.duration)
+
+    // Calculate cumulative duration of all segments up to (but not including) current index
+    let cumulativeSeconds = 0
+    for (let i = 0; i < currentIndex; i++) {
+      const duration = segments.value[i].duration || '00:00:00'
+      cumulativeSeconds += parseDurationToSeconds(duration)
+    }
+
+    // Backtime = total show duration - cumulative duration up to current item
+    const backtimeSeconds = totalShowSeconds - cumulativeSeconds
+
+    return formatSecondsToTime(Math.max(0, backtimeSeconds))
+  } catch (error) { // eslint-disable-line no-unused-vars
+    return '00:00:00'
+  }
+}
+
+function parseDurationToSeconds(duration) {
+  // Parse duration string (HH:MM:SS or MM:SS) to total seconds
+  if (!duration || duration === 'N/A') return 0
+
+  // Convert to string if it's not already
+  const durationStr = String(duration)
+
+  const parts = durationStr.split(':')
+  if (parts.length === 3) {
+    // HH:MM:SS format
+    return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2])
+  } else if (parts.length === 2) {
+    // MM:SS format
+    return parseInt(parts[0]) * 60 + parseInt(parts[1])
+  }
+  return 0
+}
+
+function formatSecondsToTime(totalSeconds) {
+  // Format seconds back to HH:MM:SS
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+}
+
+async function refreshData() {
+
+  try {
+    loading.value = true
+
+    // Save current order mapping (filename -> position in current segments array)
+    const currentOrder = new Map()
+    segments.value.forEach((segment, index) => {
+      if (segment.filename) {
+        currentOrder.set(segment.filename, index)
+      }
+    })
+
+    // Clear current selection
+    selectedItem.value = null
+
+    // Fetch fresh episode list
+    await fetchEpisodes()
+
+    // If we have a selected episode, reload its data while preserving order
+    if (selectedEpisode.value) {
+      await loadEpisodePreservingOrder(selectedEpisode.value, currentOrder)
+    }
+
+    // Show success feedback
+    nextTick(() => {
+      // Do nothing
+    })
+
+  } catch (error) { // eslint-disable-line no-unused-vars
+    // console.error('Error during data refresh:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadEpisodePreservingOrder(episodeId, currentOrder) {
+  if (!episodeId) return
+
+  try {
+    // Fetch both rundown segments and episode info in parallel
+    const [rundownResponse] = await Promise.all([
+      axios.get(`/api/episodes/${episodeId}/rundown`),
+      fetchEpisodeInfo(episodeId)
+    ])
+
+    // Process the fresh data
+    const freshSegments = rundownResponse.data.map((entry, index) => ({
+      ...entry.metadata,
+      filename: entry.filename || `item-${index}-${Date.now()}`,
+      type: entry.metadata?.type || 'unknown',
+      slug: entry.metadata?.slug || 'Untitled',
+      id: entry.metadata?.id || `id-${index}`,
+      duration: entry.metadata?.duration || 'N/A'
+    })).filter(item => item.filename && item.filename.trim() !== '')
+
+    // If we have a current order to preserve, sort the fresh data accordingly
+    if (currentOrder && currentOrder.size > 0) {
+
+      // Separate items that exist in current order vs new items
+      const orderedItems = []
+      const newItems = []
+
+      freshSegments.forEach(item => {
+        if (currentOrder.has(item.filename)) {
+          orderedItems.push({
+            item,
+            originalIndex: currentOrder.get(item.filename)
+          })
+        } else {
+          newItems.push(item)
+        }
+      })
+
+      // Sort ordered items by their original position
+      orderedItems.sort((a, b) => a.originalIndex - b.originalIndex)
+
+      // Combine: preserved order items first, then new items at the end
+      segments.value = [
+        ...orderedItems.map(entry => entry.item),
+        ...newItems
+      ]
+
+    } else {
+      // No previous order to preserve, use fresh order
+      segments.value = freshSegments
+    }
+
+  } catch (err) { // eslint-disable-line no-unused-vars
+    // Fallback to regular load
+    await loadEpisode(episodeId)
+  }
+}
+
+function toggleEpisodeDetails() {
+  showEpisodeDetails.value = !showEpisodeDetails.value
+}
+
+// Color and theme management methods
+function updateSelectionColors() {
+  // Update CSS custom properties for selection colors
+  const selectionColor = getColorValue('primary') || 'blue'
+  document.documentElement.style.setProperty('--selection-color', `rgb(var(--v-theme-${selectionColor}))`)
+
+  const droplineColor = getColorValue('yellow') || 'warning'
+  document.documentElement.style.setProperty('--dropline-color', `rgb(var(--v-theme-${droplineColor}))`)
+}
+
+function updateModalTheme() {
+  // Update modal theme colors if needed
+  const themeColor = getColorValue('surface') || 'background'
+  document.documentElement.style.setProperty('--modal-bg', `rgb(var(--v-theme-${themeColor}))`)
+}
+
+function getTextColorForItem(type) {
+  if (!type || type === 'unknown') {
+    return '#666'
+  }
+  const normalizedType = type.toLowerCase()
+  const color = getColorValue(normalizedType)
+  const isDarkBackground = ['purple-accent', 'blue-accent', 'indigo-accent', 'red-accent'].includes(color)
+  return isDarkBackground ? '#ffffff' : '#000000'
+}
+
+function formatDuration(duration) {
+  // Format duration for display
+  if (!duration || duration === 'N/A') return '00:00'
+  return duration
+}
+
+// Drag and drop event handlers
+function handleDragStart(event, index) { // eslint-disable-line no-unused-vars
+  draggedIndex.value = index
+  isDragging.value = true
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/html', event.target.innerHTML)
+
+  // Add visual feedback
+  event.target.style.opacity = '0.5'
+
+  // Store the dragged item data
+  event.dataTransfer.setData('draggedIndex', index.toString())
+}
+
+function handleDragEnd(event) { // eslint-disable-line no-unused-vars
+  draggedIndex.value = null
+  dragOverIndex.value = null
+  isDragging.value = false
+
+  // Reset visual feedback
+  event.target.style.opacity = '1'
+
+  // Clean up any drag-over styling
+  const draggableItems = rundownList.value?.querySelectorAll('.draggable-item')
+  if (draggableItems) {
+    draggableItems.forEach(item => {
+      item.classList.remove('drag-over-top', 'drag-over-bottom')
+    })
+  }
+}
+
+function handleDragOver(event) { // eslint-disable-line no-unused-vars
+  if (event.preventDefault) {
+    event.preventDefault() // Allow drop
+  }
+  event.dataTransfer.dropEffect = 'move'
+  return false
+}
+
+function handleDragEnter(event, index) { // eslint-disable-line no-unused-vars
+  if (draggedIndex.value === null) return
+
+  dragOverIndex.value = index
+
+  // Add visual feedback for drop zone
+  const rect = event.currentTarget.getBoundingClientRect()
+  const midpoint = rect.top + rect.height / 2
+
+  // Clear previous indicators
+  const draggableItems = rundownList.value?.querySelectorAll('.draggable-item')
+  if (draggableItems) {
+    draggableItems.forEach(item => {
+      item.classList.remove('drag-over-top', 'drag-over-bottom')
+    })
+  }
+
+  // Add new indicator
+  if (event.clientY < midpoint) {
+    event.currentTarget.classList.add('drag-over-top')
+  } else {
+    event.currentTarget.classList.add('drag-over-bottom')
+  }
+}
+
+function handleDragLeave(event) { // eslint-disable-line no-unused-vars
+  // Remove visual feedback when leaving
+  event.currentTarget.classList.remove('drag-over-top', 'drag-over-bottom')
+}
+
+function handleDrop(event, dropIndex) { // eslint-disable-line no-unused-vars
+  if (event.stopPropagation) {
+    event.stopPropagation() // Stop propagation
+  }
+
+  if (draggedIndex.value === null || draggedIndex.value === dropIndex) {
+    return false
+  }
+
+  // Get the position (before or after)
+  const rect = event.currentTarget.getBoundingClientRect()
+  const midpoint = rect.top + rect.height / 2
+  const insertAfter = event.clientY >= midpoint
+
+  // Calculate the actual insertion index
+  let targetIndex = dropIndex
+  if (insertAfter && dropIndex >= draggedIndex.value) {
+    targetIndex = dropIndex
+  } else if (insertAfter) {
+    targetIndex = dropIndex + 1
+  } else if (!insertAfter && dropIndex > draggedIndex.value) {
+    targetIndex = dropIndex - 1
+  } else {
+    targetIndex = dropIndex
+  }
+
+  // Perform the reorder
+  const draggedItem = segments.value[draggedIndex.value]
+  const newSegments = [...segments.value]
+
+  // Remove the dragged item
+  newSegments.splice(draggedIndex.value, 1)
+
+  // Insert at new position
+  if (draggedIndex.value < targetIndex) {
+    newSegments.splice(targetIndex, 0, draggedItem)
+  } else {
+    newSegments.splice(targetIndex, 0, draggedItem)
+  }
+
+  // Update the segments array
+  segments.value = newSegments
+
+  // Clean up
+  draggedIndex.value = null
+  dragOverIndex.value = null
+
+  // Clean up visual indicators
+  const draggableItems = rundownList.value?.querySelectorAll('.draggable-item')
+  if (draggableItems) {
+    draggableItems.forEach(item => {
+      item.classList.remove('drag-over-top', 'drag-over-bottom')
+    })
+  }
+
+  return false
+}
+
+function clearInlineEpisodeInfo() {
+  inlineEpisodeInfo.value = {
+    title: '',
+    subtitle: '',
+    duration: '',
+    guest: '',
+    tags: '',
+    slug: '',
+    status: '',
+    airdate: ''
+  }
+}
+
+async function saveEpisodeInfo() {
+  if (!episodeInfo.value || !selectedEpisode.value) return
+
+  updatingEpisode.value = true
+  try {
+    // Prepare the data
+    const updateData = {
+      ...inlineEpisodeInfo.value,
+      tags: inlineEpisodeInfo.value.tags ? inlineEpisodeInfo.value.tags.split(',').map(t => t.trim()) : []
+    }
+
+    // Save the episode info
+    await axios.put(`/api/episodes/${selectedEpisode.value}/info`, updateData)
+
+    // Update local episodeInfo
+    episodeInfo.value = { ...episodeInfo.value, ...updateData }
+
+    showSnackbar('Episode information saved successfully!')
+  } catch (error) {
+    showSnackbar('Failed to save episode information: ' + error.message, 'error')
+  } finally {
+    updatingEpisode.value = false
+  }
+}
+
+function cancelEpisodeEdit() { // eslint-disable-line no-unused-vars
+  // Reset to original values
+  populateInlineEpisodeInfo()
+  showEditEpisodeDialog.value = false
+}
+
+async function saveEpisodeChanges() { // eslint-disable-line no-unused-vars
+  updatingEpisode.value = true
+  try {
+    // Similar to saveEpisodeInfo but for the dialog
+    const updateData = {
+      ...editableEpisodeInfo.value,
+      tags: editableEpisodeInfo.value.tags ? editableEpisodeInfo.value.tags.split(',').map(t => t.trim()) : []
+    }
+
+    await axios.put(`/api/episodes/${selectedEpisode.value}/info`, updateData)
+
+    // Update both local states
+    episodeInfo.value = { ...episodeInfo.value, ...updateData }
+    populateInlineEpisodeInfo()
+
+    showEditEpisodeDialog.value = false
+    showSnackbar('Episode information updated successfully!')
+  } catch (error) {
+    showSnackbar('Failed to update episode information: ' + error.message, 'error')
+  } finally {
+    updatingEpisode.value = false
+  }
+}
+
+// created() logic - runs immediately in <script setup>
+// Initialize colors
+const highlightColor = getColorValue('highlight') // eslint-disable-line no-unused-vars
+document.documentElement.style.setProperty('--highlight-color', `rgb(var(--v-theme-${highlightColor}))`)
+updateSelectionColors()
+
+// Initialize modal theme
+updateModalTheme()
+
+// Add keyboard event listeners
+document.addEventListener('keydown', handleKeydown)
+
+// Lifecycle hooks
+onMounted(() => {
+  fetchEpisodes()  // This will now also trigger loading the episode from session
+})
+
+onBeforeUnmount(() => {
+  // Clean up keyboard event listeners
+  document.removeEventListener('keydown', handleKeydown)
+})
 </script>
 
 <style scoped>

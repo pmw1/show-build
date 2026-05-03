@@ -45,202 +45,204 @@
   </v-dialog>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { getColorValue } from '@/utils/themeColorMap.js';
 import { getAllItemTypes, mergeWithCustomTypes } from '@/config/itemTypes.js';
 
-export default {
-  name: 'NewItemModal',
-  emits: ['update:show', 'submit', 'open-library-picker'],
-  props: {
-    show: {
-      type: Boolean,
-      default: false
-    },
-    loading: {
-      type: Boolean,
-      default: false
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
+  },
+  loading: { // eslint-disable-line no-unused-vars
+    type: Boolean,
+    default: false
+  }
+});
+
+const emit = defineEmits(['update:show', 'submit', 'open-library-picker']);
+
+const dynamicColors = ref({});
+const typeSettings = ref({});
+const customTypesLoaded = ref(false);
+// Reactive trigger to force computed re-evaluation after custom types merge
+const customTypesVersion = ref(0);
+
+const allTypes = computed(() => {
+  // Access reactive trigger so computed re-evaluates when custom types load
+  void customTypesVersion.value; // eslint-disable-line no-unused-expressions
+  // Get all item types (core + custom) from the merged type system
+  const types = getAllItemTypes();
+  // Map to display format with dynamic colors
+  return types.map(type => ({
+    title: type.title,
+    value: type.value,
+    color: getTypeColor(type.value) || type.color,
+    icon: type.icon,
+    isCore: type.isCore,
+    isReusable: type.isReusable || false
+  }));
+});
+
+async function loadDynamicColors() {
+  try {
+    console.log('Loading dynamic colors for NewItemModal');
+    const response = await fetch('/api/settings/colors?profile=default');
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.colors) {
+        dynamicColors.value = data.colors;
+        console.log('Dynamic colors loaded:', dynamicColors.value);
+      }
     }
-  },
-  data() {
-    return {
-      dynamicColors: {},
-      typeSettings: {},  // Content type settings (is_reusable flag)
-      customTypesLoaded: false
-    }
-  },
-  computed: {
-    allTypes() {
-      // Get all item types (core + custom) from the merged type system
-      const types = getAllItemTypes();
-      // Map to display format with dynamic colors
-      return types.map(type => ({
-        title: type.title,
-        value: type.value,
-        color: this.getTypeColor(type.value) || type.color,
-        icon: type.icon,
-        isCore: type.isCore,
-        isReusable: type.isReusable || false
-      }));
-    }
-  },
-  async mounted() {
-    // Add ESC key listener to document
-    document.addEventListener('keydown', this.handleKeydown);
-
-    // Load dynamic colors and type settings in parallel
-    await Promise.all([
-      this.loadDynamicColors(),
-      this.loadTypeSettings()
-    ]);
-  },
-  beforeUnmount() {
-    // Clean up ESC key listener
-    document.removeEventListener('keydown', this.handleKeydown)
-  },
-  methods: {
-    async loadDynamicColors() {
-      try {
-        console.log('Loading dynamic colors for NewItemModal');
-        const response = await fetch('/api/settings/colors?profile=default');
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.colors) {
-            this.dynamicColors = data.colors;
-            console.log('Dynamic colors loaded:', this.dynamicColors);
-          }
-        }
-      } catch (error) {
-        console.log('Could not load dynamic colors, using defaults:', error);
-      }
-    },
-
-    async loadTypeSettings() {
-      try {
-        console.log('Loading content type settings for NewItemModal');
-        const response = await fetch('/api/content-library/type-settings/', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          }
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.settings) {
-            // Convert array to object keyed by type_name
-            this.typeSettings = {};
-            data.settings.forEach(setting => {
-              this.typeSettings[setting.type_name] = setting;
-            });
-            console.log('Type settings loaded:', this.typeSettings);
-
-            // Load custom types (is_core=false) and merge them into the type system
-            await this.loadCustomTypes();
-          }
-        }
-      } catch (error) {
-        console.log('Could not load type settings (content library may not be set up):', error);
-        // This is fine - content library is optional
-      }
-    },
-
-    async loadCustomTypes() {
-      try {
-        console.log('Loading custom types for NewItemModal');
-        const response = await fetch('/api/content-library/custom-types/', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          }
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.custom_types && data.custom_types.length > 0) {
-            // Merge custom types into the global type system
-            mergeWithCustomTypes(data.custom_types);
-            this.customTypesLoaded = true;
-            console.log('Custom types merged:', data.custom_types.length, 'types');
-            // Force computed property to re-evaluate
-            this.$forceUpdate();
-          }
-        }
-      } catch (error) {
-        console.log('Could not load custom types:', error);
-      }
-    },
-
-    isTypeReusable(typeValue) {
-      // Map UI type values to backend type names
-      const typeMapping = {
-        'ad': 'advertisement',
-        'coldopen': 'coldopen',
-        'tease': 'tease',
-        'segment': 'segment',
-        'promo': 'promo',
-        'reader': 'reader',
-        'cta': 'cta',
-        'interview': 'interview'
-      };
-      const backendType = typeMapping[typeValue] || typeValue;
-      const setting = this.typeSettings[backendType];
-      return setting?.is_reusable || false;
-    },
-
-    getTypeColor(type) {
-      // Return dynamic color if available, otherwise use themeColorMap fallback
-      return this.dynamicColors[type] || getColorValue(type);
-    },
-
-    handleKeydown(event) {
-      // Handle ESC key when modal is open
-      if (event.key === 'Escape' && this.show) {
-        this.cancel()
-      }
-    },
-
-    selectType(type) {
-      console.log('Selected type:', type);
-
-      // Check if this type is configured as reusable
-      if (this.isTypeReusable(type.value)) {
-        console.log(`Type ${type.value} is reusable - opening library picker`);
-        // Emit event to open library picker instead of creating directly
-        this.$emit('open-library-picker', {
-          itemType: type.value,
-          displayName: type.title
-        });
-        this.cancel();
-        return;
-      }
-
-      // Create item with basic defaults (for non-reusable types)
-      const item = {
-        type: type.value,
-        title: type.value === 'tease' ? '' : type.title,  // Tease title should be empty initially
-        subtitle: '',
-        slug: type.value === 'coldopen' ? 'show-cold-open' : '',
-        duration: type.value === 'coldopen' ? '00:00:45:00' : '00:00:00:00',  // Use hh:mm:ss:ff format
-        description: '',
-        airdate: '',  // Will be populated from info.md frontmatter
-        priority: '',  // Empty as specified
-        guests: '',
-        tags: '',
-        server_message: '',
-        customer: '',
-        link: '',
-        status: 'draft'  // Default status
-      };
-
-      // Emit the item creation
-      this.$emit('submit', item);
-
-      // Close modal
-      this.cancel();
-    },
-    cancel() {
-      this.$emit('update:show', false);
-    }
+  } catch (error) {
+    console.log('Could not load dynamic colors, using defaults:', error);
   }
 }
+
+async function loadTypeSettings() {
+  try {
+    console.log('Loading content type settings for NewItemModal');
+    const response = await fetch('/api/content-library/type-settings/', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.settings) {
+        // Convert array to object keyed by type_name
+        const settings = {};
+        data.settings.forEach(setting => {
+          settings[setting.type_name] = setting;
+        });
+        typeSettings.value = settings;
+        console.log('Type settings loaded:', typeSettings.value);
+
+        // Load custom types (is_core=false) and merge them into the type system
+        await loadCustomTypes();
+      }
+    }
+  } catch (error) {
+    console.log('Could not load type settings (content library may not be set up):', error);
+    // This is fine - content library is optional
+  }
+}
+
+async function loadCustomTypes() {
+  try {
+    console.log('Loading custom types for NewItemModal');
+    const response = await fetch('/api/content-library/custom-types/', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.custom_types && data.custom_types.length > 0) {
+        // Merge custom types into the global type system
+        mergeWithCustomTypes(data.custom_types);
+        customTypesLoaded.value = true;
+        console.log('Custom types merged:', data.custom_types.length, 'types');
+        // Force computed property to re-evaluate
+        customTypesVersion.value++;
+      }
+    }
+  } catch (error) {
+    console.log('Could not load custom types:', error);
+  }
+}
+
+function isTypeReusable(typeValue) {
+  // Map UI type values to backend type names
+  const typeMapping = {
+    'ad': 'advertisement',
+    'coldopen': 'coldopen',
+    'tease': 'tease',
+    'segment': 'segment',
+    'promo': 'promo',
+    'reader': 'reader',
+    'cta': 'cta',
+    'interview': 'interview'
+  };
+  const backendType = typeMapping[typeValue] || typeValue;
+  const setting = typeSettings.value[backendType];
+  return setting?.is_reusable || false;
+}
+
+function getTypeColor(type) {
+  // Return dynamic color if available, otherwise use themeColorMap fallback
+  return dynamicColors.value[type] || getColorValue(type);
+}
+
+function handleKeydown(event) {
+  // Handle ESC key when modal is open
+  if (event.key === 'Escape' && props.show) {
+    cancel();
+  }
+}
+
+function selectType(type) {
+  console.log('Selected type:', type);
+
+  // Check if this type is configured as reusable
+  if (isTypeReusable(type.value)) {
+    console.log(`Type ${type.value} is reusable - opening library picker`);
+    // Emit event to open library picker instead of creating directly
+    emit('open-library-picker', {
+      itemType: type.value,
+      displayName: type.title
+    });
+    cancel();
+    return;
+  }
+
+  // Create item with basic defaults (for non-reusable types)
+  const item = {
+    type: type.value,
+    title: type.value === 'tease' ? '' : type.title,  // Tease title should be empty initially
+    subtitle: '',
+    slug: type.value === 'coldopen' ? 'show-cold-open' : '',
+    duration: type.value === 'coldopen' ? '00:00:45:00' : '00:00:00:00',  // Use hh:mm:ss:ff format
+    description: '',
+    airdate: '',  // Will be populated from info.md frontmatter
+    priority: '',  // Empty as specified
+    guests: '',
+    tags: '',
+    server_message: '',
+    customer: '',
+    link: '',
+    status: 'draft'  // Default status
+  };
+
+  // Emit the item creation
+  emit('submit', item);
+
+  // Close modal
+  cancel();
+}
+
+function cancel() {
+  emit('update:show', false);
+}
+
+onMounted(async () => {
+  // Add ESC key listener to document
+  document.addEventListener('keydown', handleKeydown);
+
+  // Load dynamic colors and type settings in parallel
+  await Promise.all([
+    loadDynamicColors(),
+    loadTypeSettings()
+  ]);
+});
+
+onBeforeUnmount(() => {
+  // Clean up ESC key listener
+  document.removeEventListener('keydown', handleKeydown);
+});
 </script>

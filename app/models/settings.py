@@ -14,7 +14,10 @@ class Settings(Base):
     __tablename__ = "settings"
 
     id = Column(Integer, primary_key=True, index=True)
-    key = Column(String(100), unique=True, nullable=False, index=True)
+    # Note: uniqueness is enforced at the DB layer via partial unique indexes
+    # (uq_settings_user_key for per-user rows, uq_settings_global_key for global)
+    # — see migration g010_settings_per_user_unique.
+    key = Column(String(100), nullable=False, index=True)
     value = Column(JSON, nullable=False)
     category = Column(String(50), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)

@@ -94,6 +94,41 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         logger.error(f"JWT validation error: {type(e).__name__} - {e}")
         raise credentials_exception
 
+# In-memory presence touch debouncer: { user_id: last_db_write_epoch_seconds }
+# Limits the UPDATE on users.last_seen_at to once per minute per user across
+# this worker. Single-process workers see this directly; under multi-worker
+# this just means each worker debounces independently — still a 60x reduction.
+_LAST_SEEN_TOUCH: dict = {}
+_LAST_SEEN_INTERVAL_SECONDS = 60
+
+
+def _touch_last_seen(user_id):
+    """Update users.last_seen_at to now() if we haven't done so recently.
+    Failures are swallowed — presence is best-effort, never a request blocker."""
+    if not user_id:
+        return
+    try:
+        import time
+        now = time.time()
+        prev = _LAST_SEEN_TOUCH.get(user_id, 0)
+        if now - prev < _LAST_SEEN_INTERVAL_SECONDS:
+            return
+        _LAST_SEEN_TOUCH[user_id] = now
+        from database import SessionLocal
+        from sqlalchemy import text
+        db = SessionLocal()
+        try:
+            db.execute(
+                text("UPDATE users SET last_seen_at = NOW() WHERE id = :uid"),
+                {"uid": int(user_id)}
+            )
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug(f"_touch_last_seen({user_id}) skipped: {e}")
+
+
 async def get_current_user_or_key(
     api_key: Optional[str] = Depends(api_key_header),
     token: Optional[str] = Depends(oauth2_scheme)
@@ -129,7 +164,10 @@ async def get_current_user_or_key(
         print("Attempting JWT authentication...")
         logger.info("Attempting JWT authentication...")
         try:
-            return await get_current_user(token)
+            user = await get_current_user(token)
+            # Best-effort presence touch (debounced to once/min/user).
+            _touch_last_seen(user.get("id"))
+            return user
         except HTTPException:
             print("JWT authentication failed")
             logger.warning("JWT authentication failed")

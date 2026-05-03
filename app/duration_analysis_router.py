@@ -76,73 +76,92 @@ def extract_media_url_from_cue(cue_content: str) -> Optional[str]:
     return None
 
 def update_cue_duration_in_markdown(markdown_path: Path, asset_id: str, duration_timecode: str) -> bool:
-    """Update duration field in specific cue block within markdown file"""
+    """Update duration field in specific cue block within markdown file.
+    Gracefully handles missing files (filesystem may not exist if DB-first)."""
     try:
         if not markdown_path.exists():
             return False
-            
+
         with open(markdown_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        
+
         # Find the cue block with this AssetID
         cue_pattern = rf'```cue\s+{re.escape(asset_id)}.*?```'
         cue_match = re.search(cue_pattern, content, re.DOTALL | re.IGNORECASE)
-        
+
         if not cue_match:
             return False
-        
+
         cue_block = cue_match.group(0)
-        
+
         # Update duration field in the cue block
         duration_patterns = [
             (r'Duration:\s*[^\n\r]*', f'Duration: {duration_timecode}'),
             (r'duration:\s*[^\n\r]*', f'duration: {duration_timecode}')
         ]
-        
+
         updated_block = cue_block
         duration_updated = False
-        
+
         for pattern, replacement in duration_patterns:
             if re.search(pattern, updated_block, re.IGNORECASE):
                 updated_block = re.sub(pattern, replacement, updated_block, flags=re.IGNORECASE)
                 duration_updated = True
                 break
-        
+
         # If no duration field found, add one
         if not duration_updated:
             # Insert duration field before the closing ```
             updated_block = updated_block.replace('```', f'Duration: {duration_timecode}\n```')
-        
+
         # Replace the old cue block with updated one
         updated_content = content.replace(cue_block, updated_block)
-        
+
         with open(markdown_path, 'w', encoding='utf-8') as f:
             f.write(updated_content)
-        
+
         return True
-        
+
     except Exception:
         return False
 
 def update_rundown_item_duration(markdown_path: Path, duration_timecode: str) -> bool:
-    """Update duration field in markdown frontmatter"""
+    """Update duration field in markdown frontmatter.
+    Gracefully handles missing files (filesystem may not exist if DB-first)."""
     try:
         if not markdown_path.exists():
             return False
-            
+
         with open(markdown_path, 'r', encoding='utf-8') as f:
             post = frontmatter.load(f)
-        
+
         # Update duration in frontmatter
         post.metadata['duration'] = duration_timecode
-        
+
         # Write back to file
         with open(markdown_path, 'w', encoding='utf-8') as f:
             frontmatter.dump(post, f)
-        
+
         return True
-        
+
     except Exception:
+        return False
+
+
+def update_rundown_item_duration_in_db(db: Session, asset_id: str, duration_timecode: str) -> bool:
+    """Update duration field on RundownItem in the database."""
+    try:
+        from models_v2 import RundownItem
+        db_item = db.query(RundownItem).filter(
+            RundownItem.asset_id == str(asset_id)
+        ).first()
+        if db_item:
+            db_item.duration = duration_timecode
+            db.commit()
+            return True
+        return False
+    except Exception:
+        db.rollback()
         return False
 
 def find_cue_blocks_in_rundown_item(markdown_path: Path) -> List[Dict[str, str]]:
@@ -226,7 +245,8 @@ async def get_duration(
         raise HTTPException(status_code=500, detail=f"Error processing duration: {str(e)}")
 
 async def process_single_cue(asset_record: AssetIDRegistry, db: Session) -> Dict[str, Any]:
-    """Process a single cue/SOT AssetID"""
+    """Process a single cue/SOT AssetID.
+    Updates both filesystem (if files exist) and database."""
     try:
         # Construct file path from asset record
         file_path = asset_record.file_path
@@ -236,12 +256,12 @@ async def process_single_cue(asset_record: AssetIDRegistry, db: Session) -> Dict
                 'error': 'No file path in asset record',
                 'updated': False
             }
-        
+
         # If relative path, make it absolute
         if not file_path.startswith('/'):
             episode_dir = Path(f"/home/episodes/{asset_record.episode_number}")
             file_path = str(episode_dir / file_path)
-        
+
         # Check if file exists
         if not Path(file_path).exists():
             return {
@@ -250,7 +270,7 @@ async def process_single_cue(asset_record: AssetIDRegistry, db: Session) -> Dict
                 'error': 'Media file not found',
                 'updated': False
             }
-        
+
         # Get duration with FFprobe
         duration_seconds = get_duration_with_ffprobe(file_path)
         if duration_seconds is None:
@@ -260,28 +280,31 @@ async def process_single_cue(asset_record: AssetIDRegistry, db: Session) -> Dict
                 'error': 'Could not analyze duration with FFprobe',
                 'updated': False
             }
-        
+
         duration_timecode = seconds_to_timecode(duration_seconds)
-        
-        # Update the cue block in the markdown file
+
+        # Update the cue block in the markdown file (graceful if missing)
+        file_updated = False
         if asset_record.markdown_file_path:
             markdown_path = Path(asset_record.markdown_file_path)
             if not markdown_path.is_absolute():
                 episode_dir = Path(f"/home/episodes/{asset_record.episode_number}")
                 markdown_path = episode_dir / markdown_path
-            
-            updated = update_cue_duration_in_markdown(markdown_path, asset_record.asset_id, duration_timecode)
-        else:
-            updated = False
-        
+            file_updated = update_cue_duration_in_markdown(markdown_path, asset_record.asset_id, duration_timecode)
+
+        # Also update duration in DB
+        db_updated = update_rundown_item_duration_in_db(db, asset_record.asset_id, duration_timecode)
+
         return {
             'asset_id': asset_record.asset_id,
             'file_path': file_path,
             'duration_seconds': duration_seconds,
             'duration_timecode': duration_timecode,
-            'updated': updated
+            'updated': file_updated or db_updated,
+            'file_updated': file_updated,
+            'db_updated': db_updated
         }
-        
+
     except Exception as e:
         return {
             'asset_id': asset_record.asset_id,
@@ -360,17 +383,20 @@ async def process_rundown_item_batch(asset_record: AssetIDRegistry, db: Session)
                     'updated': False
                 })
         
-        # Update the rundown item's total duration
+        # Update the rundown item's total duration in both file and DB
         if total_duration_seconds > 0:
             total_timecode = seconds_to_timecode(total_duration_seconds)
-            rundown_updated = update_rundown_item_duration(markdown_path, total_timecode)
-            
+            file_updated = update_rundown_item_duration(markdown_path, total_timecode)
+            db_updated = update_rundown_item_duration_in_db(db, asset_record.asset_id, total_timecode)
+
             results.append({
                 'asset_id': asset_record.asset_id,
                 'type': 'rundown_total',
                 'duration_seconds': total_duration_seconds,
                 'duration_timecode': total_timecode,
-                'updated': rundown_updated
+                'updated': file_updated or db_updated,
+                'file_updated': file_updated,
+                'db_updated': db_updated
             })
         
         return results

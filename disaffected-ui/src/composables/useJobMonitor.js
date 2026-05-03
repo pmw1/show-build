@@ -58,6 +58,32 @@ export function useJobMonitor() {
   }
 
   /**
+   * Check for unseen LLM content notifications and show toasts
+   */
+  const checkLLMNotifications = async () => {
+    try {
+      const response = await axios.get('/api/llm-notifications/unseen')
+      const notifications = response.data?.notifications || []
+      for (const n of notifications) {
+        const isSuccess = n.status === 'success'
+        const color = isSuccess ? '#4CAF50' : '#F44336'
+        const msg = n.message || (isSuccess ? 'LLM content generated' : 'LLM content generation failed')
+        if (typeof window.notifyUserStandard === 'function') {
+          window.notifyUserStandard(msg, color, isSuccess ? 4000 : 6000)
+        }
+        // Emit event so content editor can refresh the affected segment
+        if (isSuccess && n.asset_id) {
+          window.dispatchEvent(new CustomEvent('llm-segment-updated', {
+            detail: { asset_id: n.asset_id, content_type: n.content_type }
+          }))
+        }
+      }
+    } catch (error) {
+      // Silent — notification polling is non-critical
+    }
+  }
+
+  /**
    * Start polling for job updates
    */
   const startPolling = (intervalMs = 5000) => {
@@ -68,11 +94,13 @@ export function useJobMonitor() {
     // Fetch immediately
     fetchActiveJobs()
     fetchRecentJobs()
+    checkLLMNotifications()
 
     // Then poll at interval
     pollInterval.value = setInterval(() => {
       fetchActiveJobs()
       fetchRecentJobs()
+      checkLLMNotifications()
     }, intervalMs)
   }
 

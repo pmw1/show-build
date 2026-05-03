@@ -116,13 +116,34 @@ async def get_show_info():
 @router.get("/episodes")
 async def list_episodes(db: Session = Depends(get_db)):
     """
-    LEGACY: Lists all available episodes by scanning the /home/episodes directory.
-    Prefer /api/episodes from episodes_router instead.
+    LEGACY: Lists all available episodes.
+    Reads from database first (authoritative), falls back to filesystem scan.
+    Prefer /api/episodes from crud_router instead.
     """
+    # Try database first (authoritative source)
+    try:
+        from models_v2 import Episode
+        db_episodes = db.query(Episode).order_by(Episode.episode_number.desc()).all()
+        if db_episodes:
+            episodes = []
+            for ep in db_episodes:
+                episode_number_str = f"{ep.episode_number:04d}" if ep.episode_number else "0000"
+                episodes.append({
+                    "episode_number": episode_number_str,
+                    "title": ep.title or f"Episode {episode_number_str}",
+                    "airdate": ep.air_date.isoformat() if ep.air_date else None,
+                    "status": ep.status or "unknown",
+                    "asset_id": ep.asset_id
+                })
+            return {"episodes": episodes, "source": "database"}
+    except Exception as e:
+        logging.warning(f"Database episode listing failed, falling back to filesystem: {e}")
+
+    # Fallback to filesystem scan
     base_path = "/home/episodes"
     if not os.path.isdir(base_path):
         logging.error(f"Episodes base path not found: {base_path}")
-        raise HTTPException(status_code=500, detail="Episodes directory not configured.")
+        return {"episodes": [], "source": "error"}
 
     episodes = []
     for item in sorted(os.listdir(base_path), reverse=True):
@@ -130,44 +151,22 @@ async def list_episodes(db: Session = Depends(get_db)):
         if not os.path.isdir(episode_path):
             continue
 
-        info_path = os.path.join(episode_path, "info.md")
-
         title = f"Episode {item}"
         airdate = None
         status = "unknown"
         asset_id = None
 
+        info_path = os.path.join(episode_path, "info.md")
         if os.path.exists(info_path):
-            metadata = None
             try:
                 metadata, _ = parse_markdown_file(info_path)
-
                 if metadata and isinstance(metadata, dict):
                     title = metadata.get("title", title)
                     airdate = metadata.get("airdate")
                     status = metadata.get("status", "unknown")
                     asset_id = metadata.get("AssetID")
-                elif metadata:
-                    logging.warning(f"Metadata for episode {item} is not a dictionary. Type: {type(metadata)}. Data: {metadata}")
-
             except Exception as e:
                 logging.warning(f"Could not process info.md for episode {item}: {e}")
-
-        if not asset_id:
-            try:
-                from models_v2 import Episode
-                try:
-                    episode_num_int = int(item.lstrip('0')) if item.isdigit() else None
-                    if episode_num_int:
-                        episode_record = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
-                    else:
-                        episode_record = None
-                except ValueError:
-                    episode_record = None
-                if episode_record and episode_record.asset_id:
-                    asset_id = episode_record.asset_id
-            except Exception as e:
-                logging.warning(f"Could not query database for episode {item} AssetID: {e}")
 
         episodes.append({
             "episode_number": item,
@@ -177,10 +176,7 @@ async def list_episodes(db: Session = Depends(get_db)):
             "asset_id": asset_id
         })
 
-    if not episodes:
-        logging.warning(f"No valid episodes found in {base_path}")
-
-    return {"episodes": episodes}
+    return {"episodes": episodes, "source": "filesystem"}
 
 
 @router.post("/next-id")
@@ -351,21 +347,110 @@ async def debug_rundown(episode_number: str):
 
 
 @router.post("/rundown/{episode_number}/reorder")
-async def reorder_rundown(episode_number: str, payload: ReorderRequest):
-    """Reorder rundown items and rename files to match their new order."""
-    return await reorder_rundown_with_rename(episode_number, payload.dict())
+async def reorder_rundown(
+    episode_number: str,
+    payload: ReorderRequest,
+    db: Session = Depends(get_db)
+):
+    """Reorder rundown items — updates order_in_rundown in database (authoritative).
+    Also attempts filesystem reorder for backward compatibility.
+    """
+    from models_v2 import Episode, Rundown, RundownItem
+
+    # Update database (authoritative source)
+    db_updated = 0
+    try:
+        episode_num_int = int(episode_number)
+        episode = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
+
+        if episode:
+            rundown = db.query(Rundown).filter(Rundown.episode_id == episode.id).first()
+            if rundown:
+                for segment in payload.segments:
+                    new_order = segment.get("order")
+                    if new_order is None:
+                        continue
+
+                    asset_id = segment.get("asset_id")
+                    filename = segment.get("filename")
+
+                    item = None
+                    if asset_id:
+                        item = db.query(RundownItem).filter(
+                            RundownItem.asset_id == asset_id,
+                            RundownItem.rundown_id == rundown.id
+                        ).first()
+
+                    if not item and filename:
+                        # Try to match by filename pattern
+                        items = db.query(RundownItem).filter(
+                            RundownItem.rundown_id == rundown.id
+                        ).all()
+                        for candidate in items:
+                            candidate_filename = f"{(candidate.order_in_rundown or 0):03d}-{candidate.slug}.md"
+                            if candidate_filename == filename:
+                                item = candidate
+                                break
+
+                    if item:
+                        item.order_in_rundown = new_order
+                        db_updated += 1
+
+                db.commit()
+                logger.info(f"DB reorder: updated {db_updated} items for episode {episode_number}")
+    except Exception as db_err:
+        db.rollback()
+        logger.error(f"Database reorder failed for episode {episode_number}: {db_err}")
+
+    # Also attempt filesystem reorder (backward compat, best-effort)
+    try:
+        await reorder_rundown_with_rename(episode_number, payload.dict())
+    except Exception as fs_err:
+        logger.warning(f"Filesystem reorder skipped for episode {episode_number}: {fs_err}")
+
+    return {"status": "success", "message": f"Rundown order updated (DB: {db_updated} items)"}
 
 
 @router.get("/episodes/{episode_number}/info")
-async def get_episode_info(episode_number: str, current_user: dict = Depends(get_current_user_or_key)):
-    """Get episode information from info.md file"""
+async def get_episode_info(
+    episode_number: str,
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    LEGACY: Get episode information. Reads from database first, falls back to info.md.
+    Prefer /api/episodes/{episode_number}/info from metadata_router instead.
+    """
+    # Try database first (authoritative source)
+    try:
+        from models_v2 import Episode
+        episode_num_int = int(episode_number)
+        episode = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
+        if episode:
+            info = {
+                "title": episode.title or "Untitled",
+                "status": episode.status or "draft",
+                "airdate": episode.air_date.isoformat() if episode.air_date else None,
+                "asset_id": episode.asset_id,
+                "episode_number": f"{episode.episode_number:04d}",
+            }
+            return {
+                "episode_number": episode_number,
+                "info": info,
+                "body": episode.description or "",
+                "source": "database"
+            }
+    except Exception as e:
+        logging.warning(f"Database lookup failed for episode {episode_number}: {e}")
+
+    # Fallback to filesystem if DB has no record
     base_path = "/home/episodes"
     info_path = os.path.join(base_path, episode_number, "info.md")
 
     if not os.path.exists(info_path):
         raise HTTPException(
             status_code=404,
-            detail=f"Episode info file not found: {info_path}"
+            detail=f"Episode {episode_number} not found in database or filesystem"
         )
 
     try:
@@ -383,13 +468,15 @@ async def get_episode_info(episode_number: str, current_user: dict = Depends(get
                 return {
                     "episode_number": episode_number,
                     "info": frontmatter,
-                    "body": body
+                    "body": body,
+                    "source": "filesystem"
                 }
 
         return {
             "episode_number": episode_number,
             "info": {},
-            "body": content
+            "body": content,
+            "source": "filesystem"
         }
 
     except Exception as e:

@@ -2,6 +2,10 @@ const { defineConfig } = require('@vue/cli-service')
 const fs = require('fs')
 const path = require('path')
 
+// Override follow-redirects default 10MB body limit for large video uploads
+const followRedirects = require('follow-redirects')
+followRedirects.maxBodyLength = 10 * 1024 * 1024 * 1024 // 10GB
+
 // Check if SSL certificates exist and are accessible
 const sslKeyPath = path.join(__dirname, 'ssl', 'key.pem')
 const sslCertPath = path.join(__dirname, 'ssl', 'cert.pem')
@@ -76,6 +80,7 @@ module.exports = defineConfig({
         target: 'http://server:80',
         changeOrigin: true,
         secure: false,
+        followRedirects: true,
         timeout: 300000  // 5 minutes for long-running LLM operations
       },
       '/assetid': {

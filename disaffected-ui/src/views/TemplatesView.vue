@@ -43,82 +43,76 @@
   </v-container>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 import { getItemTypesForDropdown } from '@/config/itemTypes';
-export default {
-  name: 'TemplatesView',
-  data: () => ({
-    loading: false,
-    showCreateDialog: false,
-    newTemplate: { name: '', type: '', content: '' },
-    headers: [
-      { title: 'Name', key: 'name', sortable: true },
-      { title: 'Type', key: 'type', sortable: true },
-      { title: 'Last Modified', key: 'modified', sortable: true },
-      { title: 'Actions', key: 'actions', sortable: false, align: 'end' }
-    ],
-    templates: []
-  }),
-  computed: {
-    itemTypeOptions() {
-      return getItemTypesForDropdown();
-    }
-  },
-  methods: {
-    async createTemplate() {
-      this.loading = true;
-      try {
-        await axios.post('/api/templates', this.newTemplate, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
-        });
-        this.loadTemplates();
-        this.showCreateDialog = false;
-        this.newTemplate = { name: '', type: '', content: '' };
-        // this.$toast.success('Template created successfully');
-      } catch (error) {
-        console.error('Failed to create template', error);
-        // this.$toast.error('Failed to create template');
-      }
-      this.loading = false;
-    },
-    async editTemplate(item) {
-      // This should open a dialog pre-filled with item data
-      // For simplicity, we'll just log it.
-      console.log('Editing template:', item);
-    },
-    async deleteTemplate(item) {
-      this.loading = true;
-      try {
-        await axios.delete(`/api/templates/${item.id}`, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
-        });
-        this.templates = this.templates.filter(t => t.id !== item.id);
-        // this.$toast.success('Template deleted successfully');
-      } catch (error) {
-        console.error('Failed to delete template', error);
-        // this.$toast.error('Failed to delete template');
-      }
-      this.loading = false;
-    },
-    async loadTemplates() {
-      this.loading = true;
-      try {
-        const response = await axios.get('/api/templates', {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
-        });
-        this.templates = response.data;
-      } catch (error) {
-        console.error('Failed to load templates', error);
-        // this.$toast.error('Failed to load templates');
-      }
-      this.loading = false;
-    }
-  },
-  mounted() {
-    this.loadTemplates();
+
+const loading = ref(false);
+const showCreateDialog = ref(false);
+const newTemplate = ref({ name: '', type: '', content: '' });
+const headers = [
+  { title: 'Name', key: 'name', sortable: true },
+  { title: 'Type', key: 'type', sortable: true },
+  { title: 'Last Modified', key: 'modified', sortable: true },
+  { title: 'Actions', key: 'actions', sortable: false, align: 'end' }
+];
+const templates = ref([]);
+
+const itemTypeOptions = computed(() => { // eslint-disable-line no-unused-vars
+  return getItemTypesForDropdown();
+});
+
+async function loadTemplates() {
+  loading.value = true;
+  try {
+    const response = await axios.get('/api/templates', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
+    });
+    templates.value = response.data;
+  } catch (error) {
+    console.error('Failed to load templates', error);
   }
+  loading.value = false;
 }
+
+async function createTemplate() {
+  loading.value = true;
+  try {
+    await axios.post('/api/templates', newTemplate.value, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
+    });
+    loadTemplates();
+    showCreateDialog.value = false;
+    newTemplate.value = { name: '', type: '', content: '' };
+  } catch (error) {
+    console.error('Failed to create template', error);
+  }
+  loading.value = false;
+}
+
+async function editTemplate(item) { // eslint-disable-line no-unused-vars
+  // This should open a dialog pre-filled with item data
+  // For simplicity, we'll just log it.
+  console.log('Editing template:', item);
+}
+
+async function deleteTemplate(item) { // eslint-disable-line no-unused-vars
+  loading.value = true;
+  try {
+    await axios.delete(`/api/templates/${item.id}`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('auth-token')}` }
+    });
+    templates.value = templates.value.filter(t => t.id !== item.id);
+  } catch (error) {
+    console.error('Failed to delete template', error);
+  }
+  loading.value = false;
+}
+
+onMounted(() => {
+  loadTemplates();
+});
 </script>
 
 <style scoped>

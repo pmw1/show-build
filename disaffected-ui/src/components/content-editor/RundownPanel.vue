@@ -401,12 +401,25 @@
                               >mdi-library</v-icon>
                             </div>
 
-                            <!-- Slug -->
+                            <!-- Slug + presence avatars (other users on this segment) -->
                             <div class="slug-column">
                               <div :class="['slug-text', { 'blink-attention': itemHasNeedsAttention(item) }]">{{ itemHasNeedsAttention(item) ? `**${truncateSlug(item?.slug || '', panelWidth)}**` : truncateSlug(item?.slug || '', panelWidth) }}</div>
                               <div v-if="panelWidth === 'narrow' && getItemGlobalIndex(item) === selectedItemIndex" class="word-count-display">
                                 WC: {{ getWordCount(item) }}
                               </div>
+                            </div>
+                            <div v-if="presentUsersFor(item).length > 0" class="presence-stack">
+                              <v-avatar
+                                v-for="u in presentUsersFor(item)"
+                                :key="u.id"
+                                :color="u.chip_color || 'primary'"
+                                size="18"
+                                class="presence-avatar"
+                                :title="`${u.display_name || u.username} is here`"
+                              >
+                                <v-img v-if="u.profile_picture" :src="u.profile_picture" />
+                                <span v-else class="presence-initials">{{ avatarInitials(u) }}</span>
+                              </v-avatar>
                             </div>
 
                             <!-- Duration (Right side) -->
@@ -987,2067 +1000,2138 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { themeColorMap, getColorValue, resolveVuetifyColor, getTextColorForBackground, loadColorsFromDatabase } from '@/utils/themeColorMap'
 import { useRegions } from '@/composables/useRegions'
+import { useUserPrefs } from '@/composables/useUserPrefs'
+import { useMessages } from '@/composables/useMessages'
+import { watch } from 'vue'
 import { useRundownDragDrop } from '@/composables/useRundownDragDrop'
-import draggable from 'vuedraggable'
+import draggable from 'vuedraggable' // eslint-disable-line no-unused-vars
 
-export default {
-  name: 'RundownPanel',
-  components: {
-    draggable
+const emit = defineEmits([
+  'close',
+  'toggle-width',
+  'save',
+  'new-item',
+  'delete-selected',
+  'sync-order',
+  'export',
+  'refresh',
+  'refresh-rundown',
+  'restore-revision',
+  'toggle-options',
+  'select-item',
+  'edit-item',
+  'reorder-items',
+  'create-region',
+  'delete-region',
+  'rundown-cleared',
+  'select-region',
+  'recalculate-durations',
+  'show-script-compare-modal',
+  'initiate-join',
+  'join-items-selected',
+  'cancel-join',
+  'join-place',
+  'delete-item',
+  'move-region-to-unassigned',
+  'item-assetid-updated',
+  'assetid-regenerated',
+])
+
+const props = defineProps({
+  panelWidth: {
+    type: String,
+    default: 'wide',
+    validator: (value) => ['narrow', 'wide'].includes(value)
   },
-  emits: [
-    'close',
-    'toggle-width',
-    'save',
-    'new-item',
-    'delete-selected',
-    'sync-order',
-    'export',
-    'refresh',
-    'refresh-rundown',
-    'restore-revision',
-    'toggle-options',
-    'select-item',
-    'edit-item',
-    'reorder-items',
-    'create-region',
-    'delete-region',
-    'rundown-cleared',
-    'select-region',
-    'recalculate-durations',
-    'show-script-compare-modal',
-    'initiate-join',
-    'join-items-selected',
-    'cancel-join',
-    'join-place',
-    'delete-item',
-  ],
-  props: {
-    panelWidth: {
-      type: String,
-      default: 'wide',
-      validator: (value) => ['narrow', 'wide'].includes(value)
-    },
-    panelHeight: {
-      type: Number,
-      default: null
-    },
-    items: {
-      type: Array,
-      default: () => []
-    },
-    loading: {
-      type: Boolean,
-      default: false
-    },
-    selectedItemIndex: {
-      type: Number,
-      default: -1
-    },
-    editingItemIndex: {
-      type: Number,
-      default: -1
-    },
-    collapseBreakRegions: {
-      type: Boolean,
-      default: false
-    },
-    saveState: {
-      type: Object,
-      default: () => ({
-        hasChanges: false,
-        buttonText: 'Synchronized',
-        buttonColor: 'success',
-        buttonIcon: 'mdi-check-circle',
-        isDisabled: true,
-        tooltip: 'Episode is synchronized - no changes to save'
-      })
-    },
-    generatingItemIndex: {
-      type: Number,
-      default: -1
-    },
-    llmState: {
-      type: Object,
-      default: null
-    },
-    joinSelectMode: {
-      type: Boolean,
-      default: false
-    },
-    joinPlacementMode: {
-      type: Boolean,
-      default: false
-    },
-    joinMergedItem: {
-      type: Object,
-      default: null
-    },
-    episode: {
-      type: [String, Number],
-      default: null
+  panelHeight: {
+    type: Number,
+    default: null
+  },
+  items: {
+    type: Array,
+    default: () => []
+  },
+  loading: {
+    type: Boolean,
+    default: false
+  },
+  selectedItemIndex: {
+    type: Number,
+    default: -1
+  },
+  editingItemIndex: {
+    type: Number,
+    default: -1
+  },
+  collapseBreakRegions: {
+    type: Boolean,
+    default: false
+  },
+  saveState: {
+    type: Object,
+    default: () => ({
+      hasChanges: false,
+      buttonText: 'Synchronized',
+      buttonColor: 'success',
+      buttonIcon: 'mdi-check-circle',
+      isDisabled: true,
+      tooltip: 'Episode is synchronized - no changes to save'
+    })
+  },
+  generatingItemIndex: {
+    type: Number,
+    default: -1
+  },
+  llmState: {
+    type: Object,
+    default: null
+  },
+  joinSelectMode: {
+    type: Boolean,
+    default: false
+  },
+  joinPlacementMode: {
+    type: Boolean,
+    default: false
+  },
+  joinMergedItem: {
+    type: Object,
+    default: null
+  },
+  episode: {
+    type: [String, Number],
+    default: null
+  }
+})
+
+// --- Composables ---
+const { groupItemsIntoRegions, getRegionColor } = useRegions()
+const {
+  isDragging, // eslint-disable-line no-unused-vars
+  isDraggingRegion, // eslint-disable-line no-unused-vars
+  draggedRegionType, // eslint-disable-line no-unused-vars
+  draggedRegionId, // eslint-disable-line no-unused-vars
+  hoveredRegionId, // eslint-disable-line no-unused-vars
+  determineRegionType,
+  handleRegionDragStart,
+  handleRegionDragEnd,
+  handleItemDragStart,
+  handleItemDragEnd,
+  allowMove,
+  handleItemChange
+} = useRundownDragDrop()
+
+// --- For $forceUpdate replacement ---
+const forceUpdateKey = ref(0) // eslint-disable-line no-unused-vars
+
+// --- Reactive state (data) ---
+const showNewRegionModal = ref(false)
+const selectedRegionType = ref(null) // eslint-disable-line no-unused-vars
+const newRegionName = ref('') // eslint-disable-line no-unused-vars
+const showDeleteRegionDialog = ref(false)
+const regionToDelete = ref(null)
+const selectedRegionId = ref(null)
+const flashMessage = ref('')
+const showFlashMessage = ref(false)
+
+// Multi-selection support
+const selectedItemIndices = ref(new Set())
+const selectedRegionIds = ref(new Set())
+const isMultiSelectMode = ref(false)
+
+// Deletion confirmation modal
+const showDeleteConfirmModal = ref(false)
+const deletionInProgress = ref(false)
+const pendingDeletion = ref(null)
+
+// Clear entire rundown modal
+const showClearRundownModal = ref(false)
+const clearRundownInProgress = ref(false)
+
+// Region visibility toggle — initial value reads the user's preference
+// (or true by default). Subsequent changes auto-persist to /api/user/prefs
+// so the user's last choice sticks across sessions and devices.
+const _userPrefs = useUserPrefs()
+const showRegions = ref(_userPrefs.get('rundown.showRegions', true))
+
+// ──────────────────────────────────────────────────────────────────
+// Public presence — show avatars on rundown items other users are
+// currently editing. Source of truth: /api/users (polled in App.vue).
+// ──────────────────────────────────────────────────────────────────
+const _messagesApi = useMessages()
+
+function _currentMyId() {
+  try { return JSON.parse(localStorage.getItem('user-data') || '{}')?.id || null }
+  catch { return null }
+}
+
+function presentUsersFor(item) {
+  if (!item) return []
+  const itemId = item.asset_id || item.id
+  if (!itemId) return []
+  const myId = _currentMyId()
+  return (_messagesApi.users.value || []).filter(u =>
+    u.id !== myId
+    && u.online
+    && u.current_location?.segment_id != null
+    && String(u.current_location.segment_id) === String(itemId)
+  )
+}
+
+function avatarInitials(u) {
+  const name = u.display_name || u.username || ''
+  const parts = name.trim().split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return (parts[0]?.slice(0, 2) || '??').toUpperCase()
+}
+
+watch(showRegions, (v) => {
+  _userPrefs.set('rundown.showRegions', !!v)
+})
+
+// If the prefs cache hydrates after this ref initialized (e.g. a fresh
+// login mid-session), pick up the stored value.
+watch(() => _userPrefs.cache.value['rundown.showRegions'], (v) => {
+  if (typeof v === 'boolean' && v !== showRegions.value) showRegions.value = v
+})
+
+// Color reactivity trigger
+const colorLoadTrigger = ref(0)
+
+// Rollback modal (segment)
+const rollbackDialog = ref(false)
+const rollbackItem = ref(null)
+const rollbackSnapshots = ref([])
+const rollbackLoading = ref(false)
+const restoringSnapshot = ref(null)
+const previewDialog = ref(false)
+const previewContent = ref('')
+const previewSnap = ref(null)
+// History stats per item (keyed by item id)
+const historyStats = ref({})
+const historyFilter = ref('all')
+
+// Rollback modal (episode)
+const episodeRollbackDialog = ref(false)
+const episodeRollbackSnapshots = ref([])
+const episodeRollbackLoading = ref(false)
+const restoringEpisode = ref(null)
+const episodePreviewDialog = ref(false)
+const episodePreviewItems = ref([])
+const episodePreviewSnap = ref(null)
+
+// Join mode state
+const joinSelectedIds = ref(new Set())
+const joinHoverGapIndex = ref(-1)
+
+// --- Computed ---
+const filteredRollbackSnapshots = computed(() => {
+  const f = historyFilter.value
+  if (!f || f === 'all') return rollbackSnapshots.value
+
+  // Source filters
+  if (f === 'auto') return rollbackSnapshots.value.filter(s => s.source === 'auto')
+  if (f === 'manual') return rollbackSnapshots.value.filter(s => s.source === 'manual')
+
+  // Time-bucket filters: show one revision per bucket, pick largest by bytes
+  let bucketMs
+  if (f === '30m') bucketMs = 30 * 60 * 1000
+  else if (f === '60m') bucketMs = 60 * 60 * 1000
+  else if (f === '1d') bucketMs = 24 * 60 * 60 * 1000
+  else return rollbackSnapshots.value
+
+  const buckets = {}
+  for (const snap of rollbackSnapshots.value) {
+    const ts = new Date(snap.modified).getTime()
+    const key = Math.floor(ts / bucketMs)
+    const sz = snap.size_bytes || snap.content_length || 0
+    if (!buckets[key] || sz > (buckets[key].size_bytes || buckets[key].content_length || 0)) {
+      buckets[key] = snap
     }
-  },
-  data() {
-    return {
-      showNewRegionModal: false,
-      selectedRegionType: null,
-      newRegionName: '',
-      showDeleteRegionDialog: false, // Show region deletion confirmation
-      regionToDelete: null, // Store region data for deletion
-      selectedRegionId: null, // Track which region is currently selected
-      flashMessage: '', // Flash message text
-      showFlashMessage: false, // Flash message visibility
+  }
+  return Object.values(buckets).sort((a, b) => new Date(b.modified) - new Date(a.modified))
+})
 
-      // Multi-selection support
-      selectedItemIndices: new Set(), // Set of selected item indices
-      selectedRegionIds: new Set(), // Set of selected region IDs
-      isMultiSelectMode: false, // Whether we're in multi-select mode
-
-      // Deletion confirmation modal
-      showDeleteConfirmModal: false,
-      deletionInProgress: false,
-      pendingDeletion: null, // Store deletion data: { type, items, regions, callback }
-
-      // Clear entire rundown modal
-      showClearRundownModal: false,
-      clearRundownInProgress: false,
-
-      // Region visibility toggle
-      showRegions: true,  // Default to regions shown (temporary)
-
-      // Color reactivity trigger
-      colorLoadTrigger: 0,  // Incremented when colors load to force re-computation
-
-      // Rollback modal (segment)
-      rollbackDialog: false,
-      rollbackItem: null,
-      rollbackSnapshots: [],
-      rollbackLoading: false,
-      restoringSnapshot: null,
-      previewDialog: false,
-      previewContent: '',
-      previewSnap: null,
-      // History stats per item (keyed by item id)
-      historyStats: {},
-      historyFilter: 'all',
-
-      // Rollback modal (episode)
-      episodeRollbackDialog: false,
-      episodeRollbackSnapshots: [],
-      episodeRollbackLoading: false,
-      restoringEpisode: null,
-      episodePreviewDialog: false,
-      episodePreviewItems: [],
-      episodePreviewSnap: null,
-
-      // Join mode state
-      joinSelectedIds: new Set(),
-      joinHoverGapIndex: -1,
+const totalDurationSeconds = computed(() => {
+  if (!props.items || props.items.length === 0) return 0
+  let totalSeconds = 0
+  props.items.forEach(item => {
+    if (item.duration) {
+      totalSeconds += parseDurationToSeconds(item.duration)
     }
+  })
+  return totalSeconds
+})
+
+const computedTotalDuration = computed(() => {
+  const ts = totalDurationSeconds.value
+  const h = Math.floor(ts / 3600)
+  const m = Math.floor((ts % 3600) / 60)
+  const s = ts % 60
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+})
+
+const durationThemeClass = computed(() => { // eslint-disable-line no-unused-vars
+  const secs = totalDurationSeconds.value
+  if (secs >= 3600) return 'duration-over'       // >= 1:00:00 red
+  if (secs >= 3300) return 'duration-target'      // >= 0:55:00 green
+  return 'duration-under'                          // < 0:50:00 blue
+})
+
+const panelWidthValue = computed(() => {
+  return props.panelWidth === 'narrow' ? '300px' : '442px'
+})
+
+const panelHeightValue = computed(() => {
+  return props.panelHeight ? `${props.panelHeight}px` : '100vh'
+})
+
+// Get needs-attention color from settings for flagged items
+const needsAttentionColor = computed(() => {
+  // Reference colorLoadTrigger to ensure re-computation when colors are loaded
+  // eslint-disable-next-line no-unused-vars
+  const _trigger = colorLoadTrigger.value
+  const colorName = getColorValue('needs-attention') || 'orange-lighten-3'
+  return resolveVuetifyColor(colorName) || '#FFCC80'
+})
+
+// Get needs-attention border color (solid) for rundown items
+const needsAttentionBorderColor = computed(() => { // eslint-disable-line no-unused-vars
+  return needsAttentionColor.value
+})
+
+// CSS variables for dynamic theming of needs-attention items
+const rundownPanelCssVars = computed(() => {
+  const hexColor = needsAttentionColor.value
+  const r = parseInt(hexColor.slice(1, 3), 16)
+  const g = parseInt(hexColor.slice(3, 5), 16)
+  const b = parseInt(hexColor.slice(5, 7), 16)
+  return {
+    '--needs-attention-border': needsAttentionBorderColor.value,
+    '--needs-attention-bg-light': `rgba(${r}, ${g}, ${b}, 0.15)`
+  }
+})
+
+const safeItems = computed(() => {
+  return props.items || []
+})
+
+const localItems = computed({ // eslint-disable-line no-unused-vars
+  get() {
+    return safeItems.value
   },
-  setup() {
-    const { groupItemsIntoRegions, getRegionColor } = useRegions()
-    const dragDrop = useRundownDragDrop()
-    return {
-      groupItemsIntoRegions,
-      getRegionColor,
-      resolveVuetifyColor,
-      getTextColorForBackground,
-      ...dragDrop
-    }
-  },
-  computed: {
-    filteredRollbackSnapshots() {
-      const f = this.historyFilter
-      if (!f || f === 'all') return this.rollbackSnapshots
+  set(/* newValue */) {
+    // This will be called when vue.draggable reorders items
+    // We don't need to do anything here as the parent manages the data
+  }
+})
 
-      // Source filters
-      if (f === 'auto') return this.rollbackSnapshots.filter(s => s.source === 'auto')
-      if (f === 'manual') return this.rollbackSnapshots.filter(s => s.source === 'manual')
+const regions = computed(() => {
+  return groupItemsIntoRegions(safeItems.value)
+})
 
-      // Time-bucket filters: show one revision per bucket, pick largest by bytes
-      let bucketMs
-      if (f === '30m') bucketMs = 30 * 60 * 1000
-      else if (f === '60m') bucketMs = 60 * 60 * 1000
-      else if (f === '1d') bucketMs = 24 * 60 * 60 * 1000
-      else return this.rollbackSnapshots
+// Convert hierarchical regions back to flat array for parent compatibility
+const flatItemsFromRegions = computed(() => {
+  if (!regions.value) return []
 
-      const buckets = {}
-      for (const snap of this.rollbackSnapshots) {
-        const ts = new Date(snap.modified).getTime()
-        const key = Math.floor(ts / bucketMs)
-        const sz = snap.size_bytes || snap.content_length || 0
-        if (!buckets[key] || sz > (buckets[key].size_bytes || buckets[key].content_length || 0)) {
-          buckets[key] = snap
-        }
-      }
-      return Object.values(buckets).sort((a, b) => new Date(b.modified) - new Date(a.modified))
-    },
-
-    totalDurationSeconds() {
-      if (!this.items || this.items.length === 0) return 0
-      let totalSeconds = 0
-      this.items.forEach(item => {
-        if (item.duration) {
-          totalSeconds += this.parseDurationToSeconds(item.duration)
-        }
-      })
-      return totalSeconds
-    },
-    computedTotalDuration() {
-      const totalSeconds = this.totalDurationSeconds
-      const h = Math.floor(totalSeconds / 3600)
-      const m = Math.floor((totalSeconds % 3600) / 60)
-      const s = totalSeconds % 60
-      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-    },
-    durationThemeClass() {
-      const secs = this.totalDurationSeconds
-      if (secs >= 3600) return 'duration-over'       // >= 1:00:00 red
-      if (secs >= 3300) return 'duration-target'      // >= 0:55:00 green
-      return 'duration-under'                          // < 0:50:00 blue
-    },
-    panelWidthValue() {
-      return this.panelWidth === 'narrow' ? '300px' : '442px'
-    },
-    panelHeightValue() {
-      return this.panelHeight ? `${this.panelHeight}px` : '100vh'
-    },
-    // Get needs-attention color from settings for flagged items
-    needsAttentionColor() {
-      // Reference colorLoadTrigger to ensure re-computation when colors are loaded
+  const flatItems = []
+  regions.value.forEach(region => {
+    region.items.forEach(item => {
+      // Remove regionId when flattening to avoid circular references
       // eslint-disable-next-line no-unused-vars
-      const _trigger = this.colorLoadTrigger;
-      const colorName = getColorValue('needs-attention') || 'orange-lighten-3';
-      return resolveVuetifyColor(colorName) || '#FFCC80';
-    },
-    // Get needs-attention border color (solid) for rundown items
-    needsAttentionBorderColor() {
-      return this.needsAttentionColor;
-    },
-    // CSS variables for dynamic theming of needs-attention items
-    rundownPanelCssVars() {
-      const hexColor = this.needsAttentionColor;
-      const r = parseInt(hexColor.slice(1, 3), 16);
-      const g = parseInt(hexColor.slice(3, 5), 16);
-      const b = parseInt(hexColor.slice(5, 7), 16);
-      return {
-        '--needs-attention-border': this.needsAttentionBorderColor,
-        '--needs-attention-bg-light': `rgba(${r}, ${g}, ${b}, 0.15)`
-      };
-    },
-    safeItems() {
-      return this.items || []
-    },
-    localItems: {
-      get() {
-        return this.safeItems
-      },
-      set(/* newValue */) {
-        // This will be called when vue.draggable reorders items
-        // We don't need to do anything here as the parent manages the data
-      }
-    },
+      const { regionId, ...cleanItem } = item
+      flatItems.push(cleanItem)
+    })
+  })
+  return flatItems
+})
 
-    regions() {
-      return this.groupItemsIntoRegions(this.safeItems)
-    },
+// Create a flat array of items with region headers interspersed
+const itemsWithHeaders = computed(() => { // eslint-disable-line no-unused-vars
+  if (!regions.value.length) return []
 
-    // Convert hierarchical regions back to flat array for parent compatibility
-    flatItemsFromRegions() {
-      if (!this.regions) return []
+  const result = []
+  let blockCounter = 0
+  let breakCounter = 0
 
-      const flatItems = []
-      this.regions.forEach(region => {
-        region.items.forEach(item => {
-          // Remove regionId when flattening to avoid circular references
-          // eslint-disable-next-line no-unused-vars
-          const { regionId, ...cleanItem } = item
-          flatItems.push(cleanItem)
-        })
-      })
-      return flatItems
-    },
-
-    // Create a flat array of items with region headers interspersed
-    itemsWithHeaders() {
-      if (!this.regions.length) return []
-
-      const result = []
-      let blockCounter = 0
-      let breakCounter = 0
-
-      this.regions.forEach((region, regionIndex) => {
-        // Generate region header name
-        let regionName
-        if (region.type === 'block') {
-          blockCounter++
-          regionName = `Block ${String.fromCharCode(64 + blockCounter)}` // A, B, C...
-        } else if (region.type === 'break') {
-          breakCounter++
-          regionName = `Break ${breakCounter}`
-        } else {
-          regionName = region.name
-        }
-
-        // Add region header
-        const regionColor = this.getRegionColor(region.type);
-        console.log(`[DEBUG] Region ${region.type} color:`, regionColor);
-        result.push({
-          isRegionHeader: true,
-          regionId: region.id,
-          regionType: region.type,
-          regionName: regionName,
-          regionColor: regionColor,
-          itemCount: region.items.length
-        })
-
-        // Add region items
-        region.items.forEach(item => {
-          result.push({
-            ...item,
-            regionId: region.id,
-            regionType: region.type,
-            regionColor: this.getRegionColor(region.type)
-          })
-        })
-
-        // Add new region button after the last region
-        if (regionIndex === this.regions.length - 1) {
-          result.push({
-            isNewRegionButton: true,
-            id: 'new-region-button'
-          })
-        }
-      })
-
-      return result
-    },
-
-    // Available region types for the modal
-    availableRegionTypes() {
-      return [
-        {
-          type: 'block',
-          name: 'Standard Block',
-          color: 'primary'
-        },
-        {
-          type: 'break',
-          name: 'Break',
-          color: 'secondary'
-        }
-      ]
-    },
-
-    // Get the region ID that contains the currently selected item
-    selectedItemRegionId() {
-      if (this.selectedItemIndex === -1 || !this.safeItems[this.selectedItemIndex]) {
-        return null
-      }
-      const selectedItem = this.safeItems[this.selectedItemIndex]
-      return this.getRegionIdForItem(selectedItem)
-    },
-
-    // Multi-selection computed properties
-    hasMultipleSelections() {
-      return this.selectedItemIndices.size > 0 || this.selectedRegionIds.size > 0
-    },
-
-    hasSelections() {
-      return this.hasMultipleSelections || this.selectedItemIndex !== -1 || this.selectedRegionId !== null
-    },
-
-    totalSelectionsCount() {
-      const multiCount = this.selectedItemIndices.size + this.selectedRegionIds.size
-      // When no multi-selections but a single item or region is selected, count it
-      if (multiCount === 0 && this.selectedItemIndex !== -1) return 1
-      if (multiCount === 0 && this.selectedRegionId) return 1
-      return multiCount
-    },
-
-    selectionSummary() {
-      const items = this.selectedItemIndices.size
-      const regions = this.selectedRegionIds.size
-
-      if (items === 0 && regions === 0) return 'None'
-      if (items === 0) return `${regions} region${regions === 1 ? '' : 's'}`
-      if (regions === 0) return `${items} item${items === 1 ? '' : 's'}`
-      return `${items} item${items === 1 ? '' : 's'} & ${regions} region${regions === 1 ? '' : 's'}`
-    },
-
-    deletionSummary() {
-      if (!this.pendingDeletion) {
-        return { title: '', details: [], count: 0 }
-      }
-
-      const { regions = [], items = [] } = this.pendingDeletion
-      const details = []
-      let count = 0
-
-      // Add regions to deletion summary
-      regions.forEach(region => {
-        const regionName = region.name || region.type || `Region ${region.id}`
-        const itemCount = region.items ? region.items.length : 0
-        details.push({
-          name: regionName,
-          subtitle: itemCount > 0 ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : 'Empty region',
-          icon: 'mdi-folder',
-          type: 'region'
-        })
-        count++
-      })
-
-      // Add individual items to deletion summary
-      items.forEach(item => {
-        const itemName = item.slug || item.title || `Item ${item.id}`
-        details.push({
-          name: itemName,
-          subtitle: `Type: ${(item.type || 'unknown').toUpperCase()}`,
-          icon: 'mdi-file-document',
-          type: 'item'
-        })
-        count++
-      })
-
-      // Generate title based on what's being deleted
-      let title = ''
-      const regionCount = regions.length
-      const itemCount = items.length
-
-      if (regionCount > 0 && itemCount > 0) {
-        title = `Delete ${regionCount} region${regionCount === 1 ? '' : 's'} and ${itemCount} item${itemCount === 1 ? '' : 's'}?`
-      } else if (regionCount > 0) {
-        title = `Delete ${regionCount} region${regionCount === 1 ? '' : 's'}?`
-      } else if (itemCount > 0) {
-        title = `Delete ${itemCount} item${itemCount === 1 ? '' : 's'}?`
-      } else {
-        title = 'Delete selected items?'
-      }
-
-      return {
-        title,
-        details,
-        count
-      }
-    },
-
-    // Check if all break regions are collapsed
-    allBreaksCollapsed() {
-      const breakRegions = this.regions.filter(region => region.type === 'break')
-      if (breakRegions.length === 0) return false
-      return breakRegions.every(region => region.isCollapsed === true)
+  regions.value.forEach((region, regionIndex) => {
+    // Generate region header name
+    let regionName
+    if (region.type === 'block') {
+      blockCounter++
+      regionName = `Block ${String.fromCharCode(64 + blockCounter)}` // A, B, C...
+    } else if (region.type === 'break') {
+      breakCounter++
+      regionName = `Break ${breakCounter}`
+    } else {
+      regionName = region.name
     }
 
-  },
-  async mounted() {
-    // Load color configuration from database
-    try {
-      await loadColorsFromDatabase('default');
-      console.log('Colors loaded successfully in RundownPanel');
-      // Increment trigger to force re-computation of color-dependent computed properties
-      this.colorLoadTrigger++;
-    } catch (error) {
-      console.warn('Failed to load colors in RundownPanel, using defaults:', error);
+    // Add region header
+    const regionColor = getRegionColor(region.type)
+    console.log(`[DEBUG] Region ${region.type} color:`, regionColor)
+    result.push({
+      isRegionHeader: true,
+      regionId: region.id,
+      regionType: region.type,
+      regionName: regionName,
+      regionColor: regionColor,
+      itemCount: region.items.length
+    })
+
+    // Add region items
+    region.items.forEach(item => {
+      result.push({
+        ...item,
+        regionId: region.id,
+        regionType: region.type,
+        regionColor: getRegionColor(region.type)
+      })
+    })
+
+    // Add new region button after the last region
+    if (regionIndex === regions.value.length - 1) {
+      result.push({
+        isNewRegionButton: true,
+        id: 'new-region-button'
+      })
+    }
+  })
+
+  return result
+})
+
+// Available region types for the modal
+const availableRegionTypes = computed(() => {
+  return [
+    {
+      type: 'block',
+      name: 'Standard Block',
+      color: 'primary'
+    },
+    {
+      type: 'break',
+      name: 'Break',
+      color: 'secondary'
+    }
+  ]
+})
+
+// Get the region ID that contains the currently selected item
+const selectedItemRegionId = computed(() => {
+  if (props.selectedItemIndex === -1 || !safeItems.value[props.selectedItemIndex]) {
+    return null
+  }
+  const selectedItem = safeItems.value[props.selectedItemIndex]
+  return getRegionIdForItem(selectedItem)
+})
+
+// Multi-selection computed properties
+const hasMultipleSelections = computed(() => {
+  return selectedItemIndices.value.size > 0 || selectedRegionIds.value.size > 0
+})
+
+const hasSelections = computed(() => {
+  return hasMultipleSelections.value || props.selectedItemIndex !== -1 || selectedRegionId.value !== null
+})
+
+const totalSelectionsCount = computed(() => {
+  const multiCount = selectedItemIndices.value.size + selectedRegionIds.value.size
+  // When no multi-selections but a single item or region is selected, count it
+  if (multiCount === 0 && props.selectedItemIndex !== -1) return 1
+  if (multiCount === 0 && selectedRegionId.value) return 1
+  return multiCount
+})
+
+const selectionSummary = computed(() => {
+  const items = selectedItemIndices.value.size
+  const regionsCount = selectedRegionIds.value.size
+
+  if (items === 0 && regionsCount === 0) return 'None'
+  if (items === 0) return `${regionsCount} region${regionsCount === 1 ? '' : 's'}`
+  if (regionsCount === 0) return `${items} item${items === 1 ? '' : 's'}`
+  return `${items} item${items === 1 ? '' : 's'} & ${regionsCount} region${regionsCount === 1 ? '' : 's'}`
+})
+
+const deletionSummary = computed(() => {
+  if (!pendingDeletion.value) {
+    return { title: '', details: [], count: 0 }
+  }
+
+  const { regions: delRegions = [], items: delItems = [] } = pendingDeletion.value
+  const details = []
+  let count = 0
+
+  // Add regions to deletion summary
+  delRegions.forEach(region => {
+    const regionName = region.name || region.type || `Region ${region.id}`
+    const itemCount = region.items ? region.items.length : 0
+    details.push({
+      name: regionName,
+      subtitle: itemCount > 0 ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : 'Empty region',
+      icon: 'mdi-folder',
+      type: 'region'
+    })
+    count++
+  })
+
+  // Add individual items to deletion summary
+  delItems.forEach(item => {
+    const itemName = item.slug || item.title || `Item ${item.id}`
+    details.push({
+      name: itemName,
+      subtitle: `Type: ${(item.type || 'unknown').toUpperCase()}`,
+      icon: 'mdi-file-document',
+      type: 'item'
+    })
+    count++
+  })
+
+  // Generate title based on what's being deleted
+  let title = ''
+  const regionCount = delRegions.length
+  const itemCount = delItems.length
+
+  if (regionCount > 0 && itemCount > 0) {
+    title = `Delete ${regionCount} region${regionCount === 1 ? '' : 's'} and ${itemCount} item${itemCount === 1 ? '' : 's'}?`
+  } else if (regionCount > 0) {
+    title = `Delete ${regionCount} region${regionCount === 1 ? '' : 's'}?`
+  } else if (itemCount > 0) {
+    title = `Delete ${itemCount} item${itemCount === 1 ? '' : 's'}?`
+  } else {
+    title = 'Delete selected items?'
+  }
+
+  return {
+    title,
+    details,
+    count
+  }
+})
+
+// Check if all break regions are collapsed
+const allBreaksCollapsed = computed(() => {
+  const breakRegions = regions.value.filter(region => region.type === 'break')
+  if (breakRegions.length === 0) return false
+  return breakRegions.every(region => region.isCollapsed === true)
+})
+
+// --- Methods ---
+
+// Check if an item's script content contains any needs-attention flagged segments
+function itemHasNeedsAttention(item) {
+  // API returns script_content as 'script' field in rundown list response
+  const scriptContent = item?.script || item?.script_content
+  if (!item || !scriptContent) {
+    return false
+  }
+  // Check for paragraph flags (data-needs-attention="true")
+  const hasParagraphFlag = scriptContent.includes('data-needs-attention="true"')
+  // Check for cue flags (NeedsAttention: true or NeedsAttention:true)
+  const hasCueFlag = /NeedsAttention:\s*true/i.test(scriptContent)
+  const result = hasParagraphFlag || hasCueFlag
+  return result
+}
+
+// Get effective duration for an item (item.duration is authoritative after recalculation)
+function getEffectiveItemDuration(item) {
+  let totalSeconds = parseDurationToSeconds(item?.duration)
+  if (totalSeconds === 0) return '0:00'
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+}
+
+// Parse any duration string (HH:MM:SS:FF, HH:MM:SS, MM:SS) to seconds
+function parseDurationToSeconds(duration) {
+  if (!duration) return 0
+  const parts = String(duration).split(':').map(Number)
+  if (parts.length === 4) {
+    return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0)
+  } else if (parts.length === 3) {
+    return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0)
+  } else if (parts.length === 2) {
+    return (parts[0] || 0) * 60 + (parts[1] || 0)
+  }
+  return 0
+}
+
+// Region visibility toggle
+function toggleRegionsVisibility() {
+  showRegions.value = !showRegions.value
+  console.log(`Regions ${showRegions.value ? 'shown' : 'hidden'}`)
+}
+
+// Handle refresh with flash message
+function handleRefresh() { // eslint-disable-line no-unused-vars
+  // Show flash message
+  flashMessage.value = 'Refreshing'
+  showFlashMessage.value = true
+
+  // Emit refresh event
+  emit('refresh')
+
+  // Hide flash message after 2 seconds
+  setTimeout(() => {
+    showFlashMessage.value = false
+  }, 2000)
+}
+
+// NEW: Methods for hierarchical structure (future use)
+function calculateRegionDuration(region) {
+  if (!region.items || region.items.length === 0) {
+    return region.estimatedDuration || '00:00:00'
+  }
+
+  let totalSeconds = 0
+  region.items.forEach(item => {
+    totalSeconds += parseDurationToSeconds(item.duration)
+  })
+
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+}
+
+function shouldCollapseRegion(region) {
+  // All regions (including break regions) follow their isCollapsed state
+  // Break regions stay expanded once opened until explicitly collapsed
+  return region.isCollapsed
+}
+
+function toggleAllBreaksExpansion() {
+  // Find all break regions
+  const breakRegions = regions.value.filter(region => region.type === 'break')
+  if (breakRegions.length === 0) return
+
+  // Determine target state - if all are collapsed, expand them; otherwise collapse all
+  const shouldExpand = allBreaksCollapsed.value
+
+  // Toggle all break regions to the target state
+  breakRegions.forEach(region => {
+    region.isCollapsed = !shouldExpand
+  })
+
+  console.log(`${shouldExpand ? 'Expanded' : 'Collapsed'} ${breakRegions.length} break regions`)
+}
+
+function toggleRegionCollapse(region) {
+  // Toggle the collapse state of a specific region
+  const newState = !region.isCollapsed
+  region.isCollapsed = newState
+
+  console.log(`${newState ? 'Collapsed' : 'Expanded'} region: ${region.name}`)
+}
+
+function getItemGlobalIndex(item) {
+  // Find the global index of an item across all regions
+  let globalIndex = 0
+  for (const region of regions.value) {
+    const itemIndex = region.items.findIndex(i => i.id === item.id)
+    if (itemIndex !== -1) {
+      return globalIndex + itemIndex
+    }
+    globalIndex += region.items.length
+  }
+  return -1
+}
+
+// Check if an item's parent region is selected
+function isItemRegionSelected(item) {
+  if (!selectedRegionId.value || !item) return false
+
+  // Find which region this item belongs to
+  for (const region of regions.value) {
+    const itemIndex = region.items.findIndex(i => i.id === item.id)
+    if (itemIndex !== -1) {
+      return region.id === selectedRegionId.value
+    }
+  }
+  return false
+}
+
+function getTextColorForItem(type) {
+  const colorMapping = themeColorMap[type] || themeColorMap.unknown
+  // The themeColorMap now calculates text color dynamically based on contrast
+  return colorMapping.textColor || '#ffffff'
+}
+
+function getBackgroundColorForItem(type) {
+  const colorValue = getColorValue(type.toLowerCase()) || 'grey'
+  const resolvedColor = resolveVuetifyColor(colorValue)
+  return resolvedColor
+}
+
+function getSelectionColor() {
+  const selectionValue = getColorValue('Selection-interface') || 'orange'
+  const resolvedColor = resolveVuetifyColor(selectionValue)
+  console.log('🎨 Selection Color Debug:', {
+    raw: selectionValue,
+    resolved: resolvedColor,
+    key: 'Selection-interface'
+  })
+  return resolvedColor
+}
+
+function getSelectionTextColor() {
+  // Use the theme system's contrast logic for selection background
+  const colorMapping = themeColorMap['Selection-interface'] || themeColorMap.unknown
+  return colorMapping.textColor || '#000000'
+}
+
+function formatDuration(duration) { // eslint-disable-line no-unused-vars
+  if (!duration) return '0:00'
+  if (typeof duration === 'string' && duration.includes(':')) {
+    return duration
+  }
+  // Handle numeric duration (assuming seconds)
+  if (typeof duration === 'number') {
+    const minutes = Math.floor(duration / 60)
+    const seconds = duration % 60
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
+  }
+  return duration.toString()
+}
+
+function formatDurationShort(duration) {
+  // Format duration as mm:ss only (4 digits + colon)
+  if (!duration) return '00:00'
+
+  let durationStr = duration
+  if (typeof duration === 'number') {
+    const minutes = Math.floor(duration / 60)
+    const seconds = duration % 60
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+  }
+
+  if (typeof duration === 'string') {
+    // Clean string - remove any non-numeric/non-colon characters
+    durationStr = durationStr.replace(/[^0-9:]/g, '')
+
+    const parts = durationStr.split(':').filter(p => p !== '')
+
+    if (parts.length === 0) return '00:00'
+
+    // Parse based on number of parts
+    let totalMinutes = 0
+    let seconds = 0
+
+    if (parts.length >= 3) {
+      // Format: hh:mm:ss (or more parts, take first 3)
+      const hours = parseInt(parts[0]) || 0
+      const minutes = parseInt(parts[1]) || 0
+      seconds = parseInt(parts[2]) || 0
+      totalMinutes = (hours * 60) + minutes
+    } else if (parts.length === 2) {
+      // Format: mm:ss
+      totalMinutes = parseInt(parts[0]) || 0
+      seconds = parseInt(parts[1]) || 0
+    } else if (parts.length === 1) {
+      // Format: just seconds
+      seconds = parseInt(parts[0]) || 0
     }
 
-    // Add keyboard listener for clear rundown shortcut - use capture phase for higher priority
-    document.addEventListener('keydown', this.handleKeydown, true);
-  },
-  beforeUnmount() {
-    // Clean up keyboard listener
-    document.removeEventListener('keydown', this.handleKeydown, true);
-  },
-  methods: {
-    // Check if an item's script content contains any needs-attention flagged segments
-    itemHasNeedsAttention(item) {
-      // API returns script_content as 'script' field in rundown list response
-      const scriptContent = item?.script || item?.script_content;
-      if (!item || !scriptContent) {
-        return false;
+    return `${totalMinutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+  }
+
+  return '00:00'
+}
+
+function truncateSlug(slug, pWidth) {
+  // Truncate slug to 17 characters or nearest word boundary not exceeding 20 chars
+  if (!slug) return ''
+
+  const lowerSlug = slug.toLowerCase()
+
+  // In expanded mode, apply truncation logic
+  if (pWidth === 'wide' && lowerSlug.length > 20) {
+    // Try to find word boundary (space or hyphen) near 17 chars, but not exceeding 20
+    let truncateAt = 17
+
+    // Look for word boundary between position 17 and 20
+    for (let i = 17; i <= 20 && i < lowerSlug.length; i++) {
+      if (lowerSlug[i] === ' ' || lowerSlug[i] === '-') {
+        truncateAt = i
+        break
       }
-      // Check for paragraph flags (data-needs-attention="true")
-      const hasParagraphFlag = scriptContent.includes('data-needs-attention="true"');
-      // Check for cue flags (NeedsAttention: true or NeedsAttention:true)
-      const hasCueFlag = /NeedsAttention:\s*true/i.test(scriptContent);
-      const result = hasParagraphFlag || hasCueFlag;
-      return result;
-    },
-
-    // Get effective duration for an item (item.duration is authoritative after recalculation)
-    getEffectiveItemDuration(item) {
-      let totalSeconds = this.parseDurationToSeconds(item?.duration)
-      if (totalSeconds === 0) return '0:00'
-      const h = Math.floor(totalSeconds / 3600)
-      const m = Math.floor((totalSeconds % 3600) / 60)
-      const s = totalSeconds % 60
-      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-    },
-
-    // Parse any duration string (HH:MM:SS:FF, HH:MM:SS, MM:SS) to seconds
-    parseDurationToSeconds(duration) {
-      if (!duration) return 0
-      const parts = String(duration).split(':').map(Number)
-      if (parts.length === 4) {
-        return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0)
-      } else if (parts.length === 3) {
-        return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0)
-      } else if (parts.length === 2) {
-        return (parts[0] || 0) * 60 + (parts[1] || 0)
-      }
-      return 0
-    },
-
-    // Region visibility toggle
-    toggleRegionsVisibility() {
-      this.showRegions = !this.showRegions;
-      console.log(`Regions ${this.showRegions ? 'shown' : 'hidden'}`);
-    },
-
-    // Handle refresh with flash message
-    handleRefresh() {
-      // Show flash message
-      this.flashMessage = 'Refreshing';
-      this.showFlashMessage = true;
-
-      // Emit refresh event
-      this.$emit('refresh');
-
-      // Hide flash message after 2 seconds
-      setTimeout(() => {
-        this.showFlashMessage = false;
-      }, 2000);
-    },
-
-    // NEW: Methods for hierarchical structure (future use)
-    calculateRegionDuration(region) {
-      if (!region.items || region.items.length === 0) {
-        return region.estimatedDuration || '00:00:00'
-      }
-
-      let totalSeconds = 0
-      region.items.forEach(item => {
-        totalSeconds += this.parseDurationToSeconds(item.duration)
-      })
-
-      const hours = Math.floor(totalSeconds / 3600)
-      const minutes = Math.floor((totalSeconds % 3600) / 60)
-      const seconds = totalSeconds % 60
-
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-    },
-
-    shouldCollapseRegion(region) {
-      // All regions (including break regions) follow their isCollapsed state
-      // Break regions stay expanded once opened until explicitly collapsed
-      return region.isCollapsed
-    },
-
-    toggleAllBreaksExpansion() {
-      // Find all break regions
-      const breakRegions = this.regions.filter(region => region.type === 'break')
-      if (breakRegions.length === 0) return
-
-      // Determine target state - if all are collapsed, expand them; otherwise collapse all
-      const shouldExpand = this.allBreaksCollapsed
-
-      // Toggle all break regions to the target state
-      breakRegions.forEach(region => {
-        region.isCollapsed = !shouldExpand
-      })
-
-      console.log(`${shouldExpand ? 'Expanded' : 'Collapsed'} ${breakRegions.length} break regions`)
-    },
-
-    toggleRegionCollapse(region) {
-      // Toggle the collapse state of a specific region
-      const newState = !region.isCollapsed
-      region.isCollapsed = newState
-
-      console.log(`${newState ? 'Collapsed' : 'Expanded'} region: ${region.name}`)
-    },
-
-    getItemGlobalIndex(item) {
-      // Find the global index of an item across all regions
-      let globalIndex = 0
-      for (const region of this.regions) {
-        const itemIndex = region.items.findIndex(i => i.id === item.id)
-        if (itemIndex !== -1) {
-          return globalIndex + itemIndex
-        }
-        globalIndex += region.items.length
-      }
-      return -1
-    },
-
-    // Check if an item's parent region is selected
-    isItemRegionSelected(item) {
-      if (!this.selectedRegionId || !item) return false
-
-      // Find which region this item belongs to
-      for (const region of this.regions) {
-        const itemIndex = region.items.findIndex(i => i.id === item.id)
-        if (itemIndex !== -1) {
-          return region.id === this.selectedRegionId
-        }
-      }
-      return false
-    },
-
-    getTextColorForItem(type) {
-      const colorMapping = themeColorMap[type] || themeColorMap.unknown
-      // The themeColorMap now calculates text color dynamically based on contrast
-      return colorMapping.textColor || '#ffffff'
-    },
-    
-    getBackgroundColorForItem(type) {
-      const colorValue = getColorValue(type.toLowerCase()) || 'grey'
-      const resolvedColor = resolveVuetifyColor(colorValue)
-      return resolvedColor
-    },
-    
-    getSelectionColor() {
-      const selectionValue = getColorValue('Selection-interface') || 'orange'
-      const resolvedColor = resolveVuetifyColor(selectionValue)
-      console.log('🎨 Selection Color Debug:', {
-        raw: selectionValue,
-        resolved: resolvedColor,
-        key: 'Selection-interface'
-      })
-      return resolvedColor
-    },
-
-    getSelectionTextColor() {
-      // Use the theme system's contrast logic for selection background
-      const colorMapping = themeColorMap['Selection-interface'] || themeColorMap.unknown
-      return colorMapping.textColor || '#000000'
-    },
-    formatDuration(duration) {
-      if (!duration) return '0:00'
-      if (typeof duration === 'string' && duration.includes(':')) {
-        return duration
-      }
-      // Handle numeric duration (assuming seconds)
-      if (typeof duration === 'number') {
-        const minutes = Math.floor(duration / 60)
-        const seconds = duration % 60
-        return `${minutes}:${seconds.toString().padStart(2, '0')}`
-      }
-      return duration.toString()
-    },
-
-    formatDurationShort(duration) {
-      // Format duration as mm:ss only (4 digits + colon)
-      if (!duration) return '00:00'
-
-      let durationStr = duration
-      if (typeof duration === 'number') {
-        const minutes = Math.floor(duration / 60)
-        const seconds = duration % 60
-        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-      }
-
-      if (typeof duration === 'string') {
-        // Clean string - remove any non-numeric/non-colon characters
-        durationStr = durationStr.replace(/[^0-9:]/g, '')
-
-        const parts = durationStr.split(':').filter(p => p !== '')
-
-        if (parts.length === 0) return '00:00'
-
-        // Parse based on number of parts
-        let totalMinutes = 0
-        let seconds = 0
-
-        if (parts.length >= 3) {
-          // Format: hh:mm:ss (or more parts, take first 3)
-          const hours = parseInt(parts[0]) || 0
-          const minutes = parseInt(parts[1]) || 0
-          seconds = parseInt(parts[2]) || 0
-          totalMinutes = (hours * 60) + minutes
-        } else if (parts.length === 2) {
-          // Format: mm:ss
-          totalMinutes = parseInt(parts[0]) || 0
-          seconds = parseInt(parts[1]) || 0
-        } else if (parts.length === 1) {
-          // Format: just seconds
-          seconds = parseInt(parts[0]) || 0
-        }
-
-        return `${totalMinutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-      }
-
-      return '00:00'
-    },
-
-    truncateSlug(slug, panelWidth) {
-      // Truncate slug to 17 characters or nearest word boundary not exceeding 20 chars
-      if (!slug) return ''
-
-      const lowerSlug = slug.toLowerCase()
-
-      // In expanded mode, apply truncation logic
-      if (panelWidth === 'wide' && lowerSlug.length > 20) {
-        // Try to find word boundary (space or hyphen) near 17 chars, but not exceeding 20
-        let truncateAt = 17
-
-        // Look for word boundary between position 17 and 20
-        for (let i = 17; i <= 20 && i < lowerSlug.length; i++) {
-          if (lowerSlug[i] === ' ' || lowerSlug[i] === '-') {
-            truncateAt = i
-            break
-          }
-        }
-
-        // If no word boundary found between 17-20, look backwards from 17
-        if (truncateAt === 17) {
-          for (let i = 17; i >= 0; i--) {
-            if (lowerSlug[i] === ' ' || lowerSlug[i] === '-') {
-              truncateAt = i
-              break
-            }
-          }
-        }
-
-        return lowerSlug.substring(0, truncateAt) + '...'
-      }
-
-      return lowerSlug
-    },
-
-    getWordCount(item) {
-      // Calculate word count from script_content, excluding code blocks but counting FSQ quotes
-      if (!item?.script_content) return 0
-
-      let content = item.script_content
-
-      // Remove YAML frontmatter (everything between --- markers)
-      content = content.replace(/^---[\s\S]*?---\n?/m, '')
-
-      // Remove code blocks (fenced with ``` or indented)
-      content = content.replace(/```[\s\S]*?```/g, '')
-      content = content.replace(/^( {4}|\t).*$/gm, '')
-
-      // Remove HTML/XML tags
-      content = content.replace(/<[^>]*>/g, '')
-
-      // Remove markdown links but keep the text
-      content = content.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-
-      // Remove markdown image syntax
-      content = content.replace(/!\[([^\]]*)\]\([^)]+\)/g, '')
-
-      // Count words (split by whitespace and filter empty strings)
-      const words = content.trim().split(/\s+/).filter(w => w.length > 0)
-
-      return words.length
-    },
-
-    // Dropline color methods for ghost item styling
-    getDroplineColor() {
-      const droplineValue = getColorValue('dropline') || 'green-lighten-4'
-      return resolveVuetifyColor(droplineValue)
-    },
-
-    getDroplineBackground() {
-      const droplineValue = getColorValue('dropline') || 'green-lighten-4'
-      const baseColor = resolveVuetifyColor(droplineValue)
-      // Convert to rgba with low opacity for background
-      const rgb = baseColor.match(/\w\w/g)?.map(hex => parseInt(hex, 16))
-      return rgb ? `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.2)` : 'rgba(200, 230, 201, 0.2)'
-    },
-
-    getDroplineTextColor() {
-      const droplineValue = getColorValue('dropline') || 'green-lighten-4'
-      const baseColor = resolveVuetifyColor(droplineValue)
-      // Use slightly more opaque version for text
-      const rgb = baseColor.match(/\w\w/g)?.map(hex => parseInt(hex, 16))
-      return rgb ? `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.8)` : 'rgba(200, 230, 201, 0.8)'
-    },
-    
-    // Helper method to get the original index of an item in the safeItems array (0-based)
-    getItemIndex(item) {
-      return this.safeItems.findIndex(i => i.id === item.id)
-    },
-
-    // Get a light background color for region items
-    getRegionBackgroundColor(regionColor) {
-      const resolvedColor = resolveVuetifyColor(regionColor)
-      // Convert hex to RGB and apply low opacity
-      const rgb = resolvedColor.match(/\w\w/g)?.map(hex => parseInt(hex, 16))
-      return rgb ? `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.08)` : 'rgba(0, 0, 0, 0.05)'
-    },
-
-    // Get a darker variant of the region color for headers
-    getRegionHeaderColor(regionColor) {
-      console.log(`[DEBUG] getRegionHeaderColor input:`, regionColor);
-
-      // Handle undefined/null regionColor
-      if (!regionColor) {
-        return resolveVuetifyColor('grey-darken-1')
-      }
-
-      // Try to get a darker variant by appending -darken-1
-      let darkerColor = regionColor
-
-      // If it doesn't already have a variant, add -darken-1
-      if (!regionColor.includes('-lighten-') && !regionColor.includes('-darken-')) {
-        darkerColor = regionColor + '-darken-1'
-      } else if (regionColor.includes('-lighten-')) {
-        // Convert lighten to darken, but cap at darken-4 for all colors
-        const lightenLevel = parseInt(regionColor.match(/-lighten-(\d)/)?.[1]) || 1
-        const darkenLevel = Math.min(lightenLevel, 4) // Cap at darken-4
-        darkerColor = regionColor.replace('-lighten-' + lightenLevel, '-darken-' + darkenLevel)
-      } else if (regionColor.includes('-darken-')) {
-        // Already dark, but make it slightly darker (cap at darken-4)
-        const currentLevel = parseInt(regionColor.match(/-darken-(\d)/)?.[1]) || 1
-        darkerColor = regionColor.replace(/-darken-\d/, `-darken-${Math.min(currentLevel + 1, 4)}`)
-      }
-
-      const resolvedColor = resolveVuetifyColor(darkerColor);
-      console.log(`[DEBUG] getRegionHeaderColor output: ${darkerColor} -> ${resolvedColor}`);
-      return resolvedColor;
-    },
-
-    // Region handler methods
-    handleEditRegion(regionHeader) {
-      console.log('Edit region:', regionHeader.regionName)
-      // TODO: Implement region editing
-    },
-
-    handleDuplicateRegion(regionHeader) {
-      console.log('Duplicate region:', regionHeader.regionName)
-      // TODO: Implement region duplication
-    },
-
-    handleDeleteRegion(element) {
-      // Find the region that this element belongs to
-      const region = this.getRegionForItem(element)
-      if (!region) {
-        console.error('Could not find region for element:', element)
-        return
-      }
-
-      console.log('Delete region:', region)
-
-      // Store the region data for the confirmation dialog
-      this.regionToDelete = {
-        region: region,
-        element: element,
-        regionName: this.getRegionHeaderName(element),
-        itemCount: region.items.length
-      }
-
-      // Show confirmation dialog
-      this.showDeleteRegionDialog = true
-    },
-
-    confirmDeleteRegion() {
-      if (!this.regionToDelete) return
-
-      const { region, regionName, itemCount, isSelectedRegionDeletion } = this.regionToDelete
-
-      if (isSelectedRegionDeletion) {
-        console.log(`Moving items from region "${regionName}" to unassigned region`)
-
-        // Emit event to parent to handle moving items to unassigned region
-        this.$emit('move-region-to-unassigned', {
-          regionId: region.id,
-          regionType: region.type,
-          regionName: regionName,
-          items: region.items,
-          itemIds: region.items.map(item => item.id)
-        })
-      } else {
-        console.log(`Deleting region "${regionName}" with ${itemCount} items`)
-
-        // Emit event to parent to handle the actual deletion
-        this.$emit('delete-region', {
-          regionId: region.id,
-          regionType: region.type,
-          regionName: regionName,
-          items: region.items,
-          itemIds: region.items.map(item => item.id)
-        })
-      }
-
-      // Close dialog and reset
-      this.cancelDeleteRegion()
-    },
-
-    cancelDeleteRegion() {
-      this.showDeleteRegionDialog = false
-      this.regionToDelete = null
-    },
-
-    // Calculate total duration for a region
-    getRegionTotalDuration(regionId) {
-      // Find the region from our grouped data
-      const region = this.regions.find(r => r.id === regionId)
-      if (!region || !region.items || region.items.length === 0) {
-        return '00:00:00'
-      }
-
-      let totalSeconds = 0
-      region.items.forEach(item => {
-        if (item.duration) {
-          // Handle different duration formats
-          let duration = item.duration.toString()
-
-          // Remove any non-digit characters except colons
-          duration = duration.replace(/[^\d:]/g, '')
-
-          // Parse duration parts
-          const parts = duration.split(':')
-          if (parts.length >= 2) {
-            const hours = parts.length >= 3 ? parseInt(parts[0]) || 0 : 0
-            const minutes = parseInt(parts[parts.length - 2]) || 0
-            const seconds = parseInt(parts[parts.length - 1]) || 0
-
-            totalSeconds += hours * 3600 + minutes * 60 + seconds
-          }
-        }
-      })
-
-      // Convert back to HH:MM:SS:FF format (8 digits to match other durations)
-      const hours = Math.floor(totalSeconds / 3600)
-      const minutes = Math.floor((totalSeconds % 3600) / 60)
-      const secs = totalSeconds % 60
-      const frames = 0 // Default to 00 frames for region totals
-
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`
-    },
-
-    // New Region Modal Methods
-    getRegionNamePlaceholder(regionType) {
-      const existingRegions = this.regions.filter(r => r.type === regionType)
-      const nextNumber = existingRegions.length + 1
-
-      if (regionType === 'block') {
-        return `Block ${String.fromCharCode(64 + nextNumber)}` // A, B, C...
-      } else if (regionType === 'break') {
-        return `Break ${nextNumber}`
-      }
-      return `${regionType} ${nextNumber}`
-    },
-
-    closeNewRegionModal() {
-      this.showNewRegionModal = false
-      this.selectedRegionType = null
-      this.newRegionName = ''
-    },
-
-
-    createRegionOfType(regionType) {
-      // Generate default name for the region type
-      const regionName = this.getRegionNamePlaceholder(regionType)
-
-      // Emit an event to parent to handle region creation
-      this.$emit('create-region', {
-        type: regionType,
-        name: regionName
-      })
-
-      console.log(`Creating new ${regionType} region: ${regionName}`)
-
-      this.closeNewRegionModal()
-    },
-
-    // Helper method to determine if an item should be collapsed
-    shouldCollapseItem(element) {
-      // If collapse setting is disabled, never collapse
-      if (!this.collapseBreakRegions) return false
-
-      // Don't collapse if no element
-      if (!element) return false
-
-      // Check if this element is in a break region by region type OR region name
-      const regionType = element.regionType || this.determineRegionType(element)
-
-      // Get region info to check name as well
-      const region = this.getRegionForItem(element)
-      const isBreakRegion = (regionType === 'break') ||
-                           (region && region.type === 'break') ||
-                           (region && region.name && region.name.toLowerCase().includes('break'))
-
-      // Only collapse break regions
-      if (!isBreakRegion) return false
-
-      // Don't collapse if this specific region is explicitly selected (clicked on region header)
-      const regionId = this.getRegionIdForItem(element)
-      const shouldCollapse = this.selectedRegionId !== regionId
-
-      // Debug logging for break region expansion issues
-      if (isBreakRegion) {
-        console.log(`Break region collapse check - Element: ${element.slug}, RegionId: ${regionId}, SelectedRegionId: ${this.selectedRegionId}, ShouldCollapse: ${shouldCollapse}`)
-      }
-
-      // ALWAYS collapse break regions by default, even if an individual item is selected
-      // The region will only expand if the user explicitly clicks the region header
-      return shouldCollapse
-    },
-
-    // Helper methods for draggable template
-    shouldShowRegionHeader(element) {
-      if (!element || !this.safeItems) return false
-
-      const currentIndex = this.safeItems.findIndex(item => item.id === element.id)
-      if (currentIndex === 0) return true // Always show header for first item
-
-      const previousItem = this.safeItems[currentIndex - 1]
-      if (!previousItem) return true
-
-      // Show header if region type changes
-      const currentRegionType = element.regionType || this.determineRegionType(element)
-      const previousRegionType = previousItem.regionType || this.determineRegionType(previousItem)
-
-      return currentRegionType !== previousRegionType
-    },
-
-    getRegionHeaderName(element) {
-      const regionType = element.regionType || this.determineRegionType(element)
-
-      // Count how many regions of this type exist before this item
-      let counter = 1
-      const currentIndex = this.safeItems.findIndex(item => item.id === element.id)
-
-      for (let i = 0; i < currentIndex; i++) {
-        const itemRegionType = this.safeItems[i].regionType || this.determineRegionType(this.safeItems[i])
-        if (itemRegionType === regionType) {
-          // Check if this is a region boundary (first item of its type in sequence)
-          const prevIndex = i - 1
-          if (prevIndex < 0) {
-            counter++
-          } else {
-            const prevRegionType = this.safeItems[prevIndex].regionType || this.determineRegionType(this.safeItems[prevIndex])
-            if (prevRegionType !== itemRegionType) {
-              counter++
-            }
-          }
-        }
-      }
-
-      if (regionType === 'block') {
-        return `Block ${String.fromCharCode(64 + counter)}` // A, B, C...
-      } else if (regionType === 'break') {
-        return `Break ${counter}`
-      }
-      return `Region ${counter}`
-    },
-
-    getRegionDurationForItem(element) {
-      const regionType = element.regionType || this.determineRegionType(element)
-
-      // Find all items of the same region type that are consecutive
-      const currentIndex = this.safeItems.findIndex(item => item.id === element.id)
-      let regionItems = [element]
-
-      // Find consecutive items of the same region type
-      for (let i = currentIndex + 1; i < this.safeItems.length; i++) {
-        const itemRegionType = this.safeItems[i].regionType || this.determineRegionType(this.safeItems[i])
-        if (itemRegionType === regionType) {
-          regionItems.push(this.safeItems[i])
-        } else {
+    }
+
+    // If no word boundary found between 17-20, look backwards from 17
+    if (truncateAt === 17) {
+      for (let i = 17; i >= 0; i--) {
+        if (lowerSlug[i] === ' ' || lowerSlug[i] === '-') {
+          truncateAt = i
           break
         }
       }
+    }
 
-      // Calculate total duration
-      let totalSeconds = 0
-      regionItems.forEach(item => {
-        if (item.duration) {
-          let duration = item.duration.toString().replace(/[^\d:]/g, '')
-          const parts = duration.split(':')
-          if (parts.length >= 2) {
-            const hours = parts.length >= 3 ? parseInt(parts[0]) || 0 : 0
-            const minutes = parseInt(parts[parts.length - 2]) || 0
-            const seconds = parseInt(parts[parts.length - 1]) || 0
-            totalSeconds += hours * 3600 + minutes * 60 + seconds
-          }
-        }
-      })
+    return lowerSlug.substring(0, truncateAt) + '...'
+  }
 
-      const hours = Math.floor(totalSeconds / 3600)
-      const minutes = Math.floor((totalSeconds % 3600) / 60)
-      const secs = totalSeconds % 60
-      const frames = 0
+  return lowerSlug
+}
 
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`
-    },
+function getWordCount(item) {
+  // Calculate word count from script_content, excluding code blocks but counting FSQ quotes
+  if (!item?.script_content) return 0
 
-    isLastItem(element) {
-      if (!this.safeItems || this.safeItems.length === 0) return false
-      const lastItem = this.safeItems[this.safeItems.length - 1]
-      return lastItem && lastItem.id === element.id
-    },
+  let content = item.script_content
 
-    // Region lookup helpers (used by selection/display methods)
-    getRegionIdForItem(element) {
-      const regions = this.regions
-      for (const region of regions) {
-        if (region.items.some(item => item.id === element.id)) {
-          return region.id
-        }
+  // Remove YAML frontmatter (everything between --- markers)
+  content = content.replace(/^---[\s\S]*?---\n?/m, '')
+
+  // Remove code blocks (fenced with ``` or indented)
+  content = content.replace(/```[\s\S]*?```/g, '')
+  content = content.replace(/^( {4}|\t).*$/gm, '')
+
+  // Remove HTML/XML tags
+  content = content.replace(/<[^>]*>/g, '')
+
+  // Remove markdown links but keep the text
+  content = content.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+
+  // Remove markdown image syntax
+  content = content.replace(/!\[([^\]]*)\]\([^)]+\)/g, '')
+
+  // Count words (split by whitespace and filter empty strings)
+  const words = content.trim().split(/\s+/).filter(w => w.length > 0)
+
+  return words.length
+}
+
+// Dropline color methods for ghost item styling
+function getDroplineColor() { // eslint-disable-line no-unused-vars
+  const droplineValue = getColorValue('dropline') || 'green-lighten-4'
+  return resolveVuetifyColor(droplineValue)
+}
+
+function getDroplineBackground() { // eslint-disable-line no-unused-vars
+  const droplineValue = getColorValue('dropline') || 'green-lighten-4'
+  const baseColor = resolveVuetifyColor(droplineValue)
+  // Convert to rgba with low opacity for background
+  const rgb = baseColor.match(/\w\w/g)?.map(hex => parseInt(hex, 16))
+  return rgb ? `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.2)` : 'rgba(200, 230, 201, 0.2)'
+}
+
+function getDroplineTextColor() { // eslint-disable-line no-unused-vars
+  const droplineValue = getColorValue('dropline') || 'green-lighten-4'
+  const baseColor = resolveVuetifyColor(droplineValue)
+  // Use slightly more opaque version for text
+  const rgb = baseColor.match(/\w\w/g)?.map(hex => parseInt(hex, 16))
+  return rgb ? `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.8)` : 'rgba(200, 230, 201, 0.8)'
+}
+
+// Helper method to get the original index of an item in the safeItems array (0-based)
+function getItemIndex(item) {
+  return safeItems.value.findIndex(i => i.id === item.id)
+}
+
+// Get a light background color for region items
+function getRegionBackgroundColor(regionColor) { // eslint-disable-line no-unused-vars
+  const resolvedColor = resolveVuetifyColor(regionColor)
+  // Convert hex to RGB and apply low opacity
+  const rgb = resolvedColor.match(/\w\w/g)?.map(hex => parseInt(hex, 16))
+  return rgb ? `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.08)` : 'rgba(0, 0, 0, 0.05)'
+}
+
+// Get a darker variant of the region color for headers
+function getRegionHeaderColor(regionColor) {
+  console.log(`[DEBUG] getRegionHeaderColor input:`, regionColor)
+
+  // Handle undefined/null regionColor
+  if (!regionColor) {
+    return resolveVuetifyColor('grey-darken-1')
+  }
+
+  // Try to get a darker variant by appending -darken-1
+  let darkerColor = regionColor
+
+  // If it doesn't already have a variant, add -darken-1
+  if (!regionColor.includes('-lighten-') && !regionColor.includes('-darken-')) {
+    darkerColor = regionColor + '-darken-1'
+  } else if (regionColor.includes('-lighten-')) {
+    // Convert lighten to darken, but cap at darken-4 for all colors
+    const lightenLevel = parseInt(regionColor.match(/-lighten-(\d)/)?.[1]) || 1
+    const darkenLevel = Math.min(lightenLevel, 4) // Cap at darken-4
+    darkerColor = regionColor.replace('-lighten-' + lightenLevel, '-darken-' + darkenLevel)
+  } else if (regionColor.includes('-darken-')) {
+    // Already dark, but make it slightly darker (cap at darken-4)
+    const currentLevel = parseInt(regionColor.match(/-darken-(\d)/)?.[1]) || 1
+    darkerColor = regionColor.replace(/-darken-\d/, `-darken-${Math.min(currentLevel + 1, 4)}`)
+  }
+
+  const resolvedColor = resolveVuetifyColor(darkerColor)
+  console.log(`[DEBUG] getRegionHeaderColor output: ${darkerColor} -> ${resolvedColor}`)
+  return resolvedColor
+}
+
+// Region handler methods
+function handleEditRegion(regionHeader) {
+  console.log('Edit region:', regionHeader.regionName)
+  // TODO: Implement region editing
+}
+
+function handleDuplicateRegion(regionHeader) { // eslint-disable-line no-unused-vars
+  console.log('Duplicate region:', regionHeader.regionName)
+  // TODO: Implement region duplication
+}
+
+function handleDeleteRegion(element) {
+  // Find the region that this element belongs to
+  const region = getRegionForItem(element)
+  if (!region) {
+    console.error('Could not find region for element:', element)
+    return
+  }
+
+  console.log('Delete region:', region)
+
+  // Store the region data for the confirmation dialog
+  regionToDelete.value = {
+    region: region,
+    element: element,
+    regionName: getRegionHeaderName(element),
+    itemCount: region.items.length
+  }
+
+  // Show confirmation dialog
+  showDeleteRegionDialog.value = true
+}
+
+function confirmDeleteRegion() {
+  if (!regionToDelete.value) return
+
+  const { region, regionName, itemCount, isSelectedRegionDeletion } = regionToDelete.value
+
+  if (isSelectedRegionDeletion) {
+    console.log(`Moving items from region "${regionName}" to unassigned region`)
+
+    // Emit event to parent to handle moving items to unassigned region
+    emit('move-region-to-unassigned', {
+      regionId: region.id,
+      regionType: region.type,
+      regionName: regionName,
+      items: region.items,
+      itemIds: region.items.map(item => item.id)
+    })
+  } else {
+    console.log(`Deleting region "${regionName}" with ${itemCount} items`)
+
+    // Emit event to parent to handle the actual deletion
+    emit('delete-region', {
+      regionId: region.id,
+      regionType: region.type,
+      regionName: regionName,
+      items: region.items,
+      itemIds: region.items.map(item => item.id)
+    })
+  }
+
+  // Close dialog and reset
+  cancelDeleteRegion()
+}
+
+function cancelDeleteRegion() {
+  showDeleteRegionDialog.value = false
+  regionToDelete.value = null
+}
+
+// Calculate total duration for a region
+function getRegionTotalDuration(regionId) { // eslint-disable-line no-unused-vars
+  // Find the region from our grouped data
+  const region = regions.value.find(r => r.id === regionId)
+  if (!region || !region.items || region.items.length === 0) {
+    return '00:00:00'
+  }
+
+  let totalSeconds = 0
+  region.items.forEach(item => {
+    if (item.duration) {
+      // Handle different duration formats
+      let duration = item.duration.toString()
+
+      // Remove any non-digit characters except colons
+      duration = duration.replace(/[^\d:]/g, '')
+
+      // Parse duration parts
+      const parts = duration.split(':')
+      if (parts.length >= 2) {
+        const hours = parts.length >= 3 ? parseInt(parts[0]) || 0 : 0
+        const minutes = parseInt(parts[parts.length - 2]) || 0
+        const seconds = parseInt(parts[parts.length - 1]) || 0
+
+        totalSeconds += hours * 3600 + minutes * 60 + seconds
       }
-      return null
-    },
+    }
+  })
 
-    getRegionForItem(element) {
-      const regions = this.regions
-      return regions.find(region =>
-        region.items.some(item => item.id === element.id)
-      )
-    },
+  // Convert back to HH:MM:SS:FF format (8 digits to match other durations)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const secs = totalSeconds % 60
+  const frames = 0 // Default to 00 frames for region totals
 
-    // Check if this element shows a region header for a selected region
-    isSelectedRegionStart(element) {
-      return this.shouldShowRegionHeader(element) &&
-             this.selectedRegionId === this.getRegionIdForItem(element)
-    },
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`
+}
 
-    // Check if this is the last item in a selected region
-    isSelectedRegionEnd(element) {
-      if (this.selectedRegionId !== this.getRegionIdForItem(element)) {
-        return false
-      }
+// New Region Modal Methods
+function getRegionNamePlaceholder(regionType) {
+  const existingRegions = regions.value.filter(r => r.type === regionType)
+  const nextNumber = existingRegions.length + 1
 
-      const currentIndex = this.safeItems.findIndex(item => item.id === element.id)
-      const nextIndex = currentIndex + 1
+  if (regionType === 'block') {
+    return `Block ${String.fromCharCode(64 + nextNumber)}` // A, B, C...
+  } else if (regionType === 'break') {
+    return `Break ${nextNumber}`
+  }
+  return `${regionType} ${nextNumber}`
+}
 
-      // It's the last item if there's no next item, or the next item is in a different region
-      if (nextIndex >= this.safeItems.length) {
-        return true
-      }
-
-      const nextElement = this.safeItems[nextIndex]
-      const nextRegionId = this.getRegionIdForItem(nextElement)
-
-      return nextRegionId !== this.selectedRegionId
-    },
-
-    // Check if this element shows a region header for the region containing selected item
-    isSelectedItemRegionStart(element) {
-      return this.shouldShowRegionHeader(element) &&
-             this.selectedItemRegionId === this.getRegionIdForItem(element)
-    },
-
-    // Check if this is the last item in the region containing selected item
-    isSelectedItemRegionEnd(element) {
-      if (this.selectedItemRegionId !== this.getRegionIdForItem(element)) {
-        return false
-      }
-
-      const currentIndex = this.safeItems.findIndex(item => item.id === element.id)
-      const nextIndex = currentIndex + 1
-
-      // It's the last item if there's no next item, or the next item is in a different region
-      if (nextIndex >= this.safeItems.length) {
-        return true
-      }
-
-      const nextElement = this.safeItems[nextIndex]
-      const nextRegionId = this.getRegionIdForItem(nextElement)
-
-      return nextRegionId !== this.selectedItemRegionId
-    },
+function closeNewRegionModal() {
+  showNewRegionModal.value = false
+  selectedRegionType.value = null
+  newRegionName.value = ''
+}
 
 
-    handleItemDelete(element) {
-      const itemIndex = this.getItemIndex(element)
-      const item = this.safeItems[itemIndex]
+function createRegionOfType(regionType) {
+  // Generate default name for the region type
+  const regionName = getRegionNamePlaceholder(regionType)
 
-      // Emit event to parent to handle the actual deletion
-      this.$emit('delete-item', {
-        itemIndex: itemIndex,
-        item: item,
-        itemId: item.id,
-        slug: item.slug || item.title || 'Unnamed Item'
-      })
+  // Emit an event to parent to handle region creation
+  emit('create-region', {
+    type: regionType,
+    name: regionName
+  })
 
-      console.log('Item delete requested:', item)
-    },
+  console.log(`Creating new ${regionType} region: ${regionName}`)
 
-    handleItemDoubleClick(element) {
-      const itemIndex = this.getItemIndex(element)
-      const item = this.safeItems[itemIndex]
+  closeNewRegionModal()
+}
 
-      this.showFlashMessage = false // Hide any existing message
-      this.flashMessage = `Double-clicked rundown item: "${item?.slug || item?.title || 'Unnamed Item'}" (Index: ${itemIndex})`
-      this.showFlashMessage = true
+// Helper method to determine if an item should be collapsed
+function shouldCollapseItem(element) { // eslint-disable-line no-unused-vars
+  // If collapse setting is disabled, never collapse
+  if (!props.collapseBreakRegions) return false
 
-      // Auto-hide flash message after 3 seconds
-      setTimeout(() => {
-        this.showFlashMessage = false
-      }, 3000)
+  // Don't collapse if no element
+  if (!element) return false
 
-      console.log('Item double-clicked:', item)
-    },
+  // Check if this element is in a break region by region type OR region name
+  const regionType = element.regionType || determineRegionType(element)
 
-    handleRegionDoubleClick(element) {
-      const regionName = this.getRegionHeaderName(element)
-      const regionId = this.getRegionIdForItem(element)
+  // Get region info to check name as well
+  const region = getRegionForItem(element)
+  const isBreakRegion = (regionType === 'break') ||
+                       (region && region.type === 'break') ||
+                       (region && region.name && region.name.toLowerCase().includes('break'))
 
-      this.showFlashMessage = false // Hide any existing message
-      this.flashMessage = `Double-clicked region: "${regionName}" (ID: ${regionId})`
-      this.showFlashMessage = true
+  // Only collapse break regions
+  if (!isBreakRegion) return false
 
-      // Auto-hide flash message after 3 seconds
-      setTimeout(() => {
-        this.showFlashMessage = false
-      }, 3000)
+  // Don't collapse if this specific region is explicitly selected (clicked on region header)
+  const rId = getRegionIdForItem(element)
+  const shouldCollapse = selectedRegionId.value !== rId
 
-      console.log('Region double-clicked:', regionName, regionId)
-    },
+  // Debug logging for break region expansion issues
+  if (isBreakRegion) {
+    console.log(`Break region collapse check - Element: ${element.slug}, RegionId: ${rId}, SelectedRegionId: ${selectedRegionId.value}, ShouldCollapse: ${shouldCollapse}`)
+  }
 
-    handleSelectedRegionDelete(element) {
-      // Use the same logic as the existing region deletion but with different messaging
-      const region = this.getRegionForItem(element)
-      if (!region) {
-        console.error('Could not find region for element:', element)
-        return
-      }
+  // ALWAYS collapse break regions by default, even if an individual item is selected
+  // The region will only expand if the user explicitly clicks the region header
+  return shouldCollapse
+}
 
-      console.log('Delete selected region:', region)
+// Helper methods for draggable template
+function shouldShowRegionHeader(element) {
+  if (!element || !safeItems.value) return false
 
-      // Store the region data for the confirmation dialog
-      this.regionToDelete = {
-        region: region,
-        element: element,
-        regionName: this.getRegionHeaderName(element),
-        itemCount: region.items.length,
-        isSelectedRegionDeletion: true // Flag to indicate this is from the selected region delete button
-      }
+  const currentIndex = safeItems.value.findIndex(item => item.id === element.id)
+  if (currentIndex === 0) return true // Always show header for first item
 
-      // Show confirmation dialog
-      this.showDeleteRegionDialog = true
-    },
+  const previousItem = safeItems.value[currentIndex - 1]
+  if (!previousItem) return true
 
-    // Drag handlers — delegate to useRundownDragDrop composable
-    // handleRegionDragStart is provided directly by composable (no ctx needed)
-    // handleRegionDragEnd, handleItemDragEnd, handleItemChange need a ctx object
-    handleRegionDragEndWrapper(evt) {
-      this.handleRegionDragEnd(evt, {
-        regions: this.regions,
-        flatItemsFromRegions: this.flatItemsFromRegions,
-        emit: this.$emit.bind(this)
-      })
-    },
-    // handleItemDragStart is provided directly by composable (no ctx needed)
-    handleItemDragEndWrapper(evt) {
-      this.handleItemDragEnd(evt, {
-        regions: this.regions,
-        flatItemsFromRegions: this.flatItemsFromRegions,
-        emit: this.$emit.bind(this)
-      })
-    },
-    // allowMove is provided directly by composable (no ctx needed)
-    handleItemChangeWrapper(evt) {
-      this.handleItemChange(evt, {
-        regions: this.regions,
-        flatItemsFromRegions: this.flatItemsFromRegions,
-        emit: this.$emit.bind(this)
-      })
-    },
+  // Show header if region type changes
+  const currentRegionType = element.regionType || determineRegionType(element)
+  const previousRegionType = previousItem.regionType || determineRegionType(previousItem)
 
-    // Update region selection for hierarchical structure
-    handleRegionSelect(region, event) {
-      const isCtrlClick = event && (event.ctrlKey || event.metaKey)
+  return currentRegionType !== previousRegionType
+}
 
-      if (isCtrlClick) {
-        // Multi-selection mode with Ctrl+click
-        this.isMultiSelectMode = true
+function getRegionHeaderName(element) {
+  const regionType = element.regionType || determineRegionType(element)
 
-        if (this.selectedRegionIds.has(region.id)) {
-          // Remove from multi-selection if already selected
-          this.selectedRegionIds.delete(region.id)
-        } else {
-          // Add to multi-selection
-          this.selectedRegionIds.add(region.id)
-        }
+  // Count how many regions of this type exist before this item
+  let counter = 1
+  const currentIndex = safeItems.value.findIndex(item => item.id === element.id)
+
+  for (let i = 0; i < currentIndex; i++) {
+    const itemRegionType = safeItems.value[i].regionType || determineRegionType(safeItems.value[i])
+    if (itemRegionType === regionType) {
+      // Check if this is a region boundary (first item of its type in sequence)
+      const prevIndex = i - 1
+      if (prevIndex < 0) {
+        counter++
       } else {
-        // Normal single selection mode
-        if (this.isMultiSelectMode) {
-          // Clear all multi-selections first
-          this.selectedRegionIds.clear()
-          this.selectedItemIndices.clear()
-          this.isMultiSelectMode = false
+        const prevRegionType = safeItems.value[prevIndex].regionType || determineRegionType(safeItems.value[prevIndex])
+        if (prevRegionType !== itemRegionType) {
+          counter++
         }
-
-        // Clear item selection when selecting a region
-        this.$emit('select-item', -1)
-
-        // Toggle selection: if already selected, deselect; otherwise select
-        if (this.selectedRegionId === region.id) {
-          this.selectedRegionId = null
-          this.$emit('select-region', null) // Emit deselection
-          // For break regions, toggle collapsed state when clicking on selected region
-          if (region.type === 'break') {
-            region.isCollapsed = !region.isCollapsed
-          }
-        } else {
-          this.selectedRegionId = region.id
-          this.$emit('select-region', region) // Emit selection with region data
-          // For break regions, expand when selected
-          if (region.type === 'break') {
-            region.isCollapsed = false
-          }
-        }
-      }
-
-      console.log('Region selected:', region.id, 'Ctrl+click:', isCtrlClick, 'Multi-selections:', this.selectedRegionIds.size)
-    },
-
-    // Update item selection for hierarchical structure
-    handleItemSelect(item, event) {
-      // Join placement mode — clicking a gap places the item, clicking an item does nothing
-      if (this.joinPlacementMode) {
-        return
-      }
-
-      const itemIndex = this.getItemGlobalIndex(item)
-
-      // Join select mode — every click toggles selection (no Ctrl required)
-      if (this.joinSelectMode) {
-        const itemId = item.asset_id || item.id
-        if (this.joinSelectedIds.has(itemId)) {
-          this.joinSelectedIds.delete(itemId)
-        } else {
-          this.joinSelectedIds.add(itemId)
-        }
-        // Force reactivity
-        this.joinSelectedIds = new Set(this.joinSelectedIds)
-        return
-      }
-
-      const isCtrlClick = event && (event.ctrlKey || event.metaKey)
-
-      if (isCtrlClick) {
-        // Multi-selection mode with Ctrl+click
-        this.isMultiSelectMode = true
-
-        if (this.selectedItemIndices.has(itemIndex)) {
-          // Remove from multi-selection if already selected
-          this.selectedItemIndices.delete(itemIndex)
-        } else {
-          // Add to multi-selection
-          this.selectedItemIndices.add(itemIndex)
-        }
-      } else {
-        // Normal single selection mode
-        if (this.isMultiSelectMode) {
-          // Clear all multi-selections first
-          this.selectedRegionIds.clear()
-          this.selectedItemIndices.clear()
-          this.isMultiSelectMode = false
-        }
-
-        // Clear region selection when selecting an item
-        this.selectedRegionId = null
-
-        // Toggle selection: if already selected, deselect; otherwise select
-        if (this.selectedItemIndex === itemIndex) {
-          this.$emit('select-item', -1) // Deselect by passing -1
-        } else {
-          this.$emit('select-item', itemIndex) // Select the item
-        }
-      }
-
-      console.log('Item selected:', item.slug, 'index:', itemIndex, 'Ctrl+click:', isCtrlClick, 'Multi-selections:', this.selectedItemIndices.size)
-
-      // Lazy-load history stats for selected item
-      if (!isCtrlClick && item && item.id && !this.historyStats[item.id]) {
-        this.fetchHistoryStats(item)
-      }
-    },
-
-    async fetchHistoryStats(item) {
-      if (!this.episode || !item?.id) return
-      try {
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-        const headers = { 'Authorization': `Bearer ${token}` }
-        let totalCount = 0
-        let oldestDate = null
-        let largestSize = 0
-
-        // Fetch filesystem snapshots (endpoint expects numeric item_id)
-        const numericId = Number(item.id)
-        const fsRes = !isNaN(numericId) ? await fetch(`/api/episodes/${this.episode}/history/segments/${numericId}`, { headers }) : null
-        if (fsRes && fsRes.ok) {
-          const fsData = await fsRes.json()
-          const snaps = fsData.snapshots || []
-          totalCount += snaps.length
-          for (const s of snaps) {
-            if (s.modified && (!oldestDate || new Date(s.modified) < new Date(oldestDate))) oldestDate = s.modified
-            if (s.size_bytes > largestSize) largestSize = s.size_bytes
-          }
-        }
-
-        // Fetch DB versions
-        const assetId = item.asset_id || item.AssetID
-        if (assetId) {
-          const dbRes = await fetch(`/api/episodes/rundown-item/${assetId}/versions`, { headers })
-          if (dbRes.ok) {
-            const dbData = await dbRes.json()
-            const vers = dbData.versions || []
-            totalCount += vers.length
-            for (const v of vers) {
-              if (v.created_at && (!oldestDate || new Date(v.created_at) < new Date(oldestDate))) oldestDate = v.created_at
-              const sz = v.content_length || 0
-              if (sz > largestSize) largestSize = sz
-            }
-          }
-        }
-
-        let oldestStr = '—'
-        if (oldestDate) {
-          const days = Math.floor((Date.now() - new Date(oldestDate).getTime()) / (24 * 60 * 60 * 1000))
-          oldestStr = days === 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`
-        }
-        const largestStr = largestSize > 1024 ? (largestSize / 1024).toFixed(0) + 'kb' : largestSize + 'b'
-        this.historyStats[item.id] = { count: totalCount, oldest: oldestStr, largest: largestStr }
-      } catch {
-        // Silent fail — stats are non-critical
-      }
-    },
-
-    // Create new region button handler
-    createNewRegion() {
-      console.log('Create new region clicked')
-      this.showNewRegionModal = true
-    },
-
-    // Enhanced delete selected functionality - now uses modal
-    handleDeleteSelected() {
-      try {
-        if (this.isMultiSelectMode && this.hasMultipleSelections) {
-          // Multi-selection deletion
-          const regions = []
-          const items = []
-
-          // Collect region objects
-          for (const regionId of this.selectedRegionIds) {
-            const region = this.regions.find(r => r.id === regionId)
-            if (region) regions.push(region)
-          }
-
-          // Collect item objects
-          for (const itemIndex of this.selectedItemIndices) {
-            const item = this.getItemByGlobalIndex(itemIndex)
-            if (item) items.push(item)
-          }
-
-          this.showDeletionModal({ type: 'multi', regions, items })
-
-        } else if (this.selectedRegionId) {
-          // Single region deletion
-          const region = this.regions.find(r => r.id === this.selectedRegionId)
-          if (region) {
-            this.showDeletionModal({ type: 'region', regions: [region], items: [] })
-          }
-        } else if (this.selectedItemIndex !== -1) {
-          // Single item deletion
-          const item = this.getItemByGlobalIndex(this.selectedItemIndex)
-          if (item) {
-            this.showDeletionModal({ type: 'item', regions: [], items: [item] })
-          }
-        }
-      } catch (error) {
-        console.error('Error preparing deletion:', error)
-      }
-    },
-
-    // Show deletion confirmation modal
-    showDeletionModal(deletionData) {
-      this.pendingDeletion = deletionData
-      this.showDeleteConfirmModal = true
-    },
-
-    // Cancel deletion
-    cancelDeletion() {
-      this.showDeleteConfirmModal = false
-      this.pendingDeletion = null
-      this.deletionInProgress = false
-    },
-
-    // Confirm and execute deletion
-    async confirmDeletion() {
-      if (!this.pendingDeletion) return
-
-      this.deletionInProgress = true
-
-      try {
-        const { regions, items } = this.pendingDeletion
-
-        // Delete all selected regions first
-        for (const region of regions) {
-          const regionName = region.name || region.type || `Region ${region.id}`
-          console.log('Deleting region:', regionName)
-          this.$emit('delete-region', region)
-        }
-
-        // Delete all selected items
-        for (const item of items) {
-          console.log('Deleting item:', item.slug || item.title || item.id)
-          this.$emit('delete-item', item)
-        }
-
-        // Clear all selections
-        this.selectedRegionIds.clear()
-        this.selectedItemIndices.clear()
-        this.isMultiSelectMode = false
-        this.selectedRegionId = null
-        this.$emit('select-item', -1)
-
-        // Close modal
-        this.cancelDeletion()
-
-      } catch (error) {
-        console.error('Error executing deletion:', error)
-        this.deletionInProgress = false
-      }
-    },
-
-    // Keyboard event handler
-    handleKeydown(event) {
-      // Ctrl+Shift+R - Refresh/Reload rundown data
-      if (event.ctrlKey && event.shiftKey && event.key === 'R') {
-        event.preventDefault();
-        event.stopPropagation();
-        this.$emit('refresh');
-        return;
-      }
-
-      // Alt+Shift+R - Toggle regions visibility
-      if (event.altKey && event.shiftKey && event.key === 'R') {
-        event.preventDefault();
-        event.stopPropagation();
-        this.toggleRegionsVisibility();
-        return;
-      }
-
-      // Check for Esc key to cancel multi-selection
-      if (event.key === 'Escape') {
-        // Only handle Esc if we're in multi-select mode or have selections
-        if (this.isMultiSelectMode || this.hasMultipleSelections || this.selectedRegionId !== null || this.selectedItemIndex !== -1) {
-          console.log('🚫 Esc pressed: Cancelling all selections')
-          this.cancelAllSelections()
-
-          // Prevent ALL further processing of this Esc key event
-          event.preventDefault()
-          event.stopPropagation()
-          event.stopImmediatePropagation()
-
-          // Return early to ensure no other handlers run
-          return false
-        }
-
-        // If Esc is pressed but we don't have selections, still prevent default behavior
-        // to avoid unwanted navigation
-        console.log('🚫 Esc pressed: No selections to cancel, preventing default navigation')
-        event.preventDefault()
-        event.stopPropagation()
-        event.stopImmediatePropagation()
-        return false
-      }
-
-      // Check for Ctrl+Alt+Shift+0 to clear entire rundown
-      // Note: when Shift+0 is pressed, event.key is ')' but event.code is 'Digit0'
-      if (event.ctrlKey && event.altKey && event.shiftKey && (event.key === ')' || event.code === 'Digit0')) {
-        console.log('🚨 Clear rundown shortcut triggered!')
-        event.preventDefault()
-        this.showClearRundownConfirmation()
-      }
-    },
-
-    // Show clear rundown confirmation modal
-    showClearRundownConfirmation() {
-      console.log('Clear rundown shortcut triggered')
-      this.showClearRundownModal = true
-    },
-
-    // Cancel clear rundown
-    cancelClearRundown() {
-      this.showClearRundownModal = false
-    },
-
-    // Execute clear entire rundown
-    async confirmClearRundown() {
-      this.clearRundownInProgress = true
-
-      try {
-        console.log('🚨 Clearing entire rundown for episode:', this.episode)
-
-        // Debug authentication tokens
-        const authToken = localStorage.getItem('auth_token') || localStorage.getItem('token')
-        const apiKey = localStorage.getItem('api_key')
-        console.log('🔐 Auth token:', authToken ? `${authToken.substring(0, 20)}...` : 'NONE')
-        console.log('🔑 API key:', apiKey ? `${apiKey.substring(0, 20)}...` : 'NONE')
-
-        const apiUrl = `/api/episodes/${this.episode}/rundown/clear`
-        console.log('📡 API URL:', apiUrl)
-
-        // Call API to clear all rundown items and files
-        const response = await fetch(apiUrl, {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`,
-            'X-API-Key': apiKey
-          }
-        })
-
-        console.log('📊 Response status:', response.status, response.statusText)
-        console.log('📋 Response headers:', [...response.headers.entries()])
-
-        if (!response.ok) {
-          // Get detailed error information
-          let errorMessage = `HTTP ${response.status}: ${response.statusText}`
-          try {
-            const errorBody = await response.text()
-            console.log('❌ Error response body:', errorBody)
-            errorMessage += `\nDetails: ${errorBody}`
-          } catch (parseError) {
-            console.log('⚠️ Could not parse error response:', parseError)
-          }
-          throw new Error(errorMessage)
-        }
-
-        const result = await response.json()
-        console.log('Rundown cleared successfully:', result)
-
-        // Clear local state
-        this.selectedItemIndices.clear()
-        this.selectedRegionIds.clear()
-        this.isMultiSelectMode = false
-
-        // Emit event to parent to reload rundown
-        this.$emit('rundown-cleared')
-
-        // Close modal
-        this.showClearRundownModal = false
-
-      } catch (error) {
-        console.error('Error clearing rundown:', error)
-        alert('Failed to clear rundown. Please try again.')
-      } finally {
-        this.clearRundownInProgress = false
-      }
-    },
-
-    // Helper method to get item by global index
-    getItemByGlobalIndex(globalIndex) {
-      let currentIndex = 0
-      for (const region of this.regions) {
-        for (const item of region.items) {
-          if (currentIndex === globalIndex) {
-            return item
-          }
-          currentIndex++
-        }
-      }
-      return null
-    },
-
-    // Helper method to get region by ID
-    getRegionById(regionId) {
-      return this.regions.find(region => region.id === regionId)
-    },
-
-    // Request new AssetID for a rundown item
-    async requestNewItemAssetID(item) {
-      try {
-        console.log('Requesting new AssetID for rundown item:', item)
-
-        const response = await fetch('/assetid/regenerate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
-          },
-          body: JSON.stringify({
-            old_asset_id: item.asset_id,
-            entity_type: 'segment',
-            reason: 'user_requested_item_regeneration',
-            context: {
-              item_slug: item.slug,
-              item_type: item.type,
-              item_id: item.id
-            }
-          })
-        })
-
-        if (!response.ok) {
-          throw new Error(`Server error: ${response.status}`)
-        }
-
-        const result = await response.json()
-        console.log('✅ AssetID regenerated successfully:', result)
-
-        // Update the item with new AssetID
-        item.asset_id = result.new_asset_id
-
-        // Show success message
-        this.flashMessage = `AssetID regenerated: ${result.old_asset_id} → ${result.new_asset_id}`
-        this.showFlashMessage = true
-
-        // Emit event to parent to save the updated item
-        this.$emit('item-assetid-updated', {
-          item: item,
-          oldAssetId: result.old_asset_id,
-          newAssetId: result.new_asset_id
-        })
-
-        // Force reactive update of the rundown display
-        this.$forceUpdate()
-
-        // Emit global refresh event
-        this.$emit('assetid-regenerated', {
-          entityType: 'segment',
-          oldAssetId: result.old_asset_id,
-          newAssetId: result.new_asset_id,
-          affectedItem: item
-        })
-
-      } catch (error) {
-        console.error('❌ Failed to regenerate AssetID:', error)
-        this.flashMessage = `Failed to regenerate AssetID: ${error.message}`
-        this.showFlashMessage = true
-      }
-    },
-
-    // Cancel all selections and exit multi-select mode
-    cancelAllSelections() {
-      // Clear all multi-selections
-      this.selectedItemIndices.clear()
-      this.selectedRegionIds.clear()
-      this.isMultiSelectMode = false
-
-      // Clear single selections
-      this.selectedRegionId = null
-      this.$emit('select-item', -1)
-
-      console.log('✅ All selections cancelled - multi-select mode disabled')
-    },
-
-    // Rollback methods
-    async openRollbackModal(item) {
-      this.rollbackItem = item
-      this.rollbackDialog = true
-      this.rollbackLoading = true
-      this.rollbackSnapshots = []
-
-      const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-      const headers = { 'Authorization': `Bearer ${token}` }
-      const combined = []
-
-      try {
-        // 1. Load filesystem snapshots (autosave)
-        const fsRes = await fetch(`/api/episodes/${this.episode}/history/segments/${item.id}`, { headers })
-        if (fsRes.ok) {
-          const fsData = await fsRes.json()
-          for (const snap of fsData.snapshots) {
-            try {
-              const detailRes = await fetch(`/api/episodes/${this.episode}/history/segments/${item.id}/${snap.filename}`, { headers })
-              if (detailRes.ok) {
-                const detail = await detailRes.json()
-                const rawContent = detail.content || ''
-                const textOnly = rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-                snap.preview = textOnly.substring(0, 80) + (textOnly.length > 80 ? '...' : '')
-                snap.content_length = detail.frontmatter?.content_length || rawContent.length
-                snap.full_content = rawContent
-              }
-            } catch {
-              snap.preview = ''
-            }
-            snap.source = 'auto'
-            snap.restore_type = 'file'
-            combined.push(snap)
-          }
-        }
-
-        // 2. Load DB version history (manual saves)
-        const assetId = item.asset_id || item.AssetID
-        if (assetId) {
-          const dbRes = await fetch(`/api/episodes/rundown-item/${assetId}/versions`, { headers })
-          if (dbRes.ok) {
-            const dbData = await dbRes.json()
-            for (const ver of (dbData.versions || [])) {
-              combined.push({
-                filename: `v${ver.version_number}`,
-                modified: ver.created_at,
-                size_bytes: (ver.content_length || 0),
-                content_length: ver.content_length,
-                preview: '',
-                source: ver.change_type === 'autosave' ? 'auto' : 'manual',
-                restore_type: 'db',
-                version_number: ver.version_number,
-                asset_id: assetId,
-                full_content: null // loaded on preview
-              })
-            }
-          }
-        }
-
-        // Sort all entries by date, newest first
-        combined.sort((a, b) => new Date(b.modified) - new Date(a.modified))
-        this.rollbackSnapshots = combined
-      } catch (e) {
-        console.error('Failed to load history:', e)
-      } finally {
-        this.rollbackLoading = false
-      }
-    },
-
-    formatSnapshotDate(isoString) {
-      if (!isoString) return '—'
-      const d = new Date(isoString)
-      return d.toLocaleString(undefined, {
-        month: 'short', day: 'numeric',
-        hour: '2-digit', minute: '2-digit', second: '2-digit'
-      })
-    },
-
-    formatTimeAgo(isoString) {
-      if (!isoString) return '—'
-      const now = Date.now()
-      const then = new Date(isoString).getTime()
-      const diffSec = Math.floor((now - then) / 1000)
-      if (diffSec < 60) return `${diffSec}s`
-      const diffMin = Math.floor(diffSec / 60)
-      if (diffMin < 60) return `${diffMin}m`
-      const diffHr = Math.floor(diffMin / 60)
-      if (diffHr < 24) return `${diffHr}h`
-      const diffDays = Math.floor(diffHr / 24)
-      return `${diffDays}d`
-    },
-
-    stripFrontmatter(text) {
-      if (!text) return text
-      // Strip YAML frontmatter (---\n...\n---)
-      const match = text.match(/^---\s*\n[\s\S]*?\n---\s*\n?/)
-      return match ? text.slice(match[0].length).trim() : text
-    },
-
-    markdownToHtml(md) {
-      if (!md) return ''
-      let html = md
-      // Headers
-      html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      // Bold and italic
-      html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
-      // Blockquotes
-      html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
-      // Horizontal rules
-      html = html.replace(/^---$/gm, '<hr>')
-      html = html.replace(/^\*\*\*$/gm, '<hr>')
-      // Unordered lists
-      html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>')
-      // Ordered lists
-      html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-      // Paragraphs - wrap lines not already in tags
-      html = html.split('\n\n').map(block => {
-        block = block.trim()
-        if (!block) return ''
-        if (block.startsWith('<')) return block
-        return '<p>' + block.replace(/\n/g, '<br>') + '</p>'
-      }).join('\n')
-      return html
-    },
-
-    renderPreviewContent(rawContent) {
-      if (!rawContent) return '<p style="color:#999">No content</p>'
-      // Strip frontmatter first
-      let content = this.stripFrontmatter(rawContent)
-      // Check if content is primarily HTML (has block-level tags)
-      if (/<(?:p|div|h[1-6]|ul|ol|blockquote|table|br)\b/i.test(content)) {
-        return content
-      }
-      // Otherwise convert markdown to HTML
-      return this.markdownToHtml(content)
-    },
-
-    async previewSnapshot(snap) {
-      if (snap.restore_type === 'db' && !snap.full_content) {
-        // Lazy-load DB version content
-        try {
-          const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-          const res = await fetch(`/api/episodes/rundown-item/${snap.asset_id}/versions/${snap.version_number}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          })
-          if (res.ok) {
-            const data = await res.json()
-            snap.full_content = data.script_content || ''
-            snap.content_length = data.content_length || snap.full_content.length
-            const textOnly = snap.full_content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-            snap.preview = textOnly.substring(0, 80) + (textOnly.length > 80 ? '...' : '')
-          }
-        } catch (e) {
-          console.error('Failed to load version content:', e)
-        }
-      }
-      this.previewSnap = snap
-      this.previewContent = this.renderPreviewContent(snap.full_content || snap.preview || '')
-      this.previewDialog = true
-    },
-
-    async restoreSnapshot(snap) {
-      if (!snap) return
-
-      this.restoringSnapshot = snap.filename
-      try {
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-        let response
-
-        if (snap.restore_type === 'db') {
-          // Restore from DB version history
-          response = await fetch(`/api/episodes/rundown-item/${snap.asset_id}/versions/${snap.version_number}/restore`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-          })
-        } else {
-          // Restore from filesystem snapshot
-          response = await fetch(`/api/episodes/${this.episode}/history/segments/restore/${snap.filename}`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-          })
-        }
-
-        if (response.ok) {
-          this.rollbackDialog = false
-          this.previewDialog = false
-          this.$emit('refresh-rundown')
-          this.flashMessage = `Segment restored from ${snap.source} ${snap.restore_type === 'db' ? 'version' : 'snapshot'}`
-          this.showFlashMessage = true
-        } else {
-          const err = await response.text()
-          alert(`Restore failed: ${err}`)
-        }
-      } catch (e) {
-        alert(`Restore failed: ${e.message}`)
-      } finally {
-        this.restoringSnapshot = null
-      }
-    },
-
-    // Episode-level rollback methods
-    joinFromMultiSelect() {
-      // Gather item objects from the multi-selected indices
-      const selectedItems = []
-      for (const idx of this.selectedItemIndices) {
-        if (this.items[idx]) {
-          selectedItems.push(this.items[idx])
-        }
-      }
-      if (selectedItems.length < 2) return
-
-      // Clear multi-select state
-      this.selectedItemIndices.clear()
-      this.isMultiSelectMode = false
-
-      // Emit to parent — this skips the join-select phase and goes straight to snapshot + config
-      this.$emit('join-items-selected', selectedItems)
-    },
-
-    cancelJoinSelect() {
-      this.joinSelectedIds = new Set()
-      this.$emit('cancel-join')
-    },
-
-    confirmJoinSelect() {
-      // Gather the actual item objects for the selected IDs
-      const selectedItems = this.items.filter(item => {
-        const itemId = item.asset_id || item.id
-        return this.joinSelectedIds.has(itemId)
-      })
-      this.$emit('join-items-selected', selectedItems)
-    },
-
-    resetJoinState() {
-      this.joinSelectedIds = new Set()
-      this.joinHoverGapIndex = -1
-    },
-
-    async openEpisodeRollbackModal() {
-      this.episodeRollbackDialog = true
-      this.episodeRollbackLoading = true
-      this.episodeRollbackSnapshots = []
-
-      try {
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-        const response = await fetch(`/api/episodes/${this.episode}/history/episode`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (response.ok) {
-          const data = await response.json()
-          // Enrich with item count from detail
-          const enriched = []
-          for (const snap of data.snapshots) {
-            try {
-              const detailRes = await fetch(`/api/episodes/${this.episode}/history/episode/${snap.filename}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-              })
-              if (detailRes.ok) {
-                const detail = await detailRes.json()
-                snap.item_count = detail.frontmatter?.item_count || detail.items?.length || 0
-                snap.items = detail.items || []
-              }
-            } catch {
-              snap.item_count = 0
-            }
-            enriched.push(snap)
-          }
-          this.episodeRollbackSnapshots = enriched
-        }
-      } catch (e) {
-        console.error('Failed to load episode snapshots:', e)
-      } finally {
-        this.episodeRollbackLoading = false
-      }
-    },
-
-    previewEpisodeSnapshot(snap) {
-      this.episodePreviewSnap = snap
-      this.episodePreviewItems = snap.items || []
-      this.episodePreviewDialog = true
-    },
-
-    async restoreEpisodeSnapshot(snap) {
-      if (!snap || !snap.filename) return
-
-      this.restoringEpisode = snap.filename
-      try {
-        const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-        const response = await fetch(`/api/episodes/${this.episode}/history/episode/restore/${snap.filename}`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (response.ok) {
-          const result = await response.json()
-          this.episodeRollbackDialog = false
-          this.episodePreviewDialog = false
-          this.$emit('refresh-rundown')
-          this.flashMessage = `Episode restored: ${result.items_restored} items`
-          this.showFlashMessage = true
-        } else {
-          const err = await response.text()
-          alert(`Episode restore failed: ${err}`)
-        }
-      } catch (e) {
-        alert(`Episode restore failed: ${e.message}`)
-      } finally {
-        this.restoringEpisode = null
       }
     }
   }
+
+  if (regionType === 'block') {
+    return `Block ${String.fromCharCode(64 + counter)}` // A, B, C...
+  } else if (regionType === 'break') {
+    return `Break ${counter}`
+  }
+  return `Region ${counter}`
 }
+
+function getRegionDurationForItem(element) { // eslint-disable-line no-unused-vars
+  const regionType = element.regionType || determineRegionType(element)
+
+  // Find all items of the same region type that are consecutive
+  const currentIndex = safeItems.value.findIndex(item => item.id === element.id)
+  let regionItems = [element]
+
+  // Find consecutive items of the same region type
+  for (let i = currentIndex + 1; i < safeItems.value.length; i++) {
+    const itemRegionType = safeItems.value[i].regionType || determineRegionType(safeItems.value[i])
+    if (itemRegionType === regionType) {
+      regionItems.push(safeItems.value[i])
+    } else {
+      break
+    }
+  }
+
+  // Calculate total duration
+  let totalSeconds = 0
+  regionItems.forEach(item => {
+    if (item.duration) {
+      let duration = item.duration.toString().replace(/[^\d:]/g, '')
+      const parts = duration.split(':')
+      if (parts.length >= 2) {
+        const hours = parts.length >= 3 ? parseInt(parts[0]) || 0 : 0
+        const minutes = parseInt(parts[parts.length - 2]) || 0
+        const seconds = parseInt(parts[parts.length - 1]) || 0
+        totalSeconds += hours * 3600 + minutes * 60 + seconds
+      }
+    }
+  })
+
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const secs = totalSeconds % 60
+  const frames = 0
+
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`
+}
+
+function isLastItem(element) { // eslint-disable-line no-unused-vars
+  if (!safeItems.value || safeItems.value.length === 0) return false
+  const lastItem = safeItems.value[safeItems.value.length - 1]
+  return lastItem && lastItem.id === element.id
+}
+
+// Region lookup helpers (used by selection/display methods)
+function getRegionIdForItem(element) {
+  const regs = regions.value
+  for (const region of regs) {
+    if (region.items.some(item => item.id === element.id)) {
+      return region.id
+    }
+  }
+  return null
+}
+
+function getRegionForItem(element) {
+  const regs = regions.value
+  return regs.find(region =>
+    region.items.some(item => item.id === element.id)
+  )
+}
+
+// Check if this element shows a region header for a selected region
+function isSelectedRegionStart(element) { // eslint-disable-line no-unused-vars
+  return shouldShowRegionHeader(element) &&
+         selectedRegionId.value === getRegionIdForItem(element)
+}
+
+// Check if this is the last item in a selected region
+function isSelectedRegionEnd(element) { // eslint-disable-line no-unused-vars
+  if (selectedRegionId.value !== getRegionIdForItem(element)) {
+    return false
+  }
+
+  const currentIndex = safeItems.value.findIndex(item => item.id === element.id)
+  const nextIndex = currentIndex + 1
+
+  // It's the last item if there's no next item, or the next item is in a different region
+  if (nextIndex >= safeItems.value.length) {
+    return true
+  }
+
+  const nextElement = safeItems.value[nextIndex]
+  const nextRegionId = getRegionIdForItem(nextElement)
+
+  return nextRegionId !== selectedRegionId.value
+}
+
+// Check if this element shows a region header for the region containing selected item
+function isSelectedItemRegionStart(element) { // eslint-disable-line no-unused-vars
+  return shouldShowRegionHeader(element) &&
+         selectedItemRegionId.value === getRegionIdForItem(element)
+}
+
+// Check if this is the last item in the region containing selected item
+function isSelectedItemRegionEnd(element) { // eslint-disable-line no-unused-vars
+  if (selectedItemRegionId.value !== getRegionIdForItem(element)) {
+    return false
+  }
+
+  const currentIndex = safeItems.value.findIndex(item => item.id === element.id)
+  const nextIndex = currentIndex + 1
+
+  // It's the last item if there's no next item, or the next item is in a different region
+  if (nextIndex >= safeItems.value.length) {
+    return true
+  }
+
+  const nextElement = safeItems.value[nextIndex]
+  const nextRegionId = getRegionIdForItem(nextElement)
+
+  return nextRegionId !== selectedItemRegionId.value
+}
+
+
+function handleItemDelete(element) {
+  const itemIndex = getItemIndex(element)
+  const item = safeItems.value[itemIndex]
+
+  // Emit event to parent to handle the actual deletion
+  emit('delete-item', {
+    itemIndex: itemIndex,
+    item: item,
+    itemId: item.id,
+    slug: item.slug || item.title || 'Unnamed Item'
+  })
+
+  console.log('Item delete requested:', item)
+}
+
+function handleItemDoubleClick(element) {
+  const itemIndex = getItemIndex(element)
+  const item = safeItems.value[itemIndex]
+
+  showFlashMessage.value = false // Hide any existing message
+  flashMessage.value = `Double-clicked rundown item: "${item?.slug || item?.title || 'Unnamed Item'}" (Index: ${itemIndex})`
+  showFlashMessage.value = true
+
+  // Auto-hide flash message after 3 seconds
+  setTimeout(() => {
+    showFlashMessage.value = false
+  }, 3000)
+
+  console.log('Item double-clicked:', item)
+}
+
+function handleRegionDoubleClick(element) {
+  const regionName = getRegionHeaderName(element)
+  const rId = getRegionIdForItem(element)
+
+  showFlashMessage.value = false // Hide any existing message
+  flashMessage.value = `Double-clicked region: "${regionName}" (ID: ${rId})`
+  showFlashMessage.value = true
+
+  // Auto-hide flash message after 3 seconds
+  setTimeout(() => {
+    showFlashMessage.value = false
+  }, 3000)
+
+  console.log('Region double-clicked:', regionName, rId)
+}
+
+function handleSelectedRegionDelete(element) { // eslint-disable-line no-unused-vars
+  // Use the same logic as the existing region deletion but with different messaging
+  const region = getRegionForItem(element)
+  if (!region) {
+    console.error('Could not find region for element:', element)
+    return
+  }
+
+  console.log('Delete selected region:', region)
+
+  // Store the region data for the confirmation dialog
+  regionToDelete.value = {
+    region: region,
+    element: element,
+    regionName: getRegionHeaderName(element),
+    itemCount: region.items.length,
+    isSelectedRegionDeletion: true // Flag to indicate this is from the selected region delete button
+  }
+
+  // Show confirmation dialog
+  showDeleteRegionDialog.value = true
+}
+
+// Drag handlers — delegate to useRundownDragDrop composable
+// handleRegionDragStart is provided directly by composable (no ctx needed)
+// handleRegionDragEnd, handleItemDragEnd, handleItemChange need a ctx object
+function handleRegionDragEndWrapper(evt) {
+  handleRegionDragEnd(evt, {
+    regions: regions.value,
+    flatItemsFromRegions: flatItemsFromRegions.value,
+    emit: emit
+  })
+}
+// handleItemDragStart is provided directly by composable (no ctx needed)
+function handleItemDragEndWrapper(evt) {
+  handleItemDragEnd(evt, {
+    regions: regions.value,
+    flatItemsFromRegions: flatItemsFromRegions.value,
+    emit: emit
+  })
+}
+// allowMove is provided directly by composable (no ctx needed)
+function handleItemChangeWrapper(evt) {
+  handleItemChange(evt, {
+    regions: regions.value,
+    flatItemsFromRegions: flatItemsFromRegions.value,
+    emit: emit
+  })
+}
+
+// Update region selection for hierarchical structure
+function handleRegionSelect(region, event) {
+  const isCtrlClick = event && (event.ctrlKey || event.metaKey)
+
+  if (isCtrlClick) {
+    // Multi-selection mode with Ctrl+click
+    isMultiSelectMode.value = true
+
+    if (selectedRegionIds.value.has(region.id)) {
+      // Remove from multi-selection if already selected
+      selectedRegionIds.value.delete(region.id)
+    } else {
+      // Add to multi-selection
+      selectedRegionIds.value.add(region.id)
+    }
+  } else {
+    // Normal single selection mode
+    if (isMultiSelectMode.value) {
+      // Clear all multi-selections first
+      selectedRegionIds.value.clear()
+      selectedItemIndices.value.clear()
+      isMultiSelectMode.value = false
+    }
+
+    // Clear item selection when selecting a region
+    emit('select-item', -1)
+
+    // Toggle selection: if already selected, deselect; otherwise select
+    if (selectedRegionId.value === region.id) {
+      selectedRegionId.value = null
+      emit('select-region', null) // Emit deselection
+      // For break regions, toggle collapsed state when clicking on selected region
+      if (region.type === 'break') {
+        region.isCollapsed = !region.isCollapsed
+      }
+    } else {
+      selectedRegionId.value = region.id
+      emit('select-region', region) // Emit selection with region data
+      // For break regions, expand when selected
+      if (region.type === 'break') {
+        region.isCollapsed = false
+      }
+    }
+  }
+
+  console.log('Region selected:', region.id, 'Ctrl+click:', isCtrlClick, 'Multi-selections:', selectedRegionIds.value.size)
+}
+
+// Update item selection for hierarchical structure
+function handleItemSelect(item, event) {
+  // Join placement mode — clicking a gap places the item, clicking an item does nothing
+  if (props.joinPlacementMode) {
+    return
+  }
+
+  const itemIndex = getItemGlobalIndex(item)
+
+  // Join select mode — every click toggles selection (no Ctrl required)
+  if (props.joinSelectMode) {
+    const itemId = item.asset_id || item.id
+    if (joinSelectedIds.value.has(itemId)) {
+      joinSelectedIds.value.delete(itemId)
+    } else {
+      joinSelectedIds.value.add(itemId)
+    }
+    // Force reactivity
+    joinSelectedIds.value = new Set(joinSelectedIds.value)
+    return
+  }
+
+  const isCtrlClick = event && (event.ctrlKey || event.metaKey)
+
+  if (isCtrlClick) {
+    // Multi-selection mode with Ctrl+click
+    isMultiSelectMode.value = true
+
+    if (selectedItemIndices.value.has(itemIndex)) {
+      // Remove from multi-selection if already selected
+      selectedItemIndices.value.delete(itemIndex)
+    } else {
+      // Add to multi-selection
+      selectedItemIndices.value.add(itemIndex)
+    }
+  } else {
+    // Normal single selection mode
+    if (isMultiSelectMode.value) {
+      // Clear all multi-selections first
+      selectedRegionIds.value.clear()
+      selectedItemIndices.value.clear()
+      isMultiSelectMode.value = false
+    }
+
+    // Clear region selection when selecting an item
+    selectedRegionId.value = null
+
+    // Toggle selection: if already selected, deselect; otherwise select
+    if (props.selectedItemIndex === itemIndex) {
+      emit('select-item', -1) // Deselect by passing -1
+    } else {
+      emit('select-item', itemIndex) // Select the item
+    }
+  }
+
+  console.log('Item selected:', item.slug, 'index:', itemIndex, 'Ctrl+click:', isCtrlClick, 'Multi-selections:', selectedItemIndices.value.size)
+
+  // Lazy-load history stats for selected item
+  if (!isCtrlClick && item && item.id && !historyStats.value[item.id]) {
+    fetchHistoryStats(item)
+  }
+}
+
+async function fetchHistoryStats(item) {
+  if (!props.episode || !item?.id) return
+  try {
+    const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+    const headers = { 'Authorization': `Bearer ${token}` }
+    let totalCount = 0
+    let oldestDate = null
+    let largestSize = 0
+
+    // Fetch filesystem snapshots (endpoint expects numeric item_id)
+    const numericId = Number(item.id)
+    const fsRes = !isNaN(numericId) ? await fetch(`/api/episodes/${props.episode}/history/segments/${numericId}`, { headers }) : null
+    if (fsRes && fsRes.ok) {
+      const fsData = await fsRes.json()
+      const snaps = fsData.snapshots || []
+      totalCount += snaps.length
+      for (const s of snaps) {
+        if (s.modified && (!oldestDate || new Date(s.modified) < new Date(oldestDate))) oldestDate = s.modified
+        if (s.size_bytes > largestSize) largestSize = s.size_bytes
+      }
+    }
+
+    // Fetch DB versions
+    const assetId = item.asset_id || item.AssetID
+    if (assetId) {
+      const dbRes = await fetch(`/api/episodes/rundown-item/${assetId}/versions`, { headers })
+      if (dbRes.ok) {
+        const dbData = await dbRes.json()
+        const vers = dbData.versions || []
+        totalCount += vers.length
+        for (const v of vers) {
+          if (v.created_at && (!oldestDate || new Date(v.created_at) < new Date(oldestDate))) oldestDate = v.created_at
+          const sz = v.content_length || 0
+          if (sz > largestSize) largestSize = sz
+        }
+      }
+    }
+
+    let oldestStr = '—'
+    if (oldestDate) {
+      const days = Math.floor((Date.now() - new Date(oldestDate).getTime()) / (24 * 60 * 60 * 1000))
+      oldestStr = days === 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`
+    }
+    const largestStr = largestSize > 1024 ? (largestSize / 1024).toFixed(0) + 'kb' : largestSize + 'b'
+    historyStats.value[item.id] = { count: totalCount, oldest: oldestStr, largest: largestStr }
+  } catch {
+    // Silent fail — stats are non-critical
+  }
+}
+
+// Create new region button handler
+function createNewRegion() {
+  console.log('Create new region clicked')
+  showNewRegionModal.value = true
+}
+
+// Enhanced delete selected functionality - now uses modal
+function handleDeleteSelected() {
+  try {
+    if (isMultiSelectMode.value && hasMultipleSelections.value) {
+      // Multi-selection deletion
+      const delRegions = []
+      const delItems = []
+
+      // Collect region objects
+      for (const rId of selectedRegionIds.value) {
+        const region = regions.value.find(r => r.id === rId)
+        if (region) delRegions.push(region)
+      }
+
+      // Collect item objects
+      for (const itemIndex of selectedItemIndices.value) {
+        const item = getItemByGlobalIndex(itemIndex)
+        if (item) delItems.push(item)
+      }
+
+      showDeletionModal({ type: 'multi', regions: delRegions, items: delItems })
+
+    } else if (selectedRegionId.value) {
+      // Single region deletion
+      const region = regions.value.find(r => r.id === selectedRegionId.value)
+      if (region) {
+        showDeletionModal({ type: 'region', regions: [region], items: [] })
+      }
+    } else if (props.selectedItemIndex !== -1) {
+      // Single item deletion
+      const item = getItemByGlobalIndex(props.selectedItemIndex)
+      if (item) {
+        showDeletionModal({ type: 'item', regions: [], items: [item] })
+      }
+    }
+  } catch (error) {
+    console.error('Error preparing deletion:', error)
+  }
+}
+
+// Show deletion confirmation modal
+function showDeletionModal(deletionData) {
+  pendingDeletion.value = deletionData
+  showDeleteConfirmModal.value = true
+}
+
+// Cancel deletion
+function cancelDeletion() {
+  showDeleteConfirmModal.value = false
+  pendingDeletion.value = null
+  deletionInProgress.value = false
+}
+
+// Confirm and execute deletion
+async function confirmDeletion() {
+  if (!pendingDeletion.value) return
+
+  deletionInProgress.value = true
+
+  try {
+    const { regions: delRegions, items: delItems } = pendingDeletion.value
+
+    // Delete all selected regions first
+    for (const region of delRegions) {
+      const regionName = region.name || region.type || `Region ${region.id}`
+      console.log('Deleting region:', regionName)
+      emit('delete-region', region)
+    }
+
+    // Delete all selected items
+    for (const item of delItems) {
+      console.log('Deleting item:', item.slug || item.title || item.id)
+      emit('delete-item', item)
+    }
+
+    // Clear all selections
+    selectedRegionIds.value.clear()
+    selectedItemIndices.value.clear()
+    isMultiSelectMode.value = false
+    selectedRegionId.value = null
+    emit('select-item', -1)
+
+    // Close modal
+    cancelDeletion()
+
+  } catch (error) {
+    console.error('Error executing deletion:', error)
+    deletionInProgress.value = false
+  }
+}
+
+// Keyboard event handler
+function handleKeydown(event) {
+  // Ctrl+Shift+R - Refresh/Reload rundown data
+  if (event.ctrlKey && event.shiftKey && event.key === 'R') {
+    event.preventDefault()
+    event.stopPropagation()
+    emit('refresh')
+    return
+  }
+
+  // Alt+Shift+R - Toggle regions visibility
+  if (event.altKey && event.shiftKey && event.key === 'R') {
+    event.preventDefault()
+    event.stopPropagation()
+    toggleRegionsVisibility()
+    return
+  }
+
+  // Check for Esc key to cancel multi-selection
+  if (event.key === 'Escape') {
+    // Only handle Esc if we're in multi-select mode or have selections
+    if (isMultiSelectMode.value || hasMultipleSelections.value || selectedRegionId.value !== null || props.selectedItemIndex !== -1) {
+      console.log('🚫 Esc pressed: Cancelling all selections')
+      cancelAllSelections()
+
+      // Prevent ALL further processing of this Esc key event
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+
+      // Return early to ensure no other handlers run
+      return false
+    }
+
+    // If Esc is pressed but we don't have selections, still prevent default behavior
+    // to avoid unwanted navigation
+    console.log('🚫 Esc pressed: No selections to cancel, preventing default navigation')
+    event.preventDefault()
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+    return false
+  }
+
+  // Check for Ctrl+Alt+Shift+0 to clear entire rundown
+  // Note: when Shift+0 is pressed, event.key is ')' but event.code is 'Digit0'
+  if (event.ctrlKey && event.altKey && event.shiftKey && (event.key === ')' || event.code === 'Digit0')) {
+    console.log('🚨 Clear rundown shortcut triggered!')
+    event.preventDefault()
+    showClearRundownConfirmation()
+  }
+}
+
+// Show clear rundown confirmation modal
+function showClearRundownConfirmation() {
+  console.log('Clear rundown shortcut triggered')
+  showClearRundownModal.value = true
+}
+
+// Cancel clear rundown
+function cancelClearRundown() {
+  showClearRundownModal.value = false
+}
+
+// Execute clear entire rundown
+async function confirmClearRundown() {
+  clearRundownInProgress.value = true
+
+  try {
+    console.log('🚨 Clearing entire rundown for episode:', props.episode)
+
+    // Debug authentication tokens
+    const authToken = localStorage.getItem('auth_token') || localStorage.getItem('token')
+    const apiKey = localStorage.getItem('api_key')
+    console.log('🔐 Auth token:', authToken ? `${authToken.substring(0, 20)}...` : 'NONE')
+    console.log('🔑 API key:', apiKey ? `${apiKey.substring(0, 20)}...` : 'NONE')
+
+    const apiUrl = `/api/episodes/${props.episode}/rundown/clear`
+    console.log('📡 API URL:', apiUrl)
+
+    // Call API to clear all rundown items and files
+    const response = await fetch(apiUrl, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+        'X-API-Key': apiKey
+      }
+    })
+
+    console.log('📊 Response status:', response.status, response.statusText)
+    console.log('📋 Response headers:', [...response.headers.entries()])
+
+    if (!response.ok) {
+      // Get detailed error information
+      let errorMessage = `HTTP ${response.status}: ${response.statusText}`
+      try {
+        const errorBody = await response.text()
+        console.log('❌ Error response body:', errorBody)
+        errorMessage += `\nDetails: ${errorBody}`
+      } catch (parseError) {
+        console.log('⚠️ Could not parse error response:', parseError)
+      }
+      throw new Error(errorMessage)
+    }
+
+    const result = await response.json()
+    console.log('Rundown cleared successfully:', result)
+
+    // Clear local state
+    selectedItemIndices.value.clear()
+    selectedRegionIds.value.clear()
+    isMultiSelectMode.value = false
+
+    // Emit event to parent to reload rundown
+    emit('rundown-cleared')
+
+    // Close modal
+    showClearRundownModal.value = false
+
+  } catch (error) {
+    console.error('Error clearing rundown:', error)
+    alert('Failed to clear rundown. Please try again.')
+  } finally {
+    clearRundownInProgress.value = false
+  }
+}
+
+// Helper method to get item by global index
+function getItemByGlobalIndex(globalIndex) {
+  let currentIndex = 0
+  for (const region of regions.value) {
+    for (const item of region.items) {
+      if (currentIndex === globalIndex) {
+        return item
+      }
+      currentIndex++
+    }
+  }
+  return null
+}
+
+// Helper method to get region by ID
+function getRegionById(regionId) {
+  return regions.value.find(region => region.id === regionId)
+}
+
+// Request new AssetID for a rundown item
+async function requestNewItemAssetID(item) {
+  try {
+    console.log('Requesting new AssetID for rundown item:', item)
+
+    const response = await fetch('/assetid/regenerate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': 'FDT5WyO7S2DbBifbDUEsd1H8cmZTT3_qpJXtb3c7qaY'
+      },
+      body: JSON.stringify({
+        old_asset_id: item.asset_id,
+        entity_type: 'segment',
+        reason: 'user_requested_item_regeneration',
+        context: {
+          item_slug: item.slug,
+          item_type: item.type,
+          item_id: item.id
+        }
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`)
+    }
+
+    const result = await response.json()
+    console.log('✅ AssetID regenerated successfully:', result)
+
+    // Update the item with new AssetID
+    item.asset_id = result.new_asset_id
+
+    // Show success message
+    flashMessage.value = `AssetID regenerated: ${result.old_asset_id} → ${result.new_asset_id}`
+    showFlashMessage.value = true
+
+    // Emit event to parent to save the updated item
+    emit('item-assetid-updated', {
+      item: item,
+      oldAssetId: result.old_asset_id,
+      newAssetId: result.new_asset_id
+    })
+
+    // Force reactive update of the rundown display (replaces this.$forceUpdate())
+    forceUpdateKey.value++
+
+    // Emit global refresh event
+    emit('assetid-regenerated', {
+      entityType: 'segment',
+      oldAssetId: result.old_asset_id,
+      newAssetId: result.new_asset_id,
+      affectedItem: item
+    })
+
+  } catch (error) {
+    console.error('❌ Failed to regenerate AssetID:', error)
+    flashMessage.value = `Failed to regenerate AssetID: ${error.message}`
+    showFlashMessage.value = true
+  }
+}
+
+// Cancel all selections and exit multi-select mode
+function cancelAllSelections() {
+  // Clear all multi-selections
+  selectedItemIndices.value.clear()
+  selectedRegionIds.value.clear()
+  isMultiSelectMode.value = false
+
+  // Clear single selections
+  selectedRegionId.value = null
+  emit('select-item', -1)
+
+  console.log('✅ All selections cancelled - multi-select mode disabled')
+}
+
+// Rollback methods
+async function openRollbackModal(item) {
+  rollbackItem.value = item
+  rollbackDialog.value = true
+  rollbackLoading.value = true
+  rollbackSnapshots.value = []
+
+  const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+  const headers = { 'Authorization': `Bearer ${token}` }
+  const combined = []
+
+  try {
+    // 1. Load filesystem snapshots (autosave)
+    const fsRes = await fetch(`/api/episodes/${props.episode}/history/segments/${item.id}`, { headers })
+    if (fsRes.ok) {
+      const fsData = await fsRes.json()
+      for (const snap of fsData.snapshots) {
+        try {
+          const detailRes = await fetch(`/api/episodes/${props.episode}/history/segments/${item.id}/${snap.filename}`, { headers })
+          if (detailRes.ok) {
+            const detail = await detailRes.json()
+            const rawContent = detail.content || ''
+            const textOnly = rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+            snap.preview = textOnly.substring(0, 80) + (textOnly.length > 80 ? '...' : '')
+            snap.content_length = detail.frontmatter?.content_length || rawContent.length
+            snap.full_content = rawContent
+          }
+        } catch {
+          snap.preview = ''
+        }
+        snap.source = 'auto'
+        snap.restore_type = 'file'
+        combined.push(snap)
+      }
+    }
+
+    // 2. Load DB version history (manual saves)
+    const assetId = item.asset_id || item.AssetID
+    if (assetId) {
+      const dbRes = await fetch(`/api/episodes/rundown-item/${assetId}/versions`, { headers })
+      if (dbRes.ok) {
+        const dbData = await dbRes.json()
+        for (const ver of (dbData.versions || [])) {
+          combined.push({
+            filename: `v${ver.version_number}`,
+            modified: ver.created_at,
+            size_bytes: (ver.content_length || 0),
+            content_length: ver.content_length,
+            preview: '',
+            source: ver.change_type === 'autosave' ? 'auto' : 'manual',
+            restore_type: 'db',
+            version_number: ver.version_number,
+            asset_id: assetId,
+            full_content: null // loaded on preview
+          })
+        }
+      }
+    }
+
+    // Sort all entries by date, newest first
+    combined.sort((a, b) => new Date(b.modified) - new Date(a.modified))
+    rollbackSnapshots.value = combined
+  } catch (e) {
+    console.error('Failed to load history:', e)
+  } finally {
+    rollbackLoading.value = false
+  }
+}
+
+function formatSnapshotDate(isoString) {
+  if (!isoString) return '—'
+  const d = new Date(isoString)
+  return d.toLocaleString(undefined, {
+    month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  })
+}
+
+function formatTimeAgo(isoString) {
+  if (!isoString) return '—'
+  const now = Date.now()
+  const then = new Date(isoString).getTime()
+  const diffSec = Math.floor((now - then) / 1000)
+  if (diffSec < 60) return `${diffSec}s`
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h`
+  const diffDays = Math.floor(diffHr / 24)
+  return `${diffDays}d`
+}
+
+function stripFrontmatter(text) {
+  if (!text) return text
+  // Strip YAML frontmatter (---\n...\n---)
+  const match = text.match(/^---\s*\n[\s\S]*?\n---\s*\n?/)
+  return match ? text.slice(match[0].length).trim() : text
+}
+
+function markdownToHtml(md) {
+  if (!md) return ''
+  let html = md
+  // Headers
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
+  // Bold and italic
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+  // Blockquotes
+  html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+  // Horizontal rules
+  html = html.replace(/^---$/gm, '<hr>')
+  html = html.replace(/^\*\*\*$/gm, '<hr>')
+  // Unordered lists
+  html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+  // Ordered lists
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+  // Paragraphs - wrap lines not already in tags
+  html = html.split('\n\n').map(block => {
+    block = block.trim()
+    if (!block) return ''
+    if (block.startsWith('<')) return block
+    return '<p>' + block.replace(/\n/g, '<br>') + '</p>'
+  }).join('\n')
+  return html
+}
+
+function renderPreviewContent(rawContent) {
+  if (!rawContent) return '<p style="color:#999">No content</p>'
+  // Strip frontmatter first
+  let content = stripFrontmatter(rawContent)
+  // Check if content is primarily HTML (has block-level tags)
+  if (/<(?:p|div|h[1-6]|ul|ol|blockquote|table|br)\b/i.test(content)) {
+    return content
+  }
+  // Otherwise convert markdown to HTML
+  return markdownToHtml(content)
+}
+
+async function previewSnapshot(snap) {
+  if (snap.restore_type === 'db' && !snap.full_content) {
+    // Lazy-load DB version content
+    try {
+      const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+      const res = await fetch(`/api/episodes/rundown-item/${snap.asset_id}/versions/${snap.version_number}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        snap.full_content = data.script_content || ''
+        snap.content_length = data.content_length || snap.full_content.length
+        const textOnly = snap.full_content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+        snap.preview = textOnly.substring(0, 80) + (textOnly.length > 80 ? '...' : '')
+      }
+    } catch (e) {
+      console.error('Failed to load version content:', e)
+    }
+  }
+  previewSnap.value = snap
+  previewContent.value = renderPreviewContent(snap.full_content || snap.preview || '')
+  previewDialog.value = true
+}
+
+async function restoreSnapshot(snap) {
+  if (!snap) return
+
+  restoringSnapshot.value = snap.filename
+  try {
+    const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+    let response
+
+    if (snap.restore_type === 'db') {
+      // Restore from DB version history
+      response = await fetch(`/api/episodes/rundown-item/${snap.asset_id}/versions/${snap.version_number}/restore`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+    } else {
+      // Restore from filesystem snapshot
+      response = await fetch(`/api/episodes/${props.episode}/history/segments/restore/${snap.filename}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+    }
+
+    if (response.ok) {
+      rollbackDialog.value = false
+      previewDialog.value = false
+      emit('refresh-rundown')
+      flashMessage.value = `Segment restored from ${snap.source} ${snap.restore_type === 'db' ? 'version' : 'snapshot'}`
+      showFlashMessage.value = true
+    } else {
+      const err = await response.text()
+      alert(`Restore failed: ${err}`)
+    }
+  } catch (e) {
+    alert(`Restore failed: ${e.message}`)
+  } finally {
+    restoringSnapshot.value = null
+  }
+}
+
+// Episode-level rollback methods
+function joinFromMultiSelect() {
+  // Gather item objects from the multi-selected indices
+  const selectedItems = []
+  for (const idx of selectedItemIndices.value) {
+    if (props.items[idx]) {
+      selectedItems.push(props.items[idx])
+    }
+  }
+  if (selectedItems.length < 2) return
+
+  // Clear multi-select state
+  selectedItemIndices.value.clear()
+  isMultiSelectMode.value = false
+
+  // Emit to parent — this skips the join-select phase and goes straight to snapshot + config
+  emit('join-items-selected', selectedItems)
+}
+
+function cancelJoinSelect() {
+  joinSelectedIds.value = new Set()
+  emit('cancel-join')
+}
+
+function confirmJoinSelect() {
+  // Gather the actual item objects for the selected IDs
+  const selectedItems = props.items.filter(item => {
+    const itemId = item.asset_id || item.id
+    return joinSelectedIds.value.has(itemId)
+  })
+  emit('join-items-selected', selectedItems)
+}
+
+function resetJoinState() {
+  joinSelectedIds.value = new Set()
+  joinHoverGapIndex.value = -1
+}
+
+async function openEpisodeRollbackModal() {
+  episodeRollbackDialog.value = true
+  episodeRollbackLoading.value = true
+  episodeRollbackSnapshots.value = []
+
+  try {
+    const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+    const response = await fetch(`/api/episodes/${props.episode}/history/episode`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (response.ok) {
+      const data = await response.json()
+      // Enrich with item count from detail
+      const enriched = []
+      for (const snap of data.snapshots) {
+        try {
+          const detailRes = await fetch(`/api/episodes/${props.episode}/history/episode/${snap.filename}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+          if (detailRes.ok) {
+            const detail = await detailRes.json()
+            snap.item_count = detail.frontmatter?.item_count || detail.items?.length || 0
+            snap.items = detail.items || []
+          }
+        } catch {
+          snap.item_count = 0
+        }
+        enriched.push(snap)
+      }
+      episodeRollbackSnapshots.value = enriched
+    }
+  } catch (e) {
+    console.error('Failed to load episode snapshots:', e)
+  } finally {
+    episodeRollbackLoading.value = false
+  }
+}
+
+function previewEpisodeSnapshot(snap) {
+  episodePreviewSnap.value = snap
+  episodePreviewItems.value = snap.items || []
+  episodePreviewDialog.value = true
+}
+
+async function restoreEpisodeSnapshot(snap) {
+  if (!snap || !snap.filename) return
+
+  restoringEpisode.value = snap.filename
+  try {
+    const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
+    const response = await fetch(`/api/episodes/${props.episode}/history/episode/restore/${snap.filename}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (response.ok) {
+      const result = await response.json()
+      episodeRollbackDialog.value = false
+      episodePreviewDialog.value = false
+      emit('refresh-rundown')
+      flashMessage.value = `Episode restored: ${result.items_restored} items`
+      showFlashMessage.value = true
+    } else {
+      const err = await response.text()
+      alert(`Episode restore failed: ${err}`)
+    }
+  } catch (e) {
+    alert(`Episode restore failed: ${e.message}`)
+  } finally {
+    restoringEpisode.value = null
+  }
+}
+
+// --- Lifecycle ---
+onMounted(async () => {
+  // Load color configuration from database
+  try {
+    await loadColorsFromDatabase('default')
+    console.log('Colors loaded successfully in RundownPanel')
+    // Increment trigger to force re-computation of color-dependent computed properties
+    colorLoadTrigger.value++
+  } catch (error) {
+    console.warn('Failed to load colors in RundownPanel, using defaults:', error)
+  }
+
+  // Add keyboard listener for clear rundown shortcut - use capture phase for higher priority
+  document.addEventListener('keydown', handleKeydown, true)
+})
+
+onBeforeUnmount(() => {
+  // Clean up keyboard listener
+  document.removeEventListener('keydown', handleKeydown, true)
+})
+
+// --- Expose methods that parent accesses via $refs ---
+defineExpose({
+  resetJoinState
+})
 </script>
 
 <style scoped>
@@ -3087,6 +3171,8 @@ export default {
 .rundown-item-wrapper {
   margin-top: 0 !important;
   margin-bottom: 0 !important;
+  /* Per-user knob: rundown row text size (Settings → Editor Display) */
+  font-size: var(--editor-rundown-font-size, inherit);
 }
 
 /* Break region items specifically - no margins and no separators */
@@ -3420,6 +3506,29 @@ export default {
   min-height: 100%;
   height: auto; /* Allow height to grow with content */
   overflow: visible; /* Show wrapping text */
+}
+
+/* Presence avatars: small overlapping circles to the right of the slug,
+   indicating other users currently editing this segment. */
+.presence-stack {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+.presence-stack .presence-avatar {
+  margin-left: -6px;
+  border: 1.5px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+.presence-stack .presence-avatar:first-child {
+  margin-left: 0;
+}
+.presence-initials {
+  font-size: 9px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0;
 }
 .slug-text {
   font-weight: normal;

@@ -33,108 +33,192 @@
     </v-card>
   </v-dialog>
 </template>
-<script>
-import { cueModalMixin } from '@/mixins/cueModalMixin';
+<script setup>
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import axios from 'axios';
+import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap';
+import { useScreenFlash } from '@/composables/useScreenFlash';
 
-export default {
-  name: 'DirModal',
-  mixins: [cueModalMixin],
-  props: {
-    show: Boolean,
-    episode: String,
-    duplicateSlugs: {
-      type: Array,
-      default: () => []
-    },
-    cueType: {
-      type: String,
-      default: 'NOTE'
-    },
-    editingCueData: {
-      type: Object,
-      default: null
-    }
+const props = defineProps({
+  show: {
+    type: Boolean,
+    default: false
   },
-  data() {
-    return {
-      noteText: '',
-      noteFor: null,
-      productionRoles: []
-    };
+  episode: String,
+  duplicateSlugs: {
+    type: Array,
+    default: () => []
   },
-  methods: {
-    async loadProductionRoles() {
-      try {
-        const token = localStorage.getItem('auth-token');
-        const response = await axios.get('/api/production-roles/', {
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
-        });
-        if (response.data && response.data.data) {
-          this.productionRoles = response.data.data;
-        }
-      } catch (err) {
-        console.warn('Failed to load production roles:', err);
-      }
-    },
-    async handleSubmit() {
-      if (!this.noteText) {
-        return;
-      }
-      await this.submit();
-    },
-    async submit() {
-      const cueBlockContent = this.buildCueBlock();
-      this.$emit('submit', cueBlockContent);
-      this.reset();
-    },
-    buildCueBlock() {
-      let block = '<!-- Begin Cue -->\n';
-      block += '[Type: NOTE]\n';
-      if (this.noteFor) {
-        block += `[Note For: ${this.noteFor}]\n`;
-      }
-      block += `[Note Text: ${this.noteText}]\n`;
-      block += '<!-- End Cue -->';
-      return block;
-    },
-    handleAbort() {
-      this.$emit('update:show', false);
-      this.reset();
-    },
-    reset() {
-      this.noteText = '';
-      this.noteFor = null;
-    },
-    handleKeydown(event) {
-      if (event.key === 'Escape' && this.show) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.handleAbort();
-      }
-    }
+  cueType: {
+    type: String,
+    default: 'NOTE'
   },
-  watch: {
-    show(newVal) {
-      // Populate fields when opening in edit mode
-      if (newVal && this.editingCueData) {
-        this.noteText = this.editingCueData.noteText || '';
-        this.noteFor = this.editingCueData.noteFor || null;
-      }
-      // Only reset when closing, mixin handles opening/focus
-      if (!newVal) {
-        this.reset();
-      }
-    }
-  },
-  async mounted() {
-    document.addEventListener('keydown', this.handleKeydown);
-    await this.loadProductionRoles();
-  },
-  beforeUnmount() {
-    document.removeEventListener('keydown', this.handleKeydown);
+  editingCueData: {
+    type: Object,
+    default: null
   }
-};
+});
+
+const emit = defineEmits(['update:show', 'submit', 'abort']);
+
+// Template refs
+const noteField = ref(null);
+
+// Data
+const noteText = ref('');
+const noteFor = ref(null);
+const productionRoles = ref([]);
+let keydownHandler = null;
+
+// Mixin-inlined computed: color theming
+const cueColor = computed(() => { // eslint-disable-line no-unused-vars
+  const colorName = getColorValue(props.cueType.toLowerCase());
+  return resolveVuetifyColor(colorName);
+});
+
+const cueColorLight = computed(() => { // eslint-disable-line no-unused-vars
+  const color = cueColor.value;
+  if (!color || !color.startsWith('#')) return '#f5f5f5';
+  const hex = color.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  const lighten = (c) => Math.round(c + (255 - c) * 0.8);
+  const newR = lighten(r).toString(16).padStart(2, '0');
+  const newG = lighten(g).toString(16).padStart(2, '0');
+  const newB = lighten(b).toString(16).padStart(2, '0');
+  return `#${newR}${newG}${newB}`;
+});
+
+const modalStyles = computed(() => ({
+  backgroundColor: cueColorLight.value
+}));
+
+const headerStyles = computed(() => ({
+  backgroundColor: cueColor.value,
+  color: 'white'
+}));
+
+// Mixin-inlined: keyboard handlers
+function setupKeyboardHandlers() {
+  keydownHandler = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      handleAbort();
+      return;
+    }
+    if (event.shiftKey && event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      handleSubmit();
+      return;
+    }
+  };
+  document.addEventListener('keydown', keydownHandler, true);
+}
+
+function removeKeyboardHandlers() {
+  if (keydownHandler) {
+    document.removeEventListener('keydown', keydownHandler, true);
+    keydownHandler = null;
+  }
+}
+
+// Mixin-inlined: focus slug field (uses noteField ref for this modal)
+function focusSlugField() {
+  const field = noteField.value;
+  if (field) {
+    const input = field.$el?.querySelector('input') || field.$el?.querySelector('textarea') || field;
+    if (input && input.focus) {
+      input.focus();
+    }
+  }
+}
+
+// Methods
+async function loadProductionRoles() {
+  try {
+    const token = localStorage.getItem('auth-token');
+    const response = await axios.get('/api/production-roles/', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (response.data && response.data.data) {
+      productionRoles.value = response.data.data;
+    }
+  } catch (err) {
+    console.warn('Failed to load production roles:', err);
+  }
+}
+
+async function handleSubmit() {
+  if (!noteText.value) {
+    return;
+  }
+  await submit();
+}
+
+async function submit() {
+  const cueBlockContent = buildCueBlock();
+  emit('submit', cueBlockContent);
+  reset();
+}
+
+function buildCueBlock() {
+  let block = '<!-- Begin Cue -->\n';
+  block += '[Type: NOTE]\n';
+  if (noteFor.value) {
+    block += `[Note For: ${noteFor.value}]\n`;
+  }
+  block += `[Note Text: ${noteText.value}]\n`;
+  block += '<!-- End Cue -->';
+  return block;
+}
+
+function handleAbort() {
+  const { flashUrgent } = useScreenFlash();
+  flashUrgent('ABORT', '#F44336', 500);
+  emit('update:show', false);
+  emit('abort');
+  reset();
+}
+
+function reset() {
+  noteText.value = '';
+  noteFor.value = null;
+}
+
+// Watch
+watch(() => props.show, (newVal) => {
+  if (newVal) {
+    // Populate fields when opening in edit mode
+    if (props.editingCueData) {
+      noteText.value = props.editingCueData.noteText || '';
+      noteFor.value = props.editingCueData.noteFor || null;
+    }
+    setupKeyboardHandlers();
+    nextTick(() => {
+      focusSlugField();
+    });
+  } else {
+    removeKeyboardHandlers();
+    reset();
+  }
+});
+
+onMounted(async () => {
+  if (props.show) {
+    setupKeyboardHandlers();
+    nextTick(() => {
+      focusSlugField();
+    });
+  }
+  await loadProductionRoles();
+});
+
+onBeforeUnmount(() => {
+  removeKeyboardHandlers();
+});
 </script>
 
 <style scoped>

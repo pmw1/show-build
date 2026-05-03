@@ -44,6 +44,7 @@ class InterfaceSettings(BaseModel):
     sidebar_position: str = Field("left", description="Sidebar position (left/right)")
     default_view: str = Field("grid", description="Default episode view (grid/list)")
     cue_card_alignment: str = Field("left", description="Cue card alignment in script mode (left/center/right)")
+    legacy_cue_convert_enabled: bool = Field(True, description="Enable the Legacy Cue Convert module — adds a 'Convert to Cue' button on Auto-Scrub-flagged paragraphs containing legacy {SOT/foo} or (SOT/foo) tokens")
 
 class RundownSettings(BaseModel):
     """Rundown configuration"""
