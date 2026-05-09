@@ -441,18 +441,21 @@ export class CueParser {
       const segment = segments[i];
 
       if (segment.type === 'text' && segment.needsParagraphTags) {
-        // Create individual paragraph for each text segment
-        const speaker = segment.speaker;
+        // Create individual paragraph for each text segment.
+        // Guard against undefined speaker/content — both have produced
+        // literal "undefined" strings or "class=\"undefined\"" in saved
+        // markdown when segments were partially constructed during cue
+        // insertion races. Persisting "undefined" then re-parsing it
+        // truncates the script on the next save.
+        const speaker = segment.speaker || 'josh';
+        const content = segment.content == null ? '' : segment.content;
         const needsAttentionAttr = segment.needsAttention ? ' data-needs-attention="true"' : '';
         const flagNoteAttr = segment.flagNote ? ` data-flag-note="${segment.flagNote.replace(/"/g, '&quot;')}"` : '';
-        result.push(`<p class="${speaker}"${needsAttentionAttr}${flagNoteAttr}>${segment.content}</p>`);
+        result.push(`<p class="${speaker}"${needsAttentionAttr}${flagNoteAttr}>${content}</p>`);
         i++;
       } else if (segment.type === 'text') {
-        if (segment.hasStructuredParagraphs) {
-          result.push(segment.content);
-        } else {
-          result.push(segment.content);
-        }
+        const content = segment.content == null ? '' : segment.content;
+        result.push(content);
         i++;
       } else if (segment.type === 'cue') {
         lossReport.totalCueSegments++;

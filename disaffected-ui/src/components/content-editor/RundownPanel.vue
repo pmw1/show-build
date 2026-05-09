@@ -1164,18 +1164,21 @@ const showRegions = ref(_userPrefs.get('rundown.showRegions', true))
 // ──────────────────────────────────────────────────────────────────
 const _messagesApi = useMessages()
 
-function _currentMyId() {
-  try { return JSON.parse(localStorage.getItem('user-data') || '{}')?.id || null }
-  catch { return null }
+function _currentMe() {
+  try {
+    const me = JSON.parse(localStorage.getItem('user-data') || '{}')
+    return { id: me?.id ?? null, username: me?.username ?? null }
+  } catch { return { id: null, username: null } }
 }
 
 function presentUsersFor(item) {
   if (!item) return []
   const itemId = item.asset_id || item.id
   if (!itemId) return []
-  const myId = _currentMyId()
+  const { id: myId, username: myUsername } = _currentMe()
   return (_messagesApi.users.value || []).filter(u =>
-    u.id !== myId
+    (myId == null || String(u.id) !== String(myId))
+    && (myUsername == null || u.username !== myUsername)
     && u.online
     && u.current_location?.segment_id != null
     && String(u.current_location.segment_id) === String(itemId)
@@ -2589,25 +2592,20 @@ function handleKeydown(event) {
     return
   }
 
-  // Check for Esc key to cancel multi-selection
+  // Esc cancels multi-select / region selections, but never closes the
+  // currently open segment in the editor.
   if (event.key === 'Escape') {
-    // Only handle Esc if we're in multi-select mode or have selections
-    if (isMultiSelectMode.value || hasMultipleSelections.value || selectedRegionId.value !== null || props.selectedItemIndex !== -1) {
-      console.log('🚫 Esc pressed: Cancelling all selections')
-      cancelAllSelections()
-
-      // Prevent ALL further processing of this Esc key event
+    if (isMultiSelectMode.value || hasMultipleSelections.value || selectedRegionId.value !== null) {
+      console.log('🚫 Esc pressed: Cancelling multi-select / region selections')
+      cancelMultiAndRegionSelections()
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
-
-      // Return early to ensure no other handlers run
       return false
     }
 
-    // If Esc is pressed but we don't have selections, still prevent default behavior
-    // to avoid unwanted navigation
-    console.log('🚫 Esc pressed: No selections to cancel, preventing default navigation')
+    // No multi-select state to clear — swallow ESC so it doesn't trigger any
+    // default browser/route behavior, but leave the open segment alone.
     event.preventDefault()
     event.stopPropagation()
     event.stopImmediatePropagation()
@@ -2780,17 +2778,15 @@ async function requestNewItemAssetID(item) {
 }
 
 // Cancel all selections and exit multi-select mode
-function cancelAllSelections() {
-  // Clear all multi-selections
+function cancelMultiAndRegionSelections() {
+  // Clear multi-item + region selections only. Do NOT emit select-item -1:
+  // the currently open segment in the editor must remain open.
   selectedItemIndices.value.clear()
   selectedRegionIds.value.clear()
   isMultiSelectMode.value = false
-
-  // Clear single selections
   selectedRegionId.value = null
-  emit('select-item', -1)
 
-  console.log('✅ All selections cancelled - multi-select mode disabled')
+  console.log('✅ Multi-select / region selections cancelled (open segment preserved)')
 }
 
 // Rollback methods

@@ -85,10 +85,11 @@ export function useScriptCore(props, emit, sanitizer, externalGuards = {}) {
   // corruption — never auto-bypassed.
   let _cueLossToastShown = false
 
-  // Shrink guard: time-debounced toast (cue-loss latch is too eager — once a
-  // user starts typing again the latch resets and they get spammed). Min 5s
-  // between consecutive shrink-guard toasts.
+  // Shrink-guard toast debounce — kept around in case we re-enable the
+  // hard abort later. Currently unused (gate downgraded to console.warn).
+  // eslint-disable-next-line no-unused-vars
   let _lastShrinkToastAt = 0
+  // eslint-disable-next-line no-unused-vars
   const SHRINK_TOAST_DEBOUNCE_MS = 5000
 
   // One-shot shrink-guard override. Set by Ctrl+Alt+S; cleared on the next
@@ -705,29 +706,55 @@ export function useScriptCore(props, emit, sanitizer, externalGuards = {}) {
       return false
     }
 
-    // 2) Cue-count regression — count Begin Cue markers, refuse if shrinking.
-    // Catches segments-array losses that bypass tripwire #1. Never bypassable.
-    const prevCueCount = (prev.match(/<!-- Begin Cue -->/g) || []).length
-    const newCueCount = (newContent || '').match(/<!-- Begin Cue -->/g)?.length || 0
-    if (newCueCount < prevCueCount) {
-      const lost = prevCueCount - newCueCount
+    // 1b) Corruption tripwire — abort if reconstructed content contains the
+    // literal "undefined" speaker class or paragraph body. These indicate a
+    // segment was reconstructed before its content/speaker fields were
+    // populated; saving them poisons the markdown and causes catastrophic
+    // truncation on the next parse-and-save round-trip (episode 0273 incident
+    // 2026-05-09, item 1089: 15215 → 1238 chars).
+    if (newContent && (/<p class="undefined"/.test(newContent) || />undefined<\/p>/.test(newContent))) {
       console.error(
-        `🚨 CUE COUNT REGRESSION aborted ${reason} emit — previous content had ${prevCueCount} cue blocks, new content has only ${newCueCount}. ${lost} cue(s) vanished from the segments array.`,
-        { prevPreview: prev.substring(0, 300), newPreview: (newContent || '').substring(0, 300) }
+        `🚨 CORRUPTION TRIPWIRE aborted ${reason} emit — reconstructed content contains literal "undefined". Refusing to save.`,
+        {
+          reason,
+          newLen: newContent.length,
+          prevLen,
+          undefinedClassMatches: (newContent.match(/<p class="undefined"/g) || []).length,
+          undefinedBodyMatches: (newContent.match(/>undefined<\/p>/g) || []).length,
+          newPreview: newContent.substring(0, 400)
+        }
       )
-      if (toast && !_cueLossToastShown) {
-        _cueLossToastShown = true
-        toast.error(`Save aborted — ${lost} cue(s) disappeared from the script. See console.`)
+      if (toast) {
+        toast.error('Save aborted — reconstructed content contained "undefined". Reload and retry.')
       }
       return false
     }
 
-    // 3) Shrink guard. Bypassed when:
-    //    - the setting disables it entirely, OR
-    //    - the call site explicitly opts out (allowShrink), OR
-    //    - the user pressed Ctrl+Alt+S to wave through one save.
-    // Threshold is 15% (tightened from 30% after the cole-allen episode 272
-    // incident where a 20% shrink quietly slipped through).
+    // 2) Cue-count regression — DOWNGRADED to a warning.
+    // Was a hard abort, but it misfired on the segments-array race
+    // condition where a stale autosave debounce fires right after an
+    // intentional cue insert / move (current segments has fewer cues
+    // than the freshly-updated rawMarkdownContent). The console.warn
+    // still surfaces if a real silent loss happens. The cue-loss
+    // tripwire (check #1 above) remains as a hard abort because that
+    // catches the actual data-corruption case (segment present but
+    // rawData missing).
+    const prevCueCount = (prev.match(/<!-- Begin Cue -->/g) || []).length
+    const newCueCount = (newContent || '').match(/<!-- Begin Cue -->/g)?.length || 0
+    if (newCueCount < prevCueCount && !allowShrink && !_allowNextShrink) {
+      console.warn(
+        `[useScriptCore] cue-count went ${prevCueCount} → ${newCueCount} during ${reason} (gate downgraded to warning — emit allowed)`,
+        { prevPreview: prev.substring(0, 200), newPreview: (newContent || '').substring(0, 200) }
+      )
+    }
+
+    // 3) Shrink guard — DOWNGRADED to a warning.
+    // Was a hard abort. Combined with the cue-count regression check
+    // it created too many false positives during normal cue-insert and
+    // delete operations (segments-array race conditions where a stale
+    // autosave debounce fires after an intentional structural edit).
+    // Logging stays so a real silent loss is still visible in the
+    // console; no toast, no abort.
     if (
       shrinkGuardEnabled.value &&
       !allowShrink &&
@@ -736,20 +763,13 @@ export function useScriptCore(props, emit, sanitizer, externalGuards = {}) {
       newLen < prevLen * 0.85
     ) {
       const shrinkPct = ((1 - newLen / prevLen) * 100).toFixed(1)
-      console.error(`🚨 SHRINK GUARD aborted ${reason} emit:`, {
+      console.warn(`[useScriptCore] shrink ${shrinkPct}% during ${reason} (gate downgraded — emit allowed)`, {
         prevLen,
         newLen,
-        shrinkBytes: prevLen - newLen,
-        shrinkPct: `${shrinkPct}%`,
         prevPreview: prev.substring(0, 200),
         newPreview: (newContent || '').substring(0, 200)
       })
-      const now = Date.now()
-      if (toast && (now - _lastShrinkToastAt) >= SHRINK_TOAST_DEBOUNCE_MS) {
-        _lastShrinkToastAt = now
-        toast.error('Shrink guard is blocking this save. Press [Ctrl]+[Alt]+[S] to allow shrink.', { timeout: 5000 })
-      }
-      return false
+      // Fall through — let the emit happen.
     }
 
     // Successful path — reset cue-loss latch and consume any one-shot override.

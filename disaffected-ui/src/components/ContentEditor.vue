@@ -178,6 +178,7 @@
           :current-episode-title="currentEpisodeTitle"
           :script-content="scriptContent"
           @update:script-content="updateScriptContent"
+          @user-initiated-shrink="_allowNextScriptShrink = true"
           v-model:scratch-content="scratchContent"
           v-model:editor-mode="editorMode"
           @update:editor-mode="editorMode = $event"
@@ -639,6 +640,34 @@ import { useEpisodeMetadata } from '../composables/useEpisodeMetadata';
 import { useSessionResume } from '../composables/useSessionResume';
 import { useUserPrefs } from '../composables/useUserPrefs';
 
+/**
+ * Stringify any value into a human-readable error message for toasts.
+ * Catches the common "[object Object]" leak when:
+ *   - FastAPI Pydantic 422 returns detail as an array of {loc, msg, type}
+ *   - Backend returns a structured error object with .message / .error
+ *   - Code accidentally toasts a raw Error instance
+ *   - Network-level errors with nested response shapes
+ */
+function formatErrorForToast(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  // Pydantic 422 shape: array of {loc, msg, type, ...}
+  if (Array.isArray(value)) {
+    return value
+      .map(item => (typeof item === 'string' ? item : (item?.msg || JSON.stringify(item))))
+      .filter(Boolean)
+      .join('; ');
+  }
+  if (typeof value === 'object') {
+    if (typeof value.message === 'string') return value.message;
+    if (typeof value.detail === 'string') return value.detail;
+    if (typeof value.error === 'string') return value.error;
+    if (typeof value.msg === 'string') return value.msg;
+    try { return JSON.stringify(value); } catch (_e) { return String(value); }
+  }
+  return String(value);
+}
+
 export default {
   name: 'ContentEditor',
   components: {
@@ -726,6 +755,19 @@ export default {
     
     // Add keyboard event listener for delete functionality
     document.addEventListener('keydown', this.handleKeydown);
+
+    // Ctrl+Alt+S — one-shot bypass for the parent-level integrity gate
+    // in updateScriptContent (mirrors the composable-level override).
+    this._scriptShrinkOverrideKeyHandler = (e) => {
+      if (e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && e.code === 'KeyS') {
+        this._allowNextScriptShrink = true;
+        if (this.$toast) {
+          this.$toast.info('Content-shrink integrity gate suspended for next save', { timeout: 2500 });
+        }
+        console.log('🟢 ContentEditor: _allowNextScriptShrink set (Ctrl+Alt+S)');
+      }
+    };
+    document.addEventListener('keydown', this._scriptShrinkOverrideKeyHandler, true);
     
     // Clear all old localStorage data that might interfere with colors
     console.log('Clearing old localStorage colors and related data');
@@ -795,6 +837,10 @@ export default {
   },
 
   beforeUnmount() {
+    // Remove the script-shrink override listener
+    if (this._scriptShrinkOverrideKeyHandler) {
+      document.removeEventListener('keydown', this._scriptShrinkOverrideKeyHandler, true);
+    }
     // Flush pending edits and save before component unmounts
     if (this.$refs.editorPanel) {
       this.$refs.editorPanel.isActivelyEditing = false;
@@ -2291,17 +2337,47 @@ Try dropping an image or video file here!`
 
     // SINGLE SOURCE HELPER: Update script content within rawMarkdownContent
     updateScriptContent(newScriptContent) {
-      // Database-first: no frontmatter in script_content, just the body
-      // NOTE: Removed '---' → '- - -' sanitizer that was corrupting content.
-      // Frontmatter is stripped on load, so standalone '---' lines in body content
-      // (e.g., markdown horizontal rules) should be preserved as-is.
-      this.rawMarkdownContent = newScriptContent || '';
+      // ── DATA-INTEGRITY GATE — DISABLED ───────────────────────────────
+      // Briefly added a parent-level cue-count regression + hard-shrink
+      // gate to catch silent data losses that bypass useScriptCore's
+      // safeEmitScriptContent. The gate proved to be too coarse — it
+      // misfired on legitimate insert paths (segments-array race
+      // conditions where an autosave with stale segments fires after a
+      // cue insert) and blocked normal editing.
+      //
+      // Disabled for now. The composable-level guards in
+      // useScriptCore.js remain in place. If we want this back, the
+      // right design is to push the SOURCE of every emit (each of the
+      // 20+ direct emit() sites in EditorPanel.vue) through an
+      // intent-tagged emitter so we can distinguish "user intentionally
+      // shrank" from "stale segments race". That's a separate, focused
+      // refactor — not something to do reactively when it's blocking
+      // your work.
+      //
+      // Logging stays so we can still diagnose if a silent loss happens:
+      // a console.warn fires when the heuristic WOULD have caught
+      // something, but we still let the emit through.
+      const prev = this.rawMarkdownContent || '';
+      const next = newScriptContent || '';
+      if (prev.length > 200) {
+        const prevCueCount = (prev.match(/<!-- Begin Cue -->/g) || []).length;
+        const nextCueCount = (next.match(/<!-- Begin Cue -->/g) || []).length;
+        if (nextCueCount < prevCueCount) {
+          console.warn(
+            `[updateScriptContent] cue-count went ${prevCueCount} → ${nextCueCount} (gate disabled — emit allowed). prevLen=${prev.length}, nextLen=${next.length}`,
+            { prevPreview: prev.substring(0, 200), nextPreview: next.substring(0, 200) }
+          );
+        }
+      }
 
-      // CRITICAL: Mark that we have unsaved changes when content is updated
+      // Consume the one-shot override flag if it was set (legacy code
+      // path may still set it; harmless to clear).
+      if (this._allowNextScriptShrink) {
+        this._allowNextScriptShrink = false;
+      }
+
+      this.rawMarkdownContent = next;
       this.hasUnsavedChanges = true;
-
-      // Reset remote sync timer — user is actively making changes,
-      // so suspend remote reloads until 15s of inactivity
       this.resetRemoteSyncTimer();
     },
 
@@ -6160,9 +6236,12 @@ Try dropping an image or video file here!`
           const assetIdMatch = scriptContent.match(assetIdLineRegex);
           console.log('📤 AssetID line found:', !!assetIdMatch, assetIdMatch ? assetIdMatch[0] : 'NOT_FOUND');
 
-          // Full cue block regex - matches from <!-- Begin Cue --> to <!-- End Cue --> containing the AssetID
+          // Full cue block regex - matches from <!-- Begin Cue --> to <!-- End Cue --> containing the AssetID.
+          // Field key is case-insensitive (AssetID / Assetid / ASSETID all valid).
+          // Trailing whitespace consumption is greedy on blank lines so the replacement
+          // doesn't leave orphaned newlines.
           const cueBlockRegex = new RegExp(
-            `<!--\\s*Begin Cue\\s*-->[\\s\\S]*?\\[Assetid:\\s*${escapedAssetId}\\][\\s\\S]*?<!--\\s*End Cue\\s*-->\\s*\\n?`,
+            `<!--\\s*Begin Cue\\s*-->[\\s\\S]*?\\[Asset[Ii][Dd]:\\s*${escapedAssetId}\\][\\s\\S]*?<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
             'i'
           );
 
@@ -6180,17 +6259,10 @@ Try dropping an image or video file here!`
             this.rawMarkdownContent = updatedContent;
 
             console.log('✅ Cue block replaced successfully in place');
-          } else {
-            console.warn('⚠️ Could not find existing cue block with AssetID:', originalAssetId);
-            console.warn('⚠️ Will insert as new cue instead');
-            // Fall through to normal insertion below
-          }
 
-          // Clear the re-upload state
-          this.editingSotCueData = null;
+            // Clear the re-upload state
+            this.editingSotCueData = null;
 
-          // Skip normal insertion if we successfully replaced
-          if (match) {
             this.hasUnsavedChanges = true;
             this.checkForUnsavedRundownChanges();
 
@@ -6204,6 +6276,19 @@ Try dropping an image or video file here!`
             console.log('🎬🎬🎬 ===============================================');
             return;
           }
+
+          // Re-upload mode but couldn't find original cue block — abort instead of
+          // duplicating the cue at the bottom of the script.
+          console.error('❌ Re-upload aborted: could not locate original cue block with AssetID:', originalAssetId);
+          this.editingSotCueData = null;
+          if (this.$toast) {
+            this.$toast.error(`Re-upload failed: original cue (${originalAssetId}) not found in script. Nothing was inserted.`);
+          } else {
+            // eslint-disable-next-line no-alert
+            alert(`Re-upload failed: original cue (${originalAssetId}) not found in script. Nothing was inserted.`);
+          }
+          console.log('🎬🎬🎬 submitSot (RE-UPLOAD ABORTED) =================');
+          return;
         }
 
         // Capture selection before insertion — modal close can race with re-renders
@@ -8190,13 +8275,15 @@ Try dropping an image or video file here!`
           }
         } else {
           this.mediaListStatus = 'Error!';
-          this.$toast.error(`❌ Error: ${response.data.error}`, { timeout: 8000 });
+          this.$toast.error(`❌ Error: ${formatErrorForToast(response.data.error)}`, { timeout: 8000 });
         }
       } catch (error) {
         clearInterval(progressInterval);
         this.mediaListStatus = 'Error!';
         console.error('📋 Media list generation failed:', error);
-        this.$toast.error(`❌ Failed to generate media list: ${error.response?.data?.detail || error.message}`, { timeout: 8000 });
+        const detail = error.response?.data?.detail;
+        const msg = formatErrorForToast(detail) || error.message || 'Unknown error';
+        this.$toast.error(`❌ Failed to generate media list: ${msg}`, { timeout: 8000 });
       } finally {
         // Reset after a brief delay
         setTimeout(() => {

@@ -1389,6 +1389,7 @@ import { useCollapseMode } from '../../composables/useCollapseMode.js'
 import { useEditorPaste } from '../../composables/useEditorPaste.js'
 import { useScriptCore } from '../../composables/useScriptCore.js'
 import { useMessages } from '../../composables/useMessages.js'
+import { useUserPrefs } from '../../composables/useUserPrefs.js'
 import {
   LEGACY_CUE_REGEX,
   LEGACY_CUE_FLAG_LABEL,
@@ -1554,6 +1555,11 @@ const emit = defineEmits([
     'save',
     'save-all',
     'update:scriptContent',
+    // Signal to ContentEditor's integrity gate that the NEXT update:scriptContent
+    // emit is an intentional shrink (cue delete, paragraph delete, etc.) — bypass
+    // the cue-count regression / hard-shrink guards for one save only. Emitted
+    // immediately BEFORE the update:scriptContent that ought to be allowed.
+    'user-initiated-shrink',
     'update:scratchContent',
     'update:slug',
     'update:title',
@@ -1785,9 +1791,15 @@ const otherUsersOnThisSegment = computed(() => {
   const itemId = item.asset_id || item.id
   if (!itemId) return []
   let myId = null
-  try { myId = JSON.parse(localStorage.getItem('user-data') || '{}')?.id || null } catch { /* noop */ }
+  let myUsername = null
+  try {
+    const me = JSON.parse(localStorage.getItem('user-data') || '{}')
+    myId = me?.id ?? null
+    myUsername = me?.username ?? null
+  } catch { /* noop */ }
   return (_msgApi.users.value || []).filter(u =>
-    u.id !== myId
+    (myId == null || String(u.id) !== String(myId))
+    && (myUsername == null || u.username !== myUsername)
     && u.online
     && u.current_location?.segment_id != null
     && String(u.current_location.segment_id) === String(itemId)
@@ -1892,7 +1904,16 @@ const titleFieldFocused = ref(false) // Track if title field is currently focuse
 const segmentUpdateTimer = ref(null) // Timer for debouncing segment updates
 const lastAutoscrubTime = ref(null) // Timestamp of last autoscrub run
 const altKeyPressed = ref(false) // Manual ALT key tracking for better browser compatibility
-const cueMenuOpen = ref(false) // Cue selector mode — single-key dispatch when open
+// Cue selector menu — toggle (open/closed). State is persisted per-user via
+// useUserPrefs under "editor.addCueOpen" so it reopens to the user's last
+// chosen state across sessions.
+const _addCuePrefs = useUserPrefs()
+const cueMenuOpen = ref(_addCuePrefs.get('editor.addCueOpen', false))
+watch(cueMenuOpen, (val) => { _addCuePrefs.set('editor.addCueOpen', !!val) })
+watch(() => _addCuePrefs.cache.value['editor.addCueOpen'], (val) => {
+  // Hydrate once prefs finish loading; only adopt if it differs.
+  if (val != null && !!val !== cueMenuOpen.value) cueMenuOpen.value = !!val
+})
 const flashingCueType = ref(null) // Which cue button to flash on keypress
 const cueDefinitions = ref([
         { type: 'IMG', key: 'i', label: 'IMG', tooltip: 'Image/Photo', btnClass: 'img-btn' },
@@ -4405,11 +4426,12 @@ function toggleCueMenu() {
 }
 
 function insertCueFromMenu(cueType) {
-  // Flash the button, then insert
+  // Flash the button briefly, then clear the flash. The cue menu itself stays
+  // in whatever state the user set via toggleCueMenu — open stays open,
+  // closed stays closed. Persisted per-user via useUserPrefs.
   flashingCueType.value = cueType
   setTimeout(() => {
     flashingCueType.value = null
-    cueMenuOpen.value = false
   }, 200)
   insertCue(cueType)
 }
@@ -5650,10 +5672,13 @@ function performCueDeletion(index, deleteAssets = false) {
   console.log('🗑️ Raw content length after deletion:', newRawContent.length);
   console.log('🗑️ Removed chars:', rawContent.length - newRawContent.length);
 
-  // Step 5: Clear all caches and emit
+  // Step 5: Clear all caches and emit.
+  // Emit user-initiated-shrink FIRST so ContentEditor's integrity gate
+  // sets its bypass flag before processing the update:scriptContent.
   cachedScriptSegments.value = null;
   lastParsedContent.value = null;
   clearEditBuffer();
+  emit('user-initiated-shrink');
   emit('update:scriptContent', newRawContent);
 
   // Clear selection if the deleted cue was selected
@@ -6653,11 +6678,33 @@ function insertCueAtSnapshotPosition(cueContent) {
 }
 
 // Raw Script Insertion Methods (Direct to Database)
-function insertCueBetweenParagraphsInRawScript(placement, cueContent) {
+async function insertCueBetweenParagraphsInRawScript(placement, cueContent) {
   console.log('🎯 Inserting cue between segments in raw script');
   console.log('🎯 Placement index:', placement.index);
 
-  // Get current script content
+  // ROOT-CAUSE FIX (ep 0273 / item 1096 SOT wipe, 2026-05-09):
+  // Before mutating rawMarkdownContent with a structural insert we must close
+  // the stale-segment-cache window. While isActivelyEditing=true, scriptSegments
+  // returns cachedScriptSegments without re-reading rawScriptContent. Any
+  // pending updateTextSegment debounce that fires after this insert would
+  // reconstruct from the stale cache (no cue) and silently overwrite the
+  // just-inserted cue. Steps:
+  //   1) flush any buffered keystrokes into rawMarkdownContent (so user edits
+  //      aren't dropped),
+  //   2) cancel pending segment-reconstruction debounces,
+  //   3) invalidate the segment cache so the next read re-parses from the
+  //      fresh rawMarkdownContent (which will include the new cue).
+  try {
+    await flushPendingChanges();
+    clearDebounceTimers();
+    clearEditBuffer();
+    cachedScriptSegments.value = null;
+    lastParsedContent.value = null;
+  } catch (err) {
+    console.warn('Pre-insert cache invalidation failed (non-fatal):', err);
+  }
+
+  // Get current script content (post-flush — includes any just-flushed edits)
   let currentScript = props.scriptContent || '';
 
   // UNIVERSAL RULE: Find ALL content segments (paragraphs AND cue blocks)
