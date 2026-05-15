@@ -229,6 +229,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { registerModalEsc } from '@/composables/useModalStack'
 
 const props = defineProps({
   show: {
@@ -243,6 +244,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:show', 'submit'])
+
+// Site-wide ESC-closes-modal behavior (registered via the global modal stack).
+registerModalEsc(() => props.show, () => emit('update:show', false), 'CueModal')
 
 const formValid = ref(false)
 const slug = ref('')

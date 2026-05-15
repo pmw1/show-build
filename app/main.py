@@ -65,6 +65,9 @@ try:
     # Legacy Cue Convert module (find-media endpoint for the /modules/legacyCueConvert frontend)
     from routers.legacy_cue_convert_router import router as legacy_cue_convert_router
 
+    # Public website-facing API (read-only, key-gated). See docs/WEBSITE_PUBLIC_API_PLAN.md
+    from routers.public import router as public_router
+
     # Audio & Voice
     from speakers_router import router as speakers_router
     from voice_sample_router import router as voice_sample_router
@@ -248,3 +251,6 @@ app.include_router(file_inventory_router)
 app.include_router(consolidation_router, prefix="/api", tags=["consolidation"])
 app.include_router(customer_router)
 app.include_router(production_roles_router, prefix="/api/production-roles", tags=["production-roles"])
+
+# Public website-facing API (read-only). All sub-routers mounted at /public/v1.
+app.include_router(public_router)

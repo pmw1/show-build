@@ -39,9 +39,37 @@ curl -X POST http://192.168.51.223:8001/write -H "Content-Type: application/json
 
 ## Active Work Queue
 
-**Check before starting any work:** [`ACTIVE_WORK_QUEUE.md`](ACTIVE_WORK_QUEUE.md)
+**Check before starting any work:**
+1. [`ACTIVE_WORK_QUEUE.md`](ACTIVE_WORK_QUEUE.md) — long-running initiatives
+2. The unified todo list at `/api/todos` — short-lived tasks (see "Unified
+   Task List" section below). Read it on session start; pay attention to
+   `priority=high` and `priority=critical` items. The dashboard renders the
+   same data at `/dashboard`.
 
-Update task status as you complete work.
+Update task status as you complete work (PATCH `/api/todos/{id}`).
+
+### Standing high-priority todos
+
+These are large architectural changes that should be top-of-mind whenever
+the related code is touched. If you're modifying these areas anyway,
+**look at the linked plan first** and either advance the plan or note why
+not in the todo description.
+
+- **#24 — Replace polling with SSE for job status** ([plan](docs/SSE_JOB_STATUS_PLAN.md)).
+  Per-cue-card + JobMonitor + SOT polling causes single-worker chokes
+  (episode 0273 hit 5-13s loads on 2026-05-09; immediate fix was
+  `WEB_CONCURRENCY=4`, durable fix is SSE). Phase 1 (SOT-job-status SSE)
+  alone is the biggest UX win. Touch this if you're already working in
+  `useJobMonitor.js`, `useSOTProcessing.js`, `PlaceholderCueCard.vue`, or
+  any of the Celery task state-update paths.
+
+- **#25 — Unify modal ESC behavior across all 27 modals**
+  ([plan](docs/MODAL_ESC_UNIFICATION_PLAN.md)). Foundation already landed:
+  `useModalStack` composable + global handler in `App.vue` + 5 previously-
+  ESC-less modals patched. Phase 1 (~half day) converts the remaining 21
+  modals from per-modal `addEventListener('keydown', ...)` to one-line
+  `registerModalEsc(...)`. Touch this if you're already editing any modal
+  in `components/modals/` or `components/content-editor/modals/`.
 
 ## Unified Task List (Dashboard Todo Panel)
 

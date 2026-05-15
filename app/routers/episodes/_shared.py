@@ -60,8 +60,15 @@ def create_content_version(db: Session, rundown_item, change_type: str = "manual
     # Get next version number
     version_number = (last_version.version_number + 1) if last_version else 1
 
-    # Calculate content length (strip HTML tags for accurate count)
-    content_length = len(re.sub(r'<[^>]+>', '', content).strip())
+    # Content length = raw character count of script_content as stored.
+    # Previously this stripped HTML tags before counting (intent: "human text
+    # only"), which made the column disagree with LENGTH(script_content) and
+    # repeatedly looked like data loss during debugging
+    # (2026-05-10 incident: row showed content_length=156399 while
+    # LENGTH(script_content)=158144 — same row). Use raw length now; if any
+    # caller still wants text-only count for shrink guards, they compute it
+    # themselves at the call site.
+    content_length = len(content) if content else 0
 
     # Create new version
     new_version = ContentVersion(

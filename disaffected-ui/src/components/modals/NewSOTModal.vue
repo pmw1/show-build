@@ -331,6 +331,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
+import { registerModalEsc } from '@/composables/useModalStack'
 
 const props = defineProps({
   show: {
@@ -340,6 +341,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:show', 'submit'])
+
+// Site-wide ESC-closes-modal behavior.
+registerModalEsc(() => props.show, () => emit('update:show', false), 'NewSOTModal')
 
 // Template refs
 const sotFormRef = ref(null)

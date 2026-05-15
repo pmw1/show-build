@@ -28,6 +28,8 @@ Layer 0 (hot-spot shortcuts) → Layer 1 (feature → subsystem) → Layer 2
 | LLM proxy / prompt overrides | `docs/PROMPT_OVERRIDE_SYSTEM.md` | `app/llm_proxy_router.py`, `app/prompts_router.py`, `useLLMPrompts.js` |
 | Episode directory / media assets | `docs/EPISODE_DIRECTORY_STANDARD.md` | `app/routers/episodes/media_router.py`, `services/asset_processing.py` |
 | Keyboard shortcuts | `docs/KEYBOARD_SHORTCUTS.md` + `disaffected-ui/src/data/keyboardShortcuts.js` | `useHotkeys.js` |
+| Public/website-facing API (planned) | `docs/WEBSITE_PUBLIC_API_PLAN.md` | _not yet implemented; lives at `app/routers/public/` per plan_ |
+| Distribution matrix (publication destinations) | `docs/PUBLICATION_DESTINATIONS_PLAN.md` | _stub; covers per-destination publishing state across YouTube, IG, X, TikTok, etc._ |
 
 ---
 

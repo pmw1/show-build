@@ -272,6 +272,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap'
+import { registerModalEsc } from '@/composables/useModalStack'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -319,6 +320,9 @@ const activeTab = ref('basic')
 watch(() => props.modelValue, (open) => {
   if (open) activeTab.value = 'basic'
 })
+
+// Site-wide ESC-closes-modal behavior.
+registerModalEsc(() => props.modelValue, () => emit('update:modelValue', false), 'EpisodeDetailsModal')
 
 const timezoneOptions = [
   { title: 'ET', value: 'America/New_York' },

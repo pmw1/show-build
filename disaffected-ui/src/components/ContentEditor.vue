@@ -418,15 +418,25 @@
       @show-message="showMessage"
     />
 
-    <!-- Unresolved Revisions Blocker Modal -->
+    <!-- Pre-Generation Blocker Modal: unresolved revisions and/or needs-attention items -->
     <v-dialog v-model="showRevisionBlockerModal" max-width="620" persistent>
       <v-card class="revision-blocker-card">
         <v-card-title class="revision-blocker-header d-flex align-center">
           <v-icon color="amber" class="me-2">mdi-alert-circle</v-icon>
-          <span>Unresolved Revisions</span>
+          <span>{{ revisionBlockerHasRevisions ? (revisionBlockerHasAttention ? 'Open Revisions &amp; Items Needing Attention' : 'Unresolved Revisions') : 'Items Need Attention' }}</span>
         </v-card-title>
         <v-card-text class="revision-blocker-body">
-          <p class="mb-3">Cannot generate host script until all proposed revisions are resolved.</p>
+          <p class="mb-3">
+            <template v-if="revisionBlockerHasRevisions && revisionBlockerHasAttention">
+              These items have proposed revisions or are flagged as needing attention. Resolve them before generating the host script, or continue anyway.
+            </template>
+            <template v-else-if="revisionBlockerHasRevisions">
+              Some items still have proposed revisions. Resolve them before generating the host script, or continue anyway.
+            </template>
+            <template v-else>
+              Some items are flagged as needing attention. You can clear the flags first, or continue anyway.
+            </template>
+          </p>
           <div class="revision-blocker-list">
             <div
               v-for="item in revisionBlockerItems"
@@ -435,8 +445,23 @@
             >
               <v-icon size="small" color="amber" class="me-2">mdi-file-document-edit</v-icon>
               <span class="revision-item-title">{{ item.title || item.slug }}</span>
-              <v-chip size="x-small" color="amber" variant="tonal" class="ms-2">
+              <v-chip
+                v-if="item.count > 0"
+                size="x-small"
+                color="amber"
+                variant="tonal"
+                class="ms-2"
+              >
                 {{ item.count }} revision{{ item.count > 1 ? 's' : '' }}
+              </v-chip>
+              <v-chip
+                v-if="item.attention > 0"
+                size="x-small"
+                color="orange"
+                variant="tonal"
+                class="ms-2"
+              >
+                needs attention
               </v-chip>
             </div>
           </div>
@@ -446,11 +471,24 @@
             Cancel
           </v-btn>
           <v-spacer />
-          <v-btn variant="outlined" color="error" @click="resolveAllRevisions('reject')">
-            Reject All &amp; Continue
+          <v-btn
+            v-if="revisionBlockerHasRevisions"
+            variant="outlined"
+            color="error"
+            @click="resolveAllRevisions('reject')"
+          >
+            Reject Revisions &amp; Continue
           </v-btn>
-          <v-btn variant="elevated" color="success" @click="resolveAllRevisions('accept')">
-            Accept All &amp; Continue
+          <v-btn
+            v-if="revisionBlockerHasRevisions"
+            variant="outlined"
+            color="success"
+            @click="resolveAllRevisions('accept')"
+          >
+            Accept Revisions &amp; Continue
+          </v-btn>
+          <v-btn variant="elevated" color="warning" @click="continueGenerateAnyway">
+            Continue Anyway
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -639,6 +677,7 @@ import { useSegmentLock } from '../composables/useSegmentLock';
 import { useEpisodeMetadata } from '../composables/useEpisodeMetadata';
 import { useSessionResume } from '../composables/useSessionResume';
 import { useUserPrefs } from '../composables/useUserPrefs';
+import { useUndoManager, isUndoRedoApplying } from '../composables/useUndoManager';
 
 /**
  * Stringify any value into a human-readable error message for toasts.
@@ -720,6 +759,7 @@ export default {
     const episodeMetadata = useEpisodeMetadata();
     const sessionResume = useSessionResume();
     const userPrefs = useUserPrefs();
+    const undoManager = useUndoManager();
 
     return {
       showEpisodeModal,
@@ -733,6 +773,7 @@ export default {
       // Session resume helpers (recordLocation is debounced)
       sessionResume,
       userPrefs,
+      undoManager,
     };
   },
 
@@ -856,6 +897,9 @@ export default {
     }
     // Clean up keyboard event listener
     document.removeEventListener('keydown', this.handleKeydown);
+    // Clear undo manager — entries hold closures over `this`, which is
+    // about to unmount; running them later would mutate a stale instance.
+    this.undoManager?.clear();
     // Clean up side panel height listeners
     if (this._scrollWrapper) {
       this._scrollWrapper.removeEventListener('scroll', this.updateSidePanelHeight);
@@ -1147,12 +1191,11 @@ export default {
       versionHistory: [],        // List of versions for current item
       loadingVersions: false,    // Loading state for version history
 
-      // Undo/Redo Stack (in-memory, client-side)
-      undoStack: [],             // Array of state snapshots for undo
-      redoStack: [],             // Array of undone states for redo
-      maxUndoHistory: 50,        // Limit memory usage (50 states max)
-      isUndoingRedoing: false,   // Prevent recursive captures during undo/redo
-      undoCaptureDebounceTimer: null, // Debounce timer for capturing undo states
+      // Undo/redo: backed by `useUndoManager` singleton (returned from
+      // setup() as `undoManager`). The previous in-memory stacks have been
+      // removed in favor of command-pattern entries pushed by
+      // captureUndoState() and individual mutation handlers.
+      lastCapturedSnapshot: null,
 
       // Content
       scratchContent: '',
@@ -1532,6 +1575,12 @@ Good night!
     }
   },
    computed: {
+    revisionBlockerHasRevisions() {
+      return (this.revisionBlockerItems || []).some(i => (i.count || 0) > 0);
+    },
+    revisionBlockerHasAttention() {
+      return (this.revisionBlockerItems || []).some(i => (i.attention || 0) > 0);
+    },
     relocateTargetItems() {
       return this.rundownItems.filter(item => !item.isPlaceholder);
     },
@@ -1837,43 +1886,55 @@ Try dropping an image or video file here!`
      * Called on content changes (debounced) and before destructive operations
      */
     captureUndoState() {
-      // Don't capture if we're in the middle of an undo/redo operation
-      if (this.isUndoingRedoing) {
-        console.log('⏮️ Skipping undo capture - currently undoing/redoing');
+      // Suppress capture during an in-flight undo/redo so the restored
+      // value does not get re-captured as a new entry on the next debounce.
+      if (isUndoRedoApplying()) {
         return;
       }
 
-      // Don't capture if no item is selected
       if (this.selectedItemIndex < 0) {
         return;
       }
 
-      const snapshot = {
+      const itemIndex = this.selectedItemIndex;
+      const itemAssetId = this.rundownItems[itemIndex]?.asset_id;
+      const after = {
         scriptContent: this.rawMarkdownContent,
         scratchContent: this.scratchContent,
-        cursorPosition: this.getCursorPosition(),
-        timestamp: new Date(),
-        selectedItemIndex: this.selectedItemIndex
+        cursorPosition: this.getCursorPosition()
       };
 
-      // Check if snapshot is different from last one (avoid duplicates)
-      const lastSnapshot = this.undoStack[this.undoStack.length - 1];
-      if (lastSnapshot &&
-          lastSnapshot.scriptContent === snapshot.scriptContent &&
-          lastSnapshot.scratchContent === snapshot.scratchContent) {
-        console.log('⏮️ Skipping duplicate undo capture');
+      // First capture after load establishes the baseline; no entry pushed.
+      if (!this.lastCapturedSnapshot) {
+        this.lastCapturedSnapshot = after;
         return;
       }
 
-      this.undoStack.push(snapshot);
-      this.redoStack = []; // Clear redo on new change
-
-      // Limit stack size
-      if (this.undoStack.length > this.maxUndoHistory) {
-        this.undoStack.shift();
+      const before = this.lastCapturedSnapshot;
+      if (before.scriptContent === after.scriptContent &&
+          before.scratchContent === after.scratchContent) {
+        return;
       }
 
-      console.log(`⏮️ Captured undo state (${this.undoStack.length} states in stack)`);
+      const restoreSnapshot = (snapshot) => {
+        // Only restore if user is still on the same item; otherwise skip
+        // silently. (A future iteration could switch items first.)
+        if (this.rundownItems[this.selectedItemIndex]?.asset_id !== itemAssetId) {
+          console.log('⏮️ Undo entry skipped — different item is selected now');
+          return;
+        }
+        this.rawMarkdownContent = snapshot.scriptContent;
+        this.scratchContent = snapshot.scratchContent;
+        this.$nextTick(() => this.restoreCursorPosition(snapshot.cursorPosition));
+      };
+
+      this.undoManager.push({
+        label: 'edit script',
+        undo: () => restoreSnapshot(before),
+        redo: () => restoreSnapshot(after)
+      });
+
+      this.lastCapturedSnapshot = after;
     },
 
     /**
@@ -1916,110 +1977,13 @@ Try dropping an image or video file here!`
     },
 
     /**
-     * Undo last change
-     */
-    undo() {
-      if (this.undoStack.length === 0) {
-        console.log('⏮️ Undo stack empty - nothing to undo');
-        return;
-      }
-
-      // Flush any buffered segment edits so current state is fully in rawMarkdownContent
-      const editorPanel = this.$refs.editorPanel;
-      if (editorPanel?.flushPendingChanges) {
-        editorPanel.flushPendingChanges();
-      }
-
-      // Block capture for longer than the 300ms debounce to prevent the restored
-      // content from being re-captured as a new snapshot after the restore.
-      this.isUndoingRedoing = true;
-      this.debouncedCaptureUndoState.cancel();
-
-      // Save current state to redo stack before undoing
-      const currentState = {
-        scriptContent: this.rawMarkdownContent,
-        scratchContent: this.scratchContent,
-        cursorPosition: this.getCursorPosition(),
-        timestamp: new Date(),
-        selectedItemIndex: this.selectedItemIndex
-      };
-      this.redoStack.push(currentState);
-
-      const previous = this.undoStack.pop();
-
-      // Only restore if same item is selected
-      if (previous.selectedItemIndex === this.selectedItemIndex) {
-        this.rawMarkdownContent = previous.scriptContent;
-        this.scratchContent = previous.scratchContent;
-
-        this.$nextTick(() => {
-          this.restoreCursorPosition(previous.cursorPosition);
-          // Extend flag past the 300ms debounce so the watcher's deferred
-          // captureUndoState fires while the flag is still true and bails out.
-          setTimeout(() => { this.isUndoingRedoing = false; }, 400);
-        });
-      } else {
-        this.isUndoingRedoing = false;
-        console.log('⏮️ Undo skipped - different item was selected');
-      }
-
-      console.log(`⏮️ Undo performed (${this.undoStack.length} states remaining)`);
-    },
-
-    /**
-     * Redo last undone change
-     */
-    redo() {
-      if (this.redoStack.length === 0) {
-        console.log('⏭️ Redo stack empty - nothing to redo');
-        return;
-      }
-
-      // Flush any buffered segment edits so current state is fully in rawMarkdownContent
-      const editorPanel = this.$refs.editorPanel;
-      if (editorPanel?.flushPendingChanges) {
-        editorPanel.flushPendingChanges();
-      }
-
-      this.isUndoingRedoing = true;
-      this.debouncedCaptureUndoState.cancel();
-
-      // Save current state to undo stack before redoing
-      const currentState = {
-        scriptContent: this.rawMarkdownContent,
-        scratchContent: this.scratchContent,
-        cursorPosition: this.getCursorPosition(),
-        timestamp: new Date(),
-        selectedItemIndex: this.selectedItemIndex
-      };
-      this.undoStack.push(currentState);
-
-      const next = this.redoStack.pop();
-
-      // Only restore if same item is selected
-      if (next.selectedItemIndex === this.selectedItemIndex) {
-        this.rawMarkdownContent = next.scriptContent;
-        this.scratchContent = next.scratchContent;
-
-        this.$nextTick(() => {
-          this.restoreCursorPosition(next.cursorPosition);
-          setTimeout(() => { this.isUndoingRedoing = false; }, 400);
-        });
-      } else {
-        this.isUndoingRedoing = false;
-        console.log('⏭️ Redo skipped - different item was selected');
-      }
-
-      console.log(`⏭️ Redo performed (${this.redoStack.length} states remaining)`);
-    },
-
-    /**
-     * Clear undo/redo stacks (call when switching items)
+     * Clear undo/redo stacks (call on episode change). Item-switch no
+     * longer clears — undo entries are item-scoped and bail when the
+     * user is on a different item.
      */
     clearUndoStacks() {
-      this.undoStack = [];
-      this.redoStack = [];
-      console.log('⏮️ Undo/redo stacks cleared');
+      this.undoManager.clear();
+      this.lastCapturedSnapshot = null;
     },
 
     // Get color for segment type from theme settings
@@ -2121,27 +2085,38 @@ Try dropping an image or video file here!`
         this.showFsqModal = true;
       }
     },
-    handleEditFsqCue(cueData) {
+    async handleEditFsqCue(cueData) {
       console.log('📝 Editing FSQ cue:', cueData);
-      // Store cue data for editing
+      // Flush any in-flight Script-mode typing into rawMarkdownContent before
+      // the modal opens — otherwise the next debounce tick will overwrite the
+      // modal-driven update with a stale snapshot of the script.
+      if (this.$refs.editorPanel?.flushPendingChanges) {
+        await this.$refs.editorPanel.flushPendingChanges();
+      }
       this.editingFsqCueData = cueData;
       this.showFsqModal = true;
     },
-    handleEditGfxCue(cueData) {
+    async handleEditGfxCue(cueData) {
       console.log('📝 Editing GFX cue:', cueData);
-      // Store cue data for editing
+      if (this.$refs.editorPanel?.flushPendingChanges) {
+        await this.$refs.editorPanel.flushPendingChanges();
+      }
       this.editingGfxCueData = cueData;
       this.showGfxModal = true;
     },
-    handleEditImgCue(cueData) {
+    async handleEditImgCue(cueData) {
       console.log('📝 Editing IMG cue:', cueData);
-      // Store cue data for editing
+      if (this.$refs.editorPanel?.flushPendingChanges) {
+        await this.$refs.editorPanel.flushPendingChanges();
+      }
       this.editingImgCueData = cueData;
       this.showImgCueModal = true;
     },
-    handleEditDirCue(cueData) {
+    async handleEditDirCue(cueData) {
       console.log('📝 Editing NOTE cue:', cueData);
-      // Store cue data for editing
+      if (this.$refs.editorPanel?.flushPendingChanges) {
+        await this.$refs.editorPanel.flushPendingChanges();
+      }
       this.editingDirCueData = cueData;
       this.showDirModal = true;
     },
@@ -2286,7 +2261,10 @@ Try dropping an image or video file here!`
         this.showRifModal = true;
       }
     },
-    handleEditRifCue(cueData) {
+    async handleEditRifCue(cueData) {
+      if (this.$refs.editorPanel?.flushPendingChanges) {
+        await this.$refs.editorPanel.flushPendingChanges();
+      }
       this.editingRifCueData = cueData;
       this.showRifModal = true;
     },
@@ -2768,6 +2746,10 @@ Try dropping an image or video file here!`
         }
       }
 
+      // Undo entries are scoped per episode — clear the manager so a
+      // user on episode B cannot Ctrl+Z back into episode A's history.
+      this.clearUndoStacks();
+
       // Load the new episode
       try {
         await this.loadEpisode(newEpisodeNumber);
@@ -3182,20 +3164,39 @@ Try dropping an image or video file here!`
       }, 15000);
     },
 
-    // Silently fetch the current item from the database and update if changed
-    // Does NOT touch reactive state while user is actively editing a paragraph
+    // Silently fetch the current item from the database and update if changed.
+    //
+    // ROOT-CAUSE FIX (ep 0273 / item 1089, 2026-05-10): this function previously
+    // had two destructive paths:
+    //   1. Local has-unsaved-changes was IGNORED. If remote was newer (e.g. an
+    //      admin restore via direct DB update or a coworker save), this would
+    //      silently overwrite the user's in-flight edits.
+    //   2. While the user was actively editing, remote was STASHED in
+    //      _pendingRemoteContent and only flushed on paragraph blur via
+    //      handleEditorSaveCurrent. Any structural action (cue insert, delete,
+    //      drag) does NOT trigger paragraph blur, so the stash was never
+    //      applied. Result: the user's stale local rawMarkdownContent (from
+    //      before the remote update) was the base for the structural change,
+    //      and the autosave saved that stale content + new cue, wiping the
+    //      remote update.
+    //
+    // New policy:
+    //   - If local has unsaved changes, NEVER apply remote silently. We can't
+    //     know which side is right; bail and let the user save explicitly. A
+    //     soft warning could fire later, but for now: data preservation wins.
+    //   - If local has no unsaved changes, apply remote regardless of editing
+    //     state. Editing state alone (cursor in a paragraph) does not imply
+    //     unsaved changes — the buffer is what holds those. If remote differs
+    //     and buffer is clean, the right thing is to adopt remote.
     async silentRemoteSync() {
       const editorPanel = this.$refs.editorPanel;
       const currentItem = this.currentRundownItem;
       if (!currentItem || !currentItem.db_id) return;
 
-      // Capture identity at call time — if user switches items during the fetch,
-      // we must NOT apply the response (it belongs to a different item)
       const syncDbId = currentItem.db_id;
       const syncItemIndex = this.selectedItemIndex;
 
       try {
-        // Create an AbortController so selectRundownItem can cancel in-flight syncs
         this._remoteSyncAbort = new AbortController();
 
         const token = localStorage.getItem('auth-token');
@@ -3205,7 +3206,6 @@ Try dropping an image or video file here!`
         });
         if (!response.ok) return;
 
-        // CRITICAL: Verify the user hasn't switched items while we were fetching
         if (this.selectedItemIndex !== syncItemIndex || this.currentRundownItem?.db_id !== syncDbId) {
           console.log('🔄 Remote sync response arrived for stale item (db_id:', syncDbId, ') — discarding');
           return;
@@ -3215,31 +3215,39 @@ Try dropping an image or video file here!`
         const remoteScript = remoteItem.script_content || remoteItem.script || '';
         const localScript = this.rawMarkdownContent || '';
 
-        // No changes — nothing to do
         if (remoteScript === localScript) {
-          // Restart timer for next check
           this.resetRemoteSyncTimer();
           return;
         }
 
-        // Double-check again after JSON parsing (another async boundary)
         if (this.selectedItemIndex !== syncItemIndex || this.currentRundownItem?.db_id !== syncDbId) {
           console.log('🔄 Remote sync — item changed during parse, discarding');
           return;
         }
 
-        console.log('🔄 Remote content differs from local — syncing');
+        // Check for in-flight buffered edits — these aren't in rawMarkdownContent yet.
+        const hasBufferedEdits = !!(editorPanel?.getEditBuffer && Object.keys(editorPanel.getEditBuffer() || {}).length > 0);
 
-        if (editorPanel?.isActivelyEditing) {
-          // User is still in a paragraph — stash remote content, apply on blur
-          this._pendingRemoteContent = remoteScript;
-          console.log('🔄 Stashed remote content (will apply on blur)');
-        } else {
-          // User is not actively editing — safe to update
-          this.rawMarkdownContent = remoteScript;
-          this.hasUnsavedChanges = false;
-          console.log('🔄 Remote content applied silently');
+        if (this.hasUnsavedChanges || this._hasUnsavedChanges || hasBufferedEdits) {
+          // Local edits in flight. Adopting remote would lose them.
+          // Adopting local would lose remote's progress. Punt: log, keep both
+          // sides, and let the next save attempt or item-switch reconcile.
+          // Critically, we do NOT stash remote into _pendingRemoteContent here
+          // — the previous stash-and-apply-on-blur dance is what caused the
+          // 2026-05-10 92k loss when a structural cue insert bypassed blur.
+          console.warn(
+            `🔄 Remote sync sees diff but local has unsaved changes — refusing to apply remote.\n` +
+            `   localLen=${localScript.length}, remoteLen=${remoteScript.length}, hasUnsavedChanges=${this.hasUnsavedChanges}, _hasUnsavedChanges=${this._hasUnsavedChanges}, hasBufferedEdits=${hasBufferedEdits}`
+          );
+          this.resetRemoteSyncTimer();
+          return;
         }
+
+        // No local unsaved changes. Adopt remote.
+        console.log(`🔄 Remote content differs from local (local=${localScript.length}, remote=${remoteScript.length}) and local is clean — applying remote`);
+        this.rawMarkdownContent = remoteScript;
+        this.hasUnsavedChanges = false;
+        this._hasUnsavedChanges = false;
       } catch (error) {
         if (error.name === 'AbortError') {
           console.log('🔄 Remote sync aborted (item switch)');
@@ -3250,17 +3258,19 @@ Try dropping an image or video file here!`
         this._remoteSyncAbort = null;
       }
 
-      // Restart timer for next check
       this.resetRemoteSyncTimer();
     },
 
-    // Apply any stashed remote content (called when user leaves a paragraph)
+    // Apply any stashed remote content (called when user leaves a paragraph).
+    // RETAINED AS NO-OP: silentRemoteSync no longer stashes (the stash-and-
+    // apply-on-blur pattern caused the 2026-05-10 data-loss incident — see
+    // silentRemoteSync above). Kept as a stub so existing callers don't
+    // ReferenceError. Any remaining _pendingRemoteContent from the old code
+    // path is cleared and ignored.
     applyPendingRemoteContent() {
       if (this._pendingRemoteContent) {
-        console.log('🔄 Applying stashed remote content after blur');
-        this.rawMarkdownContent = this._pendingRemoteContent;
+        console.warn('🔄 Discarding legacy _pendingRemoteContent stash (no-op now)');
         this._pendingRemoteContent = null;
-        this.hasUnsavedChanges = false;
       }
     },
 
@@ -3328,6 +3338,49 @@ Try dropping an image or video file here!`
         if (frontmatterBlockMatches && frontmatterBlockMatches.length > 1) {
           console.error('SAVE BLOCKED: Multiple segments detected in script content');
           throw new Error('Cannot save: Multiple segments detected in script content.');
+        }
+
+        // ROOT-CAUSE FIX (ep 0273 / item 1089, 2026-05-10): pre-save remote
+        // sanity check. For autosaves only (manual saves are user-confirmed
+        // intent), if the outgoing payload is dramatically smaller than what's
+        // currently in the DB, fetch the DB state and abort the save unless
+        // the user has explicitly typed/clicked since loading. This catches
+        // the "stale tab posts old content over a fresh restore" failure.
+        if (!isManualSave && contentToSave && currentItem.db_id) {
+          const outgoingLen = (contentToSave || '').length;
+          if (outgoingLen >= 200) {
+            try {
+              const probeResp = await fetch(`/api/episodes/rundown-item-by-id/${currentItem.db_id}`, {
+                headers: { ...headers }
+              });
+              if (probeResp.ok) {
+                const probeItem = await probeResp.json();
+                const probeRemote = probeItem.script_content || probeItem.script || '';
+                const remoteLen = probeRemote.length;
+                if (remoteLen > 0 && outgoingLen < remoteLen * 0.6 && remoteLen > 1000) {
+                  console.error(
+                    `🚨 AUTOSAVE BLOCKED — outgoing ${outgoingLen} chars is <60% of remote ${remoteLen}. ` +
+                    `This usually means a stale tab is about to overwrite a fresh restore or coworker save. ` +
+                    `Refusing autosave; user can force via manual save (Ctrl+S).`
+                  );
+                  if (this.$toast?.error) {
+                    this.$toast.error(`Autosave aborted — server has more content (${remoteLen} > local ${outgoingLen}). Reload to sync.`);
+                  } else if (window.notifyUserStandard) {
+                    window.notifyUserStandard(
+                      `Autosave aborted — server has more content. Reload to sync.`,
+                      '#F44336', 6000
+                    );
+                  }
+                  this._hasUnsavedChanges = true;
+                  if (!isEditing) this.hasUnsavedChanges = true;
+                  return;
+                }
+              }
+            } catch (probeErr) {
+              // Probe failed — proceed with save (don't block on probe failure)
+              console.warn('Pre-save remote probe failed, proceeding:', probeErr);
+            }
+          }
         }
 
         // API call — this always fires regardless of editing state
@@ -3410,63 +3463,6 @@ Try dropping an image or video file here!`
     },
 
     // Undo last change - restore to previous version
-    async undoLastChange() {
-      if (!this.currentRundownItem) {
-        notifyUserStandard('No item selected', NOTIFICATION_COLORS.WARNING, 2000);
-        return;
-      }
-
-      const assetId = this.currentRundownItem.asset_id || this.currentRundownItem.AssetID;
-      if (!assetId) {
-        notifyUserStandard('Cannot undo - item has no asset ID', NOTIFICATION_COLORS.WARNING, 2000);
-        return;
-      }
-
-      // Refresh version history first
-      await this.fetchVersionHistory();
-
-      if (this.versionHistory.length < 2) {
-        notifyUserStandard('No previous version to restore', NOTIFICATION_COLORS.INFO, 2000);
-        return;
-      }
-
-      // Get the second-to-last version (current is the latest)
-      const previousVersion = this.versionHistory[1];
-
-      try {
-        const headers = this.getAuthHeaders();
-        const response = await axios.post(
-          `/api/episodes/rundown-item/${assetId}/versions/${previousVersion.version_number}/restore`,
-          {},
-          { headers }
-        );
-
-        if (response.data && response.data.success) {
-          notifyUserStandard(`Restored to version ${previousVersion.version_number}`, NOTIFICATION_COLORS.SUCCESS, 2000);
-
-          // Reload the current item to reflect the restored content
-          await this.loadEpisode(this.currentEpisodeNumber);
-
-          // Re-select the same item
-          const restoredItemIndex = this.rundownItems.findIndex(
-            item => (item.asset_id || item.AssetID) === assetId
-          );
-          if (restoredItemIndex >= 0) {
-            await this.selectItem(restoredItemIndex);
-          }
-
-          // Refresh version history
-          await this.fetchVersionHistory();
-        } else {
-          notifyUserStandard('Failed to restore version', NOTIFICATION_COLORS.ERROR, 3000);
-        }
-      } catch (error) {
-        console.error('Undo failed:', error);
-        const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
-        notifyUserStandard(`Undo failed: ${errorMsg}`, NOTIFICATION_COLORS.ERROR, 3000);
-      }
-    },
-
     // Restore to a specific version (used by MetadataPanel)
     async restoreToVersion(versionNumber) {
       if (!this.currentRundownItem) {
@@ -4212,9 +4208,13 @@ Try dropping an image or video file here!`
         }
       }
 
-      // Clear undo/redo stacks when switching items (undo is item-specific)
+      // Reset the per-item baseline snapshot when switching items so the
+      // next captureUndoState establishes a new baseline against the
+      // newly-loaded item. Entries already in the manager remain — they
+      // are item-scoped via asset_id and bail when the user is on a
+      // different item.
       if (this.selectedItemIndex !== index) {
-        this.clearUndoStacks();
+        this.lastCapturedSnapshot = null;
       }
 
       // Unregister previous active edit and release lock
@@ -4533,21 +4533,8 @@ Try dropping an image or video file here!`
                            // Timestamp fallback: a modal closed within the last 300ms (same ESC press)
                            (Date.now() - this.lastModalCloseTime < 300);
 
-      // UNDO (Ctrl+Z / Cmd+Z) - Works in all modes, including text fields
-      if ((event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.undo();
-        return;
-      }
-
-      // REDO (Ctrl+Y / Cmd+Y or Ctrl+Shift+Z / Cmd+Shift+Z)
-      if ((event.ctrlKey || event.metaKey) && (event.key === 'y' || (event.key === 'z' && event.shiftKey) || (event.key === 'Z' && event.shiftKey))) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.redo();
-        return;
-      }
+      // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y are handled globally in App.vue via
+      // useUndoManager. Do not register them here.
 
       // TOGGLE LEFT SIDEBAR (Ctrl+Shift+[)
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === 'BracketLeft') {
@@ -4644,15 +4631,9 @@ Try dropping an image or video file here!`
         return;
       }
 
-      // Handle Ctrl+Z for undo (restore to previous version)
-      if (event.ctrlKey && !event.shiftKey && event.key === 'z' && !event.altKey && !event.metaKey) {
-        // Only intercept Ctrl+Z when NOT in a text field (allow browser undo in text fields)
-        if (!isInTextField) {
-          event.preventDefault();
-          this.undoLastChange();
-          return;
-        }
-      }
+      // Ctrl+Z handled globally in App.vue. The legacy DB-restore method
+      // (`undoLastChange`) was removed — version history is reachable via
+      // the MetadataPanel version UI, not Ctrl+Z.
 
       // Handle Ctrl+Shift+R for reloading rundown from database
       if (event.ctrlKey && event.shiftKey && event.key === 'R' && !event.altKey && !event.metaKey) {
@@ -5651,11 +5632,36 @@ Try dropping an image or video file here!`
     async submitGraphic(gfxCueData) {
       console.log('🎨 GFX cue submitted:', gfxCueData);
 
+      // Snapshot at function entry — modal-close watcher clears
+      // `editingGfxCueData` on `update:show:false`, and any future async
+      // path that awaits before reading it would race the clear.
+      const editing = this.editingGfxCueData;
+
       // Verify editorPanel ref exists
       if (!this.$refs.editorPanel) {
         console.error('❌ EditorPanel ref not found');
         alert('Error: Editor panel not ready. Please try again.');
         return;
+      }
+
+      // In edit mode, defensively force the cue body to use the original
+      // AssetID even if the modal drifted. The modal change above already
+      // does this, but keeping a single source of truth at the write site
+      // prevents future modal regressions from silently orphaning media.
+      if (editing) {
+        const editAssetId = editing.assetId || editing.rawData?.assetId;
+        if (editAssetId && gfxCueData.assetId !== editAssetId) {
+          console.warn(`⚠️ GFX edit: overriding modal-supplied assetId ${gfxCueData.assetId} with original ${editAssetId}`);
+          gfxCueData.assetId = editAssetId;
+        }
+      }
+
+      // Flush in-flight Script-mode typing into rawMarkdownContent before
+      // we run the regex replace — otherwise the next debounce tick will
+      // overwrite our update.
+      if (this.$refs.editorPanel?.flushPendingChanges) {
+        await this.$refs.editorPanel.flushPendingChanges();
+        await this.$nextTick();
       }
 
       // Format the GFX cue block with all metadata
@@ -5753,16 +5759,17 @@ Try dropping an image or video file here!`
       const cueLabel = gfxCueData.gfxType === 'xpost' ? 'X Post' : 'GFX';
 
       // ── EDIT MODE: Replace existing cue in-place ──
-      if (this.editingGfxCueData) {
-        const editAssetId = this.editingGfxCueData.assetId || this.editingGfxCueData.rawData?.assetId;
+      if (editing) {
+        const editAssetId = editing.assetId || editing.rawData?.assetId;
         console.log(`📝 EDIT MODE: Replacing GFX cue with assetId ${editAssetId}`);
 
-        // Find and replace the old cue block directly in raw markdown
-        // This is more reliable than segment manipulation since reconstructContent
-        // uses segment.data.rawData which wouldn't reflect the new cue block
+        // Find and replace the old cue block directly in raw markdown.
+        // Tempered greedy forbids cue boundaries inside the match so we
+        // never eat adjacent cues when the target is the Nth one.
         const raw = this.rawMarkdownContent || '';
+        const tempered = '(?:(?!<!-- Begin Cue -->|<!-- End Cue -->)[\\s\\S])*?';
         const cuePattern = new RegExp(
-          `<!-- Begin Cue -->\\n[\\s\\S]*?\\[Asset\\s*Id:\\s*${editAssetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\][\\s\\S]*?<!-- End Cue -->`,
+          `<!-- Begin Cue -->\\n${tempered}\\[Asset\\s*Id:\\s*${editAssetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]${tempered}<!-- End Cue -->`,
           'i'
         );
 
@@ -5771,9 +5778,13 @@ Try dropping an image or video file here!`
           this.updateScriptContent(newRawContent);
           console.log(`✅ GFX cue replaced in-place via raw markdown for assetId ${editAssetId}`);
         } else {
-          console.warn('⚠️ Could not find existing cue to replace, inserting as new');
+          // Abort instead of silently re-inserting as a new cue. Re-insert
+          // would duplicate the cue: the original is still in the script,
+          // and we'd add another at the cursor.
+          console.error(`❌ GFX edit aborted: could not locate cue with AssetID ${editAssetId}`);
           this.editingGfxCueData = null;
-          await this.submitGraphic(gfxCueData);
+          this.showGfxModal = false;
+          this.$toast?.error(`Could not locate ${cueLabel} cue (${editAssetId}) to update. Nothing was changed.`);
           return;
         }
 
@@ -5857,14 +5868,40 @@ Try dropping an image or video file here!`
       }
     },
 
-    submitFsq(fsqCueData) {
+    async submitFsq(fsqCueData) {
       console.log('🎬 FSQ cue submitted:', fsqCueData);
+
+      // Snapshot at function entry — modal-close watcher clears
+      // `editingFsqCueData` on `update:show:false`. Today's emit order is
+      // safe but a future `await` before the read would silently lose it.
+      const editing = this.editingFsqCueData;
 
       // Verify editorPanel ref exists
       if (!this.$refs.editorPanel) {
         console.error('❌ EditorPanel ref not found');
         alert('Error: Editor panel not ready. Please try again.');
         return;
+      }
+
+      // In edit mode, force the cue body to use the original AssetID even
+      // if the modal somehow drifted. The modal change above already
+      // handles the first split segment; this is a single source of truth
+      // at the write site. (Multipart edits keep the original AssetID for
+      // segment 0 and mint new ones for additional segments.)
+      if (editing) {
+        const editAssetId = editing.assetId || editing.rawData?.assetId;
+        if (editAssetId && fsqCueData.part && /^1x|^1of/.test(fsqCueData.part) && fsqCueData.assetId !== editAssetId) {
+          console.warn(`⚠️ FSQ edit: overriding modal-supplied assetId ${fsqCueData.assetId} with original ${editAssetId}`);
+          fsqCueData.assetId = editAssetId;
+        }
+      }
+
+      // Flush in-flight Script-mode typing into rawMarkdownContent before
+      // we mutate segments — otherwise the next debounce tick will
+      // overwrite our update with a stale snapshot.
+      if (this.$refs.editorPanel?.flushPendingChanges) {
+        await this.$refs.editorPanel.flushPendingChanges();
+        await this.$nextTick();
       }
 
       // Format the FSQ cue block with all metadata
@@ -5911,8 +5948,8 @@ Try dropping an image or video file here!`
       fsqCueBlock += `<!-- End Cue -->`;
 
       // ── EDIT MODE: Replace existing cue in-place ──
-      if (this.editingFsqCueData) {
-        const editAssetId = this.editingFsqCueData.assetId || this.editingFsqCueData.rawData?.assetId;
+      if (editing) {
+        const editAssetId = editing.assetId || editing.rawData?.assetId;
         console.log(`📝 EDIT MODE: Replacing FSQ cue with assetId ${editAssetId}`);
 
         const segments = this.$refs.editorPanel.scriptSegments;
@@ -5960,10 +5997,14 @@ Try dropping an image or video file here!`
 
           console.log(`✅ FSQ cue replaced in-place at segment index ${segmentIndex}`);
         } else {
-          console.warn('⚠️ Could not find existing cue to replace, inserting as new');
-          // Fall through to insert logic below
+          // Abort instead of silently re-inserting as a new cue. The
+          // previous behavior (clear edit state, recurse into insert
+          // path) duplicated the cue: original still in script, new one
+          // added at cursor.
+          console.error(`❌ FSQ edit aborted: could not locate cue with AssetID ${editAssetId}`);
           this.editingFsqCueData = null;
-          this.submitFsq(fsqCueData);
+          this.showFsqModal = false;
+          this.$toast?.error(`Could not locate FSQ cue (${editAssetId}) to update. Nothing was changed.`);
           return;
         }
 
@@ -6170,9 +6211,34 @@ Try dropping an image or video file here!`
         console.log('🎬 AssetID:', data.assetId);
         console.log('📋 Full SOT data received:', JSON.stringify(data, null, 2));
 
-        // Check if this is a re-upload (replacing existing cue in place)
-        const isReupload = this.editingSotCueData?.isReupload;
-        const originalAssetId = this.editingSotCueData?.originalAssetId;
+        // Snapshot at function entry — modal-close watcher races otherwise.
+        const editing = this.editingSotCueData;
+
+        // Three modes:
+        //   isReupload  → user is re-uploading new media; replace cue in
+        //                 place, mint a new AssetID (handled by SotModal)
+        //   isStandardEdit → user edited metadata only; replace cue in
+        //                 place, REUSE the original AssetID
+        //   else        → new cue; insert at cursor
+        const isReupload = editing?.isReupload;
+        const originalAssetId = editing?.originalAssetId;
+        const isStandardEdit = !!editing && !isReupload;
+        const standardEditAssetId = isStandardEdit
+          ? (editing.assetId || editing.rawData?.assetId || data.assetId)
+          : null;
+
+        // Defensive: in standard edit, force the cue body's AssetID to the
+        // original even if the modal drifted.
+        if (isStandardEdit && standardEditAssetId && data.assetId !== standardEditAssetId) {
+          console.warn(`⚠️ SOT edit: overriding modal-supplied assetId ${data.assetId} with original ${standardEditAssetId}`);
+          data.assetId = standardEditAssetId;
+        }
+
+        // Flush in-flight Script-mode typing before regex replace.
+        if ((isReupload || isStandardEdit) && this.$refs.editorPanel?.flushPendingChanges) {
+          await this.$refs.editorPanel.flushPendingChanges();
+          await this.$nextTick();
+        }
 
         if (isReupload) {
           console.log('📤 RE-UPLOAD MODE - Will replace existing cue in place');
@@ -6214,6 +6280,39 @@ Try dropping an image or video file here!`
         this.showSotModal = false;
         console.log('🚪 SOT modal closed');
 
+        // STANDARD EDIT: metadata-only update of an existing SOT cue.
+        // Replace the cue block in place, reusing the original AssetID so
+        // the on-disk video and job records stay bound. No re-processing
+        // is triggered — only the cue text changes.
+        if (isStandardEdit && standardEditAssetId) {
+          console.log('📝 STANDARD EDIT MODE: Replacing SOT cue with assetId', standardEditAssetId);
+          const scriptContent = this.rawMarkdownContent || '';
+          const escapedAssetId = standardEditAssetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const sotTempered = '(?:(?!<!--\\s*Begin Cue\\s*-->|<!--\\s*End Cue\\s*-->)[\\s\\S])*?';
+          const cueBlockRegex = new RegExp(
+            `<!--\\s*Begin Cue\\s*-->${sotTempered}\\[Asset[Ii][Dd]:\\s*${escapedAssetId}\\]${sotTempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
+            'i'
+          );
+
+          if (cueBlockRegex.test(scriptContent)) {
+            this.rawMarkdownContent = scriptContent.replace(cueBlockRegex, sotCue);
+            this.editingSotCueData = null;
+            this.hasUnsavedChanges = true;
+            this.checkForUnsavedRundownChanges();
+            await this.saveCurrentItem();
+            this.$toast?.success('SOT cue updated');
+            console.log('✅ SOT cue updated in place');
+            console.log('🎬🎬🎬 submitSot (STANDARD EDIT) COMPLETED');
+            console.log('🎬🎬🎬 ===============================================');
+            return;
+          }
+
+          console.error(`❌ SOT edit aborted: could not locate cue with AssetID ${standardEditAssetId}`);
+          this.editingSotCueData = null;
+          this.$toast?.error(`Could not locate SOT cue (${standardEditAssetId}) to update. Nothing was changed.`);
+          return;
+        }
+
         // RE-UPLOAD: Replace existing cue in place instead of inserting new one
         if (isReupload && originalAssetId) {
           console.log('📤 Replacing existing cue block in script content...');
@@ -6240,8 +6339,15 @@ Try dropping an image or video file here!`
           // Field key is case-insensitive (AssetID / Assetid / ASSETID all valid).
           // Trailing whitespace consumption is greedy on blank lines so the replacement
           // doesn't leave orphaned newlines.
+          //
+          // ROOT-CAUSE FIX (2026-05-10): use a tempered greedy pattern that
+          // forbids cue boundaries inside the match. The previous non-greedy
+          // `[\s\S]*?` backtracks over multiple cues, so if the target is the
+          // Nth cue, the replace eats cues 1..N. The tempered group below
+          // pins each match to a SINGLE cue block.
+          const sotTempered = '(?:(?!<!--\\s*Begin Cue\\s*-->|<!--\\s*End Cue\\s*-->)[\\s\\S])*?';
           const cueBlockRegex = new RegExp(
-            `<!--\\s*Begin Cue\\s*-->[\\s\\S]*?\\[Asset[Ii][Dd]:\\s*${escapedAssetId}\\][\\s\\S]*?<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
+            `<!--\\s*Begin Cue\\s*-->${sotTempered}\\[Asset[Ii][Dd]:\\s*${escapedAssetId}\\]${sotTempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
             'i'
           );
 
@@ -6556,21 +6662,70 @@ Try dropping an image or video file here!`
         console.log('🎬 RIF Modal Submit');
         console.log('📋 RIF data received:', data);
 
+        // Snapshot at function entry — modal-close watcher races otherwise.
+        const editing = this.editingRifCueData;
+
+        // In edit mode, reuse the original AssetID so on-disk media identity
+        // is preserved across edits. RifModal mints a new AssetID on every
+        // submit, so we override it here.
+        const editAssetId = editing?.assetID || editing?.assetId || editing?.rawData?.assetId;
+        const finalAssetId = editing && editAssetId ? editAssetId : data.assetID;
+
         // Build the RIF cue in standard format
         const rifCue = `<!-- Begin Cue -->
-[Assetid: ${data.assetID}]
+[Assetid: ${finalAssetId}]
 [Type: RIF]
 [Slug: ${data.slug}]
 [Duration: ${data.duration}]
 <!-- End Cue -->
 `;
 
-        console.log('📝 Built RIF cue, sending to EditorPanel for cursor insertion');
-
         // Close modal first
         this.showRifModal = false;
 
-        // Send cue data to EditorPanel for cursor insertion
+        // ── EDIT MODE: Replace existing cue in place ──
+        if (editing && editAssetId) {
+          if (this.$refs.editorPanel?.flushPendingChanges) {
+            await this.$refs.editorPanel.flushPendingChanges();
+            await this.$nextTick();
+          }
+          const scriptContent = this.rawMarkdownContent || '';
+          const escapedAssetId = editAssetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const tempered = '(?:(?!<!--\\s*Begin Cue\\s*-->|<!--\\s*End Cue\\s*-->)[\\s\\S])*?';
+          // AssetID match
+          let cueRegex = new RegExp(
+            `<!--\\s*Begin Cue\\s*-->${tempered}\\[Asset[Ii][Dd]:\\s*${escapedAssetId}\\]${tempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
+            'i'
+          );
+          if (!cueRegex.test(scriptContent)) {
+            // Slug fallback for older RIF blocks that may have a different
+            // AssetID format than the one stored in editing.
+            const oldSlug = editing.slug || editing.rawData?.slug;
+            if (oldSlug) {
+              const escapedSlug = oldSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              cueRegex = new RegExp(
+                `<!--\\s*Begin Cue\\s*-->${tempered}\\[Type:\\s*RIF\\]${tempered}\\[Slug:\\s*${escapedSlug}\\]${tempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
+                'i'
+              );
+            }
+          }
+          if (cueRegex.test(scriptContent)) {
+            this.rawMarkdownContent = scriptContent.replace(cueRegex, rifCue);
+            this.editingRifCueData = null;
+            this.hasUnsavedChanges = true;
+            this.checkForUnsavedRundownChanges();
+            this.$toast?.success('RIF cue updated');
+            console.log('✅ RIF cue updated in place');
+            return;
+          }
+          console.error(`❌ RIF edit aborted: could not locate cue with AssetID ${editAssetId}`);
+          this.editingRifCueData = null;
+          this.$toast?.error(`Could not locate RIF cue (${editAssetId}) to update. Nothing was changed.`);
+          return;
+        }
+
+        // ── NEW MODE: Insert at cursor position ──
+        console.log('📝 Built RIF cue, sending to EditorPanel for cursor insertion');
         if (this.$refs.editorPanel) {
           await this.$refs.editorPanel.handleRifCueSubmit(rifCue);
           console.log('✅ RIF cue inserted at cursor position');
@@ -6617,10 +6772,46 @@ Try dropping an image or video file here!`
         console.log('🎬 NOTE Modal Submit');
         console.log('📋 NOTE data received:', data);
 
+        // Snapshot at function entry — modal-close watcher races otherwise.
+        const editing = this.editingDirCueData;
+
         // Close modal first
         this.showDirModal = false;
 
-        // Send cue data to EditorPanel for placement-based insertion
+        // ── EDIT MODE: Replace existing NOTE cue in place ──
+        // NOTE cues have no AssetID in their on-disk format
+        // (`[Type: NOTE] [Note For: …] [Note Text: …]`), so the only
+        // stable identifier we have is the original noteText. Use that
+        // for the regex match.
+        const originalNoteText = editing?.noteText || editing?.rawData?.noteText;
+        if (editing && originalNoteText) {
+          if (this.$refs.editorPanel?.flushPendingChanges) {
+            await this.$refs.editorPanel.flushPendingChanges();
+            await this.$nextTick();
+          }
+          const scriptContent = this.rawMarkdownContent || '';
+          const escapedNote = originalNoteText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const tempered = '(?:(?!<!--\\s*Begin Cue\\s*-->|<!--\\s*End Cue\\s*-->)[\\s\\S])*?';
+          const cueRegex = new RegExp(
+            `<!--\\s*Begin Cue\\s*-->${tempered}\\[Type:\\s*NOTE\\]${tempered}\\[Note Text:\\s*${escapedNote}\\]${tempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
+            'i'
+          );
+          if (cueRegex.test(scriptContent)) {
+            this.rawMarkdownContent = scriptContent.replace(cueRegex, data);
+            this.editingDirCueData = null;
+            this.hasUnsavedChanges = true;
+            this.checkForUnsavedRundownChanges();
+            this.$toast?.success('NOTE cue updated');
+            console.log('✅ NOTE cue updated in place');
+            return;
+          }
+          console.error('❌ NOTE edit aborted: could not locate original cue by noteText');
+          this.editingDirCueData = null;
+          this.$toast?.error('Could not locate NOTE cue to update. Nothing was changed.');
+          return;
+        }
+
+        // ── NEW MODE: Insert at placement position ──
         if (this.$refs.editorPanel) {
           await this.$refs.editorPanel.handleDirCueSubmit(data);
           console.log('✅ NOTE cue data sent to EditorPanel');
@@ -6959,11 +7150,11 @@ Try dropping an image or video file here!`
         let token = null;
         let apiKey = localStorage.getItem('api_key');
         
-        // Try multiple localStorage keys for token
-        token = localStorage.getItem('auth_token') || 
-                 localStorage.getItem('token') || 
-                 localStorage.getItem('auth-token') || 
-                 localStorage.getItem('jwt') || 
+        // Try the canonical key first, then legacy fallbacks for old sessions.
+        token = localStorage.getItem('auth-token') ||
+                 localStorage.getItem('auth_token') ||
+                 localStorage.getItem('token') ||
+                 localStorage.getItem('jwt') ||
                  localStorage.getItem('authToken') ||
                  localStorage.getItem('access_token');
         
@@ -7480,12 +7671,24 @@ Try dropping an image or video file here!`
           const raw = this.rawMarkdownContent || '';
           console.log('🔎 Searching rawMarkdownContent for cue (length=' + raw.length + ')');
 
+          // ROOT-CAUSE FIX (ep 0273 / item 1089, 2026-05-10): the previous
+          // regex `<!-- Begin Cue -->\n[\s\S]*?\[Asset Id: X][\s\S]*?<!-- End Cue -->`
+          // had a CATASTROPHIC backtracking flaw: non-greedy `[\s\S]*?`
+          // doesn't restart at the nearest `Begin Cue`. If the target cue is
+          // the Nth in the document, the regex will match from cue #1's
+          // Begin through cue #N's End — replacing N cues with one. Console
+          // showed `cue-count went 21 → 4` for a single IMG edit; replace
+          // ate 17 cues. Fix: explicitly forbid `Begin Cue` / `End Cue`
+          // tokens INSIDE the match using a tempered greedy pattern. This
+          // pins the match to a single cue block.
+          const tempered = '(?:(?!<!-- Begin Cue -->|<!-- End Cue -->)[\\s\\S])*?';
+
           let cuePattern = null;
           let matchStrategy = '';
           if (existingAssetId) {
             const escAsset = existingAssetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             cuePattern = new RegExp(
-              `<!-- Begin Cue -->\\n[\\s\\S]*?\\[Asset\\s*Id\\s*:\\s*${escAsset}\\s*\\][\\s\\S]*?<!-- End Cue -->`,
+              `<!-- Begin Cue -->\\n${tempered}\\[Asset\\s*Id\\s*:\\s*${escAsset}\\s*\\]${tempered}<!-- End Cue -->`,
               'i'
             );
             matchStrategy = `assetId=${existingAssetId}`;
@@ -7500,7 +7703,7 @@ Try dropping an image or video file here!`
             if (oldSlug) {
               const escSlug = oldSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
               const slugPattern = new RegExp(
-                `<!-- Begin Cue -->\\n[\\s\\S]*?\\[Type\\s*:\\s*IMG\\s*\\][\\s\\S]*?\\[Slug\\s*:\\s*${escSlug}\\s*\\][\\s\\S]*?<!-- End Cue -->`,
+                `<!-- Begin Cue -->\\n${tempered}\\[Type\\s*:\\s*IMG\\s*\\]${tempered}\\[Slug\\s*:\\s*${escSlug}\\s*\\]${tempered}<!-- End Cue -->`,
                 'i'
               );
               if (slugPattern.test(raw)) {
@@ -8020,7 +8223,14 @@ Try dropping an image or video file here!`
      * Returns an array of { slug, title, count } for items with pending revisions.
      */
     findUnresolvedRevisions() {
+      // Returns items blocking script generation: any with unresolved <rev> tags
+      // OR with needs-attention flags (data-needs-attention="true" on a <p>, or
+      // NeedsAttention: true inside a cue block). Each result lists a `count`
+      // (revisions) and `attention` (needs-attention flag count) so the modal
+      // can show the right reason per item.
       const revPattern = /<rev\s+[^>]*>[\s\S]*?<\/rev>/gi;
+      const attnParaPattern = /data-needs-attention=["']true["']/gi;
+      const attnCuePattern = /NeedsAttention:\s*true/gi;
       const results = [];
 
       for (const item of this.rundownItems) {
@@ -8029,12 +8239,17 @@ Try dropping an image or video file here!`
           ? (this.rawMarkdownContent || '')
           : (item.script || item.script_content || '');
 
-        const matches = content.match(revPattern);
-        if (matches && matches.length > 0) {
+        const revMatches = content.match(revPattern) || [];
+        const attnParaMatches = content.match(attnParaPattern) || [];
+        const attnCueMatches = content.match(attnCuePattern) || [];
+        const attnTotal = attnParaMatches.length + attnCueMatches.length;
+
+        if (revMatches.length > 0 || attnTotal > 0) {
           results.push({
             slug: item.slug || item.id,
             title: item.title || item.slug || `Item ${item.id}`,
-            count: matches.length,
+            count: revMatches.length,
+            attention: attnTotal,
             id: item.id
           });
         }
@@ -8100,14 +8315,23 @@ Try dropping an image or video file here!`
         this.$toast.info(`All revisions ${label}`);
       }
 
-      // Retry generation with the stashed preset
+      // Retry generation with the stashed preset. After accept/reject the
+      // revisions are gone, but needs-attention flags may still be present —
+      // the user already saw the modal, so force past the gate this time.
       if (this.revisionBlockerPreset) {
-        await this.handleGenerateScript(this.revisionBlockerPreset);
+        await this.handleGenerateScript(this.revisionBlockerPreset, { force: true });
       }
     },
 
+    // User chose "Continue Anyway" on the pre-gen blocker modal — skip the gate.
+    async continueGenerateAnyway() {
+      this.showRevisionBlockerModal = false;
+      const preset = this.revisionBlockerPreset || 'host_full';
+      await this.handleGenerateScript(preset, { force: true });
+    },
+
     // Generate script for current episode with specified preset
-    async handleGenerateScript(preset = 'host_full') {
+    async handleGenerateScript(preset = 'host_full', opts = {}) {
       console.log('🎬 handleGenerateScript called with preset:', preset);
       console.log('🎬 currentEpisodeNumber:', this.currentEpisodeNumber);
 
@@ -8116,13 +8340,16 @@ Try dropping an image or video file here!`
         return;
       }
 
-      // Check for unresolved revisions before generating
-      const unresolvedItems = this.findUnresolvedRevisions();
-      if (unresolvedItems.length > 0) {
-        this.revisionBlockerItems = unresolvedItems;
-        this.revisionBlockerPreset = preset;
-        this.showRevisionBlockerModal = true;
-        return;
+      // Check for unresolved revisions / needs-attention flags before generating
+      // (skipped when the user has already chosen to continue anyway).
+      if (!opts.force) {
+        const blockers = this.findUnresolvedRevisions();
+        if (blockers.length > 0) {
+          this.revisionBlockerItems = blockers;
+          this.revisionBlockerPreset = preset;
+          this.showRevisionBlockerModal = true;
+          return;
+        }
       }
 
       // Reset progress state

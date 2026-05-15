@@ -830,8 +830,31 @@ const scriptTypes = [
   { preset: 'media_list', label: 'Media List', icon: 'mdi-folder-multiple-image', color: 'green' }
 ]
 
+function formatBackendError(value) {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return value.map(v => (typeof v === 'string' ? v : (v?.msg || JSON.stringify(v)))).join('; ')
+  }
+  if (typeof value === 'object') {
+    return value.message || value.detail || value.error || value.msg || JSON.stringify(value)
+  }
+  return String(value)
+}
+
 async function generateScriptPreset(preset) {
   if (!props.episodeNumber) return
+
+  // Media List has a dedicated endpoint (GET /scripts/media-list/{ep}) and a
+  // dedicated overlay handled by ContentEditor. Delegate via emit instead of
+  // hitting /scripts/generate (which only accepts host_full/host_clean/production
+  // and would 422 with a Pydantic detail array → "[object Object]" in the toast).
+  if (preset === 'media_list') {
+    emit('generate-media-list')
+    scriptFlyoutOpen.value = false
+    return
+  }
+
   generatingScriptPreset.value = preset
   generatingScript.value = true
   scriptGenerationStatus.value = ''
@@ -843,10 +866,10 @@ async function generateScriptPreset(preset) {
       // Notify AssetPoolPanel to refresh its scripts tab
       emit('scripts-updated')
     } else {
-      scriptGenerationStatus.value = `Error: ${response.data?.error || 'Unknown error'}`
+      scriptGenerationStatus.value = `Error: ${formatBackendError(response.data?.error) || 'Unknown error'}`
     }
   } catch (error) {
-    scriptGenerationStatus.value = `Error: ${error.response?.data?.detail || error.message}`
+    scriptGenerationStatus.value = `Error: ${formatBackendError(error.response?.data?.detail) || error.message}`
   } finally {
     generatingScriptPreset.value = null
     generatingScript.value = false

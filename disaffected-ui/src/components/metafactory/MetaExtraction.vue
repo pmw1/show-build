@@ -830,6 +830,12 @@ const entityModalEnriched = ref(null)
 const eligibleItemTypes = ref([
   'segment', 'coldopen', 'interview', 'tease', 'pkg', 'vox', 'sot', 'nat'
 ])
+// Autorun flags pulled from the same /api/settings/meta_extraction endpoint.
+// Phase 1 autorun fires extractSingle on every llm_status==='none' row
+// after a rundown loads; Phase 2 autorun is server-side (chained inside
+// the Phase 1 extractor) and we just respect its state here.
+const autorunPhase1 = ref(false)
+const autorunPhase2 = ref(false)
 
 // Local display order for visual drag-and-drop (doesn't affect actual rundown order)
 const localDisplayOrder = ref([])
@@ -866,9 +872,34 @@ async function loadExtractionSettings() {
     if (response.data?.item_types) {
       eligibleItemTypes.value = response.data.item_types
     }
+    autorunPhase1.value = !!response.data?.autorun_phase1
+    autorunPhase2.value = !!response.data?.autorun_phase2
   } catch (error) {
     console.error('Failed to load meta extraction settings:', error)
     // Keep defaults on error
+  }
+}
+
+// Fire Phase 1 (extractSingle) on every eligible item that hasn't been
+// extracted yet. Sequenced — not parallel — so the local Ollama doesn't
+// get hammered by 20 simultaneous requests, and so any per-item failure
+// doesn't tear down the whole sweep.
+async function autoRunPhase1Sweep() {
+  if (!autorunPhase1.value) return
+  const pending = filteredRundownItems.value.filter(it =>
+    it.llm_status === 'none' || !it.llm_status
+  )
+  if (pending.length === 0) return
+  toast.info(`Auto-running Phase 1 on ${pending.length} segment${pending.length === 1 ? '' : 's'}.`, { timeout: 4000 })
+  for (const item of pending) {
+    try {
+      await extractSingle(item)
+    } catch (err) {
+      console.error('autorun phase 1 failed for', item.id, err)
+    }
+  }
+  if (autorunPhase2.value) {
+    toast.info('Phase 2 will follow automatically (server-side chain).', { timeout: 4000 })
   }
 }
 
@@ -1138,6 +1169,10 @@ async function loadRundownItems() {
   } finally {
     loading.value = false
   }
+
+  // After the rundown is fully loaded, kick the Phase 1 autorun sweep
+  // (no-op when the setting is off). Fire-and-forget — runs in background.
+  autoRunPhase1Sweep()
 }
 
 async function checkAllStale() { // eslint-disable-line no-unused-vars

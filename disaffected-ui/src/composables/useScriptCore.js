@@ -169,20 +169,35 @@ export function useScriptCore(props, emit, sanitizer, externalGuards = {}) {
   // eslint-disable-next-line vue/no-side-effects-in-computed-properties
   const scriptSegments = computed({
     get() {
-      // CRITICAL FIX: Return cached segments while user is actively editing a paragraph.
-      // This guard MUST be FIRST — before accessing any reactive properties (rawScriptContent, etc.)
-      // If placed after, Vue tracks those properties as dependencies, marks this computed dirty
-      // when they change, and re-runs the getter. Even returning cached results doesn't help
-      // because draggableSegments then spreads into a new array, causing the draggable component
-      // to re-render children, which can blur the contenteditable element.
-      // By returning here FIRST, Vue only tracks isActivelyEditing and cachedScriptSegments
-      // as dependencies — the prop change won't trigger recomputation at all.
-      if (isActivelyEditing.value && cachedScriptSegments.value !== null) {
+      // ────────────────────────────────────────────────────────────────────
+      // Cursor-stability cache (isActivelyEditing / isDragging):
+      //
+      // While the user is typing inside a contenteditable paragraph, or
+      // dragging a segment, we return cached segments to avoid Vue marking
+      // children dirty and stealing cursor focus / drag handles.
+      //
+      // BUT — and this is the 2026-05-09 lesson — we MUST verify the cache
+      // matches current rawScriptContent before returning it. If a sibling
+      // mutation (cue insert/delete, paste cleanup, scratch sync, legacy
+      // convert) updated rawScriptContent since the cache was frozen, the
+      // cached snapshot is stale. Returning it to a write-path caller
+      // (anything doing `[...scriptSegments.value]` then a splice + setter)
+      // wipes everything the sibling mutation did.
+      //
+      // So: keep the early-return short-circuit for stability, but require
+      // the cache to be content-coherent. If rawScriptContent has drifted,
+      // fall through to the normal re-parse path even mid-typing — momentary
+      // re-render risk is far cheaper than silent data loss.
+      // ────────────────────────────────────────────────────────────────────
+      if (isActivelyEditing.value
+          && cachedScriptSegments.value !== null
+          && lastParsedContent.value === rawScriptContent.value) {
         return cachedScriptSegments.value
       }
 
-      // CRITICAL FIX: Return cached segments during drag to maintain object stability
-      if (isDragging.value && cachedScriptSegments.value !== null) {
+      if (isDragging.value
+          && cachedScriptSegments.value !== null
+          && lastParsedContent.value === rawScriptContent.value) {
         return cachedScriptSegments.value
       }
 
@@ -779,6 +794,31 @@ export function useScriptCore(props, emit, sanitizer, externalGuards = {}) {
       console.log('🟢 Shrink guard override consumed')
     }
     emit('update:scriptContent', newContent)
+
+    // ROOT-CAUSE FIX (ep 0273 / item 1089, 2026-05-09):
+    // After emitting a structural change to rawMarkdownContent, invalidate
+    // the segment cache so the next read of scriptSegments re-parses from
+    // the freshly-emitted content instead of returning stale cached segments
+    // from before the change.
+    //
+    // Skip ONLY for updateTextSegment (single-paragraph keystroke debounce)
+    // and flushPendingChanges (which already applied buffered keystrokes).
+    // Those paths use the cache to produce the new content and the new
+    // content matches the cache 1:1, so invalidating would cause an
+    // unnecessary re-parse that can steal cursor focus mid-typing.
+    //
+    // All other emits — including scriptSegments-set and draggableSegments-set
+    // — MUST invalidate. Those setters can be reached by stale-read-write
+    // paths (e.g. onLegacyCueConverted reading the cache, splicing,
+    // assigning back) where the emit reflects only the stale snapshot, not
+    // the latest rawMarkdownContent state.
+    const _typingReasons = new Set(['updateTextSegment', 'flushPendingChanges'])
+    if (!_typingReasons.has(reason)) {
+      cachedScriptSegments.value = null
+      lastParsedContent.value = null
+      clearDebounceTimers()
+    }
+
     return true
   }
 
@@ -905,6 +945,53 @@ export function useScriptCore(props, emit, sanitizer, externalGuards = {}) {
   }
 
   /**
+   * Force-fresh re-parse of segments from the current rawScriptContent,
+   * bypassing the isActivelyEditing/isDragging cache guard.
+   *
+   * USE THIS AT ANY STRUCTURAL MUTATION SITE that needs to splice, insert,
+   * delete, or otherwise modify the segments array. The default
+   * scriptSegments.value getter returns the cached snapshot while the user
+   * is typing or dragging — which is correct for display but DANGEROUS
+   * for write paths: a stale snapshot spliced and written back wipes
+   * everything that changed since the cache was frozen.
+   *
+   * Root-cause incident: ep 0273 / item 1089, 2026-05-09. The
+   * onLegacyCueConverted handler in EditorPanel.vue read scriptSegments.value
+   * while isActivelyEditing was true, got the frozen cache (missing later-
+   * inserted cues + paragraphs), spliced its replacement in, and wrote the
+   * stale segments back — wiping ~91k chars and 11 cues.
+   */
+  function getFreshSegments() {
+    if (!rawScriptContent.value || props.editorMode !== 'script') return []
+    const contentWithoutFrontmatter = stripYamlFrontmatter(rawScriptContent.value)
+    if (!contentWithoutFrontmatter || contentWithoutFrontmatter.trim() === '') {
+      return [{
+        type: 'text',
+        content: '',
+        speaker: 'josh',
+        needsParagraphTags: true,
+        segmentIndex: 0
+      }]
+    }
+    try {
+      const parsed = CueParser.parseContent(contentWithoutFrontmatter)
+      return parsed.map((segment, index) => {
+        if (segment.type === 'cue') {
+          return {
+            type: 'cue',
+            data: CueParser.formatForCard(segment.data),
+            segmentIndex: index
+          }
+        }
+        return { ...segment, segmentIndex: index }
+      })
+    } catch (err) {
+      console.error('[getFreshSegments] parse failed:', err)
+      return []
+    }
+  }
+
+  /**
    * Sync a contenteditable DOM element's innerHTML back to the segment data model.
    * Normalizes browser-inserted HTML tags.
    *
@@ -974,6 +1061,7 @@ export function useScriptCore(props, emit, sanitizer, externalGuards = {}) {
     updateTextSegment,
     flushPendingChanges,
     syncContentEditableToSegment,
+    getFreshSegments,
 
     // --- Wiring helpers for component integration ---
     setDraggableSetHandler,

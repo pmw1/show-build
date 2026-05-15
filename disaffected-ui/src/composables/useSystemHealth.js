@@ -115,11 +115,17 @@ const redisStatusIcon = computed(() => {
 
 // ---- Celery ----
 const workers = computed(() => health.value.services.celery?.workers || [])
+const workerDetails = computed(() => health.value.services.celery?.worker_details || [])
 const workerCount = computed(() => workers.value.length)
 const celeryError = computed(() => health.value.services.celery?.error || null)
+const celeryRawStatus = computed(() => health.value.services.celery?.status || null)
+const degradedWorkers = computed(() =>
+  workerDetails.value.filter(w => w.status && w.status !== 'ok')
+)
 
 const celeryStatus = computed(() => {
   if (celeryError.value) return 'error'
+  if (celeryRawStatus.value === 'degraded' || degradedWorkers.value.length > 0) return 'warning'
   if (workers.value.length === 0) return 'warning'
   return 'success'
 })
@@ -127,6 +133,9 @@ const celeryStatus = computed(() => {
 const celeryStatusText = computed(() => {
   if (celeryError.value) return 'Error'
   if (workers.value.length === 0) return 'No Workers'
+  if (degradedWorkers.value.length > 0) {
+    return `${workers.value.length - degradedWorkers.value.length}/${workers.value.length} OK`
+  }
   return `${workers.value.length} Active`
 })
 
@@ -489,7 +498,7 @@ export function useSystemHealth() {
     redisConnected, redisLatency, redisError,
     redisStatus, redisStatusText, redisStatusColor, redisStatusIcon,
     // Celery
-    workers, workerCount, celeryError,
+    workers, workerDetails, workerCount, degradedWorkers, celeryError,
     celeryStatus, celeryStatusText, celeryStatusColor, celeryStatusIcon,
     // SIP/Asterisk
     sipConnected, sipHost, sipError,

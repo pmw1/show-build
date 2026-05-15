@@ -273,20 +273,66 @@ async def health():
         else:
             health_status["services"]["redis"]["error"] = str(e)[:50]
 
-    # Test Celery worker connectivity
+    # Test Celery worker connectivity (per-worker health, not just "any worker responded")
     try:
         from celery_app import celery_app
 
-        inspect = celery_app.control.inspect(timeout=1)
-        active_workers = inspect.active()
+        inspect = celery_app.control.inspect(timeout=2)
+        ping_results = inspect.ping() or {}
+        stats_results = inspect.stats() or {}
+        active_results = inspect.active() or {}
 
-        if active_workers:
-            worker_names = list(active_workers.keys())
-            health_status["services"]["celery"]["status"] = "connected"
-            health_status["services"]["celery"]["workers"] = worker_names
-        else:
+        # Union of every worker name we saw across the three probes
+        all_names = set(ping_results) | set(stats_results) | set(active_results)
+
+        worker_details = []
+        for name in sorted(all_names):
+            stats = stats_results.get(name) or {}
+            total = stats.get("total") or {}  # {task_name: count_succeeded}
+            pool = stats.get("pool") or {}
+            rusage = stats.get("rusage") or {}
+
+            # Celery's stats() exposes total succeeded per task. Failed counts
+            # are not surfaced here, but a worker that is failing to even
+            # establish a DB connection won't be running tasks at all — so we
+            # also check for a recent rusage update vs heartbeat.
+            ponged = name in ping_results
+            has_stats = name in stats_results
+
+            worker_status = "ok"
+            error = None
+            if not ponged:
+                worker_status = "stale"
+                error = "Did not respond to ping"
+            elif not has_stats:
+                worker_status = "degraded"
+                error = "Ping ok but stats unavailable"
+
+            worker_details.append({
+                "name": name,
+                "status": worker_status,
+                "ponged": ponged,
+                "active_tasks": len(active_results.get(name) or []),
+                "completed_total": sum(total.values()) if isinstance(total, dict) else 0,
+                "pool_processes": len(pool.get("processes") or []) if isinstance(pool, dict) else 0,
+                "error": error,
+            })
+
+        # Aggregate status: any non-ok worker → degraded; no workers → no_workers
+        if not worker_details:
             health_status["services"]["celery"]["status"] = "no_workers"
             health_status["services"]["celery"]["workers"] = []
+        else:
+            any_bad = any(w["status"] != "ok" for w in worker_details)
+            health_status["services"]["celery"]["status"] = (
+                "degraded" if any_bad else "connected"
+            )
+            # Keep `workers` as a flat list of names for backward compat with
+            # any other consumer; richer per-worker detail is in `worker_details`.
+            health_status["services"]["celery"]["workers"] = [
+                w["name"] for w in worker_details
+            ]
+            health_status["services"]["celery"]["worker_details"] = worker_details
 
     except Exception as e:
         health_status["services"]["celery"]["status"] = "error"

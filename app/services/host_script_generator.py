@@ -267,10 +267,11 @@ def _get_episode_info(episode: Episode, db, items: List[RundownItem] = None) -> 
     elif episode.publish_date:
         date_str = episode.publish_date.strftime("%B %d, %Y")
 
-    # Calculate total runtime from items if not set on episode
-    duration = episode.duration_formatted or ""
-    if not duration and items:
-        duration = _calculate_total_runtime(items)
+    # Always recompute from items so the host-script total matches what the
+    # editor displays. episode.duration_formatted is a cached value updated
+    # only by the rundown-update endpoint and goes stale between item edits
+    # and host-script generation.
+    duration = _calculate_total_runtime(items) if items else (episode.duration_formatted or "")
 
     return {
         "show_name": show_name,
@@ -1150,8 +1151,8 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
         .cue-img .cue-label, .cue-gfx .cue-label {{ color: #666; }}
 
         .cue-img img, .cue-gfx img {{
-            max-width: 100%;
-            width: 100%;
+            max-width: 50%;
+            width: 50%;
             border: 1px solid #ccc;
             border-radius: 4px;
         }}

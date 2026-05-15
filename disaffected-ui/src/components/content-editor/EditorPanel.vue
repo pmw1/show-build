@@ -1832,6 +1832,7 @@ const {
   shrinkGuardEnabled, setShrinkGuardEnabled, allowNextShrink,
   getEditBuffer, setEditBufferEntry, deleteEditBufferEntry,
   getDebounceTimers, clearDebounceTimers, syncContentEditableToSegment,
+  getFreshSegments,
   detectMultipleFrontmatterBlocks, validateScriptContent,
   repairScriptContent, validateAndRepairBeforeSave,
   setPendingCueContextGetter, setDraggableSetHandler,
@@ -2565,7 +2566,11 @@ function resolveFlag(index, type) {
 function onLegacyCueConverted({ replacementSegments, segmentIndex }) {
   if (!Array.isArray(replacementSegments) || replacementSegments.length === 0) return;
 
-  const before = scriptSegments.value;
+  // ROOT-CAUSE FIX (ep 0273 / item 1089, 2026-05-09): MUST read fresh
+  // segments here, not scriptSegments.value. The cached snapshot is frozen
+  // while isActivelyEditing=true, so reading the cache + splicing + writing
+  // back wipes everything that changed since the cache was frozen.
+  const before = getFreshSegments();
   const beforeLen = before.length;
   const beforeCueCount = before.filter(s => s?.type === 'cue').length;
 
@@ -5641,10 +5646,14 @@ function performCueDeletion(index, deleteAssets = false) {
   const { start, end } = validCuePositions[cueOccurrence];
 
   // SANITY GUARD: refuse to delete if the span is suspiciously large.
-  // A real cue block is rarely > 8000 chars. If we're about to remove much more than
-  // that, the position scan is wrong and we should abort rather than wipe the document.
+  // SOT cues with full Transcription fields can run 20-25k chars in
+  // practice (ep 0273 measured 20,718 chars for a single SOT). Raise the
+  // ceiling to 60,000 — that's still much smaller than the kind of
+  // unbounded match a malformed cue would produce (a stray Begin Cue with
+  // no End Cue would swallow the entire rest of the document, easily
+  // 100k+) but no longer false-positives on legit transcribed SOTs.
   const spanLen = end - start;
-  if (spanLen > 16000) {
+  if (spanLen > 60000) {
     console.error('🗑️ ABORTING delete: cue span too large (' + spanLen + ' chars). Refusing to delete to protect document. This usually means a malformed cue earlier in the document — open Code Mode to repair.');
     if (typeof window !== 'undefined' && window.alert) {
       window.alert('Refusing to delete: this cue spans ' + spanLen + ' characters, which suggests a malformed cue elsewhere in the document. Open Code Mode to repair the cue markers.');

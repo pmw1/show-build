@@ -404,6 +404,8 @@
                             <!-- Slug + presence avatars (other users on this segment) -->
                             <div class="slug-column">
                               <div :class="['slug-text', { 'blink-attention': itemHasNeedsAttention(item) }]">{{ itemHasNeedsAttention(item) ? `**${truncateSlug(item?.slug || '', panelWidth)}**` : truncateSlug(item?.slug || '', panelWidth) }}</div>
+                              <!-- Content character count — paragraphs + FSQ quotes + SOT transcripts only. -->
+                              <div class="content-char-count" :title="`${getContentCharCount(item)} content characters`">{{ getContentCharCount(item) }}</div>
                               <div v-if="panelWidth === 'narrow' && getItemGlobalIndex(item) === selectedItemIndex" class="word-count-display">
                                 WC: {{ getWordCount(item) }}
                               </div>
@@ -1782,11 +1784,64 @@ function truncateSlug(slug, pWidth) {
   return lowerSlug
 }
 
-function getWordCount(item) {
-  // Calculate word count from script_content, excluding code blocks but counting FSQ quotes
-  if (!item?.script_content) return 0
+/**
+ * Count the characters of *content* in an item — only the things a human
+ * actually types. Used as a quick visual to spot truncation/data-loss in
+ * a row at a glance (Kevin requested 2026-05-09 after several silent
+ * truncation events). NOT a word count, NOT a save-size — just the raw
+ * meaningful content.
+ *
+ * Counts:
+ *   - text inside <p>...</p> paragraphs
+ *   - text inside FSQ cue [Quote: ...]
+ *   - text inside SOT cue [Transcription: ...]
+ *
+ * Excludes:
+ *   - YAML frontmatter
+ *   - HTML tags (just their text content is kept)
+ *   - cue block plumbing other than the two fields above
+ *   - whitespace-only lines
+ */
+function getContentCharCount(item) {
+  // API returns script_content as 'script' in the rundown list response.
+  const raw = item?.script || item?.script_content
+  if (!raw) return 0
+  let total = 0
 
-  let content = item.script_content
+  // Strip YAML frontmatter so it doesn't leak into the paragraph match.
+  const body = raw.replace(/^---[\s\S]*?---\n?/m, '')
+
+  // 1) Paragraph bodies — <p ...>text</p>
+  const pRegex = /<p\b[^>]*>([\s\S]*?)<\/p>/gi
+  let m
+  while ((m = pRegex.exec(body)) !== null) {
+    const inner = m[1].replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ')
+    total += inner.trim().length
+  }
+
+  // 2) FSQ Quote and SOT Transcription fields inside cue blocks. The values
+  //    can span newlines until the next [Field:] or <!-- End Cue -->.
+  // Cue blocks: <!-- Begin Cue --> ... <!-- End Cue -->
+  const cueRegex = /<!--\s*Begin Cue\s*-->([\s\S]*?)<!--\s*End Cue\s*-->/gi
+  let cueMatch
+  while ((cueMatch = cueRegex.exec(body)) !== null) {
+    const block = cueMatch[1]
+    // Match [Quote:  ...] or [Transcription: ...] up to the next [Field:] or end.
+    const fieldRegex = /\[(Quote|Transcription)\s*:\s*([\s\S]*?)\](?=\s*(?:\[[A-Za-z][\w ]*\s*:|<!--\s*End Cue\s*-->))/gi
+    let fm
+    while ((fm = fieldRegex.exec(block)) !== null) {
+      total += fm[2].trim().length
+    }
+  }
+
+  return total
+}
+
+function getWordCount(item) {
+  // Calculate word count from script_content, excluding code blocks but counting FSQ quotes.
+  // API returns script_content as 'script' in the rundown list response.
+  let content = item?.script || item?.script_content
+  if (!content) return 0
 
   // Remove YAML frontmatter (everything between --- markers)
   content = content.replace(/^---[\s\S]*?---\n?/m, '')
@@ -2640,7 +2695,7 @@ async function confirmClearRundown() {
     console.log('🚨 Clearing entire rundown for episode:', props.episode)
 
     // Debug authentication tokens
-    const authToken = localStorage.getItem('auth_token') || localStorage.getItem('token')
+    const authToken = localStorage.getItem('auth-token') || localStorage.getItem('token')
     const apiKey = localStorage.getItem('api_key')
     console.log('🔐 Auth token:', authToken ? `${authToken.substring(0, 20)}...` : 'NONE')
     console.log('🔑 API key:', apiKey ? `${apiKey.substring(0, 20)}...` : 'NONE')
@@ -3654,6 +3709,19 @@ defineExpose({
   color: #000000;
   margin-top: 5px;
   text-decoration: none;
+}
+
+/* Content-character count badge — shown under every slug, all sizes.
+   Tiny, low-contrast so it doesn't compete with slug; useful for spotting
+   truncation at a glance. */
+.content-char-count {
+  font-size: 10px;
+  font-weight: 500;
+  color: #000;
+  margin-top: 1px;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  text-align: left;
 }
 
 .rundown-panel.narrow .selected-item .duration-display {

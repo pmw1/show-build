@@ -27,8 +27,8 @@ Active when the Content Editor view is focused and no modal is open.
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Z` / `Cmd+Z` | Undo last change (script + scratch; scoped to current rundown item) |
-| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo (up to 50 states) |
+| `Ctrl+Z` / `Cmd+Z` | Undo last action: script edit, scratch, or cue insert/edit/delete. Entries are scoped to the rundown item that produced them; the manager spans the current episode and clears on episode switch. Up to 100 entries. |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo last undone action |
 | `Ctrl+Shift+S` | Save everything |
 | `Ctrl+Shift+R` | Reload rundown from database |
 | `Ctrl+Shift+[` | Toggle left sidebar (Rundown panel) |

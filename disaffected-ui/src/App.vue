@@ -463,6 +463,8 @@ import { useUserPrefs } from '@/composables/useUserPrefs'
 import { useSessionResume } from '@/composables/useSessionResume'
 import { useMessages } from '@/composables/useMessages'
 import { useEditorDisplayPrefs } from '@/composables/useEditorDisplayPrefs'
+import { installModalStackHandler, uninstallModalStackHandler } from '@/composables/useModalStack'
+import { useUndoManager } from '@/composables/useUndoManager'
 import PresenceMenu from '@/components/PresenceMenu.vue'
 import MessagesPanel from '@/components/MessagesPanel.vue'
 import { useHotkeys } from '@/composables/useHotkeys'
@@ -471,17 +473,46 @@ import { applyIndicatorCSSVars } from '@/composables/useContentIndicators'
 const { isAuthenticated, currentUser, checkAuthStatus, handleLogout, setAuth } = useAuth()
 const { registerFlashComponent } = useUrgentFlash()
 const { toggleModal: toggleHotkeyModal } = useHotkeys()
+const undoManager = useUndoManager()
+
+// True when the keyboard target is a real text-entry element where the
+// browser's native undo should win (sidebar fields, modal inputs, etc).
+// Script-mode paragraph contenteditables are excluded — they carry the
+// `script-paragraph` class and belong to our undo manager because the
+// reactive `rawMarkdownContent` is the source of truth, not the DOM.
+function isInNativeTextField(target) {
+  if (!target || !(target instanceof Element)) return false
+  return !!target.closest('input, textarea, [contenteditable="true"]:not(.script-paragraph)')
+}
 
 function handleGlobalHotkey(e) {
   if (e.altKey && e.key === '1') {
     e.preventDefault()
     toggleHotkeyModal()
+    return
+  }
+
+  const isUndo = (e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'z' && !e.shiftKey
+  const isRedo = (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))
+  if (isUndo || isRedo) {
+    if (isInNativeTextField(e.target)) return
+    if (isUndo && undoManager.canUndo.value) {
+      e.preventDefault()
+      e.stopPropagation()
+      undoManager.undo()
+    } else if (isRedo && undoManager.canRedo.value) {
+      e.preventDefault()
+      e.stopPropagation()
+      undoManager.redo()
+    }
   }
 }
 document.addEventListener('keydown', handleGlobalHotkey)
+installModalStackHandler()
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleGlobalHotkey)
   window.removeEventListener('keydown', handleGlobalShortcutKey)
+  uninstallModalStackHandler()
 })
 const { registerNotificationComponent } = useStandardNotification()
 const { health, isLoading: loading } = useSystemHealth() // eslint-disable-line no-unused-vars

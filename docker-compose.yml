@@ -24,7 +24,7 @@ services:
       - TZ=America/New_York
       - MODULE_NAME=main
       - VARIABLE_NAME=app
-      - WEB_CONCURRENCY=1
+      - WEB_CONCURRENCY=4
       - TIMEOUT=300
       - GRACEFUL_TIMEOUT=300
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-ea7GZD3mQy3EZYD4YZsFmr/9JwBgZFCaWyznnjhOyow=}

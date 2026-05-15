@@ -29,8 +29,8 @@ export const shortcutSections = [
     title: 'Global (Content Editor)',
     icon: 'mdi-earth',
     shortcuts: [
-      { keys: ['Ctrl+Z', 'Cmd+Z'], label: 'Undo last change' },
-      { keys: ['Ctrl+Y', 'Ctrl+Shift+Z'], label: 'Redo' },
+      { keys: ['Ctrl+Z', 'Cmd+Z'], label: 'Undo last action (script edit, cue insert/edit/delete, scratch)' },
+      { keys: ['Ctrl+Y', 'Ctrl+Shift+Z'], label: 'Redo last undone action' },
       { keys: ['Ctrl+Shift+S'], label: 'Save everything' },
       { keys: ['Ctrl+Shift+R'], label: 'Reload rundown from database' },
       { keys: ['Ctrl+Shift+['], label: 'Toggle left sidebar (Rundown panel)' },

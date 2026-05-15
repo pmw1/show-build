@@ -432,6 +432,69 @@
 - [ ] Recording and transcription
 - [ ] Database integration for call logs
 
+#### Public Website API (NEW 2026-05-08) — ⏸️ ON HOLD
+**Status**: ⏸️ ON HOLD 2026-05-08 — Kevin drafting additional requirements; reconcile before resuming
+**Reference**: `docs/WEBSITE_PUBLIC_API_PLAN.md` (see "Pause state snapshot" at top)
+
+All 4 blockers resolved 2026-05-08: #1 SSG + webhook-purge, #2 hostnames
+(`api.disaffected.com` + `media.disaffected.com`), #3 Celery-side poster
+resizing, #5 `script_content` permanently FORBIDDEN, #11 tier-gating IN
+with default `'public'` (full distribution-matrix concept deferred to
+sibling doc `PUBLICATION_DESTINATIONS_PLAN.md`).
+
+- [x] Alembic migration `g015_public_api_publish_lifecycle.py` drafted 2026-05-08 (NOT applied — needs review before `alembic upgrade head`)
+- [x] Phase 1 router scaffold landed 2026-05-08 — `app/routers/public/` package with 8 sub-routers, 17 routes, all return 501 stubs gated behind require_public_read (smoke-tested: unauth → 401, public router mounted in main.py, container restarted clean)
+- [ ] Phase 1 scaffold: `app/routers/public/` package + Pydantic schemas + `public-reader` role
+- [ ] Phase 2: episode + segment + thumbnail endpoints
+- [ ] Phase 4: tags + sitemap + RSS
+- [ ] Phase 6: cache + ops (CDN, webhook-purge, metrics)
+- [ ] Field-leak guard CI test (sentinel-string approach, see plan)
+
+#### Transcript Pipeline + Speaker Labeling Tool (NEW 2026-05-08)
+**Status**: Plan TODO. Drives public-API #5 outcome.
+**Reference**: TODO — `docs/TRANSCRIPT_PIPELINE_PLAN.md` (to be written)
+
+Sibling effort to public API. Generates the `segment_transcripts` artifact
+that becomes the public segment text surface. Pre-recorded `script_content`
+stays internal forever; transcripts come from the actual broadcast audio.
+
+- [ ] **Verify external services live** before designing pipeline:
+  - [ ] `192.168.51.197:8887` whisper-medium (kairo shared infra) — confirm up
+  - [ ] pyannote diarization endpoint — locate (likely colocated with whisper); verify or deploy
+- [ ] Write `docs/TRANSCRIPT_PIPELINE_PLAN.md` with:
+  - Celery task chain on `compilation` queue (transcribe → diarize → label → finalize)
+  - Per-segment audio extraction + alignment from rundown timecodes
+  - `segment_transcripts` lifecycle (draft → labeled → published)
+  - Retry/idempotency semantics
+- [ ] Speaker-labeling tool (lives under `/tools` route in `ToolsView.vue` for v1):
+  - Modal: per-anonymous-speaker rows with 8s audio sample + play button
+  - Dropdown sources: episode `guest_name`, production crew, NER-extracted names
+    from transcript (entity extractor already in repo), free-text manual entry, "skip"
+  - Save: writes `SPEAKER_NN → name` map, regenerates text_plain/vtt/srt with real labels
+  - Future: relocate to a more contextual home (probably episode metadata or per-episode dashboard)
+- [ ] Backend services: `app/services/transcript_pipeline.py` (Celery tasks),
+      `app/services/speaker_labeling.py` (label apply + regen)
+- [ ] API endpoints (admin, not public):
+      `POST /api/episodes/{id}/transcripts/transcribe`,
+      `GET /api/episodes/{id}/transcripts/labeling-status`,
+      `POST /api/episodes/{id}/transcripts/apply-labels`
+
+#### Publication Destinations / Distribution Matrix (NEW 2026-05-08, STUB)
+**Status**: Concept captured, full design TBD
+**Reference**: `docs/PUBLICATION_DESTINATIONS_PLAN.md`
+
+Source-of-truth for "what is published where, in what state, under what
+gate" across disaffected.com, YouTube, X, IG, TikTok, FB, Omny, Rumble.
+VOD videos as first-class entity with types (episode/segment/clip).
+Touches media-distribute project. Larger than public-API; pick up after
+public-API v1 ships OR when a concrete need arises.
+
+- [ ] Designate plan owner (show-build-claude or media-distribute-claude?)
+- [ ] Resolve open questions in stub doc (5 listed)
+- [ ] Schema design: `vod_videos`, `publication_destinations`, integrate `access_tiers`
+- [ ] Editor UI for setting destinations + state per VOD
+- [ ] media-distribute integration: pull scheduled rows, push, write back external_id
+
 ---
 
 ## 🚦 Current Status Summary

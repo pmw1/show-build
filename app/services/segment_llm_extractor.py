@@ -338,6 +338,23 @@ class SegmentLLMExtractor:
 
             db.commit()
             logger.info(f"Successfully extracted LLM data for rundown item {rundown_item_id}")
+
+            # Auto-fire Phase 2 if enabled in settings (best-effort; failure
+            # to dispatch must not roll back the successful Phase 1 result).
+            try:
+                if SegmentLLMExtractor._is_autorun_phase2_enabled(db):
+                    from services.phase2_enrichment_service import queue_phase2_enrichment
+                    task_id = queue_phase2_enrichment(db, rundown_item_id)
+                    logger.info(
+                        "Phase 2 auto-fire queued for rundown_item_id=%s (task=%s)",
+                        rundown_item_id, task_id,
+                    )
+            except Exception as autorun_exc:  # noqa: BLE001
+                logger.warning(
+                    "Phase 2 auto-fire failed for rundown_item_id=%s: %s",
+                    rundown_item_id, autorun_exc,
+                )
+
             return existing
 
         except Exception as e:
@@ -346,6 +363,27 @@ class SegmentLLMExtractor:
             existing.error_message = str(e)[:500]
             db.commit()
             raise
+
+    @staticmethod
+    def _is_autorun_phase2_enabled(db: Session) -> bool:
+        """Read meta_extraction_autorun_phase2 from the Settings table."""
+        try:
+            row = db.execute(text(
+                "SELECT value FROM settings WHERE key = 'meta_extraction_autorun_phase2'"
+            )).fetchone()
+            if not row or row[0] is None:
+                return False
+            v = row[0]
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, str):
+                # JSONB strings come back without quotes; tolerate "true"/"false"
+                # and the literal JSON forms "true"/"false"/"1"/"0".
+                return v.strip().lower() in ("true", "1", "yes", "on")
+            return bool(v)
+        except Exception as e:
+            logger.warning("Failed to read autorun_phase2 setting: %s", e)
+            return False
 
     @staticmethod
     async def batch_extract(

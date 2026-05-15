@@ -68,6 +68,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import CueParser from '../../../utils/cueParser.js'
+import { registerModalEsc } from '@/composables/useModalStack'
 
 const props = defineProps({
   show: {
@@ -81,6 +82,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:show', 'speaker-selected'])
+
+// Site-wide ESC-closes-modal behavior.
+registerModalEsc(() => props.show, () => emit('update:show', false), 'SpeakerSelectorModal')
 
 const selectedSpeaker = ref('')
 const customSpeaker = ref('')

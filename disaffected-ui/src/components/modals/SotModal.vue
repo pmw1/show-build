@@ -287,8 +287,11 @@
                   }"
                   title="Single trim - extract one clip from video [S]"
                 ><span style="text-decoration: underline;">S</span>INGLE TRIM</div>
-                <!-- Multiple Clips Button -->
+                <!-- Multiple Clips Button (hidden in edit mode — splitting an existing
+                     SOT into N independent cues with N new AssetIDs would orphan the
+                     original) -->
                 <div
+                  v-if="!editMode || initialData?.isReupload"
                   tabindex="0"
                   @click="selectCutMode('individual-clips')"
                   @focus="handleCutModeFocus('individual-clips')"
@@ -2646,16 +2649,21 @@ const handleAddCue = async () => { // eslint-disable-line no-unused-vars
     jobType = SOT_JOB_TYPES.MONTAGE
   }
 
-  // Show loading toast while generating AssetID
-  const loadingToast = toast.info('⏳ Assigning AssetID...', {
-    timeout: false,
-    closeButton: false
-  })
-
-  // Generate AssetID
-  const generatedAssetId = await generateAssetId()
-
-  toast.dismiss(loadingToast)
+  // In standard edit mode (not re-upload), reuse the original AssetID so
+  // the on-disk video and job records stay bound. Re-upload still mints a
+  // new AssetID because the underlying media is being replaced.
+  const isStandardEdit = props.editMode && !props.initialData?.isReupload && assetId.value
+  let generatedAssetId
+  if (isStandardEdit) {
+    generatedAssetId = assetId.value
+  } else {
+    const loadingToast = toast.info('⏳ Assigning AssetID...', {
+      timeout: false,
+      closeButton: false
+    })
+    generatedAssetId = await generateAssetId()
+    toast.dismiss(loadingToast)
+  }
 
   // Build SOT cue data — use clipped duration when trim points are set
   const sotData = {

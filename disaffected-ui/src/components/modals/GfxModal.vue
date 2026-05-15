@@ -573,6 +573,10 @@ const fontSize = ref(25)
 const fontFamily = ref('sans-serif')
 const textAlign = ref('center')
 const renderMode = ref('png')
+// Original AssetID when editing an existing GFX cue. Preserves on-disk
+// media identity across edits so updating cue metadata does not orphan
+// the rendered PNG and job records bound to the original AssetID.
+const initialAssetId = ref(null)
 
 // Preview background
 const previewBackgroundVideo = ref('/assets/preview-background.mp4')
@@ -752,6 +756,7 @@ const normalizeSlug = () => {
 }
 
 const resetForm = () => {
+  initialAssetId.value = null
   gfxTitle.value = ''
   gfxBody.value = ''
   gfxSlug.value = ''
@@ -765,6 +770,7 @@ const resetForm = () => {
 function loadEditData() {
   if (!props.editData) return
   const data = props.editData.rawData || props.editData
+  initialAssetId.value = data.assetId || props.editData.assetId || null
   if (data.gfxType) gfxType.value = data.gfxType
   if (data.title) gfxTitle.value = data.title
   if (data.body) gfxBody.value = data.body
@@ -774,6 +780,15 @@ function loadEditData() {
   if (data.style?.fontFamily) fontFamily.value = data.style.fontFamily
   if (data.style?.textAlign) textAlign.value = data.style.textAlign
   if (data.renderMode) renderMode.value = data.renderMode
+}
+
+// Reuse original AssetID in edit mode; only mint a new one for genuinely
+// new cues. All three submit paths route through this helper.
+async function getOrGenerateAssetId() {
+  if (props.editData && initialAssetId.value) {
+    return initialAssetId.value
+  }
+  return await generateAssetId()
 }
 
 // Generate AssetID
@@ -836,7 +851,7 @@ const handleInsertOnly = async () => {
   if (!canSubmitGfx.value) return
 
   try {
-    const assetId = await generateAssetId()
+    const assetId = await getOrGenerateAssetId()
     const cueData = buildCueData(assetId, { status: 'pending' })
     console.log('Inserting GFX cue only (no generation):', cueData)
     emit('submit', cueData)
@@ -858,7 +873,7 @@ const handleSubmit = async () => {
   loading.value = true
 
   try {
-    const assetId = await generateAssetId()
+    const assetId = await getOrGenerateAssetId()
 
     console.log('Submitting GFX to Celery...')
     const response = await axios.post('/api/gfx/generate', {
@@ -893,7 +908,7 @@ const handleSubmit = async () => {
     console.error('Error creating GFX:', error)
     if (error.response?.status === 202) {
       console.log('GFX generation in progress, proceeding with cue insertion')
-      const assetId = await generateAssetId()
+      const assetId = await getOrGenerateAssetId()
       emit('submit', buildCueData(assetId, { status: 'pending' }))
       resetForm()
       emit('update:show', false)
@@ -992,7 +1007,7 @@ const handleSocialInsert = async () => {
       return
     }
 
-    const assetId = await generateAssetId()
+    const assetId = await getOrGenerateAssetId()
     const slug = (xPostData.author_handle || 'xpost') + '-' + (xPostData.tweet_id || Date.now()).toString().slice(-8)
 
     const cueData = {

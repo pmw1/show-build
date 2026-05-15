@@ -64,13 +64,23 @@
           </div>
           <div v-if="workerCount > 0" class="mb-3">
             <strong>Active Workers:</strong> {{ workerCount }}
+            <span v-if="degradedWorkers.length > 0" class="text-warning ml-2">
+              ({{ degradedWorkers.length }} degraded)
+            </span>
             <v-list density="compact" class="mt-2">
               <v-list-item
-                v-for="worker in workers"
-                :key="worker"
-                :title="worker"
-                prepend-icon="mdi-cog"
-              />
+                v-for="worker in (workerDetails.length ? workerDetails : workers.map(n => ({ name: n, status: 'ok' })))"
+                :key="worker.name"
+                :title="worker.name"
+                :subtitle="worker.error || (worker.status === 'ok' ? `${worker.completed_total ?? 0} tasks completed` : worker.status)"
+              >
+                <template #prepend>
+                  <v-icon
+                    :color="worker.status === 'ok' ? 'success' : (worker.status === 'stale' ? 'error' : 'warning')"
+                    :icon="worker.status === 'ok' ? 'mdi-check-circle' : (worker.status === 'stale' ? 'mdi-close-circle' : 'mdi-alert-circle')"
+                  />
+                </template>
+              </v-list-item>
             </v-list>
           </div>
           <div v-if="celeryError">
@@ -201,6 +211,8 @@ const {
   celeryStatusIcon,
   workerCount,
   workers,
+  workerDetails,
+  degradedWorkers,
   celeryError,
   sipStatus,
   sipStatusText,

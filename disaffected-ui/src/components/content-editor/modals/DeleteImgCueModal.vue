@@ -62,7 +62,9 @@
 </template>
 
 <script setup>
-defineProps({
+import { registerModalEsc } from '@/composables/useModalStack'
+
+const props = defineProps({
   show: {
     type: Boolean,
     default: false
@@ -78,6 +80,9 @@ defineProps({
 })
 
 const emit = defineEmits(['update:show', 'delete-with-assets', 'delete-preserve-assets'])
+
+// Site-wide ESC-closes-modal behavior.
+registerModalEsc(() => props.show, () => emit('update:show', false), 'DeleteImgCueModal')
 
 function deleteWithAssets() {
   emit('delete-with-assets')
