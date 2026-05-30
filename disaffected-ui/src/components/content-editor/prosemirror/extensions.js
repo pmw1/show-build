@@ -19,6 +19,7 @@ import { UndoRedo } from '@tiptap/extensions';
 import { ScriptParagraph } from './ScriptParagraph.js';
 import { CueNode } from './CueNode.js';
 import { RevisionMark } from './RevisionMark.js';
+import { SlashCommand } from './SlashCommand.js';
 
 /**
  * @param {object} [opts]
@@ -32,6 +33,7 @@ export function buildScriptExtensions() {
     ScriptParagraph,
     CueNode,
     RevisionMark,
+    SlashCommand,
     UndoRedo,
   ];
 }
