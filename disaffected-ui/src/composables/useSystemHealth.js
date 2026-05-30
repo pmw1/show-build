@@ -16,6 +16,25 @@ import axios from 'axios'
 
 const POLL_INTERVAL = 30000
 
+/**
+ * Health polling must NOT run for unauthenticated users — without a token every
+ * /health call 401s, the status never resolves, and the init overlay flashes
+ * (and can cover the login screen). Gate ALL polling/fetching on a valid,
+ * non-expired auth token so non-logged-in users never trigger the health
+ * machinery at all, regardless of which component mounts this composable.
+ */
+function hasValidAuth() {
+  try {
+    const token = localStorage.getItem('auth-token')
+    if (!token || token === 'null' || token === 'undefined') return false
+    const expiry = localStorage.getItem('auth-token-expiry')
+    if (expiry && Date.now() > Number(expiry)) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
 const health = ref({
   status: 'unknown',
   timestamp: null,
@@ -460,13 +479,31 @@ function startPolling() {
   // Seed from localStorage to avoid flash, then fetch fresh immediately.
   const saved = loadHealthFromStorage()
   if (saved) health.value = saved
-  // Progressive: /health/critical (fast, DB+backend) resolves the indicators in
-  // ms; /health/secondary loads the slow external services in the background.
-  // The old single fetchHealth() hit /health which takes ~6-7s — with a 10s poll
-  // that left the indicators in a loading/red state ~67% of the time, causing the
-  // visible flashing. fetchHealthProgressive + the 30s interval fixes that.
-  fetchHealthProgressive()
-  pollTimer = setInterval(fetchHealthProgressive, POLL_INTERVAL)
+
+  // Auth-gated polling. We re-check auth on a short cadence (so polling begins
+  // promptly after login and pauses if the token expires) but only run the
+  // actual health fetch every POLL_INTERVAL. Unauthenticated users never trigger
+  // a health call, so no 401-flash.
+  let lastFetch = 0
+  let wasAuthed = false
+  const tick = () => {
+    const authed = hasValidAuth()
+    if (!authed) {
+      wasAuthed = false
+      return
+    }
+    const now = Date.now()
+    // Fetch immediately on the transition to authed (just logged in), then at
+    // most once per POLL_INTERVAL.
+    if (!wasAuthed || now - lastFetch >= POLL_INTERVAL) {
+      lastFetch = now
+      fetchHealthProgressive()
+    }
+    wasAuthed = true
+  }
+  tick()
+  // Re-check auth every 3s; the fetch itself is still throttled to POLL_INTERVAL.
+  pollTimer = setInterval(tick, 3000)
 }
 
 function stopPolling() {
