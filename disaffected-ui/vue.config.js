@@ -64,6 +64,20 @@ module.exports = defineConfig({
     host: '0.0.0.0',
     port: 8080,
     allowedHosts: 'all',
+    // Behind the Cloudflare tunnel, Cloudflare was CACHING the dev bundle
+    // (cache-control: max-age=14400) and serving a STALE app.js — including an
+    // old HMR client — to browsers regardless of hard-refresh/incognito (edge
+    // cache, not browser cache). Send no-store so Cloudflare never caches the
+    // dev server's responses. Only applied for the tunnel dev server.
+    ...(process.env.DEV_API_TARGET
+      ? {
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+            Pragma: 'no-cache',
+            Expires: '0',
+          },
+        }
+      : {}),
     // When this dev server runs on the HOST behind the Cloudflare tunnel
     // (DEV_API_TARGET set, e.g. the migration dev server on :8092), the HMR
     // websocket can't reach back through the tunnel — its failed reconnects
