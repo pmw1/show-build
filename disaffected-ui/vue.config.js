@@ -6,6 +6,12 @@ const path = require('path')
 const followRedirects = require('follow-redirects')
 followRedirects.maxBodyLength = 10 * 1024 * 1024 * 1024 // 10GB
 
+// Backend proxy target. Defaults to the docker-network hostname used by the
+// production container (`server:80`). When running the dev server on the HOST
+// (e.g. the migration worktree harness), `server` does not resolve — set
+// DEV_API_TARGET=http://localhost:8888 to proxy to the host-published backend.
+const API_TARGET = process.env.DEV_API_TARGET || 'http://server:80'
+
 // Check if SSL certificates exist and are accessible
 const sslKeyPath = path.join(__dirname, 'ssl', 'key.pem')
 const sslCertPath = path.join(__dirname, 'ssl', 'cert.pem')
@@ -77,7 +83,7 @@ module.exports = defineConfig({
     } : true,
     proxy: {
       '/api': {
-        target: 'http://server:80',
+        target: API_TARGET,
         changeOrigin: true,
         secure: false,
         // The backend issues a 307 to normalize trailing slashes, and because
@@ -92,32 +98,32 @@ module.exports = defineConfig({
         timeout: 300000  // 5 minutes for long-running LLM operations
       },
       '/assetid': {
-        target: 'http://server:80',
+        target: API_TARGET,
         changeOrigin: true,
         secure: false
       },
       '/newAssetID': {
-        target: 'http://server:80',
+        target: API_TARGET,
         changeOrigin: true,
         secure: false
       },
       '/health': {
-        target: 'http://server:80',
+        target: API_TARGET,
         changeOrigin: true,
         secure: false
       },
       '/episodes': {
-        target: 'http://server:80',
+        target: API_TARGET,
         changeOrigin: true,
         secure: false
       },
       '/scripts': {
-        target: 'http://server:80',
+        target: API_TARGET,
         changeOrigin: true,
         secure: false
       },
       '/media_assets': {
-        target: 'http://server:80',
+        target: API_TARGET,
         changeOrigin: true,
         secure: false
       },

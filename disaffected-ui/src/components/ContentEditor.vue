@@ -170,7 +170,21 @@
 
       <!-- Editor Panel (scrollable center column) -->
       <div class="editor-panel">
+        <!-- Migration: TipTap ScriptEditor (flag-gated). Mounts in place of the
+             legacy EditorPanel script surface only when useProseMirrorEditor is
+             on AND we are in script mode. Preserves the scriptContent string
+             contract + save events so the parent save/reload path is unchanged.
+             Falls back to EditorPanel for code/scratch modes and when off. -->
+        <ScriptEditor
+          v-if="useProseMirrorEditor && editorMode === 'script'"
+          ref="scriptEditor"
+          :script-content="scriptContent"
+          @update:script-content="updateScriptContent"
+          @save-current="handleEditorSaveCurrent"
+          @save-all="saveEverything"
+        />
         <EditorPanel
+          v-else
           ref="editorPanel"
           :item="currentRundownItem"
           :current-item-metadata="currentItemMetadata"
@@ -629,6 +643,11 @@ import axios from 'axios';
 
 // Core panels - always visible, load eagerly
 import EditorPanel from './content-editor/EditorPanel.vue';
+// Migration: TipTap/ProseMirror script editor, gated behind the
+// useProseMirrorEditor feature flag (default OFF). Lazy-loaded so it adds no
+// cost when the flag is off.
+import ScriptEditor from './content-editor/ScriptEditor.vue';
+import { useFeatureFlags } from '@/composables/useFeatureFlags';
 import RundownPanel from './content-editor/RundownPanel.vue';
 import MetadataPanel from './content-editor/MetadataPanel.vue';
 import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
@@ -712,6 +731,7 @@ export default {
   name: 'ContentEditor',
   components: {
     EditorPanel,
+    ScriptEditor,
     RundownPanel,
     // eslint-disable-next-line vue/no-unused-components
     MetadataPanel,
@@ -854,8 +874,9 @@ export default {
     // CRITICAL: Add beforeunload handler to catch browser refresh/close
     this.handleBeforeUnload = (e) => {
       // Flush any pending changes synchronously (best effort)
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        _ae.flushPendingChanges();
       }
       // Warn user if there are unsaved changes
       if (this.hasUnsavedChanges) {
@@ -1115,6 +1136,11 @@ export default {
   },
   data() {
     return {
+      // Migration flag: mount the TipTap ScriptEditor instead of EditorPanel's
+      // legacy contenteditable script surface. Read once at init from
+      // localStorage (default OFF). Toggle: localStorage ff:useProseMirrorEditor.
+      useProseMirrorEditor: useFeatureFlags().isEnabled('useProseMirrorEditor'),
+
       // Universal LLM state management
       llmState: useLLMState(),
 
@@ -1815,6 +1841,16 @@ Try dropping an image or video file here!`
   },
   methods: {
     /**
+     * Return whichever script editor is currently mounted (the flag-gated
+     * ScriptEditor or the legacy EditorPanel). Both expose the same reach-in
+     * contract: flushPendingChanges() and isActivelyEditing. Use this for the
+     * flush-critical paths so they work regardless of which editor is active.
+     */
+    activeEditor() {
+      return this.$refs.scriptEditor || this.$refs.editorPanel || null;
+    },
+
+    /**
      * Get authentication headers for API requests
      * Uses JWT token from localStorage
      * @returns {object} Headers object with Content-Type and Authorization
@@ -2087,8 +2123,9 @@ Try dropping an image or video file here!`
         return;
       }
       // CRITICAL: Flush pending changes before opening modal
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       if (!this.showImgCueModal) {
         // Capture cursor position BEFORE opening modal
@@ -2108,8 +2145,9 @@ Try dropping an image or video file here!`
     async handleShowGfxModal() {
       if (!this.requireRundownItemSelected('GFX cue')) return;
       // CRITICAL: Flush pending changes before opening modal
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       console.log('🎨 handleShowGfxModal called, current state:', this.showGfxModal);
       if (!this.showGfxModal) {
@@ -2130,8 +2168,9 @@ Try dropping an image or video file here!`
     async handleShowFsqModal() {
       if (!this.requireRundownItemSelected('FSQ cue')) return;
       // CRITICAL: Flush pending changes before opening modal
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       if (!this.showFsqModal) {
         // Capture the cursor position when FSQ hotkey is pressed
@@ -2156,32 +2195,36 @@ Try dropping an image or video file here!`
       // Flush any in-flight Script-mode typing into rawMarkdownContent before
       // the modal opens — otherwise the next debounce tick will overwrite the
       // modal-driven update with a stale snapshot of the script.
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       this.editingFsqCueData = cueData;
       this.showFsqModal = true;
     },
     async handleEditGfxCue(cueData) {
       console.log('📝 Editing GFX cue:', cueData);
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       this.editingGfxCueData = cueData;
       this.showGfxModal = true;
     },
     async handleEditImgCue(cueData) {
       console.log('📝 Editing IMG cue:', cueData);
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       this.editingImgCueData = cueData;
       this.showImgCueModal = true;
     },
     async handleEditDirCue(cueData) {
       console.log('📝 Editing NOTE cue:', cueData);
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       this.editingDirCueData = cueData;
       this.showDirModal = true;
@@ -2191,8 +2234,9 @@ Try dropping an image or video file here!`
       // Only require selection for NEW cues, not when editing existing ones
       if (!cueData && !this.requireRundownItemSelected('SOT cue')) return;
       // CRITICAL: Flush pending changes before opening modal
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       if (!this.showSotModal) {
         // If editing, store cue data; otherwise clear it
@@ -2328,8 +2372,9 @@ Try dropping an image or video file here!`
       }
     },
     async handleEditRifCue(cueData) {
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       this.editingRifCueData = cueData;
       this.showRifModal = true;
