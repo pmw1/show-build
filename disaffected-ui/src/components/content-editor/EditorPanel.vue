@@ -6906,6 +6906,24 @@ function insertCueAtCursor(cueContent) {
 
 // Unified cue insertion using snapshotted position (survives modal interaction)
 function insertCueAtSnapshotPosition(cueContent) {
+  // When the ProseMirror editor is active, the legacy scriptSegments path below
+  // works on segment state the new editor doesn't maintain (stale/empty), so it
+  // can drop the cue. Instead append the cue block straight to the raw script and
+  // emit — the new editor watches scriptContent and reloads to show it. This
+  // single guard covers every cue type that routes through here (FSQ, SOT, VOX,
+  // MUS, LIVE, IMG, and the multi-SOT loop).
+  if (useProseMirrorEditor.value) {
+    // Make sure any pending ProseMirror edit is flushed into rawScriptContent
+    // first so we append onto current content, not a stale snapshot.
+    if (scriptEditorRef.value?.flushPendingChanges) scriptEditorRef.value.flushPendingChanges();
+    const current = rawScriptContent.value || '';
+    const sep = current && !current.endsWith('\n') ? '\n\n' : '';
+    rawScriptContent.value = `${current}${sep}${cueContent}\n`;
+    pendingCueInsertionIndex.value = null;
+    console.log('📍 ProseMirror active — appended cue to rawScriptContent');
+    return;
+  }
+
   let insertionIndex;
   if (pendingCueInsertionIndex.value !== null && pendingCueInsertionIndex.value >= 0) {
     insertionIndex = pendingCueInsertionIndex.value;
@@ -10852,6 +10870,10 @@ async function flushPendingChangesUnified() {
 }
 
 defineExpose({
+  // Whether the ProseMirror ScriptEditor is active. ContentEditor reads this to
+  // route cue insertion through the reliable rawMarkdownContent-append path
+  // (which the new editor watches) instead of the legacy scriptSegments path.
+  useProseMirrorEditor,
   activelyEditingSegment,
   cachedScriptSegments,
   captureSegmentCursor: captureCursorMemoryPosition,

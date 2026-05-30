@@ -6208,7 +6208,9 @@ Try dropping an image or video file here!`
           console.log(`📝 Inserting ${totalParts} FSQ cue(s) at BOTTOM of script (no valid cursor position: ${insertionPosition})`);
         }
 
-        // Use EditorPanel's snapshotted position for precise insertion
+        // insertCueAtSnapshotPosition routes to a reliable append internally when
+        // the ProseMirror editor is active (see EditorPanel), so this one path
+        // works for both editors.
         if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
           this.$refs.editorPanel.insertCueAtSnapshotPosition(allCues);
           console.log('✅ FSQ cue(s) inserted via EditorPanel.insertCueAtSnapshotPosition');
@@ -6544,7 +6546,9 @@ Try dropping an image or video file here!`
         // Capture selection before insertion — modal close can race with re-renders
         const savedItemIndex = this.selectedItemIndex;
 
-        // Delegate to EditorPanel (uses pendingCueInsertionIndex snapshotted at button-press time)
+        // insertCueAtSnapshotPosition routes to a reliable append internally when
+        // the ProseMirror editor is active (see EditorPanel), so this one path
+        // works for both editors.
         if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
           this.$refs.editorPanel.insertCueAtSnapshotPosition(sotCue);
           console.log('✅ SOT cue inserted via EditorPanel.insertCueAtSnapshotPosition');
