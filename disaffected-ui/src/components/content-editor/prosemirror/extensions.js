@@ -24,16 +24,18 @@ import { SlashCommand } from './SlashCommand.js';
 /**
  * @param {object} [opts]
  * @param {string} [opts.currentUser] - stamped onto revision proposals.
+ * @param {(cueType: string) => void} [opts.onSelectCue] - called when the slash
+ *   menu picks a cue type; the host launches the matching cue modal.
  * @returns {Array} TipTap extensions for the script editor.
  */
-export function buildScriptExtensions() {
+export function buildScriptExtensions(opts = {}) {
   return [
     Document,
     Text,
     ScriptParagraph,
     CueNode,
     RevisionMark,
-    SlashCommand,
+    SlashCommand.configure({ onSelectCue: opts.onSelectCue || null }),
     UndoRedo,
   ];
 }

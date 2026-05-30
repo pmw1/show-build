@@ -40,7 +40,7 @@ export default {
   props: {
     scriptContent: { type: String, default: '' },
   },
-  emits: ['update:scriptContent', 'save-current', 'save-all'],
+  emits: ['update:scriptContent', 'save-current', 'save-all', 'insert-cue'],
   setup(props, { emit, expose }) {
     const editor = shallowRef(null);
     const isActivelyEditing = ref(false);
@@ -100,7 +100,13 @@ export default {
       const initial = markdownToDoc(props.scriptContent || '');
       frontmatter = initial.frontmatter;
       editor.value = new Editor({
-        extensions: buildScriptExtensions(),
+        // The slash (/) cue menu doesn't insert a cue node itself — it hands the
+        // chosen cue type up to EditorPanel, which launches the same modal the
+        // ADD CUE buttons launch (insertCueFromMenu). So "/" is a shortcut for
+        // those buttons.
+        extensions: buildScriptExtensions({
+          onSelectCue: (cueType) => emit('insert-cue', cueType),
+        }),
         content: initial.doc.toJSON(),
         onUpdate: () => scheduleSave(),
       });

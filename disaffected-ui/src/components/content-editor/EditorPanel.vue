@@ -317,6 +317,7 @@
                 @update:script-content="(v) => emit('update:scriptContent', v)"
                 @save-current="() => emit('save-current')"
                 @save-all="() => emit('save-all')"
+                @insert-cue="insertCueFromMenu"
               />
 
               <draggable

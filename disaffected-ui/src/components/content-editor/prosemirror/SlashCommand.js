@@ -41,15 +41,6 @@ function filterItems(query) {
 }
 
 // Minimal field bag for a freshly inserted cue of a given type. The NodeView /
-// cue modal fills in the rest; this is enough to round-trip a valid cue block.
-function newCueAttrs(type) {
-  return {
-    cueType: type,
-    fields: { Type: type, Slug: `${type.toLowerCase()}-new` },
-    imgTag: '',
-  };
-}
-
 // Position a popup element near a client rect, flipping above if it would
 // overflow the viewport bottom. No external positioning lib needed.
 function placePopup(el, rect) {
@@ -71,17 +62,21 @@ export const SlashCommand = Extension.create({
 
   addOptions() {
     return {
+      // Called when the user picks a cue type from the slash menu. The editor
+      // does NOT insert a cue node itself — instead this hands the cue type up to
+      // EditorPanel, which launches the SAME modal the ADD CUE buttons launch
+      // (via insertCueFromMenu). The modal then inserts the finished cue. So "/"
+      // is just a keyboard shortcut for the ADD CUE buttons.
+      onSelectCue: null,
       suggestion: {
         char: '/',
         startOfLine: false,
         command: ({ editor, range, props }) => {
-          // Remove the "/query" text, then insert the cue node at that point.
-          editor
-            .chain()
-            .focus()
-            .deleteRange(range)
-            .insertCue(newCueAttrs(props.type))
-            .run();
+          // Remove the "/query" text the user typed, then hand the chosen cue
+          // type up to the host (EditorPanel) to launch its modal.
+          editor.chain().focus().deleteRange(range).run();
+          const cb = this.options.onSelectCue;
+          if (typeof cb === 'function') cb(props.type);
         },
       },
     };
