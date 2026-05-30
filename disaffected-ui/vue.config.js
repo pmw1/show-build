@@ -80,7 +80,15 @@ module.exports = defineConfig({
         target: 'http://server:80',
         changeOrigin: true,
         secure: false,
-        followRedirects: true,
+        // The backend issues a 307 to normalize trailing slashes, and because
+        // the frontend is HTTPS it builds the Location from X-Forwarded-Proto
+        // as `https://server:80/...` — an internal docker host on the wrong
+        // scheme/port that neither the proxy nor the browser can follow
+        // (was EPROTO with followRedirects on; an unfollowable 307 with it off).
+        // Rewrite the redirect Location back to the browser-facing origin so
+        // the client follows it cleanly. Keep followRedirects OFF.
+        autoRewrite: true,
+        protocolRewrite: 'https',
         timeout: 300000  // 5 minutes for long-running LLM operations
       },
       '/assetid': {

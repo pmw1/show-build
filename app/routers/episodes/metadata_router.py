@@ -384,7 +384,17 @@ async def save_episode_metadata(
     current_user: dict = Depends(get_current_user_or_key),
     db: Session = Depends(get_db)
 ):
-    """Database-first episode metadata save - replaces filesystem approach"""
+    """Database-first episode metadata save - replaces filesystem approach.
+
+    Two payload modes (both backward compatible):
+
+    1. Flat metadata fields applied to the Episode row via setattr (the
+       original behavior — used by the editor UI).
+    2. Optional `episode_metadata.recording_manifest` payload from
+       showtime, which is persisted into the recording_sessions /
+       recording_takes / take_cue_fires tables. See
+       docs/SHOWTIME_INTEGRATION_ANALYSIS.md.
+    """
     from models_v2 import Episode
 
     try:
@@ -396,8 +406,28 @@ async def save_episode_metadata(
         if not episode:
             raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
 
-        # Update episode fields
+        # Extract recording manifest (if any) before the setattr loop —
+        # it's nested under episode_metadata, which is NOT a column on
+        # the Episode model and would otherwise be silently dropped.
+        recording_session_id = None
+        nested_meta = episode_data.get('episode_metadata') or {}
+        manifest = nested_meta.get('recording_manifest') if isinstance(nested_meta, dict) else None
+
+        # Track keys that didn't map to a column on the Episode model.
+        # Previously these were silently dropped — clients (showtime) had
+        # no way to know "your client thinks something happened that
+        # didn't". We now warn-log and surface them in the response so
+        # the caller can react. Known nested keys (episode_metadata) are
+        # not unknown; recording_manifest is routed separately below.
+        unknown_keys: list[str] = []
+
+        # Update episode fields (skipping episode_metadata — handled below)
         for field, value in episode_data.items():
+            if field == 'episode_metadata':
+                continue
+            if not hasattr(episode, field):
+                unknown_keys.append(field)
+                continue
             if hasattr(episode, field) and value is not None:
                 if field in ['air_date', 'publish_date', 'recording_date',
                              'schedule_datetime', 'omny_schedule_datetime',
@@ -417,11 +447,33 @@ async def save_episode_metadata(
         from datetime import datetime
         episode.updated_at = datetime.now()
 
+        # If showtime sent a recording manifest, persist it. Any error
+        # here will roll back the whole transaction so we don't half-
+        # persist a session.
+        if isinstance(manifest, dict):
+            from services.recording_session_service import persist_recording_manifest
+            session = persist_recording_manifest(db, episode.id, manifest)
+            recording_session_id = session.id
+
         db.commit()
         db.refresh(episode)
 
         logger.info(f"Episode {episode_number} metadata saved to database")
-        return {"status": "success", "message": f"Episode {episode_number} metadata saved"}
+        if unknown_keys:
+            logger.warning(
+                "save-episode for %s: dropped unknown top-level keys %r — "
+                "client may believe these were persisted",
+                episode_number, unknown_keys,
+            )
+        response: Dict[str, Any] = {
+            "status": "success",
+            "message": f"Episode {episode_number} metadata saved",
+        }
+        if recording_session_id is not None:
+            response["recording_session_id"] = recording_session_id
+        if unknown_keys:
+            response["unknown_keys_dropped"] = unknown_keys
+        return response
 
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid episode number format")

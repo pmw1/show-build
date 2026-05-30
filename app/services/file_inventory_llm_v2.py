@@ -11,17 +11,50 @@ import openai
 
 logger = logging.getLogger(__name__)
 
-# Ollama configuration
-OLLAMA_BASE_URL = "http://192.168.51.197:11434"
-DEFAULT_MODEL = "Qwen2.5-Coder:32b"  # Changed from deepseek-r1:8b per LLM consultation consensus
+# Ollama configuration — last-resort defaults if api_configs is unreachable
+OLLAMA_BASE_URL = "http://172.17.0.1:11434"
+DEFAULT_MODEL = "qwen3:32b-q4_K_M"
+
+
+def _read_file_inventory_config():
+    """Read host + primary + fallback model from api_configs at call time."""
+    try:
+        from database import SessionLocal
+        from sqlalchemy import text as _t
+        db = SessionLocal()
+        try:
+            host_row = db.execute(_t(
+                "SELECT config_value FROM api_configs WHERE service='ollama' AND config_key='host' LIMIT 1"
+            )).fetchone()
+            host = host_row[0] if host_row and host_row[0] else OLLAMA_BASE_URL
+
+            rows = db.execute(_t(
+                "SELECT config_key, config_value FROM api_configs "
+                "WHERE workflow='file_inventory' AND service='ollama' "
+                "AND config_key IN ('model','fallback_model')"
+            )).fetchall()
+            primary, fallback = DEFAULT_MODEL, None
+            for k, v in rows:
+                if k == 'model' and v:
+                    primary = v
+                elif k == 'fallback_model' and v:
+                    fallback = v
+            return host, primary, fallback
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"file_inventory config lookup failed, using defaults: {e}")
+        return OLLAMA_BASE_URL, DEFAULT_MODEL, None
 
 
 class OllamaLLMService:
     """Real Ollama LLM service for file inventory"""
 
-    def __init__(self, base_url: str = OLLAMA_BASE_URL, model: str = DEFAULT_MODEL):
-        self.base_url = base_url
-        self.model = model
+    def __init__(self, base_url: str = None, model: str = None):
+        cfg_host, cfg_primary, cfg_fallback = _read_file_inventory_config()
+        self.base_url = base_url or cfg_host
+        self.model = model or cfg_primary
+        self.fallback_model = cfg_fallback
         self.provider = "ollama"
 
     async def generate(self, system_prompt: str, user_prompt: str, temperature: float = 0.1, response_format: str = "json", max_tokens: int = 2000, top_p: float = 0.9):
@@ -39,41 +72,50 @@ class OllamaLLMService:
         Returns:
             JSON string response
         """
-        try:
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": temperature,
-                "stream": False,
-                "options": {
-                    "num_predict": max_tokens,  # Ollama uses num_predict for max_tokens
-                    "top_p": top_p
+        candidates = [self.model]
+        if self.fallback_model and self.fallback_model != self.model:
+            candidates.append(self.fallback_model)
+
+        last_exc = None
+        for idx, model_name in enumerate(candidates):
+            try:
+                payload = {
+                    "model": model_name,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": temperature,
+                    "stream": False,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "top_p": top_p
+                    }
                 }
-            }
+                if response_format == "json":
+                    payload["format"] = "json"
 
-            # Add JSON format hint if requested
-            if response_format == "json":
-                payload["format"] = "json"
-
-            response = requests.post(
-                f"{self.base_url}/api/chat",
-                json=payload,
-                timeout=180  # Increased to 180s for 32B model with larger prompts
-            )
-            response.raise_for_status()
-
-            result = response.json()
-            return result["message"]["content"]
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Ollama API error: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Error generating LLM response: {e}")
-            raise
+                response = requests.post(
+                    f"{self.base_url}/api/chat",
+                    json=payload,
+                    timeout=180
+                )
+                if response.status_code == 404 and idx < len(candidates) - 1:
+                    logger.warning(f"file_inventory: model {model_name} 404, trying fallback")
+                    continue
+                response.raise_for_status()
+                return response.json()["message"]["content"]
+            except requests.exceptions.RequestException as e:
+                last_exc = e
+                logger.error(f"Ollama API error with model {model_name}: {e}")
+                if idx < len(candidates) - 1:
+                    continue
+                raise
+            except Exception as e:
+                logger.error(f"Error generating LLM response: {e}")
+                raise
+        if last_exc:
+            raise last_exc
 
 
 class OpenAILLMService:

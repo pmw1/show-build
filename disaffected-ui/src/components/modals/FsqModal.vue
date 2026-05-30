@@ -942,6 +942,8 @@ import { useLLMState } from '@/composables/useLLMState'
 import { useAsyncAnalysis } from '@/composables/useAsyncAnalysis'
 import { getColorValue } from '@/utils/themeColorMap'
 import { FSQ_DEFAULTS, FSQ_FONT_MAP, FSQ_PNG_SCALE, fsqPreviewCanvasHeightUnit } from '@/utils/fsqLayout'
+import { registerModalEsc } from '@/composables/useModalStack'
+import { useDoubleEnterToSlug } from '@/composables/useDoubleEnterToSlug'
 
 // ---- Props & Emits ----
 const props = defineProps({
@@ -964,7 +966,7 @@ const $toast = getCurrentInstance()?.appContext.config.globalProperties.$toast
 const fsqFormRef = ref(null)
 const quoteFieldRef = ref(null)
 const previewVideoRef = ref(null)
-const slugFieldRef = ref(null) // eslint-disable-line no-unused-vars
+const slugFieldRef = ref(null)
 
 // ---- Reactive State (data) ----
 const formValid = ref(false)
@@ -1198,9 +1200,14 @@ const quoteSourceStyle = computed(() => {
 })
 
 const formattedQuotePreview = computed(() => {
-  const rawText = quote.value || 'Quote text will appear here...'
-  const decoded = decodeQuoteText(rawText)
-  const escaped = decoded
+  let rawText = quote.value || 'Quote text will appear here...'
+  // Mirror host_script_generator._format_fsq: only strip stored exterior
+  // quotes when regenerating, to avoid doubled marks. Otherwise render
+  // verbatim regardless of the strip-on-input setting.
+  if (regenerateExteriorQuotes.value) {
+    rawText = rawText.trim().replace(/^"+|"+$/g, '')
+  }
+  const escaped = rawText
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
@@ -1628,9 +1635,14 @@ function hasNestedQuotes(text) {
 }
 
 function decodeQuoteText(text) {
+  // Entity/escape decode only. Exterior-quote stripping is a paste-time
+  // concern and lives in stripExteriorQuotesIfEnabled() \u2014 DO NOT add it
+  // back here. Calling this from save paths must not mutate exterior
+  // quote marks; the stored quote should round-trip verbatim so the host
+  // script generator can honor regenerateExteriorQuotes correctly.
   if (!text) return text
 
-  let decoded = text
+  return text
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, '&')
@@ -1642,34 +1654,37 @@ function decodeQuoteText(text) {
     .replace(/\\r/g, '\r')
     .replace(/\\t/g, '\t')
     .replace(/\\\\/g, '\\')
+}
 
-  if (stripExteriorQuotes.value) {
-    decoded = decoded.trim()
-    if ((decoded.startsWith('"') && decoded.endsWith('"')) ||
-        (decoded.startsWith("'") && decoded.endsWith("'"))) {
-      decoded = decoded.slice(1, -1).trim()
-      console.log('\uD83D\uDD13 Stripped exterior quotes per settings')
-    }
+function stripExteriorQuotesIfEnabled(text) {
+  if (!text || !stripExteriorQuotes.value) return text
+  let decoded = text.trim()
+  if ((decoded.startsWith('"') && decoded.endsWith('"')) ||
+      (decoded.startsWith("'") && decoded.endsWith("'"))) {
+    decoded = decoded.slice(1, -1).trim()
+    console.log('\uD83D\uDD13 Stripped exterior quotes per settings')
   }
-
   return decoded
 }
 
-function handleKeydown(event) {
-  console.log('\u2328\uFE0F FsqModal keydown:', event.key, 'show:', props.show)
-  if (event.key === 'Escape' && props.show) {
-    console.log('\uD83D\uDEAA Closing FSQ modal via Esc key')
-    event.preventDefault()
-    event.stopPropagation()
-    cancel()
-  }
-}
+// ESC handled by global modal stack
+registerModalEsc(() => props.show, () => cancel(), 'FsqModal')
+useDoubleEnterToSlug(() => props.show, slugFieldRef)
 
 async function handleQuotePaste() {
   console.log('\uD83D\uDCCB Paste detected, waiting for v-model update...')
   await nextTick()
   await new Promise(resolve => setTimeout(resolve, 50))
   console.log('\uD83D\uDCCB Quote pasted (length: ' + quote.value.length + ')')
+
+  // Apply strip-exterior-quotes setting at paste time only. The stored
+  // quote should otherwise round-trip verbatim through save/load so the
+  // host-script render setting (regenerate exterior quotes) is the single
+  // source of truth for what ships in the final script.
+  const stripped = stripExteriorQuotesIfEnabled(quote.value)
+  if (stripped !== quote.value) {
+    quote.value = stripped
+  }
 
   cancelAnalysis()
 
@@ -2092,12 +2107,6 @@ async function submit() {
   }
 }
 
-function handleEscapeKey(event) {
-  if (event.key === 'Escape' && props.show) {
-    cancel()
-  }
-}
-
 function cancel() {
   cancelAnalysis()
 
@@ -2424,7 +2433,6 @@ async function insertManualSplit() {
 // ---- Watchers ----
 watch(() => props.show, async (newVal) => {
   if (newVal) {
-    document.addEventListener('keydown', handleEscapeKey)
     await fetchEpisodeSources()
 
     if (props.editMode && props.initialData) {
@@ -2452,8 +2460,6 @@ watch(() => props.show, async (newVal) => {
         })
       }
     })
-  } else {
-    document.removeEventListener('keydown', handleEscapeKey)
   }
 })
 
@@ -2465,13 +2471,11 @@ watch(source, (newVal) => {
 
 // ---- Lifecycle ----
 onMounted(async () => {
-  document.addEventListener('keydown', handleKeydown)
   await loadDefaultSettings()
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleKeydown)
-  document.removeEventListener('keydown', handleEscapeKey)
+  // ESC listener auto-cleaned by registerModalEsc.
   // Clean up aiFieldMixin debounce timers
   Object.values(aiDebounceTimers).forEach(timer => {
     clearTimeout(timer)

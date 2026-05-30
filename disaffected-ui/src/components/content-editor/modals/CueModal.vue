@@ -7,6 +7,7 @@
           <v-row>
             <v-col cols="12" md="6">
               <v-text-field
+                ref="slugFieldRef"
                 v-model="slug"
                 label="Slug"
                 variant="outlined"
@@ -230,6 +231,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { registerModalEsc } from '@/composables/useModalStack'
+import { useDoubleEnterToSlug } from '@/composables/useDoubleEnterToSlug'
 
 const props = defineProps({
   show: {
@@ -247,6 +249,8 @@ const emit = defineEmits(['update:show', 'submit'])
 
 // Site-wide ESC-closes-modal behavior (registered via the global modal stack).
 registerModalEsc(() => props.show, () => emit('update:show', false), 'CueModal')
+const slugFieldRef = ref(null)
+useDoubleEnterToSlug(() => props.show, slugFieldRef)
 
 const formValid = ref(false)
 const slug = ref('')

@@ -36,7 +36,32 @@ def get_ollama_host(db):
             return result[0]
     except Exception as e:
         logger.error(f"Failed to get Ollama host: {e}")
-    return 'http://192.168.51.197:11434'
+    return 'http://172.17.0.1:11434'
+
+
+def get_ollama_fallback_model(db, purpose='classifier'):
+    """Read per-task fallback model from api_configs.
+    Returns None if no fallback is configured for this purpose."""
+    task_service_map = {
+        'classifier': 'tone_classification',
+        'generator': 'segment_description',
+        'episode_generator': 'episode_description',
+        'episode_short': 'episode_short_description',
+        'legacy_cue_match': 'legacy_cue_convert',
+    }
+    service = task_service_map.get(purpose, '')
+    if not service:
+        return None
+    try:
+        result = db.execute(text(
+            "SELECT config_value FROM api_configs "
+            "WHERE workflow = 'generation' AND service = :svc AND config_key = 'fallback_model' LIMIT 1"
+        ), {"svc": service}).fetchone()
+        if result and result[0]:
+            return result[0]
+    except Exception:
+        pass
+    return None
 
 
 def get_ollama_model(db, purpose='classifier'):
@@ -170,24 +195,41 @@ def get_segment_prompt_template():
 # Ollama caller
 # ---------------------------------------------------------------------------
 
-def call_ollama(host, model, prompt, temperature=0.2, max_tokens=500, timeout=600):
-    """Synchronous Ollama /api/generate call. Returns the response text."""
-    resp = requests.post(
-        f"{host}/api/generate",
-        json={
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens
-            }
-        },
-        timeout=timeout
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return (data.get("response") or "").strip()
+def call_ollama(host, model, prompt, temperature=0.2, max_tokens=500, timeout=600, fallback_model=None):
+    """Synchronous Ollama /api/generate call. Returns the response text.
+    If `fallback_model` is provided and the primary model 404s, retries once with the fallback."""
+    candidates = [model]
+    if fallback_model and fallback_model != model:
+        candidates.append(fallback_model)
+    last_exc = None
+    for idx, m in enumerate(candidates):
+        try:
+            resp = requests.post(
+                f"{host}/api/generate",
+                json={
+                    "model": m,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": max_tokens
+                    }
+                },
+                timeout=timeout
+            )
+            if resp.status_code == 404 and idx < len(candidates) - 1:
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            return (data.get("response") or "").strip()
+        except requests.RequestException as exc:
+            last_exc = exc
+            if idx < len(candidates) - 1:
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    return ""
 
 
 
@@ -386,6 +428,7 @@ def classify_segment_tone(asset_id: str) -> dict:
 
         host = get_ollama_host(db)
         model = get_ollama_model(db, purpose='classifier')
+        fallback = get_ollama_fallback_model(db, purpose='classifier')
         palette = get_tone_palette(db)
 
         # Read tone prompt from settings or use default
@@ -421,7 +464,7 @@ def classify_segment_tone(asset_id: str) -> dict:
             )
 
         temp = get_generation_temperature(db, 'tone_classification', 0.1)
-        raw = call_ollama(host, model, prompt, temperature=temp, max_tokens=200, timeout=120)
+        raw = call_ollama(host, model, prompt, temperature=temp, max_tokens=200, timeout=120, fallback_model=fallback)
         logger.info(f"[tone] Raw LLM response for {asset_id}: {raw[:300]}")
 
         if not raw or not raw.strip():
@@ -479,6 +522,7 @@ def generate_segment_description(asset_id: str) -> dict:
 
         host = get_ollama_host(db)
         model = get_ollama_model(db, purpose='generator')
+        fallback = get_ollama_fallback_model(db, purpose='generator')
         template = get_segment_prompt_template()
 
         # Build template variables
@@ -523,7 +567,7 @@ def generate_segment_description(asset_id: str) -> dict:
         logger.info(f"[desc] Rendered prompt for {asset_id} ({len(rendered_prompt)} chars)")
 
         temp = get_generation_temperature(db, 'segment_description', 0.4)
-        description = call_ollama(host, model, rendered_prompt, temperature=temp, max_tokens=500)
+        description = call_ollama(host, model, rendered_prompt, temperature=temp, max_tokens=500, fallback_model=fallback)
 
         # Write to DB + record in history
         update_segment_fields(db, asset_id, {
@@ -619,6 +663,7 @@ def regenerate_segment_description(asset_id: str, previous_description: str, fee
 
         host = get_ollama_host(db)
         model = get_ollama_model(db, purpose='generator')
+        fallback = get_ollama_fallback_model(db, purpose='generator')
         template = get_segment_prompt_template()
 
         variables = _build_segment_variables(ctx, previous_description)
@@ -651,7 +696,7 @@ def regenerate_segment_description(asset_id: str, previous_description: str, fee
         logger.info(f"[regen] Rendered regen prompt for {asset_id} ({len(regen_prompt)} chars, {len(history)} history entries)")
 
         temp = get_generation_temperature(db, 'segment_description', 0.4)
-        description = call_ollama(host, model, regen_prompt, temperature=temp, max_tokens=500)
+        description = call_ollama(host, model, regen_prompt, temperature=temp, max_tokens=500, fallback_model=fallback)
 
         # Record user feedback + new generation in history
         append_segment_description_history(db, asset_id, 'user', feedback)
@@ -717,7 +762,6 @@ def sweep_segments_for_auto_generation():
               AND COALESCE(ri.auto_description_enabled, TRUE) = TRUE
               AND LENGTH(COALESCE(ri.script_content, '')) >= 100
               AND ri.updated_at < NOW() - INTERVAL '2 minutes'
-              AND COALESCE(ri.auto_generate_attempts, 0) < 5
             ORDER BY COALESCE(ri.auto_generate_attempts, 0) ASC,
                      e.air_date ASC NULLS LAST, ri.order_in_rundown ASC
             LIMIT 1
@@ -860,6 +904,7 @@ def generate_episode_description(episode_number):
 
         host = get_ollama_host(db)
         model = get_ollama_model(db, purpose='episode_generator')
+        fallback = get_ollama_fallback_model(db, purpose='episode_generator')
         template = get_episode_prompt_template()
 
         # Format air date
@@ -932,7 +977,7 @@ def generate_episode_description(episode_number):
         logger.info(f"[ep-desc] Rendered prompt for ep {episode_number} ({len(rendered_prompt)} chars, {len(segments)} segments)")
 
         temp = get_generation_temperature(db, 'episode_description', 0.4)
-        description = call_ollama(host, model, rendered_prompt, temperature=temp, max_tokens=600)
+        description = call_ollama(host, model, rendered_prompt, temperature=temp, max_tokens=600, fallback_model=fallback)
 
         # Save to episode
         db.execute(text(
@@ -1050,9 +1095,10 @@ def generate_episode_short_description(episode_number):
         rendered = render_template(template, variables)
         host = get_ollama_host(db)
         model = get_ollama_model(db, purpose='episode_short')
+        fallback = get_ollama_fallback_model(db, purpose='episode_short')
 
         temp = get_generation_temperature(db, 'episode_description', 0.4)
-        short_desc = call_ollama(host, model, rendered, temperature=temp, max_tokens=150)
+        short_desc = call_ollama(host, model, rendered, temperature=temp, max_tokens=150, fallback_model=fallback)
 
         db.execute(text(
             "UPDATE episodes SET short_description = :desc, short_description_model = :model WHERE episode_number = :ep"

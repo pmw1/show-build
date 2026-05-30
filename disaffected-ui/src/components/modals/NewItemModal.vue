@@ -46,9 +46,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { getColorValue } from '@/utils/themeColorMap.js';
 import { getAllItemTypes, mergeWithCustomTypes } from '@/config/itemTypes.js';
+import { registerModalEsc } from '@/composables/useModalStack';
 
 const props = defineProps({
   show: {
@@ -179,12 +180,8 @@ function getTypeColor(type) {
   return dynamicColors.value[type] || getColorValue(type);
 }
 
-function handleKeydown(event) {
-  // Handle ESC key when modal is open
-  if (event.key === 'Escape' && props.show) {
-    cancel();
-  }
-}
+// ESC handled by global modal stack
+registerModalEsc(() => props.show, () => cancel(), 'NewItemModal');
 
 function selectType(type) {
   console.log('Selected type:', type);
@@ -231,18 +228,10 @@ function cancel() {
 }
 
 onMounted(async () => {
-  // Add ESC key listener to document
-  document.addEventListener('keydown', handleKeydown);
-
   // Load dynamic colors and type settings in parallel
   await Promise.all([
     loadDynamicColors(),
     loadTypeSettings()
   ]);
-});
-
-onBeforeUnmount(() => {
-  // Clean up ESC key listener
-  document.removeEventListener('keydown', handleKeydown);
 });
 </script>

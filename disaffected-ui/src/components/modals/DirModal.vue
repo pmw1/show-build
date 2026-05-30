@@ -35,6 +35,7 @@
 </template>
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { registerModalEsc } from '@/composables/useModalStack';
 import axios from 'axios';
 import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap';
 import { useScreenFlash } from '@/composables/useScreenFlash';
@@ -99,20 +100,16 @@ const headerStyles = computed(() => ({
   color: 'white'
 }));
 
-// Mixin-inlined: keyboard handlers
+// ESC is handled by global modal stack (calls handleAbort).
+registerModalEsc(() => props.show, () => handleAbort(), 'DirModal');
+
+// Mixin-inlined: keyboard handlers (Shift+Enter only)
 function setupKeyboardHandlers() {
   keydownHandler = (event) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      handleAbort();
-      return;
-    }
     if (event.shiftKey && event.key === 'Enter') {
       event.preventDefault();
       event.stopPropagation();
       handleSubmit();
-      return;
     }
   };
   document.addEventListener('keydown', keydownHandler, true);

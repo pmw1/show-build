@@ -177,7 +177,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch } from 'vue';
+import { registerModalEsc } from '@/composables/useModalStack';
 import {
   extractPlainText,
   parseComparatorFile,
@@ -233,15 +234,8 @@ const hasDecisions = computed(() => {
   return matchResults.value.some(m => m.decision === 'adopt');
 });
 
-// Methods
-function handleKeydown(event) {
-  if (event.key === 'Escape') {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-    emit('update:show', false);
-  }
-}
+// Methods — ESC handled by registerModalEsc via global modal stack
+registerModalEsc(() => props.show, () => emit('update:show', false), 'ScriptCompareModal');
 
 function resetState() {
   fileContent.value = '';
@@ -391,14 +385,7 @@ watch(() => props.show, (val) => {
   }
 });
 
-// Lifecycle
-onMounted(() => {
-  document.addEventListener('keydown', handleKeydown);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleKeydown);
-});
+// Lifecycle (ESC handler is auto-registered above)
 </script>
 
 <style scoped>

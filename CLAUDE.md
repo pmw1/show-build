@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Production Environment
 
-- **Host**: `prefect` (192.168.51.207) — all show-build services run here
-- **Frontend**: https://192.168.51.207:8091
-- **Backend API**: https://192.168.51.207:8888
+- **Host**: `prefect` (192.168.51.238) — all show-build services run here
+- **Frontend**: https://192.168.51.238:8091
+- **Backend API**: https://192.168.51.238:8888
 - **Containers**: `show-build-server`, `show-build-postgres`, `show-build-redis`
 - **All URLs MUST use HTTPS** — no exceptions
 
@@ -98,7 +98,7 @@ DELETE /api/todos/{id}            → delete
 ```
 
 **Claude's sync protocol** (what I use during sessions):
-1. **Start of session** — read existing todos: `curl -sk http://localhost:8888/api/todos` (from inside the container) or `https://192.168.51.207:8888/api/todos` (from the host)
+1. **Start of session** — read existing todos: `curl -sk http://localhost:8888/api/todos` (from inside the container) or `https://192.168.51.238:8888/api/todos` (from the host)
 2. **Starting work** — POST with `created_by: "claude"` and `status: "in_progress"`
 3. **Completing work** — PATCH the id to `status: "completed"`; the backend auto-fills `completed_at`
 4. Keep the internal TaskCreate/TaskUpdate tools in sync with the dashboard — the dashboard is the single source of truth
@@ -360,7 +360,7 @@ This catches template ref naming conflicts (most common Vue issue), API connecti
 - Frontend: Browser console + network tab
 - Cache clearing: `scripts/clean-npm-servers.sh`
 
-**Ollama**: `http://192.168.51.197:11434` (NOT .223). Config in `api_configs` table.
+**Ollama**: Default is the **local container on prefect** — `http://ollama:11434` (from inside the docker network) or `http://192.168.51.238:11434` (from host/LAN). Default model is `qwen3:32b-q4_K_M`, kept resident via `OLLAMA_KEEP_ALIVE=-1` and an `ollama-preload` oneshot sidecar in `/home/kevin/ollama/docker-compose.yml`. Remote fallback (KairoBox shared instance): `http://192.168.51.197:11434`. Per-workflow overrides live in the `api_configs` table.
 
 **XTTS**: Use settings from database (`api_configs` table), never hardcode.
 

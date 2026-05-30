@@ -1,5 +1,17 @@
 # EditorPanel Architecture: Script Mode & Code Mode
 
+> ⚠️ **PARTIALLY SUPERSEDED — rewrite pending.** The core thesis below
+> ("two views of one string," the `update:scriptContent` → `rawMarkdownContent`
+> persistence chain, the preserved markdown/cue-block format) **survives** the
+> planned migration. But the *inner mechanism* — `segmentEditBuffer`, the 1.5s
+> per-segment debounce, the `isActivelyEditing`/`activelyEditingSegment`/
+> `isRestoringCursor` edit-buffer guard flags, and the `scriptSegments` parse
+> cache — is being replaced by a TipTap/ProseMirror document model. Treat the
+> "Edit Buffer" and reactivity-guard sections as **legacy** once the migration
+> ships; the string-contract and Code-Mode sections stay valid. See
+> [`SCRIPT_EDITOR_MIGRATION_PLAN.md`](SCRIPT_EDITOR_MIGRATION_PLAN.md).
+> **Accurate for the current code until Phase 4/5 lands.**
+
 ## The #1 Thing to Understand
 
 **Script Mode and Code Mode are two views of the same string.**

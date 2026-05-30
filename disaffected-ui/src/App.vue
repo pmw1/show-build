@@ -162,6 +162,18 @@
             <v-list-item-title>Reusables Studio</v-list-item-title>
           </v-list-item>
 
+          <!-- Unmanaged Data submenu within ShowFactory (admin-only) -->
+          <v-list-group v-if="isAdmin" value="unmanaged-data" subgroup>
+            <template v-slot:activator="{ props }">
+              <v-list-item v-bind="props" prepend-icon="mdi-database-alert">
+                <v-list-item-title>Unmanaged Data</v-list-item-title>
+              </v-list-item>
+            </template>
+            <v-list-item to="/unmanaged-data" prepend-icon="mdi-record-rec">
+              <v-list-item-title>Showtime Data</v-list-item-title>
+            </v-list-item>
+          </v-list-group>
+
           <!-- Preproduction submenu within ShowFactory -->
           <v-list-group value="preproduction" subgroup>
             <template v-slot:activator="{ props }">

@@ -143,6 +143,7 @@ async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)
     - Content library placements (source: 'library')
     """
     from models_v2 import Episode, Rundown, RundownItem
+    from services.cue_extractor import extract_cues
 
     try:
         # Convert episode number to int
@@ -167,13 +168,15 @@ async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)
 
             for item in items:
                 order_value = item.order_in_rundown or 0
+                script_content = item.script_content or ''
                 rundown_item_dict = {
                     "id": item.asset_id,  # Legacy: asset_id as primary identifier for frontend
                     "db_id": item.id,     # Database integer ID for API operations
                     "type": item.item_type or 'segment',
                     "slug": item.slug or '',
                     "duration": item.duration or '00:00:00',
-                    "script": item.script_content or '',  # Script content from new field
+                    "script": script_content,  # Script content from new field
+                    "cues": extract_cues(script_content),  # Structured cues parsed server-side
                     "order": order_value,
                     "order_in_rundown": order_value,  # Explicit field for frontend
                     "index": order_value,  # Explicit field for frontend
@@ -183,6 +186,7 @@ async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)
                     "description": item.description or '',  # Metadata description
                     "filename": f"{order_value:03d}-{item.slug}.md",  # Generate filename for compatibility
                     "asset_id": item.asset_id,
+                    "block_letter": item.block_letter or '',
                     "airdate": item.airdate.isoformat() if item.airdate else '',
                     "guests": item.guests or '',
                     "resources": item.resources or '',
@@ -382,6 +386,7 @@ async def create_rundown_item(
             script_content=item_data.get('script_content'),
             guests=item_data.get('guests'),
             resources=item_data.get('resources'),
+            block_letter=item_data.get('block_letter') or None,
             created_at=creation_timestamp,
             updated_at=creation_timestamp
         )
@@ -623,6 +628,8 @@ async def save_rundown_item(
                             rundown_item.llm_generated_fields = db_metadata['llm_generated_fields']
                         if 'auto_description_enabled' in db_metadata:
                             rundown_item.auto_description_enabled = db_metadata['auto_description_enabled']
+                        if 'block_letter' in db_metadata:
+                            rundown_item.block_letter = db_metadata['block_letter'] or None
 
                         # Handle airdate conversion
                         if 'airdate' in db_metadata and db_metadata['airdate']:
@@ -746,6 +753,8 @@ async def save_rundown_items(
                     rundown_item.item_type = item_data.get('type', rundown_item.item_type)
                     rundown_item.duration = item_data.get('duration', rundown_item.duration)
                     rundown_item.status = item_data.get('status', rundown_item.status)
+                    if 'block_letter' in item_data:
+                        rundown_item.block_letter = item_data.get('block_letter') or None
 
                     # CRITICAL: Only update script_content if explicitly provided
                     # Frontend sends script only for currently edited item

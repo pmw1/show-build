@@ -244,6 +244,13 @@ class RundownItem(Base):
     order_in_rundown = Column(Integer, nullable=False)  # From "order" field
     duration = Column(String(20), nullable=True)  # "00:03:45" - from "duration" field
 
+    # Block grouping for downstream consumers (showtime cue runner,
+    # vmix-promoter filename grammar). Nullable: editor populates when
+    # the segment belongs to a labeled block (A/B/C/D); unset for
+    # interstitials and uncategorized items. See
+    # docs/SHOWTIME_INTEGRATION_ANALYSIS.md Gap B.
+    block_letter = Column(String(2), nullable=True)
+
     # Segment-specific fields (nullable for other types)
     subtitle = Column(String(255), nullable=True)
     description = Column(Text, nullable=True)  # Metadata description only

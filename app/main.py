@@ -46,6 +46,7 @@ try:
     from rundown_templates_router import router as rundown_templates_router
     from content_library_router import router as content_library_router
     from script_generation_router import router as script_generation_router
+    from routers.recording_sessions_router import router as recording_sessions_router
 
     # Assets & Media
     from assets_router import router as assets_router
@@ -181,6 +182,7 @@ app.include_router(setup_router, prefix="/api")
 # Episodes & Content
 app.include_router(episodes_router, prefix="/api")
 app.include_router(episode_scaffold_router, prefix="/api")
+app.include_router(recording_sessions_router, prefix="/api", tags=["recording-sessions"])
 app.include_router(rundown_templates_router, prefix="/api/rundown-templates", tags=["rundown-templates"])
 app.include_router(content_library_router)
 app.include_router(script_generation_router, prefix="/api")

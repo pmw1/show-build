@@ -14,6 +14,7 @@
         <v-form ref="sotFormRef" v-model="formValid">
           <!-- Slug (required) -->
           <v-text-field
+            ref="slugFieldRef"
             v-model="formData.slug"
             label="Slug"
             placeholder="short-descriptive-name"
@@ -332,6 +333,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
 import { registerModalEsc } from '@/composables/useModalStack'
+import { useDoubleEnterToSlug } from '@/composables/useDoubleEnterToSlug'
 
 const props = defineProps({
   show: {
@@ -344,6 +346,8 @@ const emit = defineEmits(['update:show', 'submit'])
 
 // Site-wide ESC-closes-modal behavior.
 registerModalEsc(() => props.show, () => emit('update:show', false), 'NewSOTModal')
+const slugFieldRef = ref(null)
+useDoubleEnterToSlug(() => props.show, slugFieldRef)
 
 // Template refs
 const sotFormRef = ref(null)

@@ -138,6 +138,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
+import CueParser from '../utils/cueParser.js';
 
 const props = defineProps({
   modelValue: {
@@ -231,19 +232,62 @@ const previewContent = computed(() => {
   return preview;
 });
 
-const teleprompterContent = computed(() => {
-  let prompter = content.value;
+// Speaker color/label come from the single source of truth in cueParser,
+// so newly-added speakers (e.g. Scott, Asian Scott) work automatically.
+function speakerLabel(speaker) {
+  const opt = CueParser.getSpeakerOptions().find(o => o.value === speaker);
+  return opt ? opt.label : (speaker || 'josh').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
 
-  // Convert cues to teleprompter format
-  prompter = prompter.replace(
+function escapeHtml(s) {
+  return (s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Render one paragraph's text: escape HTML, then turn [CUE:args] into a cue block.
+function renderProseLine(text) {
+  return escapeHtml(text).replace(
     /\[([A-Z]+):([^\]]+)\]/g,
     '<div class="teleprompter-cue">[[ $1 - $2 ]]</div>'
   );
+}
 
-  // Add line breaks and styling
-  prompter = prompter.replace(/\n/g, '<br>');
+const teleprompterContent = computed(() => {
+  // Parse the script into speaker-tagged segments (handles both <p class="speaker">
+  // HTML and raw markdown paragraphs).
+  const segments = CueParser.parseContent(content.value || '');
 
-  return `<div class="teleprompter-text">${prompter}</div>`;
+  if (!segments || segments.length === 0) {
+    return '<div class="teleprompter-text"></div>';
+  }
+
+  let html = '';
+  let prevSpeaker = null;
+
+  segments.forEach((seg) => {
+    // Cue segments (SOT, GFX, FSQ, …) render as a cue block and do not carry a
+    // speaker — don't let them disturb the speaker-change badge tracking.
+    if (seg.type === 'cue') {
+      // generateCardTitle already includes the cue type (e.g. "SOT: slug").
+      const title = (seg.data ? CueParser.generateCardTitle(seg.data) : (seg.cueType || 'CUE'));
+      html += `<div class="teleprompter-cue">[[ ${escapeHtml(title)} ]]</div>`;
+      return;
+    }
+
+    const speaker = seg.speaker || 'josh';
+    const color = speaker === 'josh' ? '#1565C0' : CueParser.getSpeakerColor(speaker);
+
+    // Emit a speaker badge whenever the speaker changes.
+    if (speaker !== prevSpeaker) {
+      html += `<div class="teleprompter-speaker-badge" style="--speaker-color: ${color};">${escapeHtml(speakerLabel(speaker))}</div>`;
+      prevSpeaker = speaker;
+    }
+
+    const body = renderProseLine(seg.content || '');
+    html += `<div class="teleprompter-paragraph speaker-${escapeHtml(speaker)}" style="--speaker-color: ${color};">${body}</div>`;
+  });
+
+  return `<div class="teleprompter-text">${html}</div>`;
 });
 
 // Methods
@@ -520,5 +564,27 @@ watch(() => props.modelValue, (newValue) => {
   border-radius: 8px;
   font-weight: bold;
   text-transform: uppercase;
+}
+
+/* Speaker badge shown whenever the speaker changes. Color comes from the
+   per-element --speaker-color custom property set in teleprompterContent.
+   :deep() is required because this markup is injected via v-html. */
+:deep(.teleprompter-speaker-badge) {
+  display: inline-block;
+  margin: 28px auto 10px;
+  padding: 6px 18px;
+  background: var(--speaker-color, #1565C0);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 0.5em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+:deep(.teleprompter-paragraph) {
+  margin: 0 0 12px;
+  color: var(--speaker-color, #fff);
 }
 </style>

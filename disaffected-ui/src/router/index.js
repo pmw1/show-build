@@ -160,6 +160,15 @@ const routes = [
     component: () => import('@/views/ConsolidationView.vue'),
     meta: { requiresAuth: true }
   },
+  // Unmanaged Data (admin-only): inspect data that arrived from
+  // external systems (currently showtime recording manifests) before
+  // it's formalized into show-build's primary workflow.
+  {
+    path: '/unmanaged-data',
+    name: 'unmanaged-data',
+    component: () => import('@/views/UnmanagedDataView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
   // Preproduction section
   {
     path: '/whiteboard',

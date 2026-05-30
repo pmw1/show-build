@@ -58,10 +58,10 @@ def get_ollama_host_from_db(db: Session) -> Optional[str]:
 
         if result:
             return result[0]
-        return 'http://192.168.51.197:11434'  # Fallback
+        return 'http://172.17.0.1:11434'  # Fallback (local container)
     except Exception as e:
         logger.error(f"Failed to get Ollama host from database: {e}")
-        return 'http://192.168.51.197:11434'  # Fallback
+        return 'http://172.17.0.1:11434'  # Fallback (local container)
 
 
 class OllamaGenerateRequest(BaseModel):

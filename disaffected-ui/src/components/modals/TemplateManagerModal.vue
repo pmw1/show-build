@@ -14,7 +14,8 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch } from 'vue'
+import { registerModalEsc } from '@/composables/useModalStack'
 import TemplatesView from '@/views/TemplatesView.vue'
 
 const props = defineProps({ visible: { type: Boolean, default: false } })
@@ -27,11 +28,7 @@ watch(dialog, (val) => { if (!val) emit('update:visible', false) })
 
 function closeModal() { emit('update:visible', false) }
 function onTemplateSelected(template) { emit('template-selected', template); closeModal() }
-function handleKeydown(event) {
-  if (event.key === 'Escape' && dialog.value) { event.preventDefault(); event.stopPropagation(); closeModal() }
-}
-onMounted(() => document.addEventListener('keydown', handleKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
+registerModalEsc(() => dialog.value, () => closeModal(), 'TemplateManagerModal')
 
 void TemplatesView
 </script>

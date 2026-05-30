@@ -166,6 +166,7 @@
         @generate-gfx="handleGenerateGfx"
         @download-gfx-png="downloadGfxPNG"
         @update-meta="handleChildUpdateMeta"
+        @apply-all-gfx="$emit('apply-all-gfx', $event)"
       />
 
       <!-- NOTE (Directors Note) Display -->
@@ -518,7 +519,7 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq', 'status-changed']);
+const emit = defineEmits(['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq', 'apply-all-gfx', 'status-changed']);
 
 const route = useRoute();
 const { getJobByAssetId, retryFailedJob, reprocessJob } = useSOTProcessing();
@@ -2041,11 +2042,18 @@ async function handleGenerateGfx() {
       parsedListItems = typeof listItems === 'string' ? JSON.parse(listItems) : listItems;
     }
 
-    // Use LOCAL state values from child component faceplate controls, not stale cueData
+    // Use LOCAL state values from child component faceplate controls, not stale cueData.
+    // Slider values live in the child via defineExpose; cueData fields are
+    // the persisted floor. Local > persisted > default.
     const gfxRef = gfxContentRef.value;
     const localGfxAlignment = gfxRef?.localGfxAlignment ?? (props.cueData?.textAlign || 'center');
     const localGfxFontFamily = gfxRef?.localGfxFontFamily ?? (props.cueData?.fontFamily || 'sans-serif');
     const localGfxFontSize = gfxRef?.localGfxFontSize ?? (parseInt(props.cueData?.fontSize) || 25);
+    const localGfxTitleFontSize = gfxRef?.localGfxTitleFontSize ?? (parseInt(props.cueData?.titleFontSize) || 36);
+    const localGfxLineSpacing = gfxRef?.localGfxLineSpacing ?? (parseInt(props.cueData?.lineSpacing) || 30);
+    const localGfxBoxHeight = gfxRef?.localGfxBoxHeight ?? (parseInt(props.cueData?.boxHeight) || 80);
+    const localGfxBoxOpacity = gfxRef?.localGfxBoxOpacity ?? (parseInt(props.cueData?.boxOpacity) || 75);
+    const localVerticalOffset = gfxRef?.localVerticalOffset ?? (parseInt(props.cueData?.verticalOffset) || 0);
     const requestData = {
       episode_id: episode,
       gfx_type: props.cueData.gfxType || props.cueData.rawData?.gfxType || 'fullscreen-text',
@@ -2056,10 +2064,14 @@ async function handleGenerateGfx() {
       alignment: localGfxAlignment,
       font_family: localGfxFontFamily,
       font_size: localGfxFontSize,
+      title_font_size: localGfxTitleFontSize,
+      line_spacing: localGfxLineSpacing,
+      box_height: localGfxBoxHeight,
+      box_opacity: localGfxBoxOpacity,
+      vertical_offset: localVerticalOffset,
       render_mode: props.cueData.renderMode || props.cueData.rawData?.renderMode || 'png',
       priority: 'high',
       title_alignment: props.cueData.titleAlign || props.cueData.rawData?.titleAlign || null,
-      title_font_size: (props.cueData.titleFontSize || props.cueData.rawData?.titleFontSize) ? parseInt(props.cueData.titleFontSize || props.cueData.rawData?.titleFontSize) : null,
       title_pin_to_top: (props.cueData.titlePinToTop || props.cueData.rawData?.titlePinToTop) === 'true' || props.cueData.titlePinToTop === true,
       title_margin_top: (props.cueData.titleMarginTop || props.cueData.rawData?.titleMarginTop) ? parseFloat(props.cueData.titleMarginTop || props.cueData.rawData?.titleMarginTop) : 1.0,
       title_margin_bottom: (props.cueData.titleMarginBottom || props.cueData.rawData?.titleMarginBottom) ? parseFloat(props.cueData.titleMarginBottom || props.cueData.rawData?.titleMarginBottom) : 1.5,

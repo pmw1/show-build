@@ -135,6 +135,8 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap';
 import { useScreenFlash } from '@/composables/useScreenFlash';
+import { registerModalEsc } from '@/composables/useModalStack';
+import { useDoubleEnterToSlug } from '@/composables/useDoubleEnterToSlug';
 
 const props = defineProps({
   show: Boolean,
@@ -218,19 +220,18 @@ function focusSlugField() {
   }
 }
 
+// ESC is handled by global modal stack (calls handleAbort).
+// Only Shift+Enter (submit) needs a local listener; ESC + the rest
+// are covered by useModalStack.
+registerModalEsc(() => props.show, () => handleAbort(), 'StingModal');
+useDoubleEnterToSlug(() => props.show, slugField);
+
 function setupKeyboardHandlers() {
   keydownHandler = (event) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      handleAbort();
-      return;
-    }
     if (event.shiftKey && event.key === 'Enter') {
       event.preventDefault();
       event.stopPropagation();
       handleSubmit();
-      return;
     }
   };
   document.addEventListener('keydown', keydownHandler, true);

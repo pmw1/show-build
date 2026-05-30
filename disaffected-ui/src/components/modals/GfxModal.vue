@@ -66,8 +66,8 @@
                     >
                       <source :src="previewBackgroundVideo" type="video/mp4">
                     </video>
-                    <div class="black-bar-overlay"></div>
-                    <div class="gfx-preview" :style="previewStyle">
+                    <div class="black-bar-overlay" :style="blackBarStyle"></div>
+                    <div class="gfx-preview" :style="overlayPositionStyle">
                       <!-- Full Screen Text mode -->
                       <template v-if="gfxType === 'fullscreen-text'">
                         <div v-if="gfxTitle" class="gfx-title" :style="titleStyle">{{ gfxTitle }}</div>
@@ -154,20 +154,7 @@
                   <div class="style-settings mb-2">
                     <div class="text-caption text-grey mb-1">STYLE SETTINGS</div>
                     <v-row dense class="mb-1">
-                      <v-col cols="4">
-                        <v-text-field
-                          v-model.number="fontSize"
-                          label="Size"
-                          type="number"
-                          variant="outlined"
-                          density="compact"
-                          hide-details
-                          suffix="px"
-                          min="10"
-                          max="60"
-                        />
-                      </v-col>
-                      <v-col cols="8">
+                      <v-col cols="12">
                         <v-select
                           v-model="fontFamily"
                           :items="fontOptions"
@@ -177,6 +164,86 @@
                           hide-details
                         />
                       </v-col>
+                    </v-row>
+                    <v-row dense class="mb-1 mt-2 align-center">
+                      <v-col cols="3" class="text-caption text-grey">Body Size</v-col>
+                      <v-col cols="7">
+                        <v-slider
+                          v-model.number="fontSize"
+                          :min="10"
+                          :max="60"
+                          :step="1"
+                          color="primary"
+                          density="compact"
+                          hide-details
+                          thumb-label
+                        />
+                      </v-col>
+                      <v-col cols="2" class="text-caption text-right">{{ fontSize }}px</v-col>
+                    </v-row>
+                    <v-row dense class="mb-1 align-center">
+                      <v-col cols="3" class="text-caption text-grey">Title Size</v-col>
+                      <v-col cols="7">
+                        <v-slider
+                          v-model.number="titleFontSize"
+                          :min="10"
+                          :max="80"
+                          :step="1"
+                          color="primary"
+                          density="compact"
+                          hide-details
+                          thumb-label
+                        />
+                      </v-col>
+                      <v-col cols="2" class="text-caption text-right">{{ titleFontSize }}px</v-col>
+                    </v-row>
+                    <v-row dense class="mb-1 align-center">
+                      <v-col cols="3" class="text-caption text-grey">Spacing</v-col>
+                      <v-col cols="7">
+                        <v-slider
+                          v-model.number="lineSpacing"
+                          :min="10"
+                          :max="60"
+                          :step="5"
+                          color="primary"
+                          density="compact"
+                          hide-details
+                          thumb-label
+                        />
+                      </v-col>
+                      <v-col cols="2" class="text-caption text-right">{{ lineSpacing }}%</v-col>
+                    </v-row>
+                    <v-row dense class="mb-1 align-center">
+                      <v-col cols="3" class="text-caption text-grey">Box H</v-col>
+                      <v-col cols="7">
+                        <v-slider
+                          v-model.number="boxHeight"
+                          :min="50"
+                          :max="100"
+                          :step="5"
+                          color="primary"
+                          density="compact"
+                          hide-details
+                          thumb-label
+                        />
+                      </v-col>
+                      <v-col cols="2" class="text-caption text-right">{{ boxHeight }}%</v-col>
+                    </v-row>
+                    <v-row dense class="mb-1 align-center">
+                      <v-col cols="3" class="text-caption text-grey">Box Op</v-col>
+                      <v-col cols="7">
+                        <v-slider
+                          v-model.number="boxOpacity"
+                          :min="50"
+                          :max="100"
+                          :step="5"
+                          color="primary"
+                          density="compact"
+                          hide-details
+                          thumb-label
+                        />
+                      </v-col>
+                      <v-col cols="2" class="text-caption text-right">{{ boxOpacity }}%</v-col>
                     </v-row>
                     <v-row dense class="mb-1">
                       <v-col cols="12">
@@ -197,6 +264,30 @@
                             <v-icon size="small">mdi-format-align-right</v-icon>
                           </v-btn>
                         </v-btn-toggle>
+                      </v-col>
+                    </v-row>
+                    <v-row dense class="mb-1 mt-2 align-center">
+                      <v-col cols="3" class="text-caption text-grey">V-Shift</v-col>
+                      <v-col cols="7">
+                        <v-slider
+                          v-model.number="verticalOffset"
+                          :min="-40"
+                          :max="40"
+                          :step="5"
+                          color="primary"
+                          density="compact"
+                          hide-details
+                          thumb-label
+                        />
+                      </v-col>
+                      <v-col cols="2" class="text-caption text-right">
+                        <v-btn
+                          icon="mdi-restore"
+                          size="x-small"
+                          variant="text"
+                          @click="verticalOffset = 0"
+                          title="Reset to center"
+                        />
                       </v-col>
                     </v-row>
                   </div>
@@ -517,10 +608,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { getColorValue } from '@/utils/themeColorMap'
+import { registerModalEsc } from '@/composables/useModalStack'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -570,8 +662,19 @@ const titleCardText = ref('')
 
 // Style settings
 const fontSize = ref(25)
+const titleFontSize = ref(36)
+// Line spacing as percent of font-size (10-60). 30 = ~1.3 line-height.
+const lineSpacing = ref(30)
+// Black bar height as percent of canvas height (50-100). Default 80 matches
+// the original fixed 10% top / 80% / 10% bottom layout in the PIL renderer.
+const boxHeight = ref(80)
+// Black bar opacity 0-100. Default 75 matches the renderer's `alpha=191`.
+const boxOpacity = ref(75)
 const fontFamily = ref('sans-serif')
 const textAlign = ref('center')
+// Vertical offset of the title+body text block within the black bar.
+// Range -40..+40 in percent of bar height; 0 = vertically centered.
+const verticalOffset = ref(0)
 const renderMode = ref('png')
 // Original AssetID when editing an existing GFX cue. Preserves on-disk
 // media identity across edits so updating cue metadata does not orphan
@@ -642,29 +745,58 @@ const fontMap = {
   'monospace': '"Courier New", Courier, monospace'
 }
 
-const previewStyle = computed(() => ({
-  alignItems: textAlign.value === 'center' ? 'center' :
-             textAlign.value === 'left' ? 'flex-start' :
-             textAlign.value === 'right' ? 'flex-end' : 'center'
+// (Vertical-offset and bar sizing are now baked into overlayPositionStyle
+// and blackBarStyle, defined below. The old previewStyle is gone.)
+
+// Convert a "modal pixel" size (matching the slider value the user sees) to
+// the live preview's vw unit. The PIL renderer scales the input by 2.5x on
+// a 1920-wide canvas; the preview container is rendered inside the modal,
+// not full-width, so this is a perceptual approximation — close enough to
+// give the user WYSIWYG-feeling proportions.
+const previewFontVw = px => `${(px / 1920) * 100}vw`
+
+// Line-height derived from the Spacing slider (% of font-size).
+const previewLineHeight = computed(() => 1 + (lineSpacing.value / 100))
+
+const titleStyle = computed(() => ({
+  fontFamily: fontMap[fontFamily.value] || fontMap['sans-serif'],
+  fontSize: previewFontVw(titleFontSize.value),
+  fontWeight: 'bold',
+  textAlign: textAlign.value,
+  lineHeight: previewLineHeight.value,
+  marginBottom: `${(lineSpacing.value / 100).toFixed(2)}em`
 }))
 
-const titleStyle = computed(() => {
-  const fontSizeVw = ((fontSize.value + 8) / 1920) * 100
+const bodyStyle = computed(() => ({
+  fontFamily: fontMap[fontFamily.value] || fontMap['sans-serif'],
+  fontSize: previewFontVw(fontSize.value),
+  textAlign: textAlign.value,
+  lineHeight: previewLineHeight.value
+}))
+
+// Black bar overlay: positioned symmetrically around canvas vertical center,
+// alpha derived from the opacity slider (0-100 → 0-1).
+const blackBarStyle = computed(() => {
+  const heightPct = Math.max(0, Math.min(100, boxHeight.value || 80))
+  const topPct = (100 - heightPct) / 2
+  const alpha = Math.max(0, Math.min(100, boxOpacity.value || 75)) / 100
   return {
-    fontFamily: fontMap[fontFamily.value] || fontMap['sans-serif'],
-    fontSize: `${fontSizeVw}vw`,
-    fontWeight: 'bold',
-    textAlign: textAlign.value,
-    marginBottom: '0.5em'
+    top: `${topPct}%`,
+    height: `${heightPct}%`,
+    background: `rgba(0, 0, 0, ${alpha})`
   }
 })
 
-const bodyStyle = computed(() => {
-  const fontSizeVw = (fontSize.value / 1920) * 100
+// The text overlay sits inside the visible black bar, then translated by
+// verticalOffset (range -40..+40 percent of bar height). Replaces the
+// previous fixed top/height + previewStyle transform-only computed.
+const overlayPositionStyle = computed(() => {
+  const heightPct = Math.max(0, Math.min(100, boxHeight.value || 80))
+  const topPct = (100 - heightPct) / 2
   return {
-    fontFamily: fontMap[fontFamily.value] || fontMap['sans-serif'],
-    fontSize: `${fontSizeVw}vw`,
-    textAlign: textAlign.value
+    top: `${topPct}%`,
+    height: `${heightPct}%`,
+    transform: `translateY(${verticalOffset.value}%)`
   }
 })
 
@@ -681,6 +813,8 @@ const titleCardStyle = computed(() => {
 })
 
 const formattedBodyPreview = computed(() => {
+  // HTML-escape for XSS safety; real newlines and runs of whitespace are
+  // rendered by CSS `white-space: pre-wrap` on .gfx-body (no <br> needed).
   const rawText = gfxBody.value || 'Body text will appear here...'
   return rawText
     .replace(/&/g, '&amp;')
@@ -688,7 +822,6 @@ const formattedBodyPreview = computed(() => {
     .replace(/'/g, '&#39;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>')
 })
 
 // ---- Social Tab ----
@@ -762,8 +895,13 @@ const resetForm = () => {
   gfxSlug.value = ''
   titleCardText.value = ''
   fontSize.value = 25
+  titleFontSize.value = 36
+  lineSpacing.value = 30
+  boxHeight.value = 80
+  boxOpacity.value = 75
   fontFamily.value = 'sans-serif'
   textAlign.value = 'center'
+  verticalOffset.value = 0
   renderMode.value = 'png'
 }
 
@@ -772,13 +910,55 @@ function loadEditData() {
   const data = props.editData.rawData || props.editData
   initialAssetId.value = data.assetId || props.editData.assetId || null
   if (data.gfxType) gfxType.value = data.gfxType
-  if (data.title) gfxTitle.value = data.title
-  if (data.body) gfxBody.value = data.body
-  if (data.titleCardText) titleCardText.value = data.titleCardText
+  // Unescape the persisted form. submitGraphic writes \n -> "\\n" (literal
+  // backslash-n) so the value stays on one line inside [Body: ...]. We
+  // reverse that here so the textarea and preview show real line breaks.
+  // Also tolerate \r\n, \r, \" and \\ in case future writers escape more.
+  // Reverse the escapes applied by submitGraphic.escapeCueValue. Order is
+  // important: handle \\ last so we don't undo escaping of the others.
+  const unescape = s => {
+    if (typeof s !== 'string') return s
+    // Use a placeholder for \\ so we don't double-process it.
+    const PH = '\x00BS\x00'
+    return s
+      .replace(/\\\\/g, PH)
+      .replace(/\\r\\n/g, '\n')
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\n')
+      .replace(/\\]/g, ']')
+      .replace(/\\"/g, '"')
+      .replace(new RegExp(PH, 'g'), '\\')
+  }
+  if (data.title) gfxTitle.value = unescape(data.title)
+  if (data.body) gfxBody.value = unescape(data.body)
+  if (data.titleCardText) titleCardText.value = unescape(data.titleCardText)
   if (data.slug) gfxSlug.value = data.slug
-  if (data.style?.fontSize) fontSize.value = data.style.fontSize
-  if (data.style?.fontFamily) fontFamily.value = data.style.fontFamily
-  if (data.style?.textAlign) textAlign.value = data.style.textAlign
+  // Style settings: prefer flat fields (new format); fall back to nested
+  // style:{} object for any cues saved before the flattening fix landed.
+  const flatSize = data.fontSize ?? data.style?.fontSize
+  const flatTitleSize = data.titleFontSize ?? data.style?.titleFontSize
+  const flatLineSpacing = data.lineSpacing ?? data.style?.lineSpacing
+  const flatBoxHeight = data.boxHeight ?? data.style?.boxHeight
+  const flatBoxOpacity = data.boxOpacity ?? data.style?.boxOpacity
+  const flatFamily = data.fontFamily ?? data.style?.fontFamily
+  const flatAlign = data.textAlign ?? data.alignment ?? data.style?.textAlign
+  const flatVOffset = data.verticalOffset ?? data.style?.verticalOffset
+  // parseIntStripPx: persisted size values may be "25px" or "25"; sliders
+  // and renderer expect raw int. Other percent-style sliders (spacing,
+  // box-h, box-op) might be persisted as "30%" or "30".
+  const toInt = (v, fallback) => {
+    if (v == null || v === '') return fallback
+    const n = parseInt(String(v).replace(/[^0-9-]/g, ''), 10)
+    return Number.isFinite(n) && n > 0 ? n : fallback
+  }
+  fontSize.value = toInt(flatSize, 25)
+  titleFontSize.value = toInt(flatTitleSize, 36)
+  lineSpacing.value = toInt(flatLineSpacing, 30)
+  boxHeight.value = toInt(flatBoxHeight, 80)
+  boxOpacity.value = toInt(flatBoxOpacity, 75)
+  if (flatFamily) fontFamily.value = flatFamily
+  if (flatAlign) textAlign.value = flatAlign
+  if (flatVOffset != null && flatVOffset !== '') verticalOffset.value = Number(flatVOffset) || 0
   if (data.renderMode) renderMode.value = data.renderMode
 }
 
@@ -820,18 +1000,26 @@ const generateAssetId = async () => {
   }
 }
 
-// Build cue data based on current gfxType
+// Build cue data based on current gfxType.
+// IMPORTANT: style settings are stored as FLAT fields, not nested under a
+// `style:` object. The cue serializer (CueParser.formatCueToMarkdown) only
+// emits top-level scalar fields; a nested object would stringify as
+// "[object Object]" and be unreadable on the next load. This is the bug
+// that caused "left alignment / font size don't persist on reopen."
 function buildCueData(assetId, extras = {}) {
   const base = {
     type: 'GFX',
     gfxType: gfxType.value,
     assetId: assetId,
     slug: gfxSlug.value,
-    style: {
-      fontSize: fontSize.value,
-      fontFamily: fontFamily.value,
-      textAlign: textAlign.value
-    },
+    fontSize: fontSize.value,
+    titleFontSize: titleFontSize.value,
+    lineSpacing: lineSpacing.value,
+    boxHeight: boxHeight.value,
+    boxOpacity: boxOpacity.value,
+    fontFamily: fontFamily.value,
+    textAlign: textAlign.value,
+    verticalOffset: verticalOffset.value,
     renderMode: renderMode.value,
     ...extras
   }
@@ -886,6 +1074,11 @@ const handleSubmit = async () => {
       alignment: gfxType.value === 'title-card' ? 'center' : textAlign.value,
       font_family: fontFamily.value,
       font_size: fontSize.value,
+      title_font_size: titleFontSize.value,
+      line_spacing: lineSpacing.value,
+      box_height: boxHeight.value,
+      box_opacity: boxOpacity.value,
+      vertical_offset: verticalOffset.value,
       render_mode: renderMode.value,
       priority: 'high'
     }, {
@@ -1058,14 +1251,8 @@ const resetSocialForm = () => {
   socialSubtext.value = ''
 }
 
-// ---- ESC Key ----
-const handleKeydown = (event) => {
-  if (event.key === 'Escape' && props.show) {
-    event.preventDefault()
-    event.stopPropagation()
-    emit('update:show', false)
-  }
-}
+// ---- ESC Key ---- (handled by global modal stack)
+registerModalEsc(() => props.show, () => cancel(), 'GfxModal')
 
 // ---- Watchers ----
 watch(() => props.show, async (newVal) => {
@@ -1121,13 +1308,8 @@ watch(() => props.show, (newVal) => {
   }
 })
 
-// ---- Lifecycle ----
-onMounted(() => {
-  document.addEventListener('keydown', handleKeydown)
-})
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleKeydown)
-})
+// ESC handler auto-registered via registerModalEsc above; no other
+// document-level listeners needed.
 </script>
 
 <style scoped>
@@ -1208,6 +1390,10 @@ onBeforeUnmount(() => {
   color: white;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
   line-height: 1.4;
+  /* Preserve real newlines and runs of whitespace from the body field,
+     wrap long lines on word boundaries. */
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .gfx-title-card-text {

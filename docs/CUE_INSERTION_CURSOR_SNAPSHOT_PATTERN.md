@@ -1,5 +1,14 @@
 # Cue Insertion Cursor Position Snapshot Pattern
 
+> ⚠️ **SUPERSEDED — slated for deletion.** This pattern exists only because the
+> legacy `contenteditable` editor loses its caret (`focusedParagraphIndex` goes
+> null) when a cue modal takes focus. Under the TipTap/ProseMirror migration the
+> framework owns selection and exposes a stable insertion position, so the
+> per-cue-type `{type}InsertionIndex` snapshot/clear dance is unnecessary — it is
+> replaced by the plan's Phase 4 "insertion-index accessor." See
+> [`SCRIPT_EDITOR_MIGRATION_PLAN.md`](SCRIPT_EDITOR_MIGRATION_PLAN.md).
+> **Still the correct fix in today's code; delete when Phase 4/5 lands.**
+
 **Version**: 1.0
 **Status**: ✅ Production Pattern
 **Implemented**: FSQ (Full-Screen Quote)

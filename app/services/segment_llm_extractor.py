@@ -142,7 +142,26 @@ class SegmentLLMExtractor:
                 return result[0]
         except Exception as e:
             logger.error(f"Failed to get Ollama host: {e}")
-        return 'http://192.168.51.197:11434'
+        return 'http://172.17.0.1:11434'
+
+    @staticmethod
+    def get_meta_extraction_models(db: Session) -> tuple:
+        """Return (primary_model, fallback_model) for meta-extraction calls."""
+        primary, fallback = None, None
+        try:
+            rows = db.execute(text(
+                "SELECT config_key, config_value FROM api_configs "
+                "WHERE workflow = 'meta_extraction' AND service = 'ollama' "
+                "AND config_key IN ('model', 'fallback_model')"
+            )).fetchall()
+            for k, v in rows:
+                if k == 'model' and v:
+                    primary = v
+                elif k == 'fallback_model' and v:
+                    fallback = v
+        except Exception as e:
+            logger.error(f"Failed to read meta_extraction models: {e}")
+        return primary, fallback
 
     @staticmethod
     def resolve_template_variables(template: str, variables: Dict[str, Any]) -> str:
@@ -168,29 +187,40 @@ class SegmentLLMExtractor:
 
         if service == "ollama":
             host = SegmentLLMExtractor.get_ollama_host(db)
+            # If caller didn't pin a model, use the configured meta-extraction primary
+            _primary, fallback_model = SegmentLLMExtractor.get_meta_extraction_models(db)
+            if not settings.get("model") and _primary:
+                model = _primary
 
-            # Combine system and user prompts for Ollama
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            candidates = [model]
+            if fallback_model and fallback_model != model:
+                candidates.append(fallback_model)
 
+            last_text = None
+            last_status = None
             async with httpx.AsyncClient(timeout=180.0) as client:
-                response = await client.post(
-                    f"{host}/api/generate",
-                    json={
-                        "model": model,
-                        "prompt": full_prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": temperature,
-                            "num_predict": max_tokens
+                for idx, m in enumerate(candidates):
+                    response = await client.post(
+                        f"{host}/api/generate",
+                        json={
+                            "model": m,
+                            "prompt": full_prompt,
+                            "stream": False,
+                            "options": {
+                                "temperature": temperature,
+                                "num_predict": max_tokens
+                            }
                         }
-                    }
-                )
-
-                if response.status_code != 200:
-                    raise Exception(f"Ollama returned status {response.status_code}: {response.text}")
-
-                data = response.json()
-                return data.get("response", "")
+                    )
+                    last_status, last_text = response.status_code, response.text
+                    if response.status_code == 404 and idx < len(candidates) - 1:
+                        logger.warning(f"meta_extraction: model {m} 404, trying fallback")
+                        continue
+                    if response.status_code != 200:
+                        raise Exception(f"Ollama returned status {response.status_code}: {last_text}")
+                    return response.json().get("response", "")
+            raise Exception(f"Ollama returned status {last_status}: {last_text}")
 
         else:
             raise Exception(f"Unsupported LLM service: {service}")

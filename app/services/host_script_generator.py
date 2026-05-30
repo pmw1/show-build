@@ -761,7 +761,11 @@ def _process_text_markdown(text: str, preset: ScriptPreset) -> str:
     p_pattern = re.compile(r'<p\s+class=["\']([^"\']+)["\'][^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE)
 
     for match in p_pattern.finditer(text):
-        speaker_class = match.group(1).strip().lower()
+        raw_class = match.group(1).strip().lower()
+        _modifiers = {'bullet'}
+        _tokens = [t for t in raw_class.split() if t]
+        speaker_class = next((t for t in _tokens if t not in _modifiers), 'josh')
+        is_bullet = 'bullet' in _tokens
         paragraph_text = match.group(2).strip()
 
         if not paragraph_text:
@@ -775,15 +779,17 @@ def _process_text_markdown(text: str, preset: ScriptPreset) -> str:
         speaker_config = SPEAKER_CONFIG.get(speaker_class, {'name': speaker_class.upper()})
         speaker_name = speaker_config['name']
 
+        bullet_prefix = '- ' if is_bullet else ''
+
         # Format based on preset
         if preset == ScriptPreset.HOST_CLEAN:
             # Clean mode: just the text with speaker prefix on new paragraphs
-            parts.append(f"**{speaker_name}:** {paragraph_text}")
+            parts.append(f"{bullet_prefix}**{speaker_name}:** {paragraph_text}")
             parts.append("")
         else:
             # Full/Production mode: speaker labeled paragraphs
             parts.append(f"**{speaker_name}:**")
-            parts.append(f"> {paragraph_text}")
+            parts.append(f"> {bullet_prefix}{paragraph_text}")
             parts.append("")
 
     return '\n'.join(parts)
@@ -1050,6 +1056,24 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
             text-align: left;
             margin: 0.2in 0;
             text-indent: 0;
+        }}
+
+        /* Bullet style — round-tripped from the script editor as a second
+           class token on the <p>. Bullet glyph hangs at the left margin
+           and the text body is indented so wrapped lines align under the
+           first character of the text, not under the bullet. */
+        .script-paragraph.bullet {{
+            position: relative;
+            padding-left: 0.35in;
+        }}
+        .script-paragraph.bullet::before {{
+            content: "\\2022";
+            position: absolute;
+            left: 0.05in;
+            top: 0;
+            font-size: 1.6em;
+            line-height: 1;
+            font-weight: bold;
         }}
 
         /* Speaker Attribution */
@@ -1482,7 +1506,14 @@ def _process_text(
     para_pattern = re.compile(r'<p(?:\s+class="([^"]*)")?[^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE)
 
     for match in para_pattern.finditer(text):
-        speaker_class = match.group(1) or 'josh'
+        raw_class = (match.group(1) or 'josh').strip()
+        # Split class tokens so paragraph-level modifiers (currently just
+        # "bullet") don't poison the speaker lookup. First non-modifier
+        # token wins as the speaker.
+        _modifiers = {'bullet'}
+        _tokens = [t for t in raw_class.split() if t]
+        speaker_class = next((t for t in _tokens if t not in _modifiers), 'josh')
+        is_bullet = 'bullet' in _tokens
         content = match.group(2).strip()
 
         if not content:
@@ -1508,7 +1539,10 @@ def _process_text(
 
         speaker_info = SPEAKER_CONFIG.get(speaker_class, {'name': speaker_class.upper()})
 
-        parts.append('<p class="script-paragraph">')
+        parts.append(
+            '<p class="script-paragraph bullet">' if is_bullet
+            else '<p class="script-paragraph">'
+        )
 
         if show_speaker:
             parts.append(
@@ -1591,7 +1625,10 @@ def _format_fsq(cue_content: str, slug: str, url_mapping: Dict[str, str], settin
         settings.get('generation', {}).get('fsq_regenerate_exterior_quotes', False)
     )
 
-    quote = _extract_field(cue_content, 'Quote').strip('"\'')
+    quote = _extract_field(cue_content, 'Quote')
+    if regenerate_exterior_quotes:
+        # Strip stored exterior quotes so the regenerated pair below isn't doubled.
+        quote = quote.strip().strip('"')
     attribution = _extract_field(cue_content, 'Attribution')
 
     original_url = _extract_field(cue_content, r'Media\s*[Uu]rl')

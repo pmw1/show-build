@@ -46,6 +46,40 @@
 
       <v-divider class="my-4" />
 
+      <div class="text-subtitle-2 mb-2">Ollama Models</div>
+      <v-alert type="info" variant="tonal" density="compact" class="mb-3">
+        Choose which local model handles the Phase 1 (Ollama) entity extraction.
+        The fallback model is used when the primary isn't installed on the Ollama server.
+      </v-alert>
+      <v-row>
+        <v-col cols="12" md="6">
+          <v-select
+            v-model="ollamaModel"
+            :items="ollamaModelOptions"
+            label="Primary Model"
+            variant="outlined"
+            density="compact"
+            hint="Used first for meta-extraction calls."
+            persistent-hint
+            clearable
+          />
+        </v-col>
+        <v-col cols="12" md="6">
+          <v-select
+            v-model="ollamaFallbackModel"
+            :items="ollamaModelOptions"
+            label="Fallback Model"
+            variant="outlined"
+            density="compact"
+            hint="Used when the primary model is not installed. Optional."
+            persistent-hint
+            clearable
+          />
+        </v-col>
+      </v-row>
+
+      <v-divider class="my-4" />
+
       <div class="text-subtitle-2 mb-2">Autorun</div>
       <v-alert type="info" variant="tonal" density="compact" class="mb-3">
         Skip the manual button-clicking. With autorun on, eligible segments fire their entity
@@ -151,6 +185,14 @@ const autorunPhase1 = ref(false)
 const autorunPhase2 = ref(false)
 const originalAutorunPhase1 = ref(false)
 const originalAutorunPhase2 = ref(false)
+const ollamaModel = ref('')
+const ollamaFallbackModel = ref('')
+const originalOllamaModel = ref('')
+const originalOllamaFallbackModel = ref('')
+const availableOllamaModels = ref([])
+const ollamaModelOptions = computed(() =>
+  availableOllamaModels.value.map(m => ({ title: m, value: m }))
+)
 const saving = ref(false)
 const lastSaved = ref(false)
 
@@ -159,6 +201,8 @@ const hasChanges = computed(() => {
   if (!selectedTypes.value.every(t => originalTypes.value.includes(t))) return true
   if (autorunPhase1.value !== originalAutorunPhase1.value) return true
   if (autorunPhase2.value !== originalAutorunPhase2.value) return true
+  if ((ollamaModel.value || '') !== originalOllamaModel.value) return true
+  if ((ollamaFallbackModel.value || '') !== originalOllamaFallbackModel.value) return true
   return false
 })
 
@@ -179,8 +223,22 @@ async function loadSettings() {
     autorunPhase2.value = !!response.data?.autorun_phase2
     originalAutorunPhase1.value = autorunPhase1.value
     originalAutorunPhase2.value = autorunPhase2.value
+    ollamaModel.value = response.data?.model || ''
+    ollamaFallbackModel.value = response.data?.fallback_model || ''
+    originalOllamaModel.value = ollamaModel.value
+    originalOllamaFallbackModel.value = ollamaFallbackModel.value
   } catch (error) {
     console.error('Failed to load meta extraction settings:', error)
+  }
+}
+
+async function loadOllamaModels() {
+  try {
+    const resp = await axios.get('/api/llm/ollama/models', { headers: getAuthHeaders() })
+    const models = resp.data?.models || []
+    availableOllamaModels.value = models.map(m => m.name || m).filter(Boolean)
+  } catch (error) {
+    console.warn('Could not load Ollama models:', error)
   }
 }
 
@@ -192,10 +250,14 @@ async function saveSettings() {
       item_types: selectedTypes.value,
       autorun_phase1: autorunPhase1.value,
       autorun_phase2: autorunPhase2.value,
+      model: ollamaModel.value || '',
+      fallback_model: ollamaFallbackModel.value || '',
     }, { headers: getAuthHeaders() })
     originalTypes.value = [...selectedTypes.value]
     originalAutorunPhase1.value = autorunPhase1.value
     originalAutorunPhase2.value = autorunPhase2.value
+    originalOllamaModel.value = ollamaModel.value || ''
+    originalOllamaFallbackModel.value = ollamaFallbackModel.value || ''
     lastSaved.value = true
     setTimeout(() => { lastSaved.value = false }, 3000)
   } catch (error) {
@@ -211,7 +273,9 @@ function resetToDefaults() {
   autorunPhase2.value = false
 }
 
-onMounted(loadSettings)
+onMounted(async () => {
+  await Promise.all([loadSettings(), loadOllamaModels()])
+})
 </script>
 
 <style scoped>

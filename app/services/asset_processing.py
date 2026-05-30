@@ -347,6 +347,11 @@ def generate_gfx_png(
     alignment: str = 'center',
     font_family: str = 'sans-serif',
     font_size: int = 25,
+    title_font_size: int = None,
+    line_spacing: int = 30,
+    box_height: int = 80,
+    box_opacity: int = 75,
+    vertical_offset: int = 0,
     render_mode: str = 'png',
     priority: str = 'normal'
 ):
@@ -412,13 +417,18 @@ def generate_gfx_png(
         img = Image.new('RGB', (width, height), color=(0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        # Calculate black bar area (10% top/bottom margin, 80% height)
-        bar_top = int(height * 0.10)
-        bar_bottom = int(height * 0.90)
-        bar_height = bar_bottom - bar_top
+        # Calculate black bar area from slider values. box_height is the
+        # bar's % of canvas height; the bar is symmetric around vertical
+        # center. box_opacity is 0-100 -> PIL alpha 0-255.
+        bh_pct = max(0, min(100, int(box_height or 80)))
+        bar_height = int(height * bh_pct / 100)
+        bar_top = (height - bar_height) // 2
+        bar_bottom = bar_top + bar_height
 
-        # Draw semi-transparent black bar
-        overlay = Image.new('RGBA', (width, bar_height), (0, 0, 0, 191))  # 75% opacity
+        op_pct = max(0, min(100, int(box_opacity or 75)))
+        bar_alpha = int(255 * op_pct / 100)
+
+        overlay = Image.new('RGBA', (width, bar_height), (0, 0, 0, bar_alpha))
         img.paste(overlay, (0, bar_top), overlay)
 
         # Font setup
@@ -439,14 +449,19 @@ def generate_gfx_png(
         body_font = None
         title_font = None
 
-        # Scale font size for 1080p (input is preview scale)
-        scaled_font_size = int(font_size * 2.5)  # Scale up for full HD
-        title_font_size = int(scaled_font_size * 1.3)  # Title 30% larger
+        # Scale font sizes for 1080p (input is preview/modal scale).
+        # Title size: explicit slider value if provided, else legacy
+        # 1.3x body default.
+        scaled_font_size = int(font_size * 2.5)
+        if title_font_size and title_font_size > 0:
+            scaled_title_size = int(title_font_size * 2.5)
+        else:
+            scaled_title_size = int(scaled_font_size * 1.3)
 
         for font_path in font_paths:
             try:
                 body_font = ImageFont.truetype(font_path, scaled_font_size)
-                title_font = ImageFont.truetype(font_path, title_font_size)
+                title_font = ImageFont.truetype(font_path, scaled_title_size)
                 break
             except (IOError, OSError):
                 continue
@@ -470,9 +485,7 @@ def generate_gfx_png(
 
         # Text positioning
         padding_x = int(width * 0.08)  # 8% horizontal padding
-        padding_y = int(bar_height * 0.15)  # 15% vertical padding within bar
         text_area_width = width - (padding_x * 2)
-        text_area_top = bar_top + padding_y
 
         # Alignment mapping
         align_map = {
@@ -482,31 +495,56 @@ def generate_gfx_png(
         }
         text_align = align_map.get(alignment, 'center')
 
+        # Pre-compute wrapped lines and total block height so the entire
+        # title+body block can be vertically centered within the black bar
+        # and then shifted as a unit by vertical_offset.
+        title_lines = _wrap_text(title, title_font, text_area_width, draw) if title else []
+        body_lines = _wrap_text(body, body_font, text_area_width, draw)
+
+        # Inter-line gap derived from the spacing slider (% of body font).
+        ls_pct = max(0, min(100, int(line_spacing or 30)))
+        line_gap = int(scaled_font_size * ls_pct / 100)
+        title_block_h = 0
+        for line in title_lines:
+            bbox = draw.textbbox((0, 0), line, font=title_font)
+            title_block_h += (bbox[3] - bbox[1]) + line_gap
+        # Title-body gap scales with the same spacing slider but a bit
+        # larger so the title still feels separated from the body.
+        title_body_gap = int(scaled_font_size * (ls_pct + 20) / 100) if title_lines else 0
+        body_block_h = 0
+        for line in body_lines:
+            bbox = draw.textbbox((0, 0), line, font=body_font)
+            body_block_h += (bbox[3] - bbox[1]) + line_gap
+        total_block_h = title_block_h + title_body_gap + body_block_h
+
+        # Clamp vertical_offset to [-40, 40] so callers can't shove text
+        # outside the black bar.
+        v_offset_pct = max(-40, min(40, int(vertical_offset or 0)))
+        v_offset_px = int(bar_height * v_offset_pct / 100)
+
+        # Start y = top of vertically-centered block, plus the offset shift.
+        current_y = bar_top + (bar_height - total_block_h) // 2 + v_offset_px
+
         # Draw title if present
-        current_y = text_area_top
-        if title:
-            # Word wrap title
-            title_lines = _wrap_text(title, title_font, text_area_width, draw)
-            for line in title_lines:
-                bbox = draw.textbbox((0, 0), line, font=title_font)
-                line_width = bbox[2] - bbox[0]
-                line_height = bbox[3] - bbox[1]
+        for line in title_lines:
+            bbox = draw.textbbox((0, 0), line, font=title_font)
+            line_width = bbox[2] - bbox[0]
+            line_height = bbox[3] - bbox[1]
 
-                if text_align == 'center':
-                    x = (width - line_width) // 2
-                elif text_align == 'right':
-                    x = width - padding_x - line_width
-                else:
-                    x = padding_x
+            if text_align == 'center':
+                x = (width - line_width) // 2
+            elif text_align == 'right':
+                x = width - padding_x - line_width
+            else:
+                x = padding_x
 
-                draw.text((x, current_y), line, font=title_font, fill='white')
-                current_y += line_height + int(scaled_font_size * 0.3)
+            draw.text((x, current_y), line, font=title_font, fill='white')
+            current_y += line_height + line_gap
 
-            # Add space between title and body
-            current_y += int(scaled_font_size * 0.5)
+        if title_lines:
+            current_y += title_body_gap
 
         # Draw body text
-        body_lines = _wrap_text(body, body_font, text_area_width, draw)
         for line in body_lines:
             bbox = draw.textbbox((0, 0), line, font=body_font)
             line_width = bbox[2] - bbox[0]
@@ -520,7 +558,7 @@ def generate_gfx_png(
                 x = padding_x
 
             draw.text((x, current_y), line, font=body_font, fill='white')
-            current_y += line_height + int(scaled_font_size * 0.3)
+            current_y += line_height + line_gap
 
         # Build output filename
         clean_slug = slug.lower().replace(' ', '-').replace('_', '-')

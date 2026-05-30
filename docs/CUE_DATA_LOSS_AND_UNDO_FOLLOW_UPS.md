@@ -1,5 +1,17 @@
 # Follow-ups: cue data-loss fixes + universal Ctrl+Z
 
+> ℹ️ **Cross-check against the editor migration.** Some items here are shaped by
+> the legacy `contenteditable` editor and are absorbed or reframed by the planned
+> TipTap/ProseMirror migration: the §5 "re-enable hard-abort tripwires in
+> `useScriptCore`" item is superseded by the migration's **serializer
+> loss-assertion** (a structured-doc → markdown guard replaces the string→string
+> guards), and the contenteditable-debounce-shaped verification steps in §4 / the
+> checklists (e.g. "type then click edit before the 1.5s debounce," "type in a
+> paragraph contenteditable → Ctrl+Z") will need re-expression against the new
+> editor. The rundown-structure undo, MetadataPanel undo, modal-ESC, and repo
+> hygiene items are migration-orthogonal and stand as written. See
+> [`SCRIPT_EDITOR_MIGRATION_PLAN.md`](SCRIPT_EDITOR_MIGRATION_PLAN.md).
+
 This file enumerates the work that was deliberately **deferred** from the
 PR titled *"Fix cue-modal data loss across all cue types + universal
 Ctrl+Z"*. Everything below is intentionally out of scope of that PR but

@@ -222,7 +222,19 @@
                 label="LLM Model"
                 variant="outlined"
                 density="compact"
-                hint="Model used for tone classification. Leave empty to use global default."
+                hint="Primary model used for tone classification. Leave empty to use global default."
+                persistent-hint
+                clearable
+                class="mb-3"
+              />
+
+              <v-select
+                v-model="realContentSettings.toneGeneration.fallbackModel"
+                :items="ollamaModelOptions"
+                label="Fallback Model"
+                variant="outlined"
+                density="compact"
+                hint="Used when the primary model is not installed on the Ollama server. Optional."
                 persistent-hint
                 clearable
                 class="mb-3"
@@ -1042,7 +1054,19 @@
                         label="LLM Model"
                         variant="outlined"
                         density="compact"
-                        hint="Model used for episode description generation. Leave empty to use global default."
+                        hint="Primary model used for episode description generation. Leave empty to use global default."
+                        persistent-hint
+                        clearable
+                        class="mb-3"
+                      />
+
+                      <v-select
+                        v-model="realContentSettings.episodeDescription.fallbackModel"
+                        :items="ollamaModelOptions"
+                        label="Fallback Model"
+                        variant="outlined"
+                        density="compact"
+                        hint="Used when the primary model is not installed on the Ollama server. Optional."
                         persistent-hint
                         clearable
                         class="mb-3"
@@ -1316,7 +1340,19 @@
                         label="LLM Model"
                         variant="outlined"
                         density="compact"
-                        hint="Model used for segment description generation. Leave empty to use global default."
+                        hint="Primary model used for segment description generation. Leave empty to use global default."
+                        persistent-hint
+                        clearable
+                        class="mb-3"
+                      />
+
+                      <v-select
+                        v-model="realContentSettings.segmentDescription.fallbackModel"
+                        :items="ollamaModelOptions"
+                        label="Fallback Model"
+                        variant="outlined"
+                        density="compact"
+                        hint="Used when the primary model is not installed on the Ollama server. Optional."
                         persistent-hint
                         clearable
                         class="mb-3"
@@ -3007,6 +3043,7 @@ const realContentSettings = ref({
   tonePalette: [...DEFAULT_TONE_PALETTE],
   toneGeneration: {
     model: '',
+    fallbackModel: '',
     temperature: 0.1,
     prompt: 'Classify the editorial tone of this broadcast segment. Choose exactly ONE tone from this list: {{tone_palette}}.\n\nRespond ONLY with valid JSON: {"tone": "<chosen tone>", "confidence": <0.0-1.0>, "rationale": "<one sentence>"}\n\nSegment title: {{segment_title}}\nSegment type: {{segment_type}}\n\nFull segment content:\n{{segment_content}}'
   },
@@ -3018,6 +3055,7 @@ const realContentSettings = ref({
     maxLength: 500,
     temperature: 0.4,
     model: '',
+    fallbackModel: '',
     includeTitle: true,
     includeGuestInfo: true,
     itemTypes: {
@@ -3048,6 +3086,7 @@ const realContentSettings = ref({
     allowInteractiveIteration: false,
     temperature: 0.4,
     model: '',
+    fallbackModel: '',
     prompt: 'Write a concise, engaging description for the "{{segment_title}}" segment of {{show_name}} Episode {{episode_number}}.\n\nSegment type: {{segment_type}}\nDuration: {{segment_duration}}\n\n{% if has_tone %}Editorial tone: {{segment_tone}} — {{segment_tone_rationale}}\nWrite the description in that tone.\n\n{% endif %}Content:\n{{segment_content}}\n\n{% if has_adjacent_context %}Adjacent context:\nPrevious: {{adjacent_previous}}\nNext: {{adjacent_next}}\n\n{% endif %}Requirements:\n- 2-3 sentences\n- Capture the key idea and why it matters\n- Match the segment tone, show voice, and audience'
   },
   imageDescription: {
@@ -3396,6 +3435,10 @@ async function saveTonePalette() {
       fetch('/api/settings/generation-prompts/tone_classification/model', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: tg.model || '' })
+      }),
+      fetch('/api/settings/generation-prompts/tone_classification/fallback_model', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: tg.fallbackModel || '' })
       }),
       fetch('/api/settings/generation-prompts/tone_classification/temperature', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -3926,6 +3969,9 @@ async function loadRealContentSettings() {
         if (data.prompts.segment_description.model) {
           realContentSettings.value.segmentDescription.model = data.prompts.segment_description.model
         }
+        if (data.prompts.segment_description.fallback_model !== undefined) {
+          realContentSettings.value.segmentDescription.fallbackModel = data.prompts.segment_description.fallback_model || ''
+        }
         console.log('Loaded segment description settings from backend')
       }
       if (data.prompts?.episode_description) {
@@ -3942,12 +3988,14 @@ async function loadRealContentSettings() {
         }
         if (ep.temperature !== undefined) realContentSettings.value.episodeDescription.temperature = parseFloat(ep.temperature) || 0.4
         if (ep.model) realContentSettings.value.episodeDescription.model = ep.model
+        if (ep.fallback_model !== undefined) realContentSettings.value.episodeDescription.fallbackModel = ep.fallback_model || ''
         console.log('Loaded episode description settings from backend')
       }
       if (data.prompts?.tone_classification) {
         const tc = data.prompts.tone_classification
         if (tc.prompt) realContentSettings.value.toneGeneration.prompt = tc.prompt
         if (tc.model) realContentSettings.value.toneGeneration.model = tc.model
+        if (tc.fallback_model !== undefined) realContentSettings.value.toneGeneration.fallbackModel = tc.fallback_model || ''
         if (tc.temperature !== undefined) realContentSettings.value.toneGeneration.temperature = parseFloat(tc.temperature) || 0.1
         console.log('Loaded tone classification settings from backend')
       }
@@ -4010,6 +4058,10 @@ async function saveEpisodeDescriptionSettings() {
       fetch('/api/settings/generation-prompts/episode_description/model', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: settings.model || '' })
+      }),
+      fetch('/api/settings/generation-prompts/episode_description/fallback_model', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: settings.fallbackModel || '' })
       })
     ]
     await Promise.all(saves)
@@ -4048,6 +4100,10 @@ async function saveSegmentDescriptionSettings() {
       fetch('/api/settings/generation-prompts/segment_description/model', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: realContentSettings.value.segmentDescription.model || '' })
+      }),
+      fetch('/api/settings/generation-prompts/segment_description/fallback_model', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: realContentSettings.value.segmentDescription.fallbackModel || '' })
       })
     ])
     console.log('Segment description settings synced to backend')

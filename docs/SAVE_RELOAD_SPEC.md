@@ -4,6 +4,17 @@
 
 This document describes the *intended* behavior of the ContentEditor save/reload system from the user's perspective and from the system's perspective. It serves as the authoritative spec for the refactored implementation.
 
+> ℹ️ **Mostly survives the editor migration.** The save/reload/undo/remote-sync
+> *behavior* specified here is explicitly preserved by the planned
+> TipTap/ProseMirror migration (the raw-markdown-string contract does not
+> change). Only the **named contenteditable mechanisms** that appear in a few
+> sections — the "non-reactive edit buffer," the "per-segment 1.5s debounce,"
+> the double-Enter Range-API split, and the "non-reactive `hasUnsavedChanges` to
+> avoid stealing focus" rationale — become editor-internal or disappear. The UX
+> contracts in those sections still hold; only their implementation notes need
+> updating when the migration lands. See
+> [`SCRIPT_EDITOR_MIGRATION_PLAN.md`](SCRIPT_EDITOR_MIGRATION_PLAN.md).
+
 ---
 
 ## The Big Picture

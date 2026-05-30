@@ -1,4 +1,39 @@
 <template>
+  <!-- Outside-the-modal overlays (orange theme for VO). Only render
+       when a video is loaded. -->
+  <MediaModalOverlays
+    :show="show"
+    :media-loaded="!!blobUrl"
+    :current-timecode="currentTimecode"
+    :remaining-timecode="remainingTimecode"
+    :current-action-display="currentActionDisplay"
+    :trim-start="trimStart"
+    :trim-end="trimEnd"
+    :clip-duration="clipDuration"
+    :show-speed-indicator="showSpeedIndicator"
+    :playback-speed="playbackSpeed"
+    :speed-label="speedLabel"
+    :show-frame-counter="showFrameCounter"
+    :current-frame-number="currentFrameNumber"
+    :total-frames="totalFrames"
+    :frame-step-direction="frameStepDirection"
+    :thumbnail-timecode="thumbnailTimecode"
+    :clipping-method="clippingMethod"
+    :clips="clips"
+    :clip-slug="clipSlug"
+    :slug="slug"
+    v-model:show-hotkeys="showHotkeys"
+    @remove-clip="removeClip"
+    @update-clip-slug="(p) => { clips[p.index].slug = p.slug }"
+    :theme-colors="{
+      in: '#2196F3', inDark: '#1976D2',
+      out: '#FF5722', outDark: '#E64A19',
+      clip: '#FF9800', clipDark: '#F57C00',
+      thumb: '#9C27B0', thumbDark: '#7B1FA2',
+      speed: '#FFB74D'
+    }"
+  />
+
   <v-dialog
     :model-value="show"
     @update:model-value="onDialogUpdate"
@@ -6,7 +41,7 @@
     persistent
     scrollable
   >
-    <v-card class="vo-modal-card">
+    <v-card ref="modalCardRef" class="vo-modal-card">
       <!-- Header -->
       <v-toolbar density="compact" color="orange-darken-3" dark>
         <v-toolbar-title class="text-white">
@@ -14,7 +49,7 @@
           VO Cue — Voice Over (Video, no audio required)
         </v-toolbar-title>
         <v-spacer />
-        <v-btn icon @click="cancel" title="Cancel">
+        <v-btn icon @click="cancel" title="Cancel (ESC)">
           <v-icon>mdi-close</v-icon>
         </v-btn>
       </v-toolbar>
@@ -26,8 +61,47 @@
           {{ topError }}
         </div>
 
-        <!-- Form: slug + description -->
-        <v-row dense>
+        <!-- Type of Cut row -->
+        <div class="cut-type-row mb-3">
+          <div class="cut-type-label">Type of Cut:</div>
+          <div class="cut-type-buttons">
+            <button
+              ref="firstCutModeButtonRef"
+              :class="['cut-btn', { active: clippingMethod === 'none', focused: focusedCutMode === 'none' }]"
+              @click="selectCutMode('none')"
+              @focus="focusedCutMode = 'none'"
+              @blur="focusedCutMode = null"
+              @keydown="handleCutModeKeydown($event, 'none')"
+            >
+              <span class="cut-btn-label">NONE</span>
+              <span class="cut-btn-key">N</span>
+            </button>
+            <button
+              :class="['cut-btn', { active: clippingMethod === 'single-trim', focused: focusedCutMode === 'single-trim' }]"
+              @click="selectCutMode('single-trim')"
+              @focus="focusedCutMode = 'single-trim'"
+              @blur="focusedCutMode = null"
+              @keydown="handleCutModeKeydown($event, 'single-trim')"
+            >
+              <span class="cut-btn-label">SINGLE TRIM</span>
+              <span class="cut-btn-key">S</span>
+            </button>
+            <button
+              :class="['cut-btn', { active: clippingMethod === 'individual-clips', focused: focusedCutMode === 'individual-clips' }]"
+              @click="selectCutMode('individual-clips')"
+              @focus="focusedCutMode = 'individual-clips'"
+              @blur="focusedCutMode = null"
+              @keydown="handleCutModeKeydown($event, 'individual-clips')"
+            >
+              <span class="cut-btn-label">MULTIPLE CLIPS</span>
+              <span class="cut-btn-key">M</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Form: slug + description (hidden in individual-clips mode in
+             favor of the inline clip tool row) -->
+        <v-row v-if="clippingMethod !== 'individual-clips'" dense>
           <v-col cols="12" md="6">
             <v-text-field
               v-model="slug"
@@ -60,6 +134,67 @@
           </v-col>
         </v-row>
 
+        <!-- Individual-clips top-row tools -->
+        <div v-else class="individual-clips-tools">
+          <v-row dense align="center">
+            <v-col cols="12" md="4">
+              <v-text-field
+                ref="clipSlugInputRef"
+                v-model="clipSlug"
+                label="Clip Slug"
+                hint="auto-generated if blank"
+                persistent-hint
+                density="compact"
+                :class="{ 'clip-slug-attention': clipSlugNeedsAttention }"
+                @input="handleClipSlugInput"
+                @keydown.enter="handleClipSlugEnter"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-text-field
+                ref="trimStartInputRef"
+                v-model="trimStart"
+                label="Time Start"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-text-field
+                ref="trimEndInputRef"
+                v-model="trimEnd"
+                label="Time End"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="12" md="2">
+              <v-btn
+                block
+                color="orange-darken-1"
+                @click="handleTakeClip"
+                title="Take clip (Ctrl+Enter or Enter Enter)"
+              >
+                TAKE
+              </v-btn>
+            </v-col>
+          </v-row>
+          <div v-if="clips.length > 0" class="clips-badges mt-2">
+            <v-chip
+              v-for="(clip, idx) in clips"
+              :key="`badge-${idx}`"
+              closable
+              color="orange-darken-2"
+              variant="tonal"
+              size="small"
+              class="mr-2 mb-1"
+              @click:close="removeClip(idx)"
+            >
+              {{ clip.slug }}
+            </v-chip>
+          </div>
+        </div>
+
         <v-divider class="my-3" />
 
         <!-- Video preview + file picker -->
@@ -75,7 +210,7 @@
             <v-icon size="56" color="grey-lighten-1">mdi-video-plus</v-icon>
             <div class="text-body-1 mt-2">Click or drop a video file to upload</div>
             <div class="text-caption text-grey">
-              Accepted: MP4, MOV, MKV, WebM. Audio not required.
+              Accepted: MP4, MOV, MKV, WebM. Audio not required. (Press B to browse)
             </div>
             <input
               ref="fileInputRef"
@@ -93,9 +228,9 @@
               :src="blobUrl"
               class="video-player"
               @loadedmetadata="onVideoMetadata"
-              @timeupdate="onTimeupdate"
-              @play="onPlay"
-              @pause="onPause"
+              @timeupdate="updateTimecode"
+              @play="updatePlayPauseState"
+              @pause="updatePlayPauseState"
               @error="onVideoError"
               controls
               preload="metadata"
@@ -145,18 +280,16 @@
               @seek="handleWaveformSeek"
             />
 
-            <!-- NO AUDIO overlay — appears on top of the waveform area
-                 because VO content is video-only by design. The scrubber,
-                 in/out markers, and click-to-seek under it still work. -->
+            <!-- NO AUDIO overlay — VO content is video-only by design.
+                 Scrubber and click-to-seek beneath remain functional. -->
             <div v-if="!hasAudio" class="no-audio-overlay" aria-label="No audio track">
               <span class="no-audio-text">NO AUDIO</span>
             </div>
           </div>
         </transition>
 
-        <!-- 2x6 control grid: row 1 mark/go/play/preview, row 2 stepping -->
+        <!-- 2x6 control grid -->
         <div v-if="blobUrl" class="control-grid mt-3">
-          <!-- Row 1 -->
           <div class="control-row">
             <button
               ref="markInBtnRef"
@@ -187,10 +320,10 @@
             <button
               class="grid-btn preview"
               @click="onPreview"
-              title="Preview IN→OUT (P)"
+              title="Preview IN→OUT (Shift+Space)"
             >
               <span class="btn-label">PREVIEW</span>
-              <span class="btn-key">P</span>
+              <span class="btn-key">⇧SPC</span>
             </button>
             <button
               class="grid-btn go-to"
@@ -211,24 +344,23 @@
             </button>
           </div>
 
-          <!-- Row 2 -->
           <div class="control-row">
-            <button class="grid-btn step" @click="onStepBack10s" title="Back 10s (J)">
+            <button class="grid-btn step" @click="performJumpBackTenSeconds" title="Back 10s (↓)">
               <span class="btn-label">−10 s</span>
             </button>
-            <button class="grid-btn step" @click="onStepBack1s" title="Back 1s (←)">
+            <button class="grid-btn step" @click="performStepBackSecond" title="Back 1s (J)">
               <span class="btn-label">−1 s</span>
             </button>
-            <button class="grid-btn step" @click="onStepBack1f" title="Back 1 frame (Shift+←)">
+            <button class="grid-btn step" @click="performStepBackFrame" title="Back 1 frame (←)">
               <span class="btn-label">−1 f</span>
             </button>
-            <button class="grid-btn step" @click="onStepForward1f" title="Forward 1 frame (Shift+→)">
+            <button class="grid-btn step" @click="performStepForwardFrame" title="Forward 1 frame (→)">
               <span class="btn-label">+1 f</span>
             </button>
-            <button class="grid-btn step" @click="onStepForward1s" title="Forward 1s (→)">
+            <button class="grid-btn step" @click="performStepForwardSecond" title="Forward 1s (L)">
               <span class="btn-label">+1 s</span>
             </button>
-            <button class="grid-btn step" @click="onStepForward10s" title="Forward 10s (L)">
+            <button class="grid-btn step" @click="performJumpForwardTenSeconds" title="Forward 10s (↑)">
               <span class="btn-label">+10 s</span>
             </button>
           </div>
@@ -271,7 +403,7 @@
           @click="submit"
         >
           <v-icon start>mdi-check</v-icon>
-          Insert VO Cue
+          {{ clippingMethod === 'individual-clips' ? `Insert ${clips.length} VO Cue${clips.length !== 1 ? 's' : ''}` : 'Insert VO Cue' }}
         </v-btn>
       </v-card-actions>
     </v-card>
@@ -283,77 +415,106 @@
 /**
  * VoModal — Voice Over cue creation modal.
  *
- * Modeled on SotModal (same overall UX: file upload, video player,
- * waveform timeline with in/out markers, mark-in/out + frame stepping
- * 2x6 control grid, trim display) but VO-specific:
- *   - Audio is NOT required. When the source has no audio track, a
- *     "NO AUDIO" overlay appears over the waveform area (the markers,
- *     scrubber, and click-to-seek under it remain functional).
- *   - Backend route is /api/vo/upload/background + /api/vo/process
- *     instead of the SOT pipeline.
- *   - No transcription, no audio normalization, no MP3 extraction —
- *     those phases are skipped by process_vo_video on the server.
- *   - Single-trim only (no individual-clips / montage modes).
+ * Full keyboard + preview + multi-clip parity with SotModal via shared
+ * composables. VO-specific bits stay here:
+ *   - /api/vo/upload/background + /api/vo/process endpoints
+ *   - NO AUDIO overlay over the waveform area
+ *   - Orange theme, no transcription / credits / thumbnails
  *
- * State + utilities + action primitives (mark-in/out, play/pause,
- * frame stepping, etc.) come from the shared @composables/
- * useTrimmableMediaModal composable. Modal-specific UX (toasts,
- * NO AUDIO overlay, button-press animations) is wrapped on top
- * here. SotModal will adopt the same composable in a follow-up.
+ * State + actions come from @composables/useTrimmableMediaModal.
+ * Keyboard shortcuts from useMediaModalKeyboard. Multi-clip workflow
+ * from useMediaModalClips. Focus trap from useFocusTrap.
+ *
+ * Cue insertion contract with ContentEditor:
+ *   - emits `submit` (single VO cue payload) when clippingMethod !== 'individual-clips'
+ *   - emits `submit-multiple` (array of VO payloads) when 'individual-clips'
  */
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useToast } from 'vue-toastification'
-import axios from 'axios'
+import axios from 'axios' // eslint-disable-line no-unused-vars
 
 import AudioWaveform from '@/components/AudioWaveform.vue'
 import { useWaveform } from '@/composables/useWaveform'
 import { useTrimmableMediaModal } from '@/composables/useTrimmableMediaModal'
+import { useMediaModalKeyboard } from '@/composables/useMediaModalKeyboard'
+import { useMediaModalClips } from '@/composables/useMediaModalClips'
+import { useFocusTrap } from '@/composables/useFocusTrap'
+import { uploadVideoInBackground } from '@/utils/mediaUpload'
+import { registerModalEsc } from '@/composables/useModalStack'
+import { useDoubleEnterToSlug } from '@/composables/useDoubleEnterToSlug'
+import MediaModalOverlays from '@/components/modals/shared/MediaModalOverlays.vue'
+import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap'
 
 // ---------------------------------------------------------------------------
-// Props / emits — drop-in compatible with the previous VoModal
+// Props / emits — backward compatible; adds `submit-multiple`
 // ---------------------------------------------------------------------------
 const props = defineProps({
   show: Boolean,
   episode: String,
   duplicateSlugs: { type: Array, default: () => [] },
-  cueType: { type: String, default: 'vo' },
+  cueType: { type: String, default: 'vo' }, // eslint-disable-line no-unused-vars
 })
-const emit = defineEmits(['update:show', 'submit'])
+const emit = defineEmits(['update:show', 'submit', 'submit-multiple'])
 
 const toast = useToast()
 
 // ---------------------------------------------------------------------------
 // Refs (template + DOM)
 // ---------------------------------------------------------------------------
+const modalCardRef = ref(null)
 const videoPlayerRef = ref(null)
 const fileInputRef = ref(null)
-const slugFieldRef = ref(null) // eslint-disable-line no-unused-vars
+const slugFieldRef = ref(null)
 const topErrorEl = ref(null) // eslint-disable-line no-unused-vars
 const videoInfoOverlayRef = ref(null)
 const markInBtnRef = ref(null)
 const markOutBtnRef = ref(null)
 const playPauseBtnRef = ref(null)
+const trimStartInputRef = ref(null)
+const trimEndInputRef = ref(null)
+const clipSlugInputRef = ref(null)
+const firstCutModeButtonRef = ref(null)
 
 // ---------------------------------------------------------------------------
-// Shared timeline composable — provides state + actions + utilities
+// Shared timeline composable — provides state + actions + utilities.
+// Toast is wired so the composable emits its own IN/OUT/preview toasts.
 // ---------------------------------------------------------------------------
-const trim = useTrimmableMediaModal({ videoPlayerRef })
+const trim = useTrimmableMediaModal({
+  videoPlayerRef,
+  defaultFramerate: 30,
+  toast,
+  emitActionFeedback: true,
+})
 const {
+  // State
   trimStart, trimEnd, duration, currentFramerate, isPlaying,
-  currentTimecode, durationTimecode, currentActionDisplay,
+  currentTimecode, durationTimecode, remainingTimecode,
+  currentActionDisplay, thumbnailTimecode,
+  playbackSpeed, showSpeedIndicator, speedLabel,
+  showFrameCounter, currentFrameNumber, totalFrames, frameStepDirection,
+  // Multi-clip state
+  clippingMethod, clipSlug, clips, clipCounter, // eslint-disable-line no-unused-vars
+  // Computed
   clipDuration, inPointSeconds, outPointSeconds,
+  // Pure utilities
   secondsToTimecode, formatFileSize,
   animateButtonPress,
+  // Mark / go-to
   performGoToInAction, performGoToOutAction, handleWaveformSeek,
+  // Frame stepping
+  performStepBackFrame, performStepForwardFrame,
+  performStepBackSecond, performStepForwardSecond,
+  performJumpBackTenSeconds, performJumpForwardTenSeconds,
+  // Live updates
   updateTimecode, updatePlayPauseState,
 } = trim
 
 // ---------------------------------------------------------------------------
-// Waveform composable (handles audio extraction; flat for silent videos)
+// Waveform composable
 // ---------------------------------------------------------------------------
 const { waveformData, extractWaveform, clearWaveform } = useWaveform()
 const showWaveform = ref(false)
-const hasAudio = ref(false) // gates the NO AUDIO overlay
+const hasAudio = ref(false)
 
 // ---------------------------------------------------------------------------
 // Local form / upload state
@@ -369,15 +530,69 @@ const tempJobId = ref(null)
 const isSubmitting = ref(false)
 const topError = ref('')
 const videoSpecs = ref({})
+let uploadAbortFn = null
+
+// Cut-mode focus state
+const focusedCutMode = ref(null)
+
+// Hotkeys sidebar visibility (toggled by Ctrl+1)
+const showHotkeys = ref(false)
+
+// ---------------------------------------------------------------------------
+// Computed — color values for validation feedback
+// ---------------------------------------------------------------------------
+const locatorFlashColor = computed(() => {
+  const colorName = getColorValue('locatorflash') || 'deep-orange-accent-2'
+  return resolveVuetifyColor(colorName)
+})
+
+// ---------------------------------------------------------------------------
+// Multi-clip actions
+// ---------------------------------------------------------------------------
+const clipsApi = useMediaModalClips({
+  videoPlayerRef,
+  trim,
+  toast,
+  clipSlugInputRef,
+  locatorFlashColor,
+  slug,
+})
+const {
+  clipSlugNeedsAttention,
+  handleTakeClip,
+  removeClip,
+  handleDoubleEnterTake,
+  handleClipSlugInput,
+  handleClipSlugEnter,
+} = clipsApi
 
 // ---------------------------------------------------------------------------
 // Derived
 // ---------------------------------------------------------------------------
 const canSubmit = computed(() => {
+  if (!blobUrl.value || !uploadComplete.value) return false
+  if (clippingMethod.value === 'individual-clips') {
+    // Need at least one clip taken
+    return clips.value.length > 0
+  }
   return !!slug.value.trim()
-    && !!blobUrl.value
-    && uploadComplete.value
 })
+
+// ---------------------------------------------------------------------------
+// Cut-mode selection (mirrors SotModal pattern)
+// ---------------------------------------------------------------------------
+function selectCutMode(mode) {
+  clippingMethod.value = mode
+  console.log(`[VoModal] Cut mode → ${mode}`)
+}
+
+function handleCutModeKeydown(event, mode) {
+  if (event.key === ' ' || event.key === 'Enter') {
+    event.preventDefault()
+    event.stopPropagation()
+    selectCutMode(mode)
+  }
+}
 
 // ---------------------------------------------------------------------------
 // File handling
@@ -398,7 +613,6 @@ function handleFileUpload(e) {
 
 async function loadFile(file) {
   originalFile.value = file
-  // Free any previous blob
   if (blobUrl.value && blobUrl.value.startsWith('blob:')) {
     try { URL.revokeObjectURL(blobUrl.value) } catch (_e) { /* noop */ }
   }
@@ -408,48 +622,43 @@ async function loadFile(file) {
   tempJobId.value = null
 
   await nextTick()
-  // Player will fire @loadedmetadata which calls onVideoMetadata.
   startBackgroundUpload(file)
 }
 
 async function startBackgroundUpload(file) {
-  const form = new FormData()
-  form.append('file', file)
-  form.append('episode', props.episode || '')
-
+  uploadProgress.value = 1
+  uploadComplete.value = false
+  const { promise, abort } = uploadVideoInBackground(file, '/api/vo/upload/background', {
+    onProgress: (p) => { uploadProgress.value = p }
+  })
+  uploadAbortFn = abort
   try {
-    const xhr = new XMLHttpRequest()
-    xhr.upload.onprogress = (evt) => {
-      if (evt.lengthComputable) {
-        uploadProgress.value = Math.round((evt.loaded / evt.total) * 100)
-      }
-    }
-    const result = await new Promise((resolve, reject) => {
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try { resolve(JSON.parse(xhr.responseText)) }
-          catch (e) { reject(e) }
-        } else { reject(new Error(`Upload failed: ${xhr.status}`)) }
-      }
-      xhr.onerror = () => reject(new Error('Upload network error'))
-      xhr.open('POST', '/api/vo/upload/background')
-      const token = localStorage.getItem('auth-token')
-      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-      xhr.send(form)
-    })
+    const result = await promise
     tempJobId.value = result?.temp_job_id || null
     uploadProgress.value = 100
     uploadComplete.value = true
     toast.success('Upload complete')
   } catch (err) {
+    if (err?.message === 'aborted') {
+      uploadProgress.value = 0
+      return
+    }
     console.error('[VoModal] background upload failed:', err)
     uploadProgress.value = 0
     topError.value = `Upload failed: ${err?.message || 'unknown error'}`
     toast.error(topError.value)
+  } finally {
+    uploadAbortFn = null
   }
 }
 
 function clearVideo() {
+  // Cancel any in-flight upload so its stale onload doesn't write to a
+  // reset modal.
+  if (uploadAbortFn) {
+    try { uploadAbortFn() } catch (_e) { /* noop */ }
+    uploadAbortFn = null
+  }
   if (blobUrl.value && blobUrl.value.startsWith('blob:')) {
     try { URL.revokeObjectURL(blobUrl.value) } catch (_e) { /* noop */ }
   }
@@ -466,20 +675,11 @@ function clearVideo() {
 // ---------------------------------------------------------------------------
 // Video metadata + waveform extraction
 // ---------------------------------------------------------------------------
-// MEDIA_ERR_* code → human label. The browser's <video> element fails
-// silently on unsupported codecs (ProRes, HEVC w/o hw decode, AV1 on old
-// Chromium, raw DV, etc.) — we surface the reason here as both a toast
-// and topError bar so users aren't left staring at a black box.
 function onVideoError() {
   const v = videoPlayerRef.value
   const err = v?.error
   if (!err) return
-  const codes = {
-    1: 'aborted',
-    2: 'network error',
-    3: 'decode error (codec problem)',
-    4: 'format not supported by browser',
-  }
+  const codes = { 1: 'aborted', 2: 'network error', 3: 'decode error (codec problem)', 4: 'format not supported by browser' }
   const label = codes[err.code] || `unknown (code ${err.code})`
   const detail = err.message ? ` — ${err.message}` : ''
   const filename = originalFile.value?.name || 'video'
@@ -497,7 +697,7 @@ function onVideoMetadata() {
     resolution: w && h ? `${w}×${h}` : null,
     aspectRatio: w && h ? (w / h).toFixed(3) : null,
     duration: dur,
-    framerate: 30, // VO assumes 30fps unless detected later
+    framerate: 30,
     fileSize: originalFile.value?.size || null,
     filename: originalFile.value?.name || '',
   }
@@ -515,8 +715,8 @@ function onVideoMetadata() {
     `
   }
 
-  // Try to extract a waveform. For silent VO it returns an empty array; we
-  // detect that and show the NO AUDIO overlay over the timeline panel.
+  // Extract waveform. For silent VO it returns an empty array; show
+  // the NO AUDIO overlay.
   setTimeout(async () => {
     try {
       const samples = await extractWaveform(videoPlayerRef.value, 500)
@@ -530,23 +730,17 @@ function onVideoMetadata() {
   }, 100)
 }
 
-function onTimeupdate() { updateTimecode() }
-function onPlay() { updatePlayPauseState() }
-function onPause() { updatePlayPauseState() }
-
 // ---------------------------------------------------------------------------
-// Action wrappers — composable provides the primitive; we add VO UX skin
+// Action wrappers — composable provides the primitive; we add UX skin
 // ---------------------------------------------------------------------------
 function onMarkIn() {
   trim.performMarkInAction()
   animateButtonPress(markInBtnRef.value)
-  toast.info(`IN @ ${trimStart.value}`, { timeout: 1500 })
 }
 
 function onMarkOut() {
   trim.performMarkOutAction()
   animateButtonPress(markOutBtnRef.value)
-  toast.warning(`OUT @ ${trimEnd.value}`, { timeout: 1500 })
 }
 
 function onPlayPause() {
@@ -562,23 +756,78 @@ function onPreview() {
   trim.performPreviewAction()
 }
 
-function onStepBack1f()  { trim.performStepBackFrame() }
-function onStepForward1f() { trim.performStepForwardFrame() }
-function onStepBack1s()  { trim.performStepBackSecond() }
-function onStepForward1s() { trim.performStepForwardSecond() }
-function onStepBack10s() { trim.performJumpBackTenSeconds() }
-function onStepForward10s() { trim.performJumpForwardTenSeconds() }
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts
+// ---------------------------------------------------------------------------
+const kbd = useMediaModalKeyboard({
+  show: () => props.show,
+  videoPlayerRef,
+  trim,
+  onSubmit: () => submit(),
+  onTake: () => handleTakeClip(),
+  onPreviewIntoOut: () => onPreview(),
+  onDoubleEnterTake: () => handleDoubleEnterTake(),
+  onCutModeSelect: (mode) => selectCutMode(mode),
+  onBrowseFile: () => triggerFileInput(),
+  onToggleHotkeys: () => { showHotkeys.value = !showHotkeys.value },
+  onEscape: () => handleEscapeKey(),
+  trimStartInputRef,
+  trimEndInputRef,
+  clippingMethod,
+})
+
+// ---------------------------------------------------------------------------
+// Focus trap
+// ---------------------------------------------------------------------------
+const focusTrap = useFocusTrap(modalCardRef)
+
+// ESC handled by global modal stack — uniform with the other modals.
+// useMediaModalKeyboard no longer handles ESC itself.
+registerModalEsc(() => props.show, () => handleEscapeKey(), 'VoModal')
+useDoubleEnterToSlug(() => props.show, slugFieldRef)
 
 // ---------------------------------------------------------------------------
 // Submission
 // ---------------------------------------------------------------------------
 async function submit() {
   if (isSubmitting.value) return
+  if (!blobUrl.value || !uploadComplete.value) {
+    toast.warning('Wait for upload to complete')
+    return
+  }
+
+  // Multi-clip path
+  if (clippingMethod.value === 'individual-clips') {
+    if (clips.value.length === 0) {
+      toast.warning('TAKE at least one clip first (Ctrl+Enter)')
+      return
+    }
+    isSubmitting.value = true
+    try {
+      const multipleVos = clips.value.map((clip) => ({
+        type: 'VO',
+        slug: clip.slug,
+        description: description.value,
+        duration: secondsToTimecode(clip.duration_seconds, false),
+        trimStart: clip.time_start,
+        trimEnd: clip.time_end,
+        tempJobId: tempJobId.value,
+        hasAudio: hasAudio.value,
+      }))
+      emit('submit-multiple', multipleVos)
+      resetForm()
+      emit('update:show', false)
+    } finally {
+      isSubmitting.value = false
+    }
+    return
+  }
+
+  // Single submission path
   if (!slug.value.trim()) {
     slugError.value = 'Slug required'
     return
   }
-  // Slug uniqueness against previously-known cues
   if (props.duplicateSlugs.includes(slug.value.trim())) {
     slugError.value = 'Slug already used in this episode'
     return
@@ -586,9 +835,6 @@ async function submit() {
 
   isSubmitting.value = true
   try {
-    // Trigger backend processing on the already-uploaded temp job, if we
-    // have one. The actual cue-block creation happens in the parent's
-    // submitVo handler after the emit fires.
     if (tempJobId.value) {
       try {
         await axios.post('/api/vo/process', {
@@ -626,6 +872,13 @@ function cancel() {
   emit('update:show', false)
 }
 
+function handleEscapeKey() {
+  // ESC closes the modal directly (matches SotModal pattern, no
+  // confirmation prompt). cancel() → resetForm() clears state.
+  console.log('⎋ ESC pressed - closing VO modal')
+  cancel()
+}
+
 function resetForm() {
   slug.value = ''
   slugError.value = ''
@@ -633,6 +886,12 @@ function resetForm() {
   topError.value = ''
   trimStart.value = '00:00:00'
   trimEnd.value = '00:00:00'
+  clippingMethod.value = 'none'
+  clipSlug.value = ''
+  clips.value = []
+  clipCounter.value = 1
+  thumbnailTimecode.value = ''
+  showHotkeys.value = false
   isSubmitting.value = false
   clearVideo()
 }
@@ -641,9 +900,45 @@ function onDialogUpdate(v) {
   if (!v) cancel()
 }
 
-// Reset on close
-watch(() => props.show, (val) => {
-  if (!val) resetForm()
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+onMounted(() => {
+  if (props.show) {
+    kbd.install()
+    nextTick(() => { focusTrap.install() })
+  }
+})
+
+watch(
+  () => props.show,
+  (newValue, oldValue) => {
+    if (newValue && !oldValue) {
+      kbd.install()
+      nextTick(() => {
+        focusTrap.install()
+        // Auto-focus first cut-mode button (NONE)
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (firstCutModeButtonRef.value) {
+            firstCutModeButtonRef.value.focus()
+            focusedCutMode.value = 'none'
+          } else if (slugFieldRef.value) {
+            slugFieldRef.value.focus?.()
+          }
+        }))
+      })
+    } else if (!newValue && oldValue) {
+      kbd.uninstall()
+      focusTrap.uninstall()
+      resetForm()
+    }
+  }
+)
+
+onBeforeUnmount(() => {
+  if (blobUrl.value && blobUrl.value.startsWith('blob:')) {
+    try { URL.revokeObjectURL(blobUrl.value) } catch (_e) { /* noop */ }
+  }
 })
 </script>
 
@@ -663,11 +958,83 @@ watch(() => props.show, (val) => {
   font-weight: 600;
 }
 
-/* Video upload dropzone */
-.video-section {
-  position: relative;
+/* Cut-mode row */
+.cut-type-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cut-type-label {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.6);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.cut-type-buttons {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+.cut-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 2px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.7);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cut-btn:hover {
+  background: rgba(255, 152, 0, 0.08);
+  border-color: rgba(255, 152, 0, 0.5);
+}
+.cut-btn.focused {
+  border-color: #FF8F00;
+  box-shadow: 0 0 0 2px rgba(255, 143, 0, 0.3);
+  outline: none;
+}
+.cut-btn.active {
+  background: #FF8F00;
+  color: white;
+  border-color: #E65100;
+}
+.cut-btn-key {
+  font-size: 10px;
+  opacity: 0.6;
 }
 
+/* Individual clips tools */
+.individual-clips-tools {
+  background: rgba(255, 152, 0, 0.05);
+  border: 1px solid rgba(255, 152, 0, 0.2);
+  border-radius: 4px;
+  padding: 12px;
+}
+.clip-slug-attention {
+  animation: clip-attention-pulse 0.4s ease-in-out 3;
+}
+@keyframes clip-attention-pulse {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 0 3px rgba(255, 87, 34, 0.5); }
+}
+.clips-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Video upload dropzone */
+.video-section { position: relative; }
 .video-dropzone {
   border: 2px dashed rgba(0, 0, 0, 0.2);
   border-radius: 6px;
@@ -681,15 +1048,11 @@ watch(() => props.show, (val) => {
   background: rgba(255, 152, 0, 0.05);
   border-color: rgba(255, 152, 0, 0.5);
 }
-
 .video-player-wrapper {
   position: relative;
   background: #000;
   border-radius: 6px;
   overflow: hidden;
-  /* Deterministic height so controls below don't overlay an empty/short
-     video element while metadata is loading or if the file fails to decode.
-     Matches SotModal's 300px pattern. */
   min-height: 300px;
 }
 .video-player {
@@ -700,7 +1063,6 @@ watch(() => props.show, (val) => {
   background: #000;
   object-fit: contain;
 }
-
 .video-info-overlay {
   position: absolute;
   top: 8px;
@@ -712,12 +1074,9 @@ watch(() => props.show, (val) => {
   border-radius: 4px;
   pointer-events: none;
 }
-
 .upload-progress {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: 0; left: 0; right: 0;
   height: 4px;
   background: rgba(255, 255, 255, 0.15);
 }
@@ -734,11 +1093,9 @@ watch(() => props.show, (val) => {
   color: white;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
-
 .upload-complete {
   position: absolute;
   top: 8px;
-  /* Sit to the left of the Clear button (top:8px right:8px, ~70px wide) */
   right: 86px;
   font-size: 11px;
   color: #81C784;
@@ -748,7 +1105,6 @@ watch(() => props.show, (val) => {
   pointer-events: none;
   z-index: 5;
 }
-
 .clear-video-btn {
   position: absolute !important;
   top: 8px;
@@ -758,7 +1114,7 @@ watch(() => props.show, (val) => {
   z-index: 14;
 }
 
-/* Waveform area + NO AUDIO overlay */
+/* Waveform + NO AUDIO */
 .waveform-wrapper {
   position: relative;
   width: 100%;
@@ -766,20 +1122,14 @@ watch(() => props.show, (val) => {
   border-radius: 4px;
   overflow: hidden;
 }
-
 .no-audio-overlay {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(
-    135deg,
-    rgba(0, 0, 0, 0.55) 0%,
-    rgba(0, 0, 0, 0.35) 50%,
-    rgba(0, 0, 0, 0.55) 100%
-  );
-  pointer-events: none; /* let clicks reach the AudioWaveform underneath */
+  background: linear-gradient(135deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.35) 50%, rgba(0,0,0,0.55) 100%);
+  pointer-events: none;
   z-index: 5;
   user-select: none;
 }
@@ -794,7 +1144,6 @@ watch(() => props.show, (val) => {
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.4);
 }
-
 .waveform-slide-enter-active {
   transition: transform 0.35s ease, opacity 0.35s ease;
 }
@@ -803,7 +1152,7 @@ watch(() => props.show, (val) => {
   opacity: 0;
 }
 
-/* Control grid (2 rows × 6 cells) */
+/* Control grid */
 .control-grid {
   display: flex;
   flex-direction: column;
@@ -814,7 +1163,6 @@ watch(() => props.show, (val) => {
   grid-template-columns: repeat(6, 1fr);
   gap: 4px;
 }
-
 .grid-btn {
   display: flex;
   flex-direction: column;
@@ -840,7 +1188,6 @@ watch(() => props.show, (val) => {
   opacity: 0.7;
   letter-spacing: 0.05em;
 }
-
 .mark-in    { background: #2196F3; }
 .mark-out   { background: #E64A19; }
 .go-to      { background: #607D8B; }
@@ -869,9 +1216,7 @@ watch(() => props.show, (val) => {
   color: rgba(0, 0, 0, 0.85);
   font-weight: 700;
 }
-.trim-value.mono {
-  font-family: 'Roboto Mono', monospace;
-}
+.trim-value.mono { font-family: 'Roboto Mono', monospace; }
 
 .action-display {
   margin-top: 4px;
@@ -887,5 +1232,10 @@ watch(() => props.show, (val) => {
 .action-fade-enter-from,
 .action-fade-leave-to {
   opacity: 0;
+}
+
+/* Toast positioning — keep below the overlay timecode (matches SotModal) */
+:deep(.Vue-Toastification__container) {
+  top: 140px !important;
 }
 </style>

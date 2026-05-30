@@ -55,14 +55,16 @@
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount } from 'vue'
+import { registerModalEsc } from '@/composables/useModalStack'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
   availableAssets: { type: Array, default: () => [] },
   selectedFiles: { type: Array, default: () => [] },
 })
-defineEmits(['update:show', 'update:selectedFiles', 'upload', 'insert-asset'])
+const emit = defineEmits(['update:show', 'update:selectedFiles', 'upload', 'insert-asset'])
+
+registerModalEsc(() => props.show, () => emit('update:show', false), 'AssetBrowserModal')
 
 function getAssetTypeColor(type) {
   return ({ video: 'blue', audio: 'green' })[type] || 'grey'
@@ -70,11 +72,6 @@ function getAssetTypeColor(type) {
 function getAssetTypeIcon(type) {
   return ({ video: 'mdi-movie', audio: 'mdi-music-note' })[type] || 'mdi-file-document'
 }
-function handleKeydown(event) {
-  if (event.key === 'Escape' && props.show) { event.preventDefault(); event.stopPropagation() }
-}
-onMounted(() => document.addEventListener('keydown', handleKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
 </script>
 
 <style scoped>

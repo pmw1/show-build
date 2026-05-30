@@ -178,7 +178,7 @@
           :current-episode-title="currentEpisodeTitle"
           :script-content="scriptContent"
           @update:script-content="updateScriptContent"
-          @user-initiated-shrink="_allowNextScriptShrink = true"
+          @user-initiated-shrink="handleUserInitiatedShrink"
           v-model:scratch-content="scratchContent"
           v-model:editor-mode="editorMode"
           @update:editor-mode="editorMode = $event"
@@ -335,6 +335,7 @@
       v-model:show="showVoModal"
       :episode="currentEpisodeNumber"
       @submit="submitVo"
+      @submit-multiple="submitMultipleVos"
     />
     <NatModal v-model:show="showNatModal" @submit="submitNat" />
     <RifModal v-model:show="showRifModal" :edit-cue-data="editingRifCueData" @submit="submitRif" />
@@ -996,8 +997,15 @@ export default {
     rawMarkdownContent: {
       handler(newVal, oldVal) {
         if (newVal !== oldVal && this.selectedItemIndex >= 0) {
-          // Skip during item load — this is not a user edit
-          if (this.isLoadingItemContent) return;
+          // Skip during item load — this is not a user edit. The guard is
+          // force-cleared by loadItemContent's safety timer, so it can no
+          // longer latch true and silently kill autosave (ep0275 2026-05-27).
+          // If it IS set here, the only legitimate cause is an in-flight load;
+          // warn so a stuck guard would be visible instead of swallowing edits.
+          if (this.isLoadingItemContent) {
+            console.warn('⏭️ rawMarkdownContent change skipped (load guard active). If you are typing and seeing this, autosave is being suppressed.');
+            return;
+          }
 
           // Mark dirty (both reactive and non-reactive tracking)
           this._hasUnsavedChanges = true;
@@ -1882,27 +1890,80 @@ Try dropping an image or video file here!`
     // ===== Undo/Redo Stack Management =====
 
     /**
-     * Capture current state for undo stack
-     * Called on content changes (debounced) and before destructive operations
+     * Build a snapshot of the current item's editable state.
      */
-    captureUndoState() {
-      // Suppress capture during an in-flight undo/redo so the restored
-      // value does not get re-captured as a new entry on the next debounce.
-      if (isUndoRedoApplying()) {
-        return;
-      }
-
-      if (this.selectedItemIndex < 0) {
-        return;
-      }
-
-      const itemIndex = this.selectedItemIndex;
-      const itemAssetId = this.rundownItems[itemIndex]?.asset_id;
-      const after = {
+    _snapshotEditorState() {
+      return {
         scriptContent: this.rawMarkdownContent,
         scratchContent: this.scratchContent,
         cursorPosition: this.getCursorPosition()
       };
+    },
+
+    /**
+     * Build a restore function for a given snapshot + item identity.
+     */
+    _buildRestoreFn(itemAssetId, snapshot) {
+      return () => {
+        if (this.rundownItems[this.selectedItemIndex]?.asset_id !== itemAssetId) {
+          console.log('⏮️ Undo entry skipped — different item is selected now');
+          return;
+        }
+        this.rawMarkdownContent = snapshot.scriptContent;
+        this.scratchContent = snapshot.scratchContent;
+        this.$nextTick(() => this.restoreCursorPosition(snapshot.cursorPosition));
+      };
+    },
+
+    /**
+     * Synchronously push an undo entry for a destructive op.
+     * Caller passes a label and the BEFORE snapshot is captured here;
+     * caller is responsible for performing the mutation immediately after.
+     * Use this for cue delete / cue insert / cue edit — anything where the
+     * 300ms debounced capture can be lost to a save/reload race.
+     *
+     * Returns a finalize() callback that captures AFTER state and pushes
+     * the entry. Pattern:
+     *
+     *   const finalize = this.pushUndoEntryStart('delete SOT cue');
+     *   ... do the mutation ...
+     *   finalize();
+     */
+    pushUndoEntryStart(label) {
+      if (isUndoRedoApplying()) return () => {};
+      if (this.selectedItemIndex < 0) return () => {};
+
+      const itemAssetId = this.rundownItems[this.selectedItemIndex]?.asset_id;
+      const before = this._snapshotEditorState();
+
+      return () => {
+        const after = this._snapshotEditorState();
+        if (before.scriptContent === after.scriptContent &&
+            before.scratchContent === after.scratchContent) {
+          return;
+        }
+        this.undoManager.push({
+          label,
+          undo: this._buildRestoreFn(itemAssetId, before),
+          redo: this._buildRestoreFn(itemAssetId, after)
+        });
+        this.lastCapturedSnapshot = after;
+      };
+    },
+
+    /**
+     * Capture current state for undo stack (debounced path for typing).
+     * Compares against lastCapturedSnapshot and pushes an entry when they
+     * differ. Destructive ops should NOT use this — they should use
+     * pushUndoEntryStart() instead, because the debounced capture can be
+     * canceled by a save/reload that bumps the baseline.
+     */
+    captureUndoState() {
+      if (isUndoRedoApplying()) return;
+      if (this.selectedItemIndex < 0) return;
+
+      const itemAssetId = this.rundownItems[this.selectedItemIndex]?.asset_id;
+      const after = this._snapshotEditorState();
 
       // First capture after load establishes the baseline; no entry pushed.
       if (!this.lastCapturedSnapshot) {
@@ -1916,25 +1977,30 @@ Try dropping an image or video file here!`
         return;
       }
 
-      const restoreSnapshot = (snapshot) => {
-        // Only restore if user is still on the same item; otherwise skip
-        // silently. (A future iteration could switch items first.)
-        if (this.rundownItems[this.selectedItemIndex]?.asset_id !== itemAssetId) {
-          console.log('⏮️ Undo entry skipped — different item is selected now');
-          return;
-        }
-        this.rawMarkdownContent = snapshot.scriptContent;
-        this.scratchContent = snapshot.scratchContent;
-        this.$nextTick(() => this.restoreCursorPosition(snapshot.cursorPosition));
-      };
-
       this.undoManager.push({
         label: 'edit script',
-        undo: () => restoreSnapshot(before),
-        redo: () => restoreSnapshot(after)
+        undo: this._buildRestoreFn(itemAssetId, before),
+        redo: this._buildRestoreFn(itemAssetId, after)
       });
 
       this.lastCapturedSnapshot = after;
+    },
+
+    /**
+     * Handler for EditorPanel's user-initiated-shrink event.
+     * Fires immediately before destructive ops (cue delete, etc.) that
+     * intentionally remove content. Captures a BEFORE snapshot now so the
+     * undo entry survives the save/reload race the 300ms debounced path
+     * is vulnerable to. Stashes a finalize callback that the
+     * updateScriptContent watcher consumes after the mutation lands.
+     */
+    handleUserInitiatedShrink() {
+      this._allowNextScriptShrink = true;
+      // Cancel any pending debounced capture — we own this entry now.
+      if (this.debouncedCaptureUndoState?.cancel) {
+        this.debouncedCaptureUndoState.cancel();
+      }
+      this._pendingShrinkUndoFinalize = this.pushUndoEntryStart('delete cue');
     },
 
     /**
@@ -2357,6 +2423,15 @@ Try dropping an image or video file here!`
       this.rawMarkdownContent = next;
       this.hasUnsavedChanges = true;
       this.resetRemoteSyncTimer();
+
+      // Finalize any pending synchronous undo entry from a destructive op
+      // (e.g. cue delete). The handler stashed a before-snapshot when
+      // user-initiated-shrink fired; this is the post-mutation moment.
+      if (this._pendingShrinkUndoFinalize) {
+        const finalize = this._pendingShrinkUndoFinalize;
+        this._pendingShrinkUndoFinalize = null;
+        this.$nextTick(() => finalize());
+      }
     },
 
     // SINGLE SOURCE HELPER: Append to script content
@@ -3363,13 +3438,17 @@ Try dropping an image or video file here!`
                     `This usually means a stale tab is about to overwrite a fresh restore or coworker save. ` +
                     `Refusing autosave; user can force via manual save (Ctrl+S).`
                   );
+                  // Fail LOUDLY — autosave silently declining is how the user
+                  // loses work without knowing (ep0275 class of bug). Fire BOTH
+                  // notifiers when available (toast may be missed; the global
+                  // banner is the reliable one) and keep the unsaved flag set so
+                  // the save indicator stays dirty until the user resolves it.
+                  const abortMsg = `⚠️ Autosave declined — server has MORE content (${remoteLen} chars) than your local copy (${outgoingLen}). Your edits are NOT saved. Reload to sync, or press Ctrl+S to overwrite the server.`;
+                  if (window.notifyUserStandard) {
+                    window.notifyUserStandard(abortMsg, '#F44336', 10000);
+                  }
                   if (this.$toast?.error) {
-                    this.$toast.error(`Autosave aborted — server has more content (${remoteLen} > local ${outgoingLen}). Reload to sync.`);
-                  } else if (window.notifyUserStandard) {
-                    window.notifyUserStandard(
-                      `Autosave aborted — server has more content. Reload to sync.`,
-                      '#F44336', 6000
-                    );
+                    this.$toast.error(abortMsg, { timeout: 10000 });
                   }
                   this._hasUnsavedChanges = true;
                   if (!isEditing) this.hasUnsavedChanges = true;
@@ -3844,65 +3923,102 @@ Try dropping an image or video file here!`
       console.log('🔄 script length:', item.script?.length || 0);
       console.log('🔄 script preview:', item.script?.substring(0, 200) || '(empty)');
 
-      // Set loading guard to prevent autosave watcher from firing during content load
+      // Set loading guard to prevent the autosave watcher from firing during
+      // content load. This MUST always be cleared afterward — a latched
+      // `isLoadingItemContent=true` silently disables the rawMarkdownContent
+      // autosave watcher for the rest of the session (the 2026-05-27 ep0275
+      // "saves froze for 4.5h, no error shown" bug).
+      //
+      // The guard is cleared in a $nextTick (NOT synchronously) on purpose:
+      // Vue's default-flush watchers fire in a microtask AFTER the
+      // rawMarkdownContent/scratchContent assignments below, so the guard has
+      // to outlive that flush or the load itself would be mistaken for a user
+      // edit and autosaved back. To make the deferred reset un-latchable we
+      // ALSO arm a synchronous safety timer: if the $nextTick ever fails to
+      // run (component torn down mid-load, dropped tick), the timer clears the
+      // guard so autosave can never be left permanently disabled.
       this.isLoadingItemContent = true;
+      if (this._loadGuardSafetyTimer) clearTimeout(this._loadGuardSafetyTimer);
+      this._loadGuardSafetyTimer = setTimeout(() => {
+        if (this.isLoadingItemContent) {
+          console.warn('⚠️ isLoadingItemContent still true 2s after load — force-clearing to keep autosave alive');
+          this.isLoadingItemContent = false;
+        }
+      }, 2000);
 
-      // Load scratch content
-      this.scratchContent = item.scratch || '';
+      try {
+        // Load scratch content
+        this.scratchContent = item.scratch || '';
 
-      // CRITICAL: Build rawMarkdownContent from item.script (body) + item metadata (frontmatter)
-      // Do NOT use item.rawMarkdown - it may contain stale/corrupted frontmatter
-      // The loadRawMarkdownContent function rebuilds the complete markdown from clean sources
-      this.loadRawMarkdownContent(item);
+        // CRITICAL: Build rawMarkdownContent from item.script (body) + item metadata (frontmatter)
+        // Do NOT use item.rawMarkdown - it may contain stale/corrupted frontmatter
+        // The loadRawMarkdownContent function rebuilds the complete markdown from clean sources
+        this.loadRawMarkdownContent(item);
 
-      console.log('✅ Built rawMarkdownContent, length:', this.rawMarkdownContent?.length || 0);
-      
-      // Load all frontmatter metadata from the item
-      this.currentItemMetadata = {
-        // Standard fields
-        AssetID: item.AssetID || item.asset_id || '',
-        title: item.title || '',
-        type: item.type || 'segment',
-        slug: item.slug || '',
-        subtitle: item.subtitle || '',
-        description: item.description || '',
-        duration: item.duration || '00:00:00',
-        status: item.status || 'draft',
-        order: item.order || 1,
-        airdate: item.airdate || '',
-        priority: item.priority || '',
-        guests: item.guests || '',
-        resources: item.resources || '',
-        tags: item.tags || '',
-        server_message: item.server_message || '',
-        created_at: item.created_at || '',
-        
-        // Include any additional custom fields from the item
-        ...Object.keys(item).reduce((acc, key) => {
-          // Skip standard fields and system fields
-          const standardFields = [
-            'AssetID', 'asset_id', 'title', 'type', 'slug', 'subtitle', 'description',
-            'duration', 'status', 'order', 'airdate', 'priority', 'guests', 'resources', 
-            'tags', 'server_message', 'created_at', 'script', 'scratch', 'filename', 'id'
-          ];
-          
-          if (!standardFields.includes(key) && item[key] !== null && item[key] !== undefined) {
-            acc[key] = item[key];
-          }
-          return acc;
-        }, {})
-      };
-      
-      console.log('✅ Loaded metadata - AssetID:', this.currentItemMetadata.AssetID, 'Title:', this.currentItemMetadata.title, 'Order:', this.currentItemMetadata.order);
-      console.log('Loaded raw content length:', this.rawMarkdownContent.length);
+        console.log('✅ Built rawMarkdownContent, length:', this.rawMarkdownContent?.length || 0);
+
+        // Load all frontmatter metadata from the item
+        this.currentItemMetadata = {
+          // Standard fields
+          AssetID: item.AssetID || item.asset_id || '',
+          title: item.title || '',
+          type: item.type || 'segment',
+          slug: item.slug || '',
+          subtitle: item.subtitle || '',
+          description: item.description || '',
+          duration: item.duration || '00:00:00',
+          status: item.status || 'draft',
+          order: item.order || 1,
+          airdate: item.airdate || '',
+          priority: item.priority || '',
+          guests: item.guests || '',
+          resources: item.resources || '',
+          tags: item.tags || '',
+          server_message: item.server_message || '',
+          created_at: item.created_at || '',
+
+          // Include any additional custom fields from the item
+          ...Object.keys(item).reduce((acc, key) => {
+            // Skip standard fields and system fields
+            const standardFields = [
+              'AssetID', 'asset_id', 'title', 'type', 'slug', 'subtitle', 'description',
+              'duration', 'status', 'order', 'airdate', 'priority', 'guests', 'resources',
+              'tags', 'server_message', 'created_at', 'script', 'scratch', 'filename', 'id'
+            ];
+
+            if (!standardFields.includes(key) && item[key] !== null && item[key] !== undefined) {
+              acc[key] = item[key];
+            }
+            return acc;
+          }, {})
+        };
+
+        console.log('✅ Loaded metadata - AssetID:', this.currentItemMetadata.AssetID, 'Title:', this.currentItemMetadata.title, 'Order:', this.currentItemMetadata.order);
+        console.log('Loaded raw content length:', this.rawMarkdownContent.length);
+      } catch (loadErr) {
+        // If the load body throws, clear the guard right away so autosave is
+        // never left disabled, and surface the error (don't fail silently).
+        this.isLoadingItemContent = false;
+        if (this._loadGuardSafetyTimer) { clearTimeout(this._loadGuardSafetyTimer); this._loadGuardSafetyTimer = null; }
+        console.error('❌ loadItemContent failed:', loadErr);
+        if (window.notifyUserStandard) {
+          window.notifyUserStandard('Failed to load item content — reload the page', '#F44336', 6000);
+        }
+        return;
+      }
 
       // Clear loading guard - content is fully loaded, future changes are user edits
       this.$nextTick(() => {
         this.isLoadingItemContent = false;
         this.hasUnsavedChanges = false;
+        if (this._loadGuardSafetyTimer) { clearTimeout(this._loadGuardSafetyTimer); this._loadGuardSafetyTimer = null; }
         console.log('🔓 Content load complete - autosave re-enabled');
         // Capture initial snapshot so first Ctrl+Z can revert to the loaded state
-        this.captureUndoState();
+        try {
+          this.captureUndoState();
+        } catch (e) {
+          console.warn('captureUndoState after load failed (non-fatal):', e);
+        }
       });
     },
 
@@ -4550,57 +4666,13 @@ Try dropping an image or video file here!`
         return;
       }
 
-      // ESCAPE KEY - Close modal if one is open, otherwise exit editing mode
-      if (event.key === 'Escape') {
-        // Cancel join mode on ESC
-        if (this.joinMode.active) {
-          event.preventDefault();
-          this.rejectJoin();
-          return;
-        }
-        if (hasModalOpen) {
-          event.preventDefault();
-          event.stopPropagation();
-          event.stopImmediatePropagation();  // Prevent other handlers from also processing ESC
-          console.log('🚨 ESC pressed with modal open - closing modal only (not leaving segment)');
-
-          // Record close timestamp so subsequent ESC in same tick is blocked
-          this.lastModalCloseTime = Date.now();
-
-          // Close whichever modal is open
-          this.showImgCueModal = false;
-          this.showGfxModal = false;
-          this.whiteboardPrefillData = null;
-          this.showFsqModal = false;
-          this.showSotModal = false;
-          this.showVoModal = false;
-          this.showNatModal = false;
-          this.showPkgModal = false;
-          this.showVoxModal = false;
-          this.showMusModal = false;
-          this.showLiveModal = false;
-          this.showNewItemModal = false;
-          this.showNewGFXModal = false;
-          this.showNewSOTModal = false;
-          this.showDeleteCueModal = false;
-          this.showRevisionBlockerModal = false;
-          this.showAssetBrowserModal = false;
-          this.showTemplateManagerModal = false;
-          this.showBumpModal = false;
-          this.showStingModal = false;
-          this.showDirModal = false;
-          this.showRifModal = false;
-          this.showScriptCompareModal = false;
-          this.showJoinConfigModal = false;
-          this.showLibraryPickerModal = false;
-          this.showEpisodeModal = false;
-          this.showRelocatePicker = false;
-
-          return;
-        }
-
-        // No modal open — ESC does nothing (disabled: was blurring text field / deselecting segment)
-        // If not in text field, allow other Escape handlers (like multi-select cancel)
+      // ESCAPE KEY — modal closing is now handled by the global modal
+      // stack (useModalStack). Only the joinMode UI-mode cancel stays
+      // here because join mode isn't a modal.
+      if (event.key === 'Escape' && this.joinMode.active) {
+        event.preventDefault();
+        this.rejectJoin();
+        return;
       }
 
       // ARROW DOWN - Navigate to next rundown item (navigation mode only)
@@ -5343,8 +5415,9 @@ Try dropping an image or video file here!`
 
     // Delete the confirmed cue block
     deleteCue(deleteInfo) {
-      // CRITICAL: Capture undo state before destructive operation
-      this.captureUndoState();
+      // CRITICAL: Synchronous undo entry before destructive operation —
+      // can't rely on debounced capture (save/reload race).
+      const finalizeUndo = this.pushUndoEntryStart('delete cue');
 
       console.log('Deleting cue:', deleteInfo);
 
@@ -5387,7 +5460,12 @@ Try dropping an image or video file here!`
       
       // Mark as having unsaved changes
       this.hasUnsavedChanges = true;
-      
+
+      // Finalize the undo entry after the mutation lands. The textarea
+      // input event also bumps rawMarkdownContent via two-way binding;
+      // schedule on next tick so the AFTER snapshot reflects the update.
+      this.$nextTick(() => finalizeUndo());
+
       console.log('Cue block deleted successfully');
     },
 
@@ -5712,41 +5790,77 @@ Try dropping an image or video file here!`
         this.syncXpostCueToDatabase(gfxCueData);
       } else {
         // Standard GFX fields
+        // Escape for the [Field: value] cue format. The parser regex
+        // terminates a field on `]` followed by either another `[` field
+        // marker, the cue end marker, or EOL. We must escape:
+        //   \  -> \\   (so unescape can be unambiguous)
+        //   \n -> \\n  (keep field value on one line)
+        //   \r -> \\n  (normalize line endings)
+        //   ]  -> \\]  (avoid accidental field terminator)
+        const escapeCueValue = s => String(s ?? '')
+          .replace(/\\/g, '\\\\')
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '\n')
+          .replace(/\n/g, '\\n')
+          .replace(/\]/g, '\\]');
         if (gfxCueData.title) {
-          gfxCueBlock += `[Title: ${gfxCueData.title}]\n`;
+          gfxCueBlock += `[Title: ${escapeCueValue(gfxCueData.title)}]\n`;
         }
         if (gfxCueData.body) {
-          const escapedBody = gfxCueData.body.replace(/\n/g, '\\n');
-          gfxCueBlock += `[Body: ${escapedBody}]\n`;
+          gfxCueBlock += `[Body: ${escapeCueValue(gfxCueData.body)}]\n`;
         }
         if (gfxCueData.listItems && gfxCueData.listItems.length) {
           gfxCueBlock += `[ListItems: ${JSON.stringify(gfxCueData.listItems)}]\n`;
         }
-        if (gfxCueData.style) {
-          gfxCueBlock += `[FontSize: ${gfxCueData.style.fontSize}px]\n`;
-          gfxCueBlock += `[FontFamily: ${gfxCueData.style.fontFamily}]\n`;
-          gfxCueBlock += `[TextAlign: ${gfxCueData.style.textAlign}]\n`;
-          if (gfxCueData.style.titleFontSize) {
-            gfxCueBlock += `[TitleFontSize: ${gfxCueData.style.titleFontSize}px]\n`;
-          }
-          if (gfxCueData.style.titleAlign) {
-            gfxCueBlock += `[TitleAlign: ${gfxCueData.style.titleAlign}]\n`;
-          }
-          if (gfxCueData.style.titlePinToTop) {
-            gfxCueBlock += `[TitlePinToTop: true]\n`;
-          }
-          if (gfxCueData.style.titleMarginTop != null) {
-            gfxCueBlock += `[TitleMarginTop: ${gfxCueData.style.titleMarginTop}]\n`;
-          }
-          if (gfxCueData.style.titleMarginBottom != null) {
-            gfxCueBlock += `[TitleMarginBottom: ${gfxCueData.style.titleMarginBottom}]\n`;
-          }
+        // Style fields. Read FLAT first (new GfxModal contract), fall back
+        // to nested `style:{}` so any cue created by an older modal version
+        // still serializes correctly. Writing them flat keeps round-tripping
+        // through CueParser intact (nested objects would stringify as
+        // "[object Object]" — the original "settings don't persist" bug).
+        const sFontSize      = gfxCueData.fontSize      ?? gfxCueData.style?.fontSize;
+        const sTitleFontSize = gfxCueData.titleFontSize ?? gfxCueData.style?.titleFontSize;
+        const sLineSpacing   = gfxCueData.lineSpacing   ?? gfxCueData.style?.lineSpacing;
+        const sBoxHeight     = gfxCueData.boxHeight     ?? gfxCueData.style?.boxHeight;
+        const sBoxOpacity    = gfxCueData.boxOpacity    ?? gfxCueData.style?.boxOpacity;
+        const sFontFamily    = gfxCueData.fontFamily    ?? gfxCueData.style?.fontFamily;
+        const sTextAlign     = gfxCueData.textAlign     ?? gfxCueData.style?.textAlign;
+        const sVOffset       = gfxCueData.verticalOffset ?? gfxCueData.style?.verticalOffset;
+        if (sFontSize != null)      gfxCueBlock += `[FontSize: ${sFontSize}px]\n`;
+        if (sTitleFontSize != null) gfxCueBlock += `[TitleFontSize: ${sTitleFontSize}px]\n`;
+        if (sLineSpacing != null)   gfxCueBlock += `[LineSpacing: ${sLineSpacing}]\n`;
+        if (sBoxHeight != null)     gfxCueBlock += `[BoxHeight: ${sBoxHeight}]\n`;
+        if (sBoxOpacity != null)    gfxCueBlock += `[BoxOpacity: ${sBoxOpacity}]\n`;
+        if (sFontFamily)            gfxCueBlock += `[FontFamily: ${sFontFamily}]\n`;
+        if (sTextAlign)             gfxCueBlock += `[TextAlign: ${sTextAlign}]\n`;
+        if (sVOffset != null)       gfxCueBlock += `[VerticalOffset: ${sVOffset}]\n`;
+        // Legacy title-positioning fields (still nested under style if present).
+        // TitleFontSize is now handled flat above; alignment/pin/margin are
+        // not in the modal yet so keep the nested-fallback for them.
+        if (gfxCueData.style?.titleAlign) {
+          gfxCueBlock += `[TitleAlign: ${gfxCueData.style.titleAlign}]\n`;
+        }
+        if (gfxCueData.style?.titlePinToTop) {
+          gfxCueBlock += `[TitlePinToTop: true]\n`;
+        }
+        if (gfxCueData.style?.titleMarginTop != null) {
+          gfxCueBlock += `[TitleMarginTop: ${gfxCueData.style.titleMarginTop}]\n`;
+        }
+        if (gfxCueData.style?.titleMarginBottom != null) {
+          gfxCueBlock += `[TitleMarginBottom: ${gfxCueData.style.titleMarginBottom}]\n`;
         }
         if (gfxCueData.renderMode) {
           gfxCueBlock += `[RenderMode: ${gfxCueData.renderMode}]\n`;
         }
-        if (gfxCueData.assetUrl) {
-          gfxCueBlock += `[AssetURL: ${gfxCueData.assetUrl}]\n`;
+        // Persist the rendered asset URL/path. Tolerate snake_case from
+        // backend responses that might leak through unmapped.
+        const sAssetUrl = gfxCueData.assetUrl || gfxCueData.asset_url || gfxCueData.mediaUrl;
+        if (sAssetUrl) {
+          gfxCueBlock += `[AssetURL: ${sAssetUrl}]\n`;
+          gfxCueBlock += `[MediaURL: ${sAssetUrl}]\n`;
+        } else {
+          // Tripwire: in Generate&Insert we expect a URL. Log loudly so we
+          // notice silent regressions in the render-response handling.
+          console.warn('⚠️ GFX cue has no assetUrl/mediaUrl — image will show as "not found".', gfxCueData);
         }
         if (gfxCueData.status) {
           gfxCueBlock += `[Status: ${gfxCueData.status}]\n`;
@@ -6464,10 +6578,40 @@ Try dropping an image or video file here!`
       console.log('🚪 SOT modal closed');
 
       try {
+        // ORDER FIX: insertCueAtSnapshotPosition clears
+        // pendingCueInsertionIndex after the first insert, so subsequent
+        // inserts fall through to `selectedSegmentIndex + 1` — which
+        // hasn't advanced. Result: clips 2..N all land at the SAME
+        // position, ending up in reverse document order.
+        //
+        // Fix: capture the initial insertion index from EditorPanel's
+        // snapshot once, then advance it by 1 between each clip so each
+        // insert lands AFTER the previous one (in document order).
+        const editorPanel = this.$refs.editorPanel;
+        let nextInsertionIndex = null;
+        // EditorPanel exposes pendingCueInsertionIndex and
+        // selectedSegmentIndex as Vue refs via defineExpose.
+        const snapRef = editorPanel?.pendingCueInsertionIndex;
+        const selectedRef = editorPanel?.selectedSegmentIndex;
+        const snapVal = snapRef && typeof snapRef === 'object' && 'value' in snapRef
+          ? snapRef.value : snapRef;
+        const selectedVal = selectedRef && typeof selectedRef === 'object' && 'value' in selectedRef
+          ? selectedRef.value : selectedRef;
+        nextInsertionIndex = snapVal ?? (selectedVal != null && selectedVal >= 0
+          ? selectedVal + 1 : null);
+        console.log(`📍 multi-clip insertion baseline = ${nextInsertionIndex} (from snap=${snapVal}, selected=${selectedVal})`);
+
         // Process each SOT sequentially to maintain order
         for (let i = 0; i < sotsArray.length; i++) {
           const data = sotsArray[i];
           console.log(`\n📍 Processing SOT ${i + 1}/${sotsArray.length}: ${data.slug}`);
+
+          // Re-prime the snapshot before each call so insertCueAtSnapshotPosition
+          // uses the advancing index, not the stale one.
+          if (snapRef && typeof snapRef === 'object' && 'value' in snapRef && nextInsertionIndex != null) {
+            snapRef.value = nextInsertionIndex;
+            console.log(`📍 Forced pendingCueInsertionIndex.value = ${nextInsertionIndex} for clip ${i + 1}`);
+          }
 
           // Build the SOT cue block with source reference metadata for re-trimming
           const sotCue = `<!-- Begin Cue -->
@@ -6496,6 +6640,12 @@ Try dropping an image or video file here!`
           if (this.$refs.editorPanel && this.$refs.editorPanel.handleSotCueSubmit) {
             await this.$refs.editorPanel.handleSotCueSubmit(sotCue);
             console.log(`✅ Cue ${i + 1} inserted via EditorPanel.handleSotCueSubmit`);
+            // ORDER FIX (continued): advance the snapshot index so the
+            // next clip lands AFTER this one. Each inserted cue counts
+            // as one segment forward.
+            if (nextInsertionIndex != null) {
+              nextInsertionIndex += 1;
+            }
           } else {
             // Fallback - append to end
             console.warn('⚠️ EditorPanel not available, appending to end');
@@ -6628,7 +6778,101 @@ Try dropping an image or video file here!`
         }
       }
     },
-    
+
+    async submitMultipleVos(vosArray) {
+      console.log('🎬🎬🎬 ===============================================');
+      console.log(`🎬 submitMultipleVos CALLED - ${vosArray.length} independent VO cues`);
+      console.log('📋 VOs to insert:', vosArray.map(v => `${v.slug}`));
+
+      // Close modal first
+      this.showVoModal = false;
+      console.log('🚪 VO modal closed');
+
+      try {
+        // ORDER FIX: same advancing-snapshot pattern as submitMultipleSots.
+        // EditorPanel's insertCueAtSnapshotPosition clears the snapshot
+        // after the first insert; if we don't re-prime it, subsequent
+        // clips land at the stale selectedSegmentIndex + 1, producing
+        // reverse document order.
+        const editorPanel = this.$refs.editorPanel;
+        let nextInsertionIndex = null;
+        const snapRef = editorPanel?.pendingCueInsertionIndex;
+        const selectedRef = editorPanel?.selectedSegmentIndex;
+        const snapVal = snapRef && typeof snapRef === 'object' && 'value' in snapRef
+          ? snapRef.value : snapRef;
+        const selectedVal = selectedRef && typeof selectedRef === 'object' && 'value' in selectedRef
+          ? selectedRef.value : selectedRef;
+        nextInsertionIndex = snapVal ?? (selectedVal != null && selectedVal >= 0
+          ? selectedVal + 1 : null);
+        console.log(`📍 multi-VO insertion baseline = ${nextInsertionIndex}`);
+
+        // Process each VO sequentially to maintain order
+        for (let i = 0; i < vosArray.length; i++) {
+          const data = vosArray[i];
+          console.log(`\n📍 Processing VO ${i + 1}/${vosArray.length}: ${data.slug}`);
+
+          if (snapRef && typeof snapRef === 'object' && 'value' in snapRef && nextInsertionIndex != null) {
+            snapRef.value = nextInsertionIndex;
+            console.log(`📍 Forced pendingCueInsertionIndex.value = ${nextInsertionIndex} for VO ${i + 1}`);
+          }
+
+          // Build VO cue block — same template as submitVo
+          const voCue = `<!-- Begin Cue -->
+[Type: VO]
+[AssetID: ${data.assetID || data.assetId || ''}]
+[Slug: ${data.slug || ''}]
+[Description: ${data.description || ''}]
+[MediaURL: Processing...]
+[Duration: ${data.duration || ''}]
+[TrimStart: ${data.trimStart || '00:00:00'}]
+[TrimEnd: ${data.trimEnd || '00:00:00'}]
+[SourceJobId: ${data.tempJobId || ''}]
+[HasAudio: ${data.hasAudio ? 'true' : 'false'}]
+[ProcessingStatus: Queued]
+<!-- End Cue -->
+
+`;
+
+          if (editorPanel && editorPanel.handleVoCueSubmit) {
+            await editorPanel.handleVoCueSubmit(voCue);
+            console.log(`✅ VO ${i + 1} inserted via EditorPanel.handleVoCueSubmit`);
+            if (nextInsertionIndex != null) nextInsertionIndex += 1;
+          } else {
+            console.warn('⚠️ EditorPanel not available, appending to end');
+            this.appendToScriptContent(`\n${voCue}\n`, null);
+          }
+        }
+
+        this.hasUnsavedChanges = true;
+        this.checkForUnsavedRundownChanges();
+
+        console.log('💾 Saving script content with all VO cue blocks to database...');
+        await this.saveCurrentItem();
+        console.log('💾 Save complete');
+
+        console.log(`✅ All ${vosArray.length} VO cues inserted`);
+        console.log('🎬🎬🎬 submitMultipleVos COMPLETED');
+        console.log('🎬🎬🎬 ===============================================');
+
+        if (typeof notifyUserStandard === 'function') {
+          notifyUserStandard(
+            `🎙️ ${vosArray.length} VO clips inserted`,
+            typeof NOTIFICATION_COLORS !== 'undefined' ? NOTIFICATION_COLORS.SUCCESS : 'success',
+            5000
+          );
+        } else if (this.$toast) {
+          this.$toast.success(`${vosArray.length} VO cues inserted`);
+        }
+
+      } catch (error) {
+        console.error('❌❌❌ Error in submitMultipleVos:', error);
+        console.error('❌ Stack trace:', error.stack);
+        if (this.$toast) {
+          this.$toast.error(`Failed to insert multiple VO cues: ${error.message}`);
+        }
+      }
+    },
+
     async submitNat(data) {
       try {
         console.log('🎬 NAT Modal Submit');

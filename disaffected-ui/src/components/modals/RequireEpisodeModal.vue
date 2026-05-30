@@ -66,8 +66,9 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, watch } from 'vue';
 import axios from 'axios';
+import { registerModalEsc } from '@/composables/useModalStack';
 
 const props = defineProps({
   show: {
@@ -128,21 +129,8 @@ function cancel() {
   emit('update:show', false);
 }
 
-function handleKeydown(event) {
-  if (event.key === 'Escape' && props.show) {
-    event.preventDefault();
-    event.stopPropagation();
-    cancel();
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', handleKeydown);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleKeydown);
-});
+// ESC handled by global modal stack
+registerModalEsc(() => props.show, () => cancel(), 'RequireEpisodeModal');
 </script>
 
 <style scoped>

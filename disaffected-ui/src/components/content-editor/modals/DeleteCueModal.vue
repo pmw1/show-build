@@ -68,8 +68,8 @@
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount } from 'vue'
 import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap'
+import { registerModalEsc } from '@/composables/useModalStack'
 
 const props = defineProps({
   show: {
@@ -92,11 +92,8 @@ const props = defineProps({
 
 const emit = defineEmits(['update:show', 'delete', 'cancel'])
 
-function handleKeydown(event) {
-  if (event.key === 'Escape' && props.show) {
-    cancel()
-  }
-}
+// ESC handled by global modal stack
+registerModalEsc(() => props.show, () => cancel(), 'DeleteCueModal')
 
 function getCueColor(cueType) {
   if (!cueType) return '#666'
@@ -118,13 +115,6 @@ function confirmDelete() {
   emit('update:show', false)
 }
 
-onMounted(() => {
-  document.addEventListener('keydown', handleKeydown)
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleKeydown)
-})
 </script>
 
 <style scoped>

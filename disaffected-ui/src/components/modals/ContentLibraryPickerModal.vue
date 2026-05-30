@@ -131,9 +131,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import axios from 'axios';
 import { getColorValue } from '@/utils/themeColorMap.js';
+import { registerModalEsc } from '@/composables/useModalStack';
 
 const props = defineProps({
   show: {
@@ -183,12 +184,8 @@ const displayTypeName = computed(() => {
   return typeNames[props.itemType] || props.itemType;
 });
 
-// Methods
-function handleKeydown(event) {
-  if (event.key === 'Escape' && props.show) {
-    cancel();
-  }
-}
+// Methods — ESC handled by global modal stack
+registerModalEsc(() => props.show, () => cancel(), 'ContentLibraryPickerModal');
 
 function reset() {
   libraryItems.value = [];
@@ -322,13 +319,8 @@ watch(priorityFilter, () => {
   loadLibraryItems();
 });
 
-// Lifecycle
-onMounted(() => {
-  document.addEventListener('keydown', handleKeydown);
-});
-
+// Lifecycle — ESC auto-registered; only the search debounce needs cleanup
 onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleKeydown);
   if (searchTimeout) {
     clearTimeout(searchTimeout);
   }

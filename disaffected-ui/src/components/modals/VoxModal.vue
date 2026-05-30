@@ -3,7 +3,7 @@
     <v-card>
       <v-card-title>Add Voiceover (VOX) Cue</v-card-title>
       <v-card-text>
-        <v-text-field v-model="slug" label="Slug" required></v-text-field>
+        <v-text-field v-model="slug" label="Slug" required ref="slugFieldRef"></v-text-field>
         <v-textarea v-model="description" label="Description" required rows="4"></v-textarea>
         <v-text-field v-model="duration" label="Duration (HH:MM:SS)" required></v-text-field>
       </v-card-text>
@@ -16,11 +16,14 @@
   </v-dialog>
 </template>
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch } from 'vue'
+import { registerModalEsc } from '@/composables/useModalStack'
+import { useDoubleEnterToSlug } from '@/composables/useDoubleEnterToSlug'
 
 const props = defineProps({ show: Boolean })
 const emit = defineEmits(['update:show', 'submit'])
 
+const slugFieldRef = ref(null)
 const slug = ref('')
 const description = ref('')
 const duration = ref('')
@@ -33,11 +36,8 @@ function reset() {
   slug.value = ''; description.value = ''; duration.value = ''
   emit('update:show', false)
 }
-function handleKeydown(event) {
-  if (event.key === 'Escape' && props.show) { event.preventDefault(); event.stopPropagation(); emit('update:show', false) }
-}
+registerModalEsc(() => props.show, () => emit('update:show', false), 'VoxModal')
+useDoubleEnterToSlug(() => props.show, slugFieldRef)
 watch(() => props.show, (val) => { if (!val) { slug.value = ''; description.value = ''; duration.value = '' } })
-onMounted(() => document.addEventListener('keydown', handleKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
 </script>
 <style scoped>.v-card { padding: 16px; }</style>

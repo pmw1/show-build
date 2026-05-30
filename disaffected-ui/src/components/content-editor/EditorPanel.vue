@@ -203,6 +203,13 @@
                 <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
                 <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
                 <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
+                <button
+                  type="button"
+                  class="formatting-hotkey formatting-hotkey-btn"
+                  :class="{ 'formatting-hotkey-active': isBulletActiveForCurrentSelection }"
+                  title="Toggle bullet on focused / selected paragraph(s)"
+                  @click="toggleBulletFromButton"
+                ><strong>CTRL+L</strong> Bullet</button>
                 <span class="formatting-hotkey"><strong>ALT+/</strong> Revise</span>
                 <span class="formatting-hotkey"><strong>ALT+.</strong> Add</span>
                 <span class="formatting-hotkey"><strong>ALT+SHIFT+A</strong> Regen AssetID</span>
@@ -238,6 +245,26 @@
                   prepend-icon="mdi-set-merge"
                 >
                   Join
+                </v-btn>
+                <v-btn
+                  :color="isBulletActiveForCurrentSelection ? 'primary' : 'default'"
+                  :variant="isBulletActiveForCurrentSelection ? 'flat' : 'outlined'"
+                  size="small"
+                  @click="toggleBulletOnSelection(Array.from(multiSelectedSegments)[0])"
+                  prepend-icon="mdi-format-list-bulleted"
+                  :title="isBulletActiveForCurrentSelection ? 'Remove bullets from selected paragraphs' : 'Add bullets to selected paragraphs'"
+                >
+                  {{ isBulletActiveForCurrentSelection ? 'Unbullet' : 'Bullet' }}
+                </v-btn>
+                <v-btn
+                  color="primary"
+                  variant="outlined"
+                  size="small"
+                  @click="openSpeakerSelectorForSelection"
+                  prepend-icon="mdi-account-voice"
+                  :title="`Change speaker for ${multiSelectionCount} selected paragraph${multiSelectionCount > 1 ? 's' : ''}`"
+                >
+                  Change speaker
                 </v-btn>
                 <v-btn
                   color="error"
@@ -398,7 +425,8 @@
                           'paragraph-focused': focusedParagraphIndex === index,
                           'paragraph-saved': savedParagraphIndex === index,
                           'paragraph-needs-attention': segment.needsAttention,
-                          'paragraph-invalid-cue': hasInvalidCuePattern(index)
+                          'paragraph-invalid-cue': hasInvalidCuePattern(index),
+                          'paragraph-bullet': segment.bullet
                         }
                       ]"
                       @mouseenter="hoveredParagraphIndex = index"
@@ -705,6 +733,7 @@
                     @edit-gfx="handleEditGfx"
                     @relocate="handleRelocateCue(index)"
                     @apply-all-fsq="handleApplyAllFsq"
+                    @apply-all-gfx="handleApplyAllGfx"
                   />
 
                   <!-- Needs Attention Flag Button for Cue -->
@@ -879,6 +908,13 @@
                 <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
                 <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
                 <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
+                <button
+                  type="button"
+                  class="formatting-hotkey formatting-hotkey-btn"
+                  :class="{ 'formatting-hotkey-active': isBulletActiveForCurrentSelection }"
+                  title="Toggle bullet on focused / selected paragraph(s)"
+                  @click="toggleBulletFromButton"
+                ><strong>CTRL+L</strong> Bullet</button>
                 <span class="formatting-hotkey"><strong>ALT+/</strong> Revise</span>
                 <span class="formatting-hotkey"><strong>ALT+.</strong> Add</span>
                 <span class="formatting-hotkey"><strong>ALT+SHIFT+A</strong> Regen AssetID</span>
@@ -1227,6 +1263,13 @@
                 <span class="formatting-hotkey"><strong>CTRL+I</strong> Italic</span>
                 <span class="formatting-hotkey"><strong>CTRL+U</strong> Underline</span>
                 <span class="formatting-hotkey"><strong>CTRL+ALT+H</strong> Highlight</span>
+                <button
+                  type="button"
+                  class="formatting-hotkey formatting-hotkey-btn"
+                  :class="{ 'formatting-hotkey-active': isBulletActiveForCurrentSelection }"
+                  title="Toggle bullet on focused / selected paragraph(s)"
+                  @click="toggleBulletFromButton"
+                ><strong>CTRL+L</strong> Bullet</button>
                 <span class="formatting-hotkey"><strong>ALT+/</strong> Revise</span>
                 <span class="formatting-hotkey"><strong>ALT+.</strong> Add</span>
                 <span class="formatting-hotkey"><strong>ALT+SHIFT+A</strong> Regen AssetID</span>
@@ -1328,6 +1371,32 @@
         <div class="text-caption text-grey mb-3">
           Press Enter to start with the values below, or pick a different voice / speed.
         </div>
+
+        <div class="text-caption text-grey-darken-1 mb-1">Read</div>
+        <v-btn-toggle
+          v-model="ttsOptionsForm.scope"
+          mandatory
+          density="compact"
+          variant="outlined"
+          divided
+          class="mb-3 d-flex"
+        >
+          <v-btn value="rundown_item" size="small" class="flex-grow-1">
+            <v-icon start size="small">mdi-text-box-outline</v-icon>
+            Full rundown item
+          </v-btn>
+          <v-btn
+            value="paragraph"
+            size="small"
+            class="flex-grow-1"
+            :disabled="ttsParagraphTargetIndex === null"
+            :title="ttsParagraphTargetIndex === null ? 'No paragraph is selected — click into one first' : 'Read only the selected paragraph'"
+          >
+            <v-icon start size="small">mdi-format-paragraph</v-icon>
+            Selected paragraph
+          </v-btn>
+        </v-btn-toggle>
+
         <v-select
           v-model="ttsOptionsForm.voice"
           :items="ttsAvailableVoices.length ? ttsAvailableVoices : ['josh-1']"
@@ -1870,6 +1939,7 @@ const showSpeakerSelector = ref(false)
 const cueCardAlignment = ref('left') // Default alignment, loaded from settings
 const currentSegmentSpeaker = ref('josh')
 const editingSpeakerSegmentIndex = ref(null)
+const bulkSpeakerChange = ref(false) // true when SpeakerSelectorModal targets all multi-selected segments
 const showCuePlacement = ref(false)
 const showSwapErrorDialog = ref(false)
 const swapErrorMessage = ref('')
@@ -1909,7 +1979,7 @@ const altKeyPressed = ref(false) // Manual ALT key tracking for better browser c
 // useUserPrefs under "editor.addCueOpen" so it reopens to the user's last
 // chosen state across sessions.
 const _addCuePrefs = useUserPrefs()
-const cueMenuOpen = ref(_addCuePrefs.get('editor.addCueOpen', false))
+const cueMenuOpen = ref(_addCuePrefs.get('editor.addCueOpen', true))
 watch(cueMenuOpen, (val) => { _addCuePrefs.set('editor.addCueOpen', !!val) })
 watch(() => _addCuePrefs.cache.value['editor.addCueOpen'], (val) => {
   // Hydrate once prefs finish loading; only adopt if it differs.
@@ -1957,7 +2027,13 @@ const ttsInstance = ref(null) // TTS composable instance
 const activeReadingOptions = ref({ voice: 'josh-1', speed: 1.0 })
 // Pre-read TTS options modal
 const showTtsOptionsDialog = ref(false)
-const ttsOptionsForm = ref({ voice: 'josh-1', speed: 1.0 })
+// scope: 'rundown_item' (read the whole item) | 'paragraph' (read only the
+// currently focused/selected paragraph). The user picks this explicitly in the
+// modal — TTS scope is NOT inferred from where the cursor happens to be parked.
+const ttsOptionsForm = ref({ voice: 'josh-1', speed: 1.0, scope: 'rundown_item' })
+// Index of the paragraph the "Selected paragraph" scope would read, or null if
+// none is focused/selected. Computed when the modal opens.
+const ttsParagraphTargetIndex = ref(null)
 const ttsAvailableVoices = ref([])
 const ttsVoicesLoading = ref(false)
 const segmentLineCounts = ref({}) // Cache of line counts per segment for reactivity
@@ -3199,6 +3275,13 @@ function handleContentEditableKeydown(index, event) {
     return;
   }
 
+  // Ctrl+L: Toggle bullet on this paragraph (or all selected paragraphs)
+  if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'l') {
+    event.preventDefault();
+    toggleBulletOnSelection(index);
+    return;
+  }
+
   // Ctrl+S: Save all
   if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
     event.preventDefault();
@@ -3407,6 +3490,60 @@ function toggleHighlightContentEditable(index, element) {
   }
 }
 
+// Toggle bullet on the focused paragraph, or on every paragraph in the
+// current multi-selection. The bullet flag round-trips to markdown as a
+// second class token on the <p> element (e.g. <p class="josh bullet">).
+// Why this path: scriptSegments is the canonical edit state, and going
+// through its setter triggers reconstructRawContent + the save guard,
+// so we don't need a separate persistence call.
+function toggleBulletOnSelection(focusedIndex) {
+  const indices = multiSelectedSegments.value.size > 0
+    ? Array.from(multiSelectedSegments.value)
+    : [focusedIndex];
+
+  const segments = [...scriptSegments.value];
+
+  // If any target lacks the bullet, turn it ON for all of them; otherwise turn OFF.
+  const anyMissing = indices.some(i => segments[i] && segments[i].type === 'text' && !segments[i].bullet);
+  const next = anyMissing;
+
+  let mutated = false;
+  indices.forEach(i => {
+    const seg = segments[i];
+    if (!seg || seg.type !== 'text') return;
+    if (!!seg.bullet !== next) {
+      segments[i] = { ...seg, bullet: next };
+      mutated = true;
+    }
+  });
+
+  if (!mutated) return;
+
+  // Setter reconstructs raw markdown and emits update:scriptContent.
+  scriptSegments.value = segments;
+}
+
+// Styles toolbar wrapper — used by the "Bullet" button in the Styles flyout.
+// Falls back to focusedParagraphIndex when there's no multi-selection.
+function toggleBulletFromButton() {
+  if (multiSelectedSegments.value.size > 0) {
+    toggleBulletOnSelection(Array.from(multiSelectedSegments.value)[0]);
+    return;
+  }
+  const idx = focusedParagraphIndex.value;
+  if (idx == null) return;
+  toggleBulletOnSelection(idx);
+}
+
+const isBulletActiveForCurrentSelection = computed(() => {
+  const segs = scriptSegments.value || [];
+  const indices = multiSelectedSegments.value.size > 0
+    ? Array.from(multiSelectedSegments.value)
+    : (focusedParagraphIndex.value != null ? [focusedParagraphIndex.value] : []);
+  if (indices.length === 0) return false;
+  return indices.every(i => segs[i] && segs[i].type === 'text' && !!segs[i].bullet);
+});
+
 // --- Revision System (Script Mode) ---
 
 // Get current username from auth
@@ -3553,6 +3690,14 @@ function finalizeRevision() {
   }
   // If mode === 'revise' and no addText, kill-only tag is already in place — nothing more needed
 
+  // Flag paragraph as needing attention while an unresolved revision exists.
+  // Mutate in place — the updateTextSegment write above owns the next save;
+  // emitting a full reconstruct here would race and clobber the <rev> insert.
+  const flagSeg = scriptSegments.value[index];
+  if (flagSeg && flagSeg.type === 'text' && !flagSeg.needsAttention) {
+    flagSeg.needsAttention = true;
+  }
+
   // Exit revision mode
   activeRevision.value = null;
   revisionEntryMode.value = false;
@@ -3630,6 +3775,18 @@ function getRevisionCount(segmentIndex) {
   return matches ? matches.length : 0;
 }
 
+// Clear needs-attention flag on a text segment if no <rev> tags remain.
+// Mutates the segment in place — does NOT emit a full reconstruct, which
+// would race with the updateTextSegment write that just committed the
+// accept/reject. The flag change rides along with the next save.
+function _clearAttentionIfNoRevisions(index) {
+  const segment = scriptSegments.value[index];
+  if (!segment || segment.type !== 'text') return;
+  if (!segment.needsAttention) return;
+  if (getRevisionCount(index) > 0) return;
+  segment.needsAttention = false;
+}
+
 // Accept a single revision: replace <rev> block with replacement text
 function acceptRevision(index, revBlockEl) {
   const element = revBlockEl.closest('[contenteditable="true"]');
@@ -3652,6 +3809,7 @@ function acceptRevision(index, revBlockEl) {
 
   updateTextSegment(index, content);
   hasLocalUnsavedChanges.value = true;
+  _clearAttentionIfNoRevisions(index);
   // Trigger immediate save
   nextTick(async () => {
     await flushPendingChanges();
@@ -3679,6 +3837,7 @@ function rejectRevision(index, revBlockEl) {
 
   updateTextSegment(index, content);
   hasLocalUnsavedChanges.value = true;
+  _clearAttentionIfNoRevisions(index);
   nextTick(async () => {
     await flushPendingChanges();
     emit('save-all');
@@ -3702,6 +3861,7 @@ function acceptAllRevisions(index) {
 
   updateTextSegment(index, content);
   hasLocalUnsavedChanges.value = true;
+  _clearAttentionIfNoRevisions(index);
   nextTick(async () => {
     await flushPendingChanges();
     emit('save-all');
@@ -3725,6 +3885,7 @@ function rejectAllRevisions(index) {
 
   updateTextSegment(index, content);
   hasLocalUnsavedChanges.value = true;
+  _clearAttentionIfNoRevisions(index);
   nextTick(async () => {
     await flushPendingChanges();
     emit('save-all');
@@ -5537,6 +5698,42 @@ function handleApplyAllFsq({ param, value }) {
   }
 }
 
+function handleApplyAllGfx({ param, value }) {
+  console.log(`🎨 Apply All GFX: ${param} = ${value}`);
+
+  let updateCount = 0;
+
+  for (let i = 0; i < scriptSegments.value.length; i++) {
+    const segment = scriptSegments.value[i];
+    if (segment.type !== 'cue' || segment.data?.type !== 'GFX') continue;
+
+    const updatedData = { ...segment.data };
+    const updatedRawData = { ...segment.data.rawData };
+
+    updatedData[param] = value;
+    updatedRawData[param] = value;
+    updatedData.rawData = updatedRawData;
+
+    const updatedCueBlock = CueParser.formatCueToMarkdown(updatedRawData);
+
+    scriptSegments.value.splice(i, 1, {
+      ...segment,
+      data: updatedData,
+      rawContent: updatedCueBlock
+    });
+
+    updateCount++;
+  }
+
+  if (updateCount > 0) {
+    const newRawContent = reconstructRawContent(scriptSegments.value);
+    emit('update:scriptContent', newRawContent);
+    console.log(`✅ Applied ${param}=${value} to ${updateCount} GFX cue(s)`);
+  } else {
+    console.log('⚠️ No GFX cues found to update');
+  }
+}
+
 function deleteCue(index) {
   const segment = scriptSegments.value[index];
 
@@ -5933,9 +6130,24 @@ function deleteSegment(index) {
 }
 
 function openSpeakerSelector(segmentIndex) {
+  bulkSpeakerChange.value = false;
   editingSpeakerSegmentIndex.value = segmentIndex;
   const segment = scriptSegments.value[segmentIndex];
   currentSegmentSpeaker.value = segment.speaker || 'josh';
+  showSpeakerSelector.value = true;
+}
+
+// Open the speaker selector for ALL currently multi-selected paragraphs.
+// On selection, handleSpeakerChange() applies the chosen speaker to every
+// selected segment in one reconstruct/emit.
+function openSpeakerSelectorForSelection() {
+  if (multiSelectedSegments.value.size === 0) return;
+  bulkSpeakerChange.value = true;
+  editingSpeakerSegmentIndex.value = null;
+  // Pre-select the speaker of the lowest-index selected segment, if uniform.
+  const indices = Array.from(multiSelectedSegments.value).sort((a, b) => a - b);
+  const speakers = new Set(indices.map(i => scriptSegments.value[i]?.speaker || 'josh'));
+  currentSegmentSpeaker.value = speakers.size === 1 ? [...speakers][0] : 'josh';
   showSpeakerSelector.value = true;
 }
 
@@ -6847,6 +7059,22 @@ function insertCueWithinParagraphInRawScript(placement, cueContent) {
 }
 
 function handleSpeakerChange(newSpeaker) {
+  // Bulk path: apply the chosen speaker to every multi-selected paragraph.
+  if (bulkSpeakerChange.value) {
+    const indices = Array.from(multiSelectedSegments.value);
+    if (indices.length > 0) {
+      const updatedSegments = [...scriptSegments.value];
+      indices.forEach(i => {
+        if (updatedSegments[i]) updatedSegments[i] = { ...updatedSegments[i], speaker: newSpeaker };
+      });
+      const newScriptContent = reconstructScriptContentWithFrontmatter(updatedSegments);
+      emit('update:scriptContent', newScriptContent);
+    }
+    bulkSpeakerChange.value = false;
+    clearMultiSelection();
+    return;
+  }
+
   if (editingSpeakerSegmentIndex.value !== null) {
     // Update the segment's speaker
     const updatedSegments = [...scriptSegments.value];
@@ -6926,6 +7154,19 @@ function handleGlobalKeydown(event) {
     return;
   }
 
+  // Ctrl+L with a multi-selection active — toggle bullet on every selected
+  // paragraph. The per-paragraph keydown handler covers Ctrl+L when focus
+  // is inside a contenteditable; this global branch handles the case where
+  // the user Ctrl/Shift-clicked to multi-select without putting keyboard
+  // focus inside any of the selected paragraphs.
+  if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'l' &&
+      multiSelectedSegments.value.size > 0) {
+    event.preventDefault();
+    const firstIdx = Array.from(multiSelectedSegments.value)[0];
+    toggleBulletOnSelection(firstIdx);
+    return;
+  }
+
   // Handle Ctrl+Shift+C for collapse mode toggle
   if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c') {
     console.log('✅ CTRL+SHIFT+C triggered - toggling collapse mode');
@@ -6972,24 +7213,9 @@ function handleGlobalKeydown(event) {
     }
   }
 
-  // ── Cue selector mode (single-key dispatch when cue menu is open) ──
-  if (cueMenuOpen.value && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-    const key = event.key.toLowerCase();
-    // ESC closes the cue menu
-    if (key === 'escape') {
-      event.preventDefault();
-      cueMenuOpen.value = false;
-      return;
-    }
-    // Match single key to cue definition
-    const cue = cueDefinitions.value.find(c => c.key === key);
-    if (cue) {
-      event.preventDefault();
-      event.stopPropagation();
-      insertCueFromMenu(cue.type);
-      return;
-    }
-  }
+  // Cue menu single-key dispatch removed: cue insertion is now Alt+<key> only
+  // (handled in the Alt+key block below). The cue menu stays open by default
+  // as a visible button palette.
 
   // ── Alt+key cue hotkeys ──
   // Use manual ALT tracking instead of event.altKey for better browser compatibility
@@ -7425,6 +7651,21 @@ function restoreCursorPosition() {
   if (!targetElement || !document.body.contains(targetElement)) {
     console.warn('📍 Target element not found for cursor restore');
     return;
+  }
+
+  // GUARD: if the live caret is already inside this segment, the user is
+  // controlling it (they may have just repositioned via arrow keys / mouse).
+  // No DOM re-render destroyed the selection, so there is nothing to restore —
+  // re-applying the stale savedCursorState offset here would yank the caret
+  // back from where the user just placed it (the "cursor snapback" bug).
+  // Only proceed when the caret is NOT in the target (i.e. it was actually lost).
+  const liveSelection = window.getSelection();
+  if (liveSelection && liveSelection.rangeCount > 0) {
+    const anchor = liveSelection.anchorNode;
+    if (anchor && targetElement.contains(anchor)) {
+      console.log('📍 Live caret already in segment', segmentIndex, '— skipping restore (user owns the caret)');
+      return;
+    }
   }
 
   try {
@@ -9139,10 +9380,24 @@ async function openTtsOptionsDialog() {
     return;
   }
 
-  // Seed the form from the last-used options (or defaults)
+  // Resolve which paragraph "Selected paragraph" scope would read. Priority:
+  // an explicitly selected segment, then the focused paragraph, then the last
+  // known paragraph (survives the blur that the shortcut keypress can cause).
+  // Only text paragraphs are eligible — cues/media aren't "paragraphs".
+  const candidate = [
+    selectedSegmentIndex.value,
+    focusedParagraphIndex.value,
+    lastKnownParagraphIndex.value
+  ].find(i => i !== null && i !== undefined && i >= 0);
+  const candidateSeg = (candidate !== undefined) ? scriptSegments.value[candidate] : null;
+  ttsParagraphTargetIndex.value = (candidateSeg && candidateSeg.type === 'text') ? candidate : null;
+
+  // Seed the form from the last-used options (or defaults). Scope ALWAYS
+  // defaults to the whole rundown item; the user opts into a single paragraph.
   ttsOptionsForm.value = {
     voice: activeReadingOptions.value.voice || 'josh-1',
-    speed: activeReadingOptions.value.speed || 1.0
+    speed: activeReadingOptions.value.speed || 1.0,
+    scope: 'rundown_item'
   };
 
   showTtsOptionsDialog.value = true;
@@ -9164,14 +9419,23 @@ async function openTtsOptionsDialog() {
 }
 
 function confirmTtsOptionsAndRead() {
+  // 'paragraph' scope only valid if a paragraph target was resolved; otherwise
+  // fall back to reading the whole rundown item.
+  const scope = (ttsOptionsForm.value.scope === 'paragraph' && ttsParagraphTargetIndex.value !== null)
+    ? 'paragraph'
+    : 'rundown_item';
   const opts = {
     voice: (ttsOptionsForm.value.voice || 'josh-1').toString().trim() || 'josh-1',
-    speed: Number(ttsOptionsForm.value.speed) || 1.0
+    speed: Number(ttsOptionsForm.value.speed) || 1.0,
+    scope,
+    paragraphIndex: scope === 'paragraph' ? ttsParagraphTargetIndex.value : null
   };
   showTtsOptionsDialog.value = false;
-  activeReadingOptions.value = opts;
+  // Persist only voice/speed as the reusable default — not scope/paragraph.
+  activeReadingOptions.value = { voice: opts.voice, speed: opts.speed };
   if (typeof window.notifyUserStandard === 'function') {
-    window.notifyUserStandard(`Reading with ${opts.voice} @ ${opts.speed}x`, '#2196F3', 2000);
+    const what = scope === 'paragraph' ? 'selected paragraph' : 'full rundown item';
+    window.notifyUserStandard(`Reading ${what} with ${opts.voice} @ ${opts.speed}x`, '#2196F3', 2000);
   }
   toggleContextualReading(opts);
 }
@@ -9190,7 +9454,7 @@ async function startContextualReading(options) {
     return;
   }
 
-  const context = getReadingContext();
+  const context = getReadingContext(options);
   if (!context) {
     console.warn('No content to read');
     if (typeof window.notifyUserStandard === 'function') {
@@ -9229,7 +9493,41 @@ async function startContextualReading(options) {
 }
 
 // Determine what's currently selected/highlighted
-function getReadingContext() {
+function getReadingContext(options = {}) {
+  // EXPLICIT SCOPE (from the TTS options modal) takes priority over any
+  // inferred focus/selection. This is the contract the user picks in the modal:
+  //   - 'rundown_item' → always read the whole item, regardless of where the
+  //     cursor is parked (fixes: cursor-in-paragraph wrongly narrowing the read)
+  //   - 'paragraph'    → read only options.paragraphIndex
+  if (options.scope === 'rundown_item') {
+    return {
+      type: 'rundown_item',
+      items: buildRundownItemReadingItems()
+    };
+  }
+  if (options.scope === 'paragraph') {
+    const pIdx = options.paragraphIndex;
+    const paragraph = (pIdx !== null && pIdx !== undefined && pIdx >= 0)
+      ? scriptSegments.value[pIdx] : null;
+    if (paragraph && paragraph.type === 'text') {
+      return {
+        type: 'paragraph',
+        index: pIdx,
+        content: processContentForReading(paragraph.content),
+        speaker: paragraph.speaker
+      };
+    }
+    // Requested paragraph no longer valid — fall back to the whole item.
+    return {
+      type: 'rundown_item',
+      items: buildRundownItemReadingItems()
+    };
+  }
+
+  // No explicit scope passed (non-modal callers). Below is the legacy
+  // inference, MINUS the passive focused-paragraph branch — merely parking the
+  // cursor in a paragraph must not narrow the read to it.
+
   // Check if a specific segment is selected via selectedSegmentIndex
   if (selectedSegmentIndex.value !== null && selectedSegmentIndex.value >= 0) {
     const segment = scriptSegments.value[selectedSegmentIndex.value];
@@ -9238,17 +9536,6 @@ function getReadingContext() {
       index: selectedSegmentIndex.value,
       content: processContentForReading(segment.content),
       speaker: segment.speaker
-    };
-  }
-
-  // Check if a specific paragraph is focused
-  if (focusedParagraphIndex.value !== null && focusedParagraphIndex.value >= 0) {
-    const paragraph = scriptSegments.value[focusedParagraphIndex.value];
-    return {
-      type: 'paragraph',
-      index: focusedParagraphIndex.value,
-      content: processContentForReading(paragraph.content),
-      speaker: paragraph.speaker
     };
   }
 
@@ -10555,6 +10842,7 @@ defineExpose({
   isTtsConfigured,
   lastParsedContent,
   pendingCueData,
+  pendingCueInsertionIndex,
   pendingCueType,
   pendingPlacement,
   rawScriptContent,
@@ -10566,6 +10854,7 @@ defineExpose({
   segmentEditBuffer,
   segmentReparseKey,
   selectSegment,
+  selectedSegmentIndex,
   showAssetIDInfo,
   showCuePlacement,
   toggleCueMenu,
@@ -11373,6 +11662,53 @@ defineExpose({
 .formatting-hotkey strong {
   font-weight: 700 !important;
   color: rgba(60, 60, 60, 1) !important;
+}
+
+/* Clickable variant of formatting-hotkey (e.g. the Bullet button). */
+.formatting-hotkey-btn {
+  background: transparent !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  border-radius: 4px !important;
+  padding: 1px 6px !important;
+  cursor: pointer !important;
+}
+.formatting-hotkey-btn:hover {
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+.formatting-hotkey-btn.formatting-hotkey-active {
+  background: rgba(33, 150, 243, 0.12) !important;
+  border-color: rgba(33, 150, 243, 0.6) !important;
+  color: #1976d2 !important;
+}
+.formatting-hotkey-btn.formatting-hotkey-active strong {
+  color: #1976d2 !important;
+}
+
+/* Bullet style on a script-mode paragraph.
+   Renders a bullet glyph before the first line and indents the paragraph
+   by 2 character widths. Applied via the `paragraph-bullet` class on the
+   outer .paragraph-content wrapper, which is round-tripped to markdown as
+   a second class token on the persisted <p> element (e.g. class="josh bullet"). */
+.paragraph-content.paragraph-bullet .speaker-contenteditable {
+  position: relative;
+  padding-left: 3.75ch !important;
+}
+.paragraph-content.paragraph-bullet .speaker-contenteditable::before {
+  content: "\2022";  /* • */
+  position: absolute;
+  left: 0;
+  /* Vertically center the glyph on the first text line. The editable has
+     padding-top:2px and line-height:27px, so the first line's vertical
+     center sits at 2px + 27px/2 ≈ 15.5px from the top. Using top:50% of
+     the first line + translateY(-50%) keeps the glyph centered regardless
+     of its font-size. */
+  top: calc(2px + 27px / 2);
+  transform: translateY(-50%);
+  font-size: 1.8em;
+  line-height: 1;
+  font-weight: bold;
+  color: rgba(0, 0, 0, 0.8);
+  pointer-events: none;
 }
 
 /* Auto-sizing Cue Toolbar inside Editor Content */

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Bootstrap wrapper: open the sot-trace TUI inside the running container.
+# Pass-through args go to the in-container `sot-trace` CLI.
+# Default (no args) launches the TUI.
+set -euo pipefail
+
+CONTAINER="show-build-sot-trace"
+
+if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+  echo "error: container '$CONTAINER' is not running" >&2
+  echo "start it with: docker compose up -d sot-trace" >&2
+  exit 1
+fi
+
+if [ "$#" -eq 0 ]; then
+  exec docker exec -it "$CONTAINER" sot-trace tui
+else
+  exec docker exec -it "$CONTAINER" sot-trace "$@"
+fi

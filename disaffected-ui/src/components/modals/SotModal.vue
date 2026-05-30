@@ -1,164 +1,31 @@
 <template>
-  <!-- Overlay Information Display (OUTSIDE v-dialog to avoid stacking context issues) -->
-  <div v-if="show && mediaUrl" class="overlay-info-display" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 10001;">
-    <!-- Top Center: Large Timecode Display -->
-    <div class="timecode-overlay" style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.85); padding: 14px 20px; border-radius: 9px; text-align: center; border: 2px solid rgba(255, 255, 255, 0.3); min-width: 520px;">
-      <div style="display: flex; gap: 12px; align-items: center; justify-content: center;">
-        <!-- Current Timecode (75% size) -->
-        <div style="color: white; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(255, 255, 255, 0.5); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">{{ currentTimecode }}</div>
-        <!-- Countdown Timecode (75% size, red text only) -->
-        <div style="padding: 8px 12px;">
-          <div style="color: #F44336; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(244, 67, 54, 0.8); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">-{{ remainingTimecode }}</div>
-        </div>
-      </div>
-      <div style="color: #90CAF9; font-size: 10px; font-weight: bold; font-family: 'Helvetica', Arial, sans-serif; margin-top: 6px;">{{ currentActionDisplay }}</div>
-
-      <!-- Clip Duration Display (slides down from behind timecode when IN and OUT are set) -->
-      <transition name="slide-down">
-        <div v-if="trimStart && trimEnd && clipDuration" class="clip-duration-display" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.2);">
-          <div style="color: #81C784; font-size: 12px; font-weight: bold; margin-bottom: 4px;">CLIP DURATION</div>
-          <div style="color: #4CAF50; font-size: 32px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(76, 175, 80, 0.5);">{{ clipDuration }}</div>
-        </div>
-      </transition>
-    </div>
-
-    <!-- Playback Speed Indicator (Top Right, appears on speed change) -->
-    <transition name="speed-fade">
-      <div v-if="showSpeedIndicator" class="speed-indicator" style="position: absolute; top: 20px; right: 50px; background: rgba(0, 0, 0, 0.9); padding: 20px; border-radius: 50%; width: 100px; height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 3px solid rgba(76, 175, 80, 0.8); box-shadow: 0 0 20px rgba(76, 175, 80, 0.5);">
-        <div style="color: #4CAF50; font-size: 32px; font-weight: bold; font-family: 'Roboto Mono', monospace; text-shadow: 0 0 10px rgba(76, 175, 80, 0.8);">{{ playbackSpeed.toFixed(2) }}×</div>
-        <div style="color: #81C784; font-size: 10px; font-weight: bold; margin-top: 4px; text-transform: uppercase; letter-spacing: 1px;">{{ speedLabel }}</div>
-      </div>
-    </transition>
-
-    <!-- Frame Counter (Bottom Center, appears during frame stepping) -->
-    <transition name="frame-counter-fade">
-      <div v-if="showFrameCounter" class="frame-counter" style="position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.9); padding: 15px 30px; border-radius: 8px; border: 2px solid rgba(156, 39, 176, 0.8); box-shadow: 0 0 20px rgba(156, 39, 176, 0.5);">
-        <div style="color: #9C27B0; font-size: 12px; font-weight: bold; margin-bottom: 4px; text-align: center; text-transform: uppercase; letter-spacing: 1px;">Frame</div>
-        <div style="color: white; font-size: 28px; font-weight: bold; font-family: 'Roboto Mono', monospace; text-shadow: 0 0 10px rgba(156, 39, 176, 0.8); text-align: center;">
-          {{ currentFrameNumber }} <span style="color: rgba(255,255,255,0.5); font-size: 18px;">/</span> {{ totalFrames }}
-        </div>
-        <div style="color: #CE93D8; font-size: 10px; font-weight: bold; margin-top: 4px; text-align: center; font-family: 'Helvetica', Arial, sans-serif;">{{ frameStepDirection }}</div>
-      </div>
-    </transition>
-
-    <!-- Top Left: IN Point Display -->
-    <div style="position: absolute; top: 5px; left: 50px;">
-      <div class="in-point-display" style="background: rgba(33, 150, 243, 0.9); padding: 14px 20px; border-radius: 9px; border-left: 6px solid #1976D2; border: 2px solid rgba(33, 150, 243, 0.5); min-width: 200px;">
-        <div style="color: rgba(255,255,255,0.8); font-size: 10px; font-weight: bold; margin-bottom: 4px;">◄ IN POINT</div>
-        <div style="color: white; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(33, 150, 243, 0.5);">{{ trimStart || '--:--:--:--' }}</div>
-      </div>
-    </div>
-
-    <!-- Left Side: Hotkeys List (below center timecode, extends to bottom) -->
-    <div style="position: absolute; top: 100px; left: 50px; bottom: 70px; z-index: 999999;">
-      <div class="hotkeys-list" style="background: rgba(0, 0, 0, 0.92); padding: 15px; border-radius: 8px; width: 350px; height: 100%; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
-        <!-- Header at top -->
-        <div @click="showHotkeys = !showHotkeys" style="color: white; font-size: 14px; font-weight: bold; border-bottom: 2px solid rgba(255, 255, 255, 0.3); padding-bottom: 6px; cursor: pointer; margin-bottom: 8px;">
-          ⌨️ HOTKEYS <span style="font-size: 10px; opacity: 0.6;">{{ showHotkeys ? '▼' : '▶' }}</span>
-          <span style="color: rgba(255,255,255,0.5); font-size: 9px; margin-left: 10px;">CTRL+1</span>
-        </div>
-        <!-- Content expands downward to fill available space -->
-        <div v-show="showHotkeys" style="color: white; font-size: 11px; line-height: 1.6; font-family: 'Helvetica', Arial, sans-serif; flex: 1; overflow-y: auto; padding-right: 8px;">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">SPACE</span><span>Play/Pause</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">SHIFT+SPACE</span><span>Preview</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">I</span><span>Mark IN</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">O</span><span>Mark OUT</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">Q</span><span>Go to IN</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">W</span><span>Go to OUT</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">K</span><span>Play/Pause</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">J / L</span><span>-1s / +1s</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">← / →</span><span>-1f / +1f</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">↑ / ↓</span><span>-10s / +10s</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #4CAF50; font-weight: bold;">[ / ]</span><span style="color: #4CAF50;">Speed -/+</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #4CAF50; font-weight: bold;">\</span><span style="color: #4CAF50;">Speed 1×</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #9C27B0; font-weight: bold;">ALT+T</span><span style="color: #9C27B0;">Mark Thumb</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #FF9800; font-weight: bold;">CTRL+ENTER</span><span style="color: #FF9800;">Take Clip</span></div>
-          <div v-if="clippingMethod === 'individual-clips'" style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #FFEB3B; font-weight: bold;">ENTER×2</span><span style="color: #FFEB3B;">Take Clip</span></div>
-          <!-- Type of Cut Hotkeys -->
-          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2); margin-bottom: 6px; color: rgba(255,255,255,0.7); font-size: 10px;">TYPE OF CUT</div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">N</span><span style="color: #64B5F6;">None</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">S</span><span style="color: #64B5F6;">Single Trim</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">M</span><span style="color: #64B5F6;">Multiple Clips</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2);"><span style="color: #4CAF50; font-weight: bold;">ALT+ENTER</span><span style="color: #4CAF50;">Submit</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #F44336; font-weight: bold;">ESC</span><span style="color: #F44336;">Cancel</span></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Top Right: OUT Point Display (aligned with center timecode) -->
-    <div style="position: absolute; top: 5px; right: 50px;">
-      <div class="out-point-display" style="background: rgba(255, 87, 34, 0.9); padding: 14px 20px; border-radius: 9px; border-right: 6px solid #E64A19; border: 2px solid rgba(255, 87, 34, 0.5); min-width: 200px;">
-        <div style="color: rgba(255,255,255,0.8); font-size: 10px; font-weight: bold; margin-bottom: 4px; text-align: right;">OUT POINT ►</div>
-        <div style="color: white; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(255, 87, 34, 0.5); text-align: right;">{{ trimEnd || '--:--:--:--' }}</div>
-      </div>
-
-      <!-- Thumbnail Marker Display (only when thumbnail is set) - pushed down to clear toast area -->
-      <transition name="clip-drop">
-        <div v-if="thumbnailTimecode && thumbnailTimecode !== '00:00:00:00'" class="thumbnail-marker-display" style="background: rgba(156, 39, 176, 0.9); padding: 14px 18px; border-radius: 10px; border-right: 8px solid #7B1FA2; margin-top: 70px; margin-bottom: 15px; pointer-events: auto; max-width: 400px;">
-          <div style="color: white; font-size: 16px; font-weight: bold; margin-bottom: 6px; text-align: right;">📸 THUMBNAIL</div>
-          <div style="color: white; font-size: 20px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 1px; text-align: right;">{{ thumbnailTimecode }}</div>
-        </div>
-      </transition>
-
-      <!-- Individual Clip Boxes (drop in under thumbnail) - first clip has margin-top to clear toast if no thumbnail -->
-      <transition-group name="clip-drop">
-        <div
-          v-for="(clip, index) in clips"
-          :key="`clip-${index}`"
-          class="clip-box"
-          :style="{
-            background: 'rgba(255, 152, 0, 0.9)',
-            padding: '10px 15px',
-            borderRadius: '10px',
-            borderRight: '8px solid #F57C00',
-            marginBottom: '8px',
-            marginTop: (index === 0 && (!thumbnailTimecode || thumbnailTimecode === '00:00:00:00')) ? '70px' : '0',
-            pointerEvents: 'auto',
-            maxWidth: '560px'
-          }"
-        >
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <div style="color: white; font-size: 18px; font-weight: bold;">CLIP {{ index + 1 }}</div>
-            <button @click="removeClip(index)" style="background: #f44336; color: white; border: none; border-radius: 4px; padding: 4px 10px; font-size: 13px; cursor: pointer; font-weight: bold; transition: all 0.2s;">✕</button>
-          </div>
-          <input
-            v-model="clip.slug"
-            placeholder="clip-slug-here"
-            style="width: 100%; padding: 6px; margin-bottom: 6px; background: rgba(255, 255, 255, 0.2); border: 2px solid rgba(255, 255, 255, 0.4); border-radius: 6px; color: white; font-size: 16px; font-weight: bold; font-family: 'Roboto Mono', monospace;"
-            @click.stop
-          />
-          <div style="color: white; font-size: 14px; font-family: 'Roboto Mono', monospace; margin-bottom: 2px;">{{ clip.time_start }} → {{ clip.time_end }}</div>
-          <div style="color: rgba(255, 255, 255, 0.7); font-size: 13px; font-family: 'Roboto Mono', monospace;">Duration: {{ Math.round(clip.duration_seconds) }}s</div>
-        </div>
-      </transition-group>
-
-      <!-- Single Trim Clip Card (shows when in single-trim mode with IN/OUT set) - has margin-top to clear toast if no thumbnail -->
-      <transition name="clip-drop">
-        <div
-          v-if="clippingMethod === 'single-trim' && trimStart && trimEnd && clipDuration"
-          key="single-trim-card"
-          class="clip-box"
-          :style="{
-            background: 'rgba(33, 150, 243, 0.9)',
-            padding: '18px',
-            borderRadius: '10px',
-            borderRight: '8px solid #1976D2',
-            marginTop: (!thumbnailTimecode || thumbnailTimecode === '00:00:00:00') ? '70px' : '0',
-            marginBottom: '12px',
-            pointerEvents: 'auto',
-            maxWidth: '400px'
-          }"
-        >
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <div style="color: white; font-size: 18px; font-weight: bold;">SINGLE TRIM</div>
-          </div>
-          <div style="color: white; font-size: 16px; font-weight: bold; font-family: 'Roboto Mono', monospace; margin-bottom: 8px;">{{ clipSlug || slug || 'untitled' }}</div>
-          <div style="color: white; font-size: 14px; font-family: 'Roboto Mono', monospace; margin-bottom: 4px;">{{ trimStart }} → {{ trimEnd }}</div>
-          <div style="color: rgba(255, 255, 255, 0.7); font-size: 13px; font-family: 'Roboto Mono', monospace;">Duration: {{ clipDuration }}</div>
-        </div>
-      </transition>
-    </div>
-  </div>
+  <!-- Outside-the-modal overlays — extracted into MediaModalOverlays
+       shared component. Renders only when show && mediaUrl. -->
+  <MediaModalOverlays
+    :show="show"
+    :media-loaded="!!mediaUrl"
+    :current-timecode="currentTimecode"
+    :remaining-timecode="remainingTimecode"
+    :current-action-display="currentActionDisplay"
+    :trim-start="trimStart"
+    :trim-end="trimEnd"
+    :clip-duration="clipDuration"
+    :show-speed-indicator="showSpeedIndicator"
+    :playback-speed="playbackSpeed"
+    :speed-label="speedLabel"
+    :show-frame-counter="showFrameCounter"
+    :current-frame-number="currentFrameNumber"
+    :total-frames="totalFrames"
+    :frame-step-direction="frameStepDirection"
+    :thumbnail-timecode="thumbnailTimecode"
+    :clipping-method="clippingMethod"
+    :clips="clips"
+    :clip-slug="clipSlug"
+    :slug="slug"
+    v-model:show-hotkeys="showHotkeys"
+    @remove-clip="removeClip"
+    @update-clip-slug="(p) => { clips[p.index].slug = p.slug }"
+  />
 
   <v-dialog
     :model-value="show"
@@ -1121,6 +988,14 @@ import { useToast } from 'vue-toastification'
 import axios from 'axios' // eslint-disable-line no-unused-vars
 import AudioWaveform from '../AudioWaveform.vue' // eslint-disable-line no-unused-vars
 import { useWaveform } from '../../composables/useWaveform'
+import { useTrimmableMediaModal } from '../../composables/useTrimmableMediaModal'
+import { useMediaModalKeyboard } from '../../composables/useMediaModalKeyboard'
+import { useMediaModalClips } from '../../composables/useMediaModalClips'
+import { useFocusTrap } from '../../composables/useFocusTrap'
+import { uploadVideoInBackground } from '../../utils/mediaUpload'
+import { registerModalEsc } from '../../composables/useModalStack'
+import { useDoubleEnterToSlug } from '../../composables/useDoubleEnterToSlug'
+import MediaModalOverlays from './shared/MediaModalOverlays.vue'
 import { getColorValue, resolveVuetifyColor } from '../../utils/themeColorMap'
 
 // SOT Processing Job Types
@@ -1182,27 +1057,63 @@ const step10sForwardBtn = ref(null)
 const step1sForwardBtn = ref(null)
 const step1fForwardBtn = ref(null)
 
-// Form data
+// ---------------------------------------------------------------------
+// Trim / timecode / playback / multi-clip state — owned by the composable.
+// Destructured here so existing template/script references resolve.
+// ---------------------------------------------------------------------
+const trim = useTrimmableMediaModal({
+  videoPlayerRef,
+  defaultFramerate: 30,
+  toast,
+  emitActionFeedback: true,
+})
+const {
+  // Trim points
+  trimStart, trimEnd, duration,
+  // Playback / display
+  currentFramerate, isPlaying, currentTimecode, durationTimecode,
+  remainingTimecode, currentActionDisplay, thumbnailTimecode,
+  // Speed
+  playbackSpeed, showSpeedIndicator, speedLabel,
+  // Frame counter
+  showFrameCounter, currentFrameNumber, totalFrames, frameStepDirection,
+  // Multi-clip state
+  clippingMethod, clipSlug, clips, clipCounter,
+  // Computed
+  clipDuration, inPointSeconds, outPointSeconds,
+  // Pure utilities
+  secondsToTimecode, timecodeToSeconds, formatFileSize,
+  // UI feedback
+  hoverButton, unhoverButton, animateButtonPress, // eslint-disable-line no-unused-vars
+  // Mark / go-to
+  performMarkInAction, performMarkOutAction,
+  performGoToInAction, performGoToOutAction,
+  handleWaveformSeek,
+  // Play / pause / preview
+  performPlayPauseAction, performPreviewAction,
+  // Frame stepping
+  performStepBackFrame, performStepForwardFrame,
+  performStepBackSecond, performStepForwardSecond,
+  performJumpBackTenSeconds, performJumpForwardTenSeconds,
+  // Thumbnail / speed actions are invoked via the trim composable
+  // by useMediaModalKeyboard internally; not needed as locals here.
+  // Live updates
+  updateTimecode, updatePlayPauseState,
+} = trim
+
+// Form data (SOT-specific)
 const assetId = ref('Generated on save') // eslint-disable-line no-unused-vars
 const slug = ref('')
 const mediaUrl = ref('')
 const thumbnailUrl = ref('')
-const duration = ref('')
-const trimStart = ref('00:00:00')
-const trimEnd = ref('00:00:00')
 const description = ref('')
 const airTime = ref('') // eslint-disable-line no-unused-vars
 const airDate = ref('') // eslint-disable-line no-unused-vars
 const transcription = ref('')
 const credits = ref([])
 
-// Video state
-const currentFramerate = ref(30)
-const isPlaying = ref(false)
-const currentTimecode = ref('00:00:00:00')
-const durationTimecode = ref('00:00:00:00')
-const remainingTimecode = ref('00:00:00:00')
-const previewInterval = ref(null)
+// Video state (SOT-specific)
+const previewInterval = ref(null) // eslint-disable-line no-unused-vars
 const videoSpecs = ref({})
 const blobUrl = ref('')
 const fileExtension = ref('') // eslint-disable-line no-unused-vars
@@ -1213,17 +1124,12 @@ const uploadProgress = ref(0)
 const tempJobId = ref(null)
 const uploadComplete = ref(false) // eslint-disable-line no-unused-vars
 const isSubmitting = ref(false) // Debounce flag for Alt+Enter
-
-// Clipping tools state
-const clippingMethod = ref('none')
-const clipSlug = ref('')
-const clips = ref([])
-const clipCounter = ref(1)
+let uploadAbortFn = null // captures the abort() returned by uploadVideoInBackground
 
 // Type of Cut keyboard navigation
-const focusedCutMode = ref(null) // Tracks which button is focused during Tab navigation
-const focusedVideoButton = ref(null) // Tracks which video source button is focused
-const showCutModeHelp = ref(false) // Show helper text when Tab-navigating
+const focusedCutMode = ref(null)
+const focusedVideoButton = ref(null)
+const showCutModeHelp = ref(false)
 
 // Cut mode descriptions (shown when Tab-navigating)
 const cutModeDescriptions = { // eslint-disable-line no-unused-vars
@@ -1234,67 +1140,18 @@ const cutModeDescriptions = { // eslint-disable-line no-unused-vars
   'montage': 'Combine multiple clips into single video (Coming Soon)'
 }
 
-// Double-Enter TAKE functionality
+// Double-Enter TAKE functionality — clipSlugNeedsAttention and
+// pendingTakeOnSlug come from useMediaModalClips below
 const clipSlugInputRef = ref(null)
 const clipSlugLabelRef = ref(null) // eslint-disable-line no-unused-vars
 const localFileButtonRef = ref(null)
-const lastEnterTime = ref(0)
-const pendingTakeOnSlug = ref(false) // Auto-retry TAKE when slug is entered
-const clipSlugNeedsAttention = ref(false) // For styling the input when validation fails
-const DOUBLE_ENTER_THRESHOLD = 400 // milliseconds
-
-// Keyboard handler
-const keyboardHandler = ref(null)
-
-// Overlay display state
-const currentActionDisplay = ref('READY')
-const thumbnailTimecode = ref('')
-
-// Playback speed state
-const playbackSpeed = ref(1.0)
-const showSpeedIndicator = ref(false)
-const speedIndicatorTimer = ref(null)
-const SPEED_PRESETS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
-
-// Frame counter state
-const showFrameCounter = ref(false)
-const frameCounterTimer = ref(null)
-const currentFrameNumber = ref(0)
-const totalFrames = ref(0)
-const frameStepDirection = ref('')
+const SPEED_PRESETS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0] // eslint-disable-line no-unused-vars
 
 // Waveform state
-const showWaveform = ref(false)
+const showWaveform = ref(false) // eslint-disable-line no-unused-vars
 
 // Hotkeys visibility state (starts collapsed)
 const showHotkeys = ref(false)
-
-// Computed: Clip duration display
-const clipDuration = computed(() => {
-  if (!trimStart.value || !trimEnd.value) return null
-  const startSeconds = timecodeToSeconds(trimStart.value)
-  const endSeconds = timecodeToSeconds(trimEnd.value)
-  const durationSeconds = endSeconds - startSeconds
-  if (durationSeconds <= 0) return null
-  return secondsToTimecode(durationSeconds, true)
-})
-
-// Computed: In/out points as seconds for waveform markers
-const inPointSeconds = computed(() => {
-  if (!trimStart.value || trimStart.value === '00:00:00') return null
-  return timecodeToSeconds(trimStart.value)
-})
-const outPointSeconds = computed(() => {
-  if (!trimEnd.value || trimEnd.value === '00:00:00') return null
-  return timecodeToSeconds(trimEnd.value)
-})
-
-// Computed: Speed label
-const speedLabel = computed(() => { // eslint-disable-line no-unused-vars
-  if (playbackSpeed.value < 1.0) return 'Slow Motion'
-  if (playbackSpeed.value > 1.0) return 'Fast Forward'
-  return 'Normal Speed'
-})
 
 // Computed: Color values for validation feedback
 const locatorFlashColor = computed(() => {
@@ -1307,84 +1164,35 @@ const needsAttentionColor = computed(() => {
   return resolveVuetifyColor(colorName)
 })
 
+// Multi-clip actions (provides clipSlugNeedsAttention/pendingTakeOnSlug
+// state via the composable's returned refs)
+const clipsApi = useMediaModalClips({
+  videoPlayerRef,
+  trim,
+  toast,
+  clipSlugInputRef,
+  locatorFlashColor,
+  slug,
+})
+const {
+  clipSlugNeedsAttention,
+  pendingTakeOnSlug, // eslint-disable-line no-unused-vars
+  handleTakeClip, // eslint-disable-line no-unused-vars
+  removeClip, // eslint-disable-line no-unused-vars
+  handleDoubleEnterTake,
+  handleClipSlugInput, // eslint-disable-line no-unused-vars
+  handleClipSlugEnter, // eslint-disable-line no-unused-vars
+} = clipsApi
+
 // Selection color for focused UI elements (Tab navigation highlight)
 const selectionColor = computed(() => {
   const colorName = getColorValue('selection') || 'warning'
   return resolveVuetifyColor(colorName)
 })
 
-// Utility functions
-const secondsToTimecode = (seconds, showFrames = true) => {
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const secs = Math.floor(seconds % 60)
-  const frames = Math.floor((seconds % 1) * currentFramerate.value)
-
-  if (showFrames) {
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`
-  } else {
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
-}
-
-const timecodeToSeconds = (timecode) => {
-  const parts = timecode.split(':').map(p => parseInt(p, 10))
-  if (parts.length === 3) {
-    return parts[0] * 3600 + parts[1] * 60 + parts[2]
-  } else if (parts.length === 4) {
-    const frames = parts[3] / currentFramerate.value
-    return parts[0] * 3600 + parts[1] * 60 + parts[2] + frames
-  }
-  return 0
-}
-
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
-}
-
-const getDarkerColor = (color) => {
-  // Simple darkening - reduce brightness
-  const hex = color.replace('#', '')
-  const r = Math.max(0, parseInt(hex.substr(0, 2), 16) - 30)
-  const g = Math.max(0, parseInt(hex.substr(2, 2), 16) - 30)
-  const b = Math.max(0, parseInt(hex.substr(4, 2), 16) - 30)
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
-}
-
-// Button hover effects
-const hoverButton = (e, baseColor) => { // eslint-disable-line no-unused-vars
-  const darkerColor = getDarkerColor(baseColor)
-  e.currentTarget.querySelectorAll('div').forEach((div, idx) => {
-    if (idx === 0) div.style.background = getDarkerColor(darkerColor)
-    else div.style.background = darkerColor
-  })
-  e.currentTarget.style.transform = 'scale(1.05)'
-  e.currentTarget.style.zIndex = '100'
-  e.currentTarget.style.boxShadow = `0 4px 12px ${baseColor}66`
-}
-
-const unhoverButton = (e, baseColor) => { // eslint-disable-line no-unused-vars
-  const sections = e.currentTarget.querySelectorAll('div')
-  if (sections.length >= 2) {
-    sections[0].style.background = getDarkerColor(baseColor)
-    sections[1].style.background = baseColor
-  }
-  e.currentTarget.style.transform = 'scale(1)'
-  e.currentTarget.style.zIndex = '13'
-  e.currentTarget.style.boxShadow = 'none'
-}
-
-const animateButtonPress = (button) => {
-  if (!button) return
-  button.style.transform = 'scale(0.95)'
-  setTimeout(() => {
-    button.style.transform = 'scale(1)'
-  }, 100)
-}
+// Utility + button-effect functions now come from the trim composable
+// (secondsToTimecode, timecodeToSeconds, formatFileSize, hoverButton,
+// unhoverButton, animateButtonPress). Destructured at the top.
 
 // Type of Cut keyboard navigation handlers
 const handleCutModeFocus = (mode) => { // eslint-disable-line no-unused-vars
@@ -1445,291 +1253,15 @@ const handleCutModeKeydown = (event, mode) => { // eslint-disable-line no-unused
 }
 
 // Video control actions
-const performMarkInAction = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  trimStart.value = secondsToTimecode(videoPlayerRef.value.currentTime, true)  // Frame-accurate
-  animateButtonPress(markInBtn.value)
-
-  // Auto-switch to single-trim mode if currently "none"
-  if (clippingMethod.value === 'none') {
-    clippingMethod.value = 'single-trim'
-    toast('Clipping mode switched to SINGLE TRIM', {
-      type: 'success',
-      position: 'top-center',
-      timeout: 2500,
-      icon: '✂️',
-    })
-  }
-
-  // Show toast notification - blue color, slide from left
-  toast(`IN point set: ${trimStart.value}`, {
-    type: 'info',
-    position: 'top-left',
-    timeout: 2000,
-    toastClassName: 'mark-in-toast',
-    bodyClassName: 'mark-in-toast-body',
-    icon: '◄',
-  })
-}
-
-const performMarkOutAction = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  trimEnd.value = secondsToTimecode(videoPlayerRef.value.currentTime, true)  // Frame-accurate
-  animateButtonPress(markOutBtn.value)
-
-  // Auto-switch to single-trim mode if currently "none"
-  if (clippingMethod.value === 'none') {
-    clippingMethod.value = 'single-trim'
-    toast('Clipping mode switched to SINGLE TRIM', {
-      type: 'success',
-      position: 'top-center',
-      timeout: 2500,
-      icon: '✂️',
-    })
-  }
-
-  // Show toast notification - orange/red color, slide from right
-  toast(`OUT point set: ${trimEnd.value}`, {
-    type: 'warning',
-    position: 'top-right',
-    timeout: 2000,
-    toastClassName: 'mark-out-toast',
-    bodyClassName: 'mark-out-toast-body',
-    icon: '►',
-  })
-}
-
-const performGoToInAction = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  const seconds = timecodeToSeconds(trimStart.value)
-  videoPlayerRef.value.currentTime = seconds
-  animateButtonPress(goToInBtn.value)
-}
-
-const performGoToOutAction = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  const seconds = timecodeToSeconds(trimEnd.value)
-  videoPlayerRef.value.currentTime = seconds
-  animateButtonPress(goToOutBtn.value)
-}
-
-// Handle waveform scrubber seek
-const handleWaveformSeek = (time) => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  videoPlayerRef.value.currentTime = time
-  updateTimecode()
-}
-
-const performPlayPauseAction = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  if (videoPlayerRef.value.paused) {
-    videoPlayerRef.value.play()
-    currentActionDisplay.value = 'PLAYING ▶'
-  } else {
-    videoPlayerRef.value.pause()
-    currentActionDisplay.value = 'PAUSED ⏸'
-  }
-  animateButtonPress(playPauseBtn.value)
-}
-
-const performPreviewAction = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-
-  // Clear any existing preview interval
-  if (previewInterval.value) {
-    clearInterval(previewInterval.value)
-    previewInterval.value = null
-  }
-
-  const inPoint = timecodeToSeconds(trimStart.value)
-  const outPoint = timecodeToSeconds(trimEnd.value)
-
-  if (outPoint <= inPoint) {
-    toast.warning('Out point must be after In point')
-    return
-  }
-
-  currentActionDisplay.value = 'PREVIEW MODE 👁'
-  videoPlayerRef.value.currentTime = inPoint
-  videoPlayerRef.value.play()
-
-  // Monitor playback and pause at Out point
-  previewInterval.value = setInterval(() => {
-    if (videoPlayerRef.value.currentTime >= outPoint) {
-      videoPlayerRef.value.pause()
-      currentActionDisplay.value = 'PREVIEW ENDED ⏹'
-      clearInterval(previewInterval.value)
-      previewInterval.value = null
-    }
-  }, 100)
-
-  animateButtonPress(previewBtn.value)
-}
+// Mark, go-to, play/pause, preview, step, jump, thumbnail, and speed
+// actions all come from the trim composable (destructured at the top).
+// Only performTakeAction (SOT-only row-3 button) remains here.
 
 const performTakeAction = () => { // eslint-disable-line no-unused-vars
   console.log('[SOT Modal] Take action - commit current cut')
   toast.info('Take: Current cut committed')
   animateButtonPress(takeBtn.value)
   // TODO: Implement multiple cuts storage system
-}
-
-const performStepBackFrame = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  const frameDuration = 1 / currentFramerate.value
-  videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - frameDuration)
-  currentActionDisplay.value = 'REVERSE 1 FRAME ◄|'
-  animateButtonPress(step1fBackBtn.value)
-  showFrameCounterBriefly('◄ BACKWARD')
-}
-
-const performStepForwardFrame = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  const frameDuration = 1 / currentFramerate.value
-  videoPlayerRef.value.currentTime = Math.min(videoPlayerRef.value.duration || 0, videoPlayerRef.value.currentTime + frameDuration)
-  currentActionDisplay.value = 'FORWARD 1 FRAME |►'
-  animateButtonPress(step1fForwardBtn.value)
-  showFrameCounterBriefly('FORWARD ►')
-}
-
-const performStepBackSecond = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - 1)
-  currentActionDisplay.value = 'BACK 1 SECOND ◄◄'
-  animateButtonPress(step1sBackBtn.value)
-}
-
-const performStepForwardSecond = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  videoPlayerRef.value.currentTime = Math.min(videoPlayerRef.value.duration || 0, videoPlayerRef.value.currentTime + 1)
-  currentActionDisplay.value = 'FORWARD 1 SECOND ►►'
-  animateButtonPress(step1sForwardBtn.value)
-}
-
-const performJumpBackTenSeconds = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - 10)
-  currentActionDisplay.value = 'JUMP BACK 10s ◄◄◄'
-  animateButtonPress(step10sBackBtn.value)
-}
-
-const performJumpForwardTenSeconds = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  videoPlayerRef.value.currentTime = Math.min(videoPlayerRef.value.duration || 0, videoPlayerRef.value.currentTime + 10)
-  currentActionDisplay.value = 'JUMP FORWARD 10s ►►►'
-  animateButtonPress(step10sForwardBtn.value)
-}
-
-// Thumbnail marker function
-const setThumbnailTimecode = () => {
-  if (!videoPlayerRef.value) return
-  thumbnailTimecode.value = currentTimecode.value
-  toast.success(`📸 Thumbnail marker set at ${thumbnailTimecode.value}`, {
-    position: 'bottom-center',
-    timeout: 2000,
-    toastClassName: 'thumbnail-toast',
-    bodyClassName: 'thumbnail-toast-body',
-  })
-  currentActionDisplay.value = '📸 THUMBNAIL MARKED'
-}
-
-// Playback speed control functions
-const setPlaybackSpeed = (speed) => {
-  if (!videoPlayerRef.value) return
-
-  // Clamp speed between 0.25x and 4.0x
-  const clampedSpeed = Math.max(0.25, Math.min(4.0, speed))
-  playbackSpeed.value = clampedSpeed
-  videoPlayerRef.value.playbackRate = clampedSpeed
-
-  // Show speed indicator with auto-hide
-  showSpeedIndicatorBriefly()
-
-  // Update action display
-  if (clampedSpeed < 1.0) {
-    currentActionDisplay.value = `SLOW MOTION ${clampedSpeed.toFixed(2)}×`
-  } else if (clampedSpeed > 1.0) {
-    currentActionDisplay.value = `FAST FORWARD ${clampedSpeed.toFixed(2)}×`
-  } else {
-    currentActionDisplay.value = 'NORMAL SPEED 1.00×'
-  }
-
-  console.log(`🎬 Playback speed set to ${clampedSpeed.toFixed(2)}×`)
-}
-
-const increasePlaybackSpeed = () => {
-  // Find next preset speed above current
-  const currentSpeed = playbackSpeed.value
-  const nextSpeed = SPEED_PRESETS.find(s => s > currentSpeed) || 4.0
-  setPlaybackSpeed(nextSpeed)
-  toast.info(`Speed: ${nextSpeed.toFixed(2)}×`, {
-    position: 'top-center',
-    timeout: 1500,
-    toastClassName: 'speed-toast'
-  })
-}
-
-const decreasePlaybackSpeed = () => {
-  // Find next preset speed below current
-  const currentSpeed = playbackSpeed.value
-  const previousSpeed = SPEED_PRESETS.slice().reverse().find(s => s < currentSpeed) || 0.25
-  setPlaybackSpeed(previousSpeed)
-  toast.info(`Speed: ${previousSpeed.toFixed(2)}×`, {
-    position: 'top-center',
-    timeout: 1500,
-    toastClassName: 'speed-toast'
-  })
-}
-
-const resetPlaybackSpeed = () => {
-  setPlaybackSpeed(1.0)
-  toast.success('Speed reset to 1.0×', {
-    position: 'top-center',
-    timeout: 1500,
-    toastClassName: 'speed-toast'
-  })
-}
-
-const showSpeedIndicatorBriefly = () => {
-  // Clear any existing timer
-  if (speedIndicatorTimer.value) {
-    clearTimeout(speedIndicatorTimer.value)
-  }
-
-  // Show indicator
-  showSpeedIndicator.value = true
-
-  // Hide after 2 seconds
-  speedIndicatorTimer.value = setTimeout(() => {
-    showSpeedIndicator.value = false
-    speedIndicatorTimer.value = null
-  }, 2000)
-}
-
-const showFrameCounterBriefly = (direction) => {
-  if (!videoPlayerRef.value) return
-
-  // Calculate current frame and total frames
-  const currentTime = videoPlayerRef.value.currentTime
-  const videoDur = videoPlayerRef.value.duration || 0
-  const fps = currentFramerate.value
-
-  currentFrameNumber.value = Math.floor(currentTime * fps)
-  totalFrames.value = Math.floor(videoDur * fps)
-  frameStepDirection.value = direction
-
-  // Clear any existing timer
-  if (frameCounterTimer.value) {
-    clearTimeout(frameCounterTimer.value)
-  }
-
-  // Show counter
-  showFrameCounter.value = true
-
-  // Hide after 1.5 seconds
-  frameCounterTimer.value = setTimeout(() => {
-    showFrameCounter.value = false
-    frameCounterTimer.value = null
-  }, 1500)
 }
 
 // Scroll to bottom of modal
@@ -1775,289 +1307,33 @@ const handleVideoKeydown = (event) => { // eslint-disable-line no-unused-vars
   }
 }
 
-// Keyboard shortcuts setup
-const setupKeyboardShortcuts = () => {
-  keyboardHandler.value = (event) => {
-    // SAFETY CHECK: Only handle keyboard events when modal is visible
-    // This prevents blocking space keys when the modal is mounted but not shown
-    if (!props.show) {
-      return
-    }
+// Keyboard shortcuts now live in useMediaModalKeyboard composable.
+// The setupKeyboardShortcuts / removeKeyboardShortcuts wrappers below
+// preserve the watcher's call sites; the actual switch lives in the
+// composable.
+const kbd = useMediaModalKeyboard({
+  show: () => props.show,
+  videoPlayerRef,
+  trim,
+  onSubmit: () => handleAddCue(),
+  onTake: () => performTakeAction(),
+  onPreviewIntoOut: () => performPreviewAction(),
+  onDoubleEnterTake: () => handleDoubleEnterTake(),
+  onCutModeSelect: (mode) => selectCutMode(mode, true),
+  onBrowseFile: () => triggerFileInput(),
+  onToggleHotkeys: () => { showHotkeys.value = !showHotkeys.value },
+  onScrollToBottom: () => scrollToBottomOfModal(),
+  onEscape: () => handleEscapeKey(),
+  trimStartInputRef,
+  trimEndInputRef,
+  clippingMethod,
+})
 
-    // ESC key - always handle with confirmation modal
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-      handleEscapeKey()
-      return
-    }
+const setupKeyboardShortcuts = () => kbd.install()
+const removeKeyboardShortcuts = () => kbd.uninstall()
 
-    // Don't interfere with typing in input fields, EXCEPT for these shortcuts:
-    // - Ctrl+Enter (TAKE)
-    // - Shift+Space (Preview in-to-out)
-    // - Alt+Enter (Submit for processing)
-    // - Arrow keys in trim inputs
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
-      // Allow Ctrl+Enter (TAKE) from any input
-      if (event.key === 'Enter' && event.ctrlKey) {
-        // Let it through to the switch statement
-      }
-      // Allow Alt+Enter (Submit) from any input
-      else if (event.key === 'Enter' && event.altKey) {
-        // Let it through to the switch statement
-      }
-      // Allow Shift+Space (Preview) from any input
-      else if (event.key === ' ' && event.shiftKey) {
-        // Let it through to the switch statement
-      }
-      // Allow arrow keys in trim inputs
-      else if ((event.target === trimStartInputRef.value || event.target === trimEndInputRef.value) &&
-          ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
-        // Let it through to the switch statement
-      }
-      // Block all other keys when in input fields
-      else {
-        return
-      }
-    }
-
-    // CRITICAL: Always prevent default for space to avoid page scroll
-    // This must happen BEFORE the videoPlayerRef check, so even if no video is loaded,
-    // pressing space won't scroll the page
-    // Using stopPropagation and stopImmediatePropagation to fully block the event
-    // from reaching the scrollable v-card-text container
-    if (event.key === ' ') {
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-    }
-
-    // CRITICAL: Handle Ctrl+1 BEFORE videoPlayerRef check to toggle hotkeys menu
-    // This must work even when no video is loaded
-    if (event.key === '1' && event.ctrlKey) {
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-      showHotkeys.value = !showHotkeys.value
-      return // Fully handled, don't continue
-    }
-
-    if (!videoPlayerRef.value) return
-
-    let handled = true
-
-    switch(event.key) {
-      case ' ': // Space - Play/Pause or Preview with Shift
-        event.preventDefault()
-        if (event.shiftKey) {
-          performPreviewAction()
-        } else {
-          performPlayPauseAction()
-        }
-        break
-
-      case 'j':
-      case 'J': // J - Step back 1 second
-        event.preventDefault()
-        performStepBackSecond()
-        break
-
-      case 'k':
-      case 'K': // K - Play/Pause
-        event.preventDefault()
-        performPlayPauseAction()
-        break
-
-      case 'l':
-      case 'L': // L - Step forward 1 second
-        event.preventDefault()
-        performStepForwardSecond()
-        break
-
-      case 'ArrowLeft': // Left Arrow - Frame/second/10-second step back
-        event.preventDefault()
-        if (event.ctrlKey) {
-          performJumpBackTenSeconds()
-        } else if (event.shiftKey) {
-          // Step back 10 frames
-          if (videoPlayerRef.value) {
-            videoPlayerRef.value.currentTime = Math.max(0, videoPlayerRef.value.currentTime - (10 / currentFramerate.value))
-          }
-        } else {
-          performStepBackFrame()
-        }
-        break
-
-      case 'ArrowRight': // Right Arrow - Frame/second/10-second step forward
-        event.preventDefault()
-        if (event.ctrlKey) {
-          performJumpForwardTenSeconds()
-        } else if (event.shiftKey) {
-          // Step forward 10 frames
-          if (videoPlayerRef.value) {
-            const videoDur = videoPlayerRef.value.duration || 0
-            videoPlayerRef.value.currentTime = Math.min(videoDur, videoPlayerRef.value.currentTime + (10 / currentFramerate.value))
-          }
-        } else {
-          performStepForwardFrame()
-        }
-        break
-
-      case 'ArrowUp': // Up Arrow - Jump forward 10 seconds
-        event.preventDefault()
-        performJumpForwardTenSeconds()
-        break
-
-      case 'ArrowDown': // Down Arrow - Jump back 10 seconds
-        event.preventDefault()
-        performJumpBackTenSeconds()
-        break
-
-      case 'i':
-      case 'I': // I - Mark In
-        event.preventDefault()
-        performMarkInAction()
-        break
-
-      case 'o':
-      case 'O': // O - Mark Out
-        event.preventDefault()
-        performMarkOutAction()
-        break
-
-      case 'q':
-      case 'Q': // Q - Go to In
-        event.preventDefault()
-        performGoToInAction()
-        break
-
-      case 'w':
-      case 'W': // W - Go to Out
-        event.preventDefault()
-        performGoToOutAction()
-        break
-
-      case 'Enter': // Ctrl+Enter - Take, Alt+Enter - Submit/Inject, Double-Enter - Take (multiple clips mode)
-        if (event.ctrlKey) {
-          event.preventDefault()
-          performTakeAction()
-        } else if (event.altKey) {
-          event.preventDefault()
-          handleAddCue() // Submit and close modal
-        } else if (!event.shiftKey && clippingMethod.value === 'individual-clips') {
-          // Double-Enter detection for multiple clips mode
-          const now = Date.now()
-          const timeSinceLastEnter = now - lastEnterTime.value
-
-          if (timeSinceLastEnter < DOUBLE_ENTER_THRESHOLD) {
-            // Double-Enter detected!
-            event.preventDefault()
-            event.stopPropagation()
-            console.log('🎬 Double-Enter detected - triggering TAKE')
-            handleDoubleEnterTake()
-            lastEnterTime.value = 0 // Reset to prevent triple-enter issues
-          } else {
-            // First Enter - record time
-            lastEnterTime.value = now
-            // Don't prevent default for single Enter (allow normal typing in fields)
-          }
-        }
-        break
-
-      case 't':
-      case 'T': // Alt+T - Set Thumbnail
-        if (event.altKey) {
-          event.preventDefault()
-          setThumbnailTimecode()
-        } else {
-          handled = false
-        }
-        break
-
-      case '.': // Alt+. - Set Thumbnail
-        if (event.altKey) {
-          event.preventDefault()
-          setThumbnailTimecode()
-        } else {
-          handled = false
-        }
-        break
-
-      case '[': // [ - Decrease playback speed
-        event.preventDefault()
-        decreasePlaybackSpeed()
-        break
-
-      case ']': // ] - Increase playback speed
-        event.preventDefault()
-        increasePlaybackSpeed()
-        break
-
-      case '\\': // \ - Reset playback speed to 1x
-        event.preventDefault()
-        resetPlaybackSpeed()
-        break
-
-      case 'PageDown': // Page Down - Scroll to bottom of modal
-        event.preventDefault()
-        scrollToBottomOfModal()
-        break
-
-      // Type of Cut hotkeys (N, S, M, R, G)
-      case 'n':
-      case 'N': // N - None mode
-        event.preventDefault()
-        selectCutMode('none', true)
-        break
-
-      case 's':
-      case 'S': // S - Single Trim mode
-        event.preventDefault()
-        selectCutMode('single-trim', true)
-        break
-
-      case 'm':
-      case 'M': // M - Multiple Clips mode
-        event.preventDefault()
-        selectCutMode('individual-clips', true)
-        break
-
-      case 'r':
-      case 'R': // R - Removal mode (disabled)
-        event.preventDefault()
-        selectCutMode('removal', true)
-        break
-
-      case 'g':
-      case 'G': // G - Montage mode (disabled)
-        event.preventDefault()
-        selectCutMode('montage', true)
-        break
-
-      case 'b':
-      case 'B': // B - Browse for local file
-        event.preventDefault()
-        triggerFileInput()
-        break
-
-      default:
-        handled = false
-        break
-    }
-
-    // CRITICAL: Stop ALL keyboard events from propagating when SOT modal is open
-    // This prevents global shortcuts from interfering with video editing
-    if (handled) {
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-    }
-  }
-
-  // Use capture phase to intercept ALL keyboard events before other handlers
-  document.addEventListener('keydown', keyboardHandler.value, true)
-}
+// (Original inline keyboard switch ~280 lines removed — handled by
+// useMediaModalKeyboard above.)
 
 // Video metadata handling
 const handleVideoMetadataLoaded = () => { // eslint-disable-line no-unused-vars
@@ -2122,22 +1398,9 @@ const handleVideoMetadataLoaded = () => { // eslint-disable-line no-unused-vars
   }, 500)
 }
 
-const updateTimecode = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value || !timecodeDisplay.value) return
-
-  const current = videoPlayerRef.value.currentTime
-  const videoDuration = videoPlayerRef.value.duration || 0
-  const remaining = videoDuration - current
-
-  currentTimecode.value = secondsToTimecode(current, true)
-  durationTimecode.value = secondsToTimecode(videoDuration, true)
-  remainingTimecode.value = secondsToTimecode(remaining, true)
-}
-
-const updatePlayPauseState = () => { // eslint-disable-line no-unused-vars
-  if (!videoPlayerRef.value) return
-  isPlaying.value = !videoPlayerRef.value.paused
-}
+// updateTimecode and updatePlayPauseState come from the trim composable
+// (destructured at the top). The template wires them to the <video>
+// element's @timeupdate / @play / @pause events directly.
 
 // File handling
 const triggerFileInput = () => { // eslint-disable-line no-unused-vars
@@ -2170,70 +1433,40 @@ const handleFileUpload = async (event) => { // eslint-disable-line no-unused-var
 }
 
 const startBackgroundUpload = async (file) => {
+  uploadProgress.value = 1
+  uploadComplete.value = false
+  const { promise, abort } = uploadVideoInBackground(file, '/api/sot/upload/background', {
+    onProgress: (p) => { uploadProgress.value = p }
+  })
+  uploadAbortFn = abort
   try {
-    uploadProgress.value = 1 // Show progress bar
-    uploadComplete.value = false
-
-    const formData = new FormData()
-    formData.append('file', file)
-
-    const xhr = new XMLHttpRequest()
-
-    // Track upload progress
-    xhr.upload.addEventListener('progress', (e) => {
-      if (e.lengthComputable) {
-        uploadProgress.value = Math.round((e.loaded / e.total) * 100)
-      }
-    })
-
-    // Handle completion
-    xhr.addEventListener('load', () => {
-      if (xhr.status === 200) {
-        const response = JSON.parse(xhr.responseText)
-        tempJobId.value = response.temp_job_id
-        uploadComplete.value = true
-        uploadProgress.value = 100
-
-        // Hide progress bar after 1 second
-        setTimeout(() => {
-          uploadProgress.value = 0
-        }, 1000)
-
-        toast.success('Upload complete - ready to process')
-      } else {
-        uploadProgress.value = 0
-        toast.error('Upload failed: ' + xhr.statusText)
-      }
-    })
-
-    // Handle errors
-    xhr.addEventListener('error', () => {
-      uploadProgress.value = 0
-      toast.error('Upload failed - network error')
-    })
-
-    // Get auth token
-    const token = localStorage.getItem('auth-token')
-    const apiKey = localStorage.getItem('api_key')
-
-    xhr.open('POST', '/api/sot/upload/background', true)
-
-    if (token) {
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-    } else if (apiKey) {
-      xhr.setRequestHeader('X-API-Key', apiKey)
-    }
-
-    xhr.send(formData)
-
+    const response = await promise
+    tempJobId.value = response.temp_job_id
+    uploadComplete.value = true
+    uploadProgress.value = 100
+    setTimeout(() => { uploadProgress.value = 0 }, 1000)
+    toast.success('Upload complete - ready to process')
   } catch (error) {
+    if (error?.message === 'aborted') {
+      uploadProgress.value = 0
+      return // silent on user-initiated abort
+    }
     console.error('Background upload error:', error)
     uploadProgress.value = 0
     toast.error('Upload failed: ' + error.message)
+  } finally {
+    uploadAbortFn = null
   }
 }
 
 const clearVideo = () => { // eslint-disable-line no-unused-vars
+  // Cancel any in-flight upload so its stale onload doesn't write
+  // to a reset modal.
+  if (uploadAbortFn) {
+    try { uploadAbortFn() } catch (_) { /* noop */ }
+    uploadAbortFn = null
+  }
+
   if (videoPlayerRef.value) {
     videoPlayerRef.value.pause()
     videoPlayerRef.value.src = ''
@@ -2261,177 +1494,11 @@ const clearVideo = () => { // eslint-disable-line no-unused-vars
   toast.info('Video cleared')
 }
 
-// Clipping tools functions
-const handleTakeClip = () => { // eslint-disable-line no-unused-vars
-  // Validate time inputs
-  if (!trimStart.value || !trimEnd.value) {
-    toast.warning('Please set both time start and time end')
-    return
-  }
+// Clipping tools functions come from useMediaModalClips (destructured
+// near the top): handleTakeClip, removeClip, handleDoubleEnterTake,
+// handleClipSlugInput, handleClipSlugEnter, plus clipSlugNeedsAttention
+// and pendingTakeOnSlug refs.
 
-  // Validate time end is after time start
-  const startSec = timecodeToSeconds(trimStart.value)
-  const endSec = timecodeToSeconds(trimEnd.value)
-
-  if (endSec <= startSec) {
-    toast.warning('Time end must be after time start')
-    return
-  }
-
-  // Get frame-accurate timecodes (with frames)
-  let timeStartWithFrames = trimStart.value
-  let timeEndWithFrames = trimEnd.value
-
-  // If using video player, get exact frame-accurate timecodes
-  if (videoPlayerRef.value) {
-    // Already has frame info if in format HH:MM:SS:FF
-    if (trimStart.value.split(':').length < 4) {
-      timeStartWithFrames = secondsToTimecode(startSec, true)
-    }
-    if (trimEnd.value.split(':').length < 4) {
-      timeEndWithFrames = secondsToTimecode(endSec, true)
-    }
-  }
-
-  // Auto-generate clip slug if empty
-  let finalClipSlug = clipSlug.value.trim()
-
-  if (!finalClipSlug) {
-    const baseSlug = slug.value.trim() || 'clip'
-
-    if (clippingMethod.value === 'individual-clips') {
-      finalClipSlug = `${baseSlug}_CLIP_${clipCounter.value}`
-      clipCounter.value++
-    } else if (clippingMethod.value === 'montage') {
-      finalClipSlug = `${baseSlug}_MONTAGE`
-    }
-  }
-
-  // Add clip to collection
-  clips.value.push({
-    slug: finalClipSlug,
-    time_start: timeStartWithFrames,
-    time_end: timeEndWithFrames,
-    duration_seconds: endSec - startSec,
-    transcript: '' // Initialize empty transcript for this clip
-  })
-
-  toast.success(`Clip "${finalClipSlug}" added`)
-
-  // Clear fields for next clip
-  if (clippingMethod.value === 'individual-clips') {
-    clipSlug.value = '' // Clear to auto-generate next
-  }
-  // For montage, keep the slug
-
-  trimStart.value = '00:00:00'
-  trimEnd.value = '00:00:00'
-}
-
-const removeClip = (index) => { // eslint-disable-line no-unused-vars
-  const removedClip = clips.value[index]
-  clips.value.splice(index, 1)
-  toast.info(`Removed clip "${removedClip.slug}"`)
-}
-
-// Triple-blink the clip slug input field with locator flash color
-const blinkClipSlugInput = async () => {
-  const input = clipSlugInputRef.value
-  if (!input) return
-
-  const flashColor = locatorFlashColor.value
-  const originalBorder = input.style.border
-  const originalBoxShadow = input.style.boxShadow
-
-  for (let i = 0; i < 3; i++) {
-    // Flash on
-    input.style.border = `3px solid ${flashColor}`
-    input.style.boxShadow = `0 0 15px ${flashColor}, 0 0 30px ${flashColor}80`
-    await new Promise(resolve => setTimeout(resolve, 120))
-
-    // Flash off
-    input.style.border = originalBorder || '1px solid #ddd'
-    input.style.boxShadow = originalBoxShadow || 'none'
-    await new Promise(resolve => setTimeout(resolve, 80))
-  }
-}
-
-// Handle double-Enter TAKE with validation
-const handleDoubleEnterTake = async () => {
-  // Check if we're in multiple clips mode
-  if (clippingMethod.value !== 'individual-clips') {
-    return false
-  }
-
-  // Check if we have IN and OUT points
-  if (!trimStart.value || !trimEnd.value ||
-      trimStart.value === '00:00:00' || trimEnd.value === '00:00:00') {
-    toast.warning('Please set IN and OUT points first (I and O keys)')
-    return false
-  }
-
-  // Check if we have a slug
-  const hasSlug = clipSlug.value.trim().length > 0
-
-  if (!hasSlug) {
-    // Validation failed - no slug
-    console.log('⚠️ Double-Enter TAKE failed: No clip slug provided')
-
-    // Set needs attention state
-    clipSlugNeedsAttention.value = true
-    pendingTakeOnSlug.value = true
-
-    // Triple blink with locator color
-    await blinkClipSlugInput()
-
-    // Focus on the clip slug input
-    nextTick(() => {
-      if (clipSlugInputRef.value) {
-        clipSlugInputRef.value.focus()
-        clipSlugInputRef.value.select()
-      }
-    })
-
-    toast.warning('Please enter a clip slug to TAKE')
-    return false
-  }
-
-  // All validation passed - execute TAKE
-  handleTakeClip()
-  return true
-}
-
-// Handle input changes in clip slug field - auto-retry if pending
-const handleClipSlugInput = () => { // eslint-disable-line no-unused-vars
-  // Clear the needs attention state when user starts typing
-  if (clipSlugNeedsAttention.value && clipSlug.value.trim().length > 0) {
-    clipSlugNeedsAttention.value = false
-  }
-}
-
-// Handle Enter keypress in clip slug field - auto-retry TAKE if pending
-const handleClipSlugEnter = (event) => { // eslint-disable-line no-unused-vars
-  if (pendingTakeOnSlug.value && clipSlug.value.trim().length > 0) {
-    event.preventDefault()
-    event.stopPropagation()
-
-    console.log('🎬 Auto-retrying TAKE after slug entered')
-
-    // Clear pending state
-    pendingTakeOnSlug.value = false
-    clipSlugNeedsAttention.value = false
-
-    // Execute the TAKE
-    handleTakeClip()
-
-    // Defocus the input and return focus to modal for keyboard shortcuts
-    nextTick(() => {
-      if (clipSlugInputRef.value) {
-        clipSlugInputRef.value.blur()
-      }
-    })
-  }
-}
 
 // Credits management
 const addCredit = () => { // eslint-disable-line no-unused-vars
@@ -2700,39 +1767,12 @@ const cancel = () => { // eslint-disable-line no-unused-vars
 
 // Handle ESC key with confirmation modal
 const handleEscapeKey = () => { // eslint-disable-line no-unused-vars
-  // Check if any work has been done that needs cleanup
-  const hasUploadedFile = mediaUrl.value || blobUrl.value || originalFile.value
-  const hasTrimPoints = trimStart.value !== '00:00:00' || trimEnd.value !== '00:00:00'
-  const hasClips = clips.value && clips.value.length > 0
-  const hasFormData = slug.value || description.value || transcription.value
-
-  const hasAnyWork = hasUploadedFile || hasTrimPoints || hasClips || hasFormData
-
-  if (!hasAnyWork) {
-    // No work done, just close
-    cancel()
-    return
-  }
-
-  // Show confirmation dialog
-  const confirmed = window.confirm(
-    '⚠️ CLOSE SOT EDITOR?\n\n' +
-    'This will:\n' +
-    '• Discard all unsaved changes\n' +
-    '• Clear uploaded video from memory\n' +
-    '• Remove trim points and clips\n' +
-    '• Cancel any pending processing\n\n' +
-    'Are you sure you want to close?'
-  )
-
-  if (confirmed) {
-    console.log('🗑️ User confirmed ESC - cleaning up and closing')
-    // TODO: Add API call to clean up any temporary database entries or uploaded files
-    // For now, just reset the form and close
-    cancel()
-  } else {
-    console.log('🔄 User cancelled ESC - staying in modal')
-  }
+  // ESC closes the SOT modal directly (no confirmation prompt). User
+  // request: ESC should always close the topmost modal in focus.
+  // If work is in progress (uploaded file, trim points, clips, form
+  // data), `cancel()` still calls `resetForm()` which clears it.
+  console.log('⎋ ESC pressed - closing SOT modal')
+  cancel()
 }
 
 const resetForm = () => {
@@ -2769,89 +1809,15 @@ const resetForm = () => {
   }
 }
 
-// Remove keyboard shortcuts (for when modal closes)
-const removeKeyboardShortcuts = () => {
-  if (keyboardHandler.value) {
-    document.removeEventListener('keydown', keyboardHandler.value, true)
-    keyboardHandler.value = null
-    console.log('⌨️ SOT Modal keyboard shortcuts removed')
-  }
-}
+// Focus trap now lives in useFocusTrap composable.
+const focusTrap = useFocusTrap(modalCardRef)
+const setupFocusTrap = () => focusTrap.install()
+const removeFocusTrap = () => focusTrap.uninstall()
 
-// Focus trap handler reference
-const focusTrapHandler = ref(null)
-
-// Setup focus trap to keep Tab within the modal
-const setupFocusTrap = () => {
-  if (focusTrapHandler.value) return // Already set up
-
-  focusTrapHandler.value = (e) => {
-    if (e.key !== 'Tab') return
-
-    // Get the modal card element
-    const modalEl = modalCardRef.value?.$el || modalCardRef.value
-    if (!modalEl) return
-
-    // Get all focusable elements within the modal
-    const focusableSelectors = [
-      'button:not([disabled])',
-      'input:not([disabled])',
-      'select:not([disabled])',
-      'textarea:not([disabled])',
-      '[tabindex]:not([tabindex="-1"]):not([disabled])',
-      'a[href]'
-    ].join(', ')
-
-    const focusableElements = modalEl.querySelectorAll(focusableSelectors)
-    const focusableArray = Array.from(focusableElements).filter(el => {
-      // Filter out hidden elements
-      return el.offsetParent !== null && !el.closest('[style*="display: none"]')
-    })
-
-    if (focusableArray.length === 0) return
-
-    const firstElement = focusableArray[0]
-    const lastElement = focusableArray[focusableArray.length - 1]
-
-    // Check if current focus is outside the modal
-    const currentFocus = document.activeElement
-    const isInModal = modalEl.contains(currentFocus)
-
-    if (!isInModal) {
-      // Focus is outside modal, bring it back
-      e.preventDefault()
-      firstElement.focus()
-      return
-    }
-
-    if (e.shiftKey) {
-      // Shift+Tab: if on first element, go to last
-      if (currentFocus === firstElement) {
-        e.preventDefault()
-        lastElement.focus()
-      }
-    } else {
-      // Tab: if on last element, go to first
-      if (currentFocus === lastElement) {
-        e.preventDefault()
-        firstElement.focus()
-      }
-    }
-  }
-
-  // Use capture phase to intercept before other handlers
-  document.addEventListener('keydown', focusTrapHandler.value, true)
-  console.log('🔒 Focus trap enabled for SOT modal')
-}
-
-// Remove focus trap
-const removeFocusTrap = () => {
-  if (focusTrapHandler.value) {
-    document.removeEventListener('keydown', focusTrapHandler.value, true)
-    focusTrapHandler.value = null
-    console.log('🔓 Focus trap disabled for SOT modal')
-  }
-}
+// ESC handled by global modal stack — uniform with the other 20 modals.
+// useMediaModalKeyboard no longer handles ESC itself.
+registerModalEsc(() => props.show, () => handleEscapeKey(), 'SotModal')
+useDoubleEnterToSlug(() => props.show, slugField)
 
 // Lifecycle - DON'T setup keyboard shortcuts here, only when modal is shown
 onMounted(() => {
@@ -2946,28 +1912,10 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  if (keyboardHandler.value) {
-    document.removeEventListener('keydown', keyboardHandler.value, true)
-  }
-
-  // Clean up focus trap
-  if (focusTrapHandler.value) {
-    document.removeEventListener('keydown', focusTrapHandler.value, true)
-  }
-
-  if (previewInterval.value) {
-    clearInterval(previewInterval.value)
-  }
-
-  if (speedIndicatorTimer.value) {
-    clearTimeout(speedIndicatorTimer.value)
-  }
-
-  if (frameCounterTimer.value) {
-    clearTimeout(frameCounterTimer.value)
-  }
-
-  // Clean up blob URL
+  // Keyboard handler, focus trap, preview interval, speed indicator
+  // and frame counter timers all clean themselves up via their
+  // composables' own onBeforeUnmount hooks. Only the blob URL is
+  // owned here.
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value)
   }

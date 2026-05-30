@@ -162,6 +162,8 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import { useRequireEpisode } from '@/composables/useRequireEpisode'
 import { useClipboardImageDetection } from '@/composables/useClipboardImageDetection'
+import { registerModalEsc } from '@/composables/useModalStack'
+import { useDoubleEnterToSlug } from '@/composables/useDoubleEnterToSlug'
 
 const props = defineProps({
   show: {
@@ -286,14 +288,13 @@ onBeforeUnmount(() => {
   }
 })
 
+// ESC handled by global modal stack
+registerModalEsc(() => props.show, () => cancel(), 'ImgCueModal')
+useDoubleEnterToSlug(() => props.show, slugInput)
+
 // Methods
 function handleKeydown(event) {
   if (!props.show) return
-
-  if (event.key === 'Escape') {
-    cancel()
-    return
-  }
 
   // Don't intercept Ctrl+V / Cmd+V here — let the native paste event fire
   // so handleGlobalPaste receives the actual clipboardData from the browser.

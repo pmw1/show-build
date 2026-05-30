@@ -292,7 +292,8 @@ export function useScriptCore(props, emit, sanitizer, externalGuards = {}) {
         if (segment.type === 'text') {
           const speaker = segment.speaker || 'josh'
           const content = segment.content || ''
-          newContent += `<p class="${speaker}">${content}</p>\n\n`
+          const classAttr = segment.bullet ? `${speaker} bullet` : speaker
+          newContent += `<p class="${classAttr}">${content}</p>\n\n`
         } else if (segment.type === 'cue') {
           lossReport.totalCueSegments++
           if (segment.data && segment.data.rawData) {
@@ -382,7 +383,8 @@ export function useScriptCore(props, emit, sanitizer, externalGuards = {}) {
         if (segment.type === 'text') {
           const speaker = segment.speaker || 'josh'
           const content = segment.content || ''
-          newContent += `<p class="${speaker}">${content}</p>\n\n`
+          const classAttr = segment.bullet ? `${speaker} bullet` : speaker
+          newContent += `<p class="${classAttr}">${content}</p>\n\n`
         } else if (segment.type === 'cue') {
           lossReport.totalCueSegments++
           if (segment.data && segment.data.rawData) {

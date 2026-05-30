@@ -383,6 +383,8 @@
 
                       <v-btn size="small" variant="tonal" color="amber-darken-2" :loading="regeneratingFSQ" :disabled="regeneratingFSQ" @click="regenerateAllFSQ" class="mb-2 mt-2" block><v-icon left size="small">mdi-format-quote-close</v-icon> Regenerate All Quotes</v-btn>
                       <div v-if="fsqRegenerationStatus" class="text-caption mt-1" :class="fsqRegenerationStatus.includes('Error') ? 'text-error' : 'text-success'">{{ fsqRegenerationStatus }}</div>
+                      <v-btn size="small" variant="tonal" color="deep-purple-darken-2" :loading="regeneratingGFX" :disabled="regeneratingGFX" @click="regenerateAllGFX" class="mb-2 mt-2" block><v-icon left size="small">mdi-image-multiple</v-icon> Regenerate All Graphics</v-btn>
+                      <div v-if="gfxRegenerationStatus" class="text-caption mt-1" :class="gfxRegenerationStatus.includes('Error') ? 'text-error' : 'text-success'">{{ gfxRegenerationStatus }}</div>
                       <v-btn size="small" variant="tonal" color="blue-darken-2" :loading="enumeratingCues" :disabled="enumeratingCues" @click="enumerateCueBlocks" class="mb-2 mt-2" block><v-icon left size="small">mdi-format-list-numbered</v-icon> Enumerate Cue Blocks</v-btn>
                       <div v-if="enumerationStatus" class="text-caption mt-1" :class="enumerationStatus.includes('Error') ? 'text-error' : 'text-success'">{{ enumerationStatus }}</div>
                       <v-btn size="small" variant="tonal" color="teal-darken-2" :loading="gatheringMedia" :disabled="gatheringMedia" @click="gatherForShow" class="mb-2 mt-2" block><v-icon left size="small">mdi-folder-download</v-icon> Gather for Show</v-btn>
@@ -788,6 +790,8 @@ const generatedDocuments = ref([])
 const loadingDocuments = ref(false)
 const regeneratingFSQ = ref(false)
 const fsqRegenerationStatus = ref('')
+const regeneratingGFX = ref(false)
+const gfxRegenerationStatus = ref('')
 const enumeratingCues = ref(false)
 const enumerationStatus = ref('')
 const gatheringMedia = ref(false)
@@ -1359,6 +1363,42 @@ async function regenerateAllFSQ() {
     fsqRegenerationStatus.value = 'Error: ' + (error.response?.data?.detail || error.message)
   } finally {
     regeneratingFSQ.value = false
+  }
+}
+
+async function regenerateAllGFX() {
+  if (!props.episodeNumber) {
+    gfxRegenerationStatus.value = 'Error: No episode selected'
+    return
+  }
+
+  regeneratingGFX.value = true
+  gfxRegenerationStatus.value = ''
+
+  try {
+    const authToken = localStorage.getItem('auth-token')
+    const response = await $axios.post(
+      `/gfx/regenerate-all/${props.episodeNumber}`,
+      { regenerate_existing: true },
+      {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+
+    if (response.data.success) {
+      const { generated, skipped, failed, total_gfxs } = response.data
+      gfxRegenerationStatus.value = `Generated: ${generated}/${total_gfxs}, Skipped: ${skipped}, Failed: ${failed}`
+    } else {
+      gfxRegenerationStatus.value = 'Error: ' + (response.data.message || 'Unknown error')
+    }
+  } catch (error) {
+    console.error('Error regenerating GFX assets:', error)
+    gfxRegenerationStatus.value = 'Error: ' + (error.response?.data?.detail || error.message)
+  } finally {
+    regeneratingGFX.value = false
   }
 }
 

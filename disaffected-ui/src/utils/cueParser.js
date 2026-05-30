@@ -89,7 +89,13 @@ export class CueParser {
         // Extract class, data-needs-attention, data-flag-note, and content from paragraph
         const match = paragraphHtml.match(/<p(?:\s+class="([^"]*)")?([^>]*)>([\s\S]*?)<\/p>/);
         if (match) {
-          const speaker = match[1] || 'josh'; // Default to josh if no class
+          const rawClass = match[1] || '';
+          const classTokens = rawClass.split(/\s+/).filter(Boolean);
+          // Modifier tokens are not speakers — they ride alongside the speaker class.
+          const MODIFIERS = new Set(['bullet']);
+          const speakerToken = classTokens.find(t => !MODIFIERS.has(t));
+          const speaker = speakerToken || 'josh';
+          const bullet = classTokens.includes('bullet');
           const otherAttributes = match[2] || '';
           const content = match[3].trim();
 
@@ -112,6 +118,7 @@ export class CueParser {
                   type: 'text',
                   content: paragraph.trim(),
                   speaker: speaker,
+                  bullet: bullet,
                   needsParagraphTags: true,
                   needsAttention: needsAttention,
                   flagNote: flagNote
@@ -123,6 +130,7 @@ export class CueParser {
                 type: 'text',
                 content: content,
                 speaker: speaker,
+                bullet: bullet,
                 needsParagraphTags: true,
                 needsAttention: needsAttention,
                 flagNote: flagNote
@@ -134,6 +142,7 @@ export class CueParser {
               type: 'text',
               content: '',
               speaker: speaker,
+              bullet: bullet,
               needsParagraphTags: true,
               needsAttention: needsAttention,
               flagNote: flagNote
@@ -407,6 +416,17 @@ export class CueParser {
       boxOpacity: cueData.boxOpacity,
       lineSpacing: cueData.lineSpacing,
       alignment: cueData.alignment || cueData.style, // 'style' is legacy field name for alignment
+      // GFX content fields — title is renamed to gfxTitle so it doesn't
+      // collide with the top-level `title` (which is the card display label
+      // produced by generateCardTitle).
+      gfxTitle: cueData.title,
+      body: cueData.body,
+      gfxType: cueData.gfxType,
+      titleAlign: cueData.titleAlign,
+      textAlign: cueData.textAlign,
+      listItems: cueData.listItems,
+      verticalOffset: cueData.verticalOffset,
+      renderMode: cueData.renderMode,
       isImageType: this.isImageCueType(cueData.type),
       analysisState: cueData.analysisState,
       analysisField: cueData.analysisField,
@@ -451,7 +471,8 @@ export class CueParser {
         const content = segment.content == null ? '' : segment.content;
         const needsAttentionAttr = segment.needsAttention ? ' data-needs-attention="true"' : '';
         const flagNoteAttr = segment.flagNote ? ` data-flag-note="${segment.flagNote.replace(/"/g, '&quot;')}"` : '';
-        result.push(`<p class="${speaker}"${needsAttentionAttr}${flagNoteAttr}>${content}</p>`);
+        const classAttr = segment.bullet ? `${speaker} bullet` : speaker;
+        result.push(`<p class="${classAttr}"${needsAttentionAttr}${flagNoteAttr}>${content}</p>`);
         i++;
       } else if (segment.type === 'text') {
         const content = segment.content == null ? '' : segment.content;
@@ -567,6 +588,8 @@ export class CueParser {
   static getSpeakerOptions() {
     return [
       { value: 'josh', label: 'Josh', color: '#1976d2' },
+      { value: 'scott', label: 'Scott', color: '#00897b' },
+      { value: 'asian-scott', label: 'Asian Scott', color: '#d81b60' },
       { value: 'guest', label: 'Guest', color: '#388e3c' },
       { value: 'caller', label: 'Caller', color: '#f57c00' },
       { value: 'announcer', label: 'Announcer', color: '#7b1fa2' },

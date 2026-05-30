@@ -34,6 +34,11 @@ from models.settings import Settings, PromptOverride, GfxXpostCue
 # Jobs domain
 from models.jobs import CeleryJobLog, SOTProcessingJob
 
+# Recording domain (showtime writeback)
+from models.recording import (
+    RecordingSession, RecordingTake, TakeMarker, TakeCueFire,
+)
+
 __all__ = [
     # Enums
     "RundownItemType", "ElementType", "CueType",
@@ -49,4 +54,6 @@ __all__ = [
     "Settings", "PromptOverride", "GfxXpostCue",
     # Jobs
     "CeleryJobLog", "SOTProcessingJob",
+    # Recording (showtime writeback)
+    "RecordingSession", "RecordingTake", "TakeMarker", "TakeCueFire",
 ]

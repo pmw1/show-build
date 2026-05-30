@@ -79,6 +79,8 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, getCurrentInstance, onMounted, onBeforeUnmount } from 'vue';
+import { registerModalEsc } from '@/composables/useModalStack';
+import { useDoubleEnterToSlug } from '@/composables/useDoubleEnterToSlug';
 import axios from 'axios';
 import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap';
 import { useScreenFlash } from '@/composables/useScreenFlash';
@@ -198,20 +200,17 @@ function parseDuration(dur) {
   }
 }
 
-// Mixin-inlined: keyboard handlers
+// ESC is handled by global modal stack (calls handleAbort).
+registerModalEsc(() => props.show, () => handleAbort(), 'RifModal');
+useDoubleEnterToSlug(() => props.show, slugField);
+
+// Mixin-inlined: keyboard handlers (Shift+Enter only — ESC handled above)
 function setupKeyboardHandlers() {
   keydownHandler = (event) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      handleAbort();
-      return;
-    }
     if (event.shiftKey && event.key === 'Enter') {
       event.preventDefault();
       event.stopPropagation();
       handleSubmit();
-      return;
     }
   };
   document.addEventListener('keydown', keydownHandler, true);

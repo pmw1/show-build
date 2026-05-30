@@ -106,3 +106,7 @@ force_restart.sh
 copilot/
 
 scripts/collect_disaffected_training_data.py
+backups/
+.backups/
+app/celerybeat-schedule
+tools/sot-trace/data/

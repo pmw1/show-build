@@ -37,6 +37,19 @@ class GFXAssetRequest(BaseModel):
     alignment: str = "center"
     font_family: str = "sans-serif"
     font_size: int = 25
+    # Title font size in modal-pixel units (scaled 2.5x at render time, like
+    # font_size). Frontend slider default 36; None means "auto = 1.3 * body".
+    title_font_size: Optional[int] = None
+    # Inter-line gap as a percent of the body font size (10-60). 30 ≈ the
+    # current renderer default (`int(scaled_font_size * 0.3)`).
+    line_spacing: int = 30
+    # Black-bar overlay sizing/opacity. Defaults match the previous fixed
+    # values: 80% canvas height, 75% opacity (renderer alpha=191).
+    box_height: int = 80
+    box_opacity: int = 75
+    # Vertical shift of the title+body text block, as a percent of the
+    # black-bar height. Range -40..+40; 0 = vertically centered (default).
+    vertical_offset: int = 0
     render_mode: str = "png"
     priority: str = "normal"
 
@@ -93,6 +106,11 @@ async def generate_gfx_asset(
                 'alignment': request.alignment,
                 'font_family': request.font_family,
                 'font_size': request.font_size,
+                'title_font_size': request.title_font_size,
+                'line_spacing': request.line_spacing,
+                'box_height': request.box_height,
+                'box_opacity': request.box_opacity,
+                'vertical_offset': request.vertical_offset,
                 'render_mode': request.render_mode,
                 'priority': 'high'
             },
@@ -184,6 +202,11 @@ async def generate_gfx_asset_async(
                 'alignment': request.alignment,
                 'font_family': request.font_family,
                 'font_size': request.font_size,
+                'title_font_size': request.title_font_size,
+                'line_spacing': request.line_spacing,
+                'box_height': request.box_height,
+                'box_opacity': request.box_opacity,
+                'vertical_offset': request.vertical_offset,
                 'render_mode': request.render_mode,
                 'priority': priority
             },
@@ -209,6 +232,238 @@ async def generate_gfx_asset_async(
             status_code=500,
             detail=f"Failed to queue GFX generation task: {str(e)}"
         )
+
+
+class GFXBatchRequest(BaseModel):
+    regenerate_existing: bool = False
+
+
+class GFXBatchResponse(BaseModel):
+    success: bool
+    episode_id: str
+    total_gfxs: int
+    generated: int
+    skipped: int
+    failed: int
+    task_ids: list
+    message: str
+
+
+@router.post("/regenerate-all/{episode_id}", response_model=GFXBatchResponse)
+async def regenerate_all_gfx_assets(
+    episode_id: str,
+    request: GFXBatchRequest = None,
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Regenerate all GFX PNG assets for an episode.
+
+    Scans the episode's rundown for GFX cue blocks and queues PNG
+    generation for each. Mirrors the FSQ batch regeneration endpoint.
+    """
+    from models_v2 import RundownItem, Rundown, Episode
+    from core.paths import ShowBuildPaths
+    import re
+
+    path_manager = ShowBuildPaths()
+    regenerate_existing = request.regenerate_existing if request else False
+
+    try:
+        print(f"📦 Starting batch GFX regeneration for episode {episode_id}")
+        print(f"   Regenerate existing: {regenerate_existing}")
+
+        episode_id_normalized = episode_id.zfill(4) if len(episode_id) < 4 else episode_id
+
+        episode = db.query(Episode).filter(
+            Episode.episode_number == int(episode_id_normalized)
+        ).first()
+
+        if not episode:
+            return GFXBatchResponse(
+                success=True, episode_id=episode_id, total_gfxs=0,
+                generated=0, skipped=0, failed=0, task_ids=[],
+                message="No episode found"
+            )
+
+        rundown = db.query(Rundown).filter(
+            Rundown.episode_id == episode.id
+        ).first()
+
+        if not rundown:
+            return GFXBatchResponse(
+                success=True, episode_id=episode_id, total_gfxs=0,
+                generated=0, skipped=0, failed=0, task_ids=[],
+                message="No rundown found for this episode"
+            )
+
+        rundown_items = db.query(RundownItem).filter(
+            RundownItem.rundown_id == rundown.id
+        ).order_by(RundownItem.order_in_rundown).all()
+
+        if not rundown_items:
+            return GFXBatchResponse(
+                success=True, episode_id=episode_id, total_gfxs=0,
+                generated=0, skipped=0, failed=0, task_ids=[],
+                message="No rundown items found"
+            )
+
+        gfx_pattern = re.compile(
+            r'<!-- Begin Cue -->.*?'
+            r'\[Type:\s*GFX\].*?'
+            r'<!-- End Cue -->',
+            re.DOTALL | re.IGNORECASE
+        )
+
+        gfx_cues = []
+        for item in rundown_items:
+            if not item.script_content:
+                continue
+            for match in gfx_pattern.findall(item.script_content):
+                cue_data = _parse_gfx_cue_block(match)
+                # Need a body (or title/list) to render — match frontend rule
+                if cue_data and (cue_data.get('body') or cue_data.get('title') or cue_data.get('listItems')):
+                    cue_data['rundown_item_id'] = item.id
+                    gfx_cues.append(cue_data)
+
+        print(f"   📝 Found {len(gfx_cues)} GFX cues")
+
+        if not gfx_cues:
+            return GFXBatchResponse(
+                success=True, episode_id=episode_id, total_gfxs=0,
+                generated=0, skipped=0, failed=0, task_ids=[],
+                message="No GFX cue blocks found in episode rundown"
+            )
+
+        generated = 0
+        skipped = 0
+        failed = 0
+        task_ids = []
+        cleaned = 0
+
+        assets_dir = path_manager.get_asset_type_dir(episode_id_normalized, 'graphics')
+        assets_dir.mkdir(parents=True, exist_ok=True)
+
+        # When regenerating, sweep existing GFX PNGs so stale enumerated names
+        # do not collide with freshly rendered files. Mirrors FSQ behavior.
+        if regenerate_existing:
+            print(f"   🧹 Cleaning old GFX files from {assets_dir}")
+            for old_file in assets_dir.glob("*.png"):
+                try:
+                    old_file.unlink()
+                    cleaned += 1
+                except Exception as e:
+                    print(f"      Failed to remove {old_file.name}: {e}")
+            print(f"   🧹 Cleaned {cleaned} old files")
+
+        for cue in gfx_cues:
+            try:
+                slug = cue.get('slug', 'gfx')
+                clean_slug = slug.lower().replace(' ', '-').replace('_', '-')
+                enumerator = cue.get('enumerator')
+
+                if enumerator:
+                    expected_filename = f"{enumerator}-{clean_slug}.png"
+                else:
+                    expected_filename = f"gfx_{clean_slug}.png"
+
+                asset_path = assets_dir / expected_filename
+
+                if asset_path.exists() and not regenerate_existing:
+                    print(f"   ⏭️ Skipping existing: {expected_filename}")
+                    skipped += 1
+                    continue
+
+                font_size_raw = cue.get('fontSize', '')
+                font_size = 25
+                if font_size_raw:
+                    try:
+                        font_size = int(float(str(font_size_raw).replace('px', '').strip()))
+                    except (ValueError, AttributeError):
+                        pass
+
+                vertical_offset_raw = cue.get('verticalOffset', 0)
+                try:
+                    vertical_offset = int(float(str(vertical_offset_raw)))
+                except (ValueError, AttributeError):
+                    vertical_offset = 0
+
+                task = generate_gfx_png.apply_async(
+                    kwargs={
+                        'episode_id': episode_id_normalized,
+                        'gfx_type': cue.get('gfxType', 'fullscreen-text'),
+                        'body': (cue.get('body', '') or '').replace('\\n', '\n'),
+                        'slug': slug,
+                        'asset_id': cue.get('assetId', cue.get('asset_id', '')),
+                        'title': cue.get('title'),
+                        'alignment': cue.get('textAlign', cue.get('alignment', 'center')),
+                        'font_family': cue.get('fontFamily', 'sans-serif'),
+                        'font_size': font_size,
+                        'vertical_offset': vertical_offset,
+                        'render_mode': cue.get('renderMode', 'png'),
+                        'priority': 'low'
+                    },
+                    queue='assets_low'
+                )
+
+                task_ids.append(task.id)
+                generated += 1
+                print(f"   ✅ Queued: {expected_filename} (task: {task.id})")
+
+            except Exception as e:
+                print(f"   ❌ Failed to queue {cue.get('slug', 'unknown')}: {e}")
+                failed += 1
+
+        if cleaned > 0:
+            message = f"Batch GFX generation: {cleaned} old files cleaned, {generated} queued, {skipped} skipped, {failed} failed"
+        else:
+            message = f"Batch GFX generation: {generated} queued, {skipped} skipped, {failed} failed"
+        print(f"   📊 {message}")
+
+        return GFXBatchResponse(
+            success=True,
+            episode_id=episode_id,
+            total_gfxs=len(gfx_cues),
+            generated=generated,
+            skipped=skipped,
+            failed=failed,
+            task_ids=task_ids,
+            message=message
+        )
+
+    except Exception as e:
+        print(f"   ❌ Batch GFX generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Batch GFX generation failed: {str(e)}"
+        )
+
+
+def _parse_gfx_cue_block(cue_content: str) -> dict:
+    """Parse a GFX cue block into a dict (camelCase keys)."""
+    import re
+    cue_data = {}
+    field_pattern = re.compile(r'^\s*\[([^:]+):\s*(.*)\]\s*$')
+    for line in cue_content.split('\n'):
+        match = field_pattern.match(line)
+        if not match:
+            continue
+        field_name = match.group(1).strip()
+        field_value = match.group(2).strip()
+        cue_data[_to_camel_case(field_name)] = field_value
+    return cue_data
+
+
+def _to_camel_case(field_name: str) -> str:
+    words = field_name.replace('-', ' ').replace('_', ' ').split()
+    if not words:
+        return field_name
+    result = words[0].lower()
+    for word in words[1:]:
+        result += word.capitalize()
+    return result
 
 
 @router.get("/task/{task_id}")

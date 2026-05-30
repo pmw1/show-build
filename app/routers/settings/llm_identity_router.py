@@ -236,12 +236,32 @@ async def get_meta_extraction_settings(
         autorun_phase1 = _read_bool_setting(db, "meta_extraction_autorun_phase1", default=False)
         autorun_phase2 = _read_bool_setting(db, "meta_extraction_autorun_phase2", default=False)
 
+        # Read Ollama model + fallback_model from api_configs
+        from sqlalchemy import text as _sql_text
+        model = ""
+        fallback_model = ""
+        try:
+            rows = db.execute(_sql_text(
+                "SELECT config_key, config_value FROM api_configs "
+                "WHERE workflow='meta_extraction' AND service='ollama' "
+                "AND config_key IN ('model','fallback_model')"
+            )).fetchall()
+            for k, v in rows:
+                if k == 'model':
+                    model = v or ""
+                elif k == 'fallback_model':
+                    fallback_model = v or ""
+        except Exception as exc:
+            logger.warning(f"meta_extraction model lookup failed: {exc}")
+
         return {
             "success": True,
             "item_types": item_types,
             "defaults": DEFAULT_META_EXTRACTION_TYPES,
             "autorun_phase1": autorun_phase1,
             "autorun_phase2": autorun_phase2,
+            "model": model,
+            "fallback_model": fallback_model,
         }
     except Exception as e:
         logger.error(f"Error loading meta extraction settings: {e}")
@@ -316,6 +336,30 @@ async def save_meta_extraction_settings(
                 body.get("autorun_phase2"),
                 "Auto-fire Phase 2 (Grok) enrichment immediately after Phase 1 completes",
             )
+
+        # Upsert Ollama model + fallback_model into api_configs when provided
+        from sqlalchemy import text as _sql_text
+        def _upsert_api_config(key: str, value: str):
+            existing = db.execute(_sql_text(
+                "SELECT id FROM api_configs WHERE workflow='meta_extraction' "
+                "AND category='llm' AND service='ollama' AND config_key=:k"
+            ), {"k": key}).fetchone()
+            if existing:
+                db.execute(_sql_text(
+                    "UPDATE api_configs SET config_value=:v, updated_at=NOW() "
+                    "WHERE workflow='meta_extraction' AND category='llm' "
+                    "AND service='ollama' AND config_key=:k"
+                ), {"v": value, "k": key})
+            else:
+                db.execute(_sql_text(
+                    "INSERT INTO api_configs (workflow, category, service, config_key, config_value, is_enabled) "
+                    "VALUES ('meta_extraction','llm','ollama',:k,:v,true)"
+                ), {"v": value, "k": key})
+
+        if "model" in body:
+            _upsert_api_config("model", body.get("model") or "")
+        if "fallback_model" in body:
+            _upsert_api_config("fallback_model", body.get("fallback_model") or "")
 
         db.commit()
         db.refresh(setting)

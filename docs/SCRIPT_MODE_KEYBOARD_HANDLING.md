@@ -1,5 +1,15 @@
 # Script Mode Keyboard Event Handling
 
+> ⚠️ **SUPERSEDED — slated for deletion.** This document describes the legacy
+> hand-rolled `contenteditable` Script Mode (custom Enter/Backspace Range-API
+> handling, `segmentEditBuffer`, the `isActivelyEditing` guard, focus-retry,
+> "spaces disappear while typing" workarounds). The Script editor is migrating
+> to TipTap/ProseMirror, where the framework owns block-split/join and the
+> caret, so this entire mechanism ceases to exist. See
+> [`SCRIPT_EDITOR_MIGRATION_PLAN.md`](SCRIPT_EDITOR_MIGRATION_PLAN.md).
+> **Accurate for the current code until the migration's Phase 5 lands; it will
+> be deleted then.**
+
 ## Overview
 
 Script Mode in EditorPanel.vue uses custom keyboard event handling to provide a natural writing experience while maintaining synchronization between Script Mode (visual editing) and Code Mode (markdown).

@@ -76,8 +76,9 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch } from 'vue'
 import axios from 'axios'
+import { registerModalEsc } from '@/composables/useModalStack'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false }
@@ -114,11 +115,8 @@ function resetForm() {
   loginForm.value?.reset()
 }
 
-function handleEscapeKey(event) {
-  if (event.key === 'Escape' && isVisible.value) {
-    isVisible.value = false
-  }
-}
+// ESC handled by global modal stack
+registerModalEsc(() => isVisible.value, () => { isVisible.value = false }, 'LoginModal')
 
 async function handleLogin() {
   if (!formValid.value) return
@@ -163,16 +161,7 @@ async function handleLogin() {
 }
 
 watch(isVisible, (newValue) => {
-  if (newValue) {
-    resetForm()
-    document.addEventListener('keydown', handleEscapeKey)
-  } else {
-    document.removeEventListener('keydown', handleEscapeKey)
-  }
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleEscapeKey)
+  if (newValue) resetForm()
 })
 </script>
 
