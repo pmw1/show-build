@@ -223,6 +223,18 @@
         <v-list-item to="/organization" prepend-icon="mdi-domain">
           <v-list-item-title>Organization</v-list-item-title>
         </v-list-item>
+        <!-- Development Section (admin-only) -->
+        <v-list-group v-if="isAdmin" value="development">
+          <template #activator="{ props }">
+            <v-list-item v-bind="props" prepend-icon="mdi-dev-to">
+              <v-list-item-title>Development</v-list-item-title>
+            </v-list-item>
+          </template>
+          <v-list-item to="/dev/wireframes" prepend-icon="mdi-vector-rectangle">
+            <v-list-item-title>Wireframes</v-list-item-title>
+          </v-list-item>
+        </v-list-group>
+
         <v-list-item
           to="/settings"
           prepend-icon="mdi-cog"
