@@ -16,8 +16,12 @@ const PREFIX = 'ff:';
 
 const KNOWN_FLAGS = {
   // Mount the new TipTap/ProseMirror ScriptEditor instead of the legacy
-  // contenteditable EditorPanel script surface. Default OFF.
-  useProseMirrorEditor: false,
+  // contenteditable EditorPanel script surface.
+  // DEFAULT ON for the dev/migration branch — the dev site uses the new editor
+  // by default. (This file only exists on the migration branch; live/main runs
+  // the legacy editor.) To opt OUT in a given browser:
+  //   localStorage.setItem('ff:useProseMirrorEditor', 'false')
+  useProseMirrorEditor: true,
 };
 
 function read(name) {
