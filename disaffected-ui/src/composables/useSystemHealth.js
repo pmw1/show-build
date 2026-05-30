@@ -14,7 +14,7 @@ import axios from 'axios'
 
 // ---- Singleton state (module-level, shared across all callers) ----
 
-const POLL_INTERVAL = 10000
+const POLL_INTERVAL = 30000
 
 const health = ref({
   status: 'unknown',
@@ -440,7 +440,10 @@ const fetchHealthProgressive = async () => {
   }
   setTimeout(async () => {
     try {
-      const response = await axios.get('/health/secondary', { timeout: 5000 })
+      // /health/secondary runs the deep external checks (~6-7s); give it a
+      // timeout comfortably above that so the external-service indicators
+      // actually resolve instead of timing out and staying red.
+      const response = await axios.get('/health/secondary', { timeout: 15000 })
       if (response.data.services) {
         health.value.services = { ...health.value.services, ...response.data.services }
       }
@@ -454,11 +457,16 @@ const fetchHealthProgressive = async () => {
 
 function startPolling() {
   if (pollTimer) return // Already running
-  // Seed from localStorage to avoid flash, then fetch fresh immediately
+  // Seed from localStorage to avoid flash, then fetch fresh immediately.
   const saved = loadHealthFromStorage()
   if (saved) health.value = saved
-  fetchHealth()
-  pollTimer = setInterval(fetchHealth, POLL_INTERVAL)
+  // Progressive: /health/critical (fast, DB+backend) resolves the indicators in
+  // ms; /health/secondary loads the slow external services in the background.
+  // The old single fetchHealth() hit /health which takes ~6-7s — with a 10s poll
+  // that left the indicators in a loading/red state ~67% of the time, causing the
+  // visible flashing. fetchHealthProgressive + the 30s interval fixes that.
+  fetchHealthProgressive()
+  pollTimer = setInterval(fetchHealthProgressive, POLL_INTERVAL)
 }
 
 function stopPolling() {
