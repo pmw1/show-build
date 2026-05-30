@@ -74,6 +74,12 @@ const routes = [
     props: true,
     meta: { requiresAuth: true }
   },
+  // Dev-only: ScriptEditor (TipTap migration) harness — not linked from nav.
+  {
+    path: '/dev/script-editor',
+    name: 'dev-script-editor',
+    component: () => import('@/views/DevScriptEditorView.vue')
+  },
   // Add new routes for other sections
   {
     path: '/assets',
