@@ -105,7 +105,15 @@ export default {
         // ADD CUE buttons launch (insertCueFromMenu). So "/" is a shortcut for
         // those buttons.
         extensions: buildScriptExtensions({
-          onSelectCue: (cueType) => emit('insert-cue', cueType),
+          onSelectCue: (cueType) => {
+            // The cue is inserted by the modal, which writes back through
+            // scriptContent — an EXTERNAL change this editor must reload. Flush
+            // any pending edit and clear isActivelyEditing so the scriptContent
+            // watcher doesn't skip the reload (it bails while actively editing).
+            flushPendingChanges();
+            isActivelyEditing.value = false;
+            emit('insert-cue', cueType);
+          },
         }),
         content: initial.doc.toJSON(),
         onUpdate: () => scheduleSave(),
