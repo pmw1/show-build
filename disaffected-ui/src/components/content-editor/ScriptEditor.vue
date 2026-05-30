@@ -18,13 +18,17 @@
 -->
 <template>
   <div class="script-editor-root">
-    <div ref="editorHost" class="script-editor-host" />
+    <!-- EditorContent (not a raw element mount): this is what forwards the
+         host app's plugin context (Vuetify) into the cue NodeViews, so the
+         cards' <v-card>/<v-btn> render. A manual `new Editor({element})` mount
+         bypasses that forwarding and the cue cards come up blank. -->
+    <editor-content :editor="editor" class="script-editor-host" />
   </div>
 </template>
 
 <script>
 import { ref, shallowRef, onMounted, onBeforeUnmount, watch } from 'vue';
-import { Editor } from '@tiptap/vue-3';
+import { Editor, EditorContent } from '@tiptap/vue-3';
 import { buildScriptExtensions } from './prosemirror/extensions.js';
 import { markdownToDoc, docToMarkdown, assertNoLoss } from '@/utils/prosemirror/markdown.js';
 
@@ -32,12 +36,12 @@ const SAVE_DEBOUNCE_MS = 1500;
 
 export default {
   name: 'ScriptEditor',
+  components: { EditorContent },
   props: {
     scriptContent: { type: String, default: '' },
   },
   emits: ['update:scriptContent', 'save-current', 'save-all'],
   setup(props, { emit, expose }) {
-    const editorHost = ref(null);
     const editor = shallowRef(null);
     const isActivelyEditing = ref(false);
 
@@ -91,13 +95,15 @@ export default {
     }
 
     onMounted(() => {
+      // No `element` — <EditorContent> mounts the editor's DOM and forwards the
+      // host app context (Vuetify) into the cue NodeViews.
+      const initial = markdownToDoc(props.scriptContent || '');
+      frontmatter = initial.frontmatter;
       editor.value = new Editor({
-        element: editorHost.value,
         extensions: buildScriptExtensions(),
-        content: markdownToDoc(props.scriptContent || '').doc.toJSON(),
+        content: initial.doc.toJSON(),
         onUpdate: () => scheduleSave(),
       });
-      frontmatter = markdownToDoc(props.scriptContent || '').frontmatter;
     });
 
     onBeforeUnmount(() => {
@@ -131,7 +137,7 @@ export default {
       },
     });
 
-    return { editorHost, editor, isActivelyEditing, flushPendingChanges };
+    return { editor, isActivelyEditing, flushPendingChanges };
   },
 };
 </script>

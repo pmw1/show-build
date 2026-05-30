@@ -731,6 +731,9 @@ export default {
   name: 'ContentEditor',
   components: {
     EditorPanel,
+    // Used via <ScriptEditor> behind a v-if; eslint's static check misses the
+    // PascalCase-in-v-if usage (same quirk handled for MetadataPanel below).
+    // eslint-disable-next-line vue/no-unused-components
     ScriptEditor,
     RundownPanel,
     // eslint-disable-next-line vue/no-unused-components
