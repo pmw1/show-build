@@ -170,21 +170,11 @@
 
       <!-- Editor Panel (scrollable center column) -->
       <div class="editor-panel">
-        <!-- Migration: TipTap ScriptEditor (flag-gated). Mounts in place of the
-             legacy EditorPanel script surface only when useProseMirrorEditor is
-             on AND we are in script mode. Preserves the scriptContent string
-             contract + save events so the parent save/reload path is unchanged.
-             Falls back to EditorPanel for code/scratch modes and when off. -->
-        <ScriptEditor
-          v-if="useProseMirrorEditor && editorMode === 'script'"
-          ref="scriptEditor"
-          :script-content="scriptContent"
-          @update:script-content="updateScriptContent"
-          @save-current="handleEditorSaveCurrent"
-          @save-all="saveEverything"
-        />
+        <!-- Migration: the TipTap ScriptEditor swap happens INSIDE EditorPanel
+             (it replaces only the contenteditable script surface, keeping the
+             toolbar / mode toggles / cue-insert chrome). EditorPanel reads the
+             useProseMirrorEditor flag itself. -->
         <EditorPanel
-          v-else
           ref="editorPanel"
           :item="currentRundownItem"
           :current-item-metadata="currentItemMetadata"
@@ -643,11 +633,9 @@ import axios from 'axios';
 
 // Core panels - always visible, load eagerly
 import EditorPanel from './content-editor/EditorPanel.vue';
-// Migration: TipTap/ProseMirror script editor, gated behind the
-// useProseMirrorEditor feature flag (default OFF). Lazy-loaded so it adds no
-// cost when the flag is off.
-import ScriptEditor from './content-editor/ScriptEditor.vue';
-import { useFeatureFlags } from '@/composables/useFeatureFlags';
+// Migration: the TipTap/ProseMirror ScriptEditor is mounted INSIDE EditorPanel
+// (it swaps only the contenteditable surface). EditorPanel owns the flag; nothing
+// to import here.
 import RundownPanel from './content-editor/RundownPanel.vue';
 import MetadataPanel from './content-editor/MetadataPanel.vue';
 import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
@@ -731,10 +719,6 @@ export default {
   name: 'ContentEditor',
   components: {
     EditorPanel,
-    // Used via <ScriptEditor> behind a v-if; eslint's static check misses the
-    // PascalCase-in-v-if usage (same quirk handled for MetadataPanel below).
-    // eslint-disable-next-line vue/no-unused-components
-    ScriptEditor,
     RundownPanel,
     // eslint-disable-next-line vue/no-unused-components
     MetadataPanel,
@@ -1139,11 +1123,6 @@ export default {
   },
   data() {
     return {
-      // Migration flag: mount the TipTap ScriptEditor instead of EditorPanel's
-      // legacy contenteditable script surface. Read once at init from
-      // localStorage (default OFF). Toggle: localStorage ff:useProseMirrorEditor.
-      useProseMirrorEditor: useFeatureFlags().isEnabled('useProseMirrorEditor'),
-
       // Universal LLM state management
       llmState: useLLMState(),
 
@@ -1850,7 +1829,10 @@ Try dropping an image or video file here!`
      * flush-critical paths so they work regardless of which editor is active.
      */
     activeEditor() {
-      return this.$refs.scriptEditor || this.$refs.editorPanel || null;
+      // EditorPanel is always the script-surface host; when the ProseMirror
+      // editor is active it lives inside EditorPanel, which delegates its
+      // flushPendingChanges()/isActivelyEditing to the inner ScriptEditor.
+      return this.$refs.editorPanel || null;
     },
 
     /**

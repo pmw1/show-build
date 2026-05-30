@@ -307,7 +307,20 @@
                 title="Lower auto-scroll zone"
               ></div>
 
+              <!-- Migration: ProseMirror script surface (flag ON). Replaces the
+                   legacy contenteditable draggable list below; the cue-insert
+                   toolbar, mode toggles, and all other chrome stay rendered. -->
+              <ScriptEditor
+                v-if="useProseMirrorEditor"
+                ref="scriptEditorRef"
+                :script-content="props.scriptContent"
+                @update:script-content="(v) => emit('update:scriptContent', v)"
+                @save-current="() => emit('save-current')"
+                @save-all="() => emit('save-all')"
+              />
+
               <draggable
+                v-else
                 v-model="draggableSegments"
                 tag="div"
                 :item-key="getSegmentKey"
@@ -1457,6 +1470,10 @@ import { useContentSanitizer } from '../../composables/useContentSanitizer.js'
 import { useCollapseMode } from '../../composables/useCollapseMode.js'
 import { useEditorPaste } from '../../composables/useEditorPaste.js'
 import { useScriptCore } from '../../composables/useScriptCore.js'
+// Migration: the TipTap/ProseMirror editor that replaces ONLY the contenteditable
+// script surface (the toolbar / mode toggles / cue-insert chrome around it stays).
+import ScriptEditor from './ScriptEditor.vue'
+import { useFeatureFlags } from '../../composables/useFeatureFlags.js'
 import { useMessages } from '../../composables/useMessages.js'
 import { useUserPrefs } from '../../composables/useUserPrefs.js'
 import {
@@ -1889,6 +1906,12 @@ const {
 const { parseGoogleDocsPaste, cleanGoogleDocsNode, parseGenericPaste } = useEditorPaste()
 
 const { enabled: legacyCueConvertEnabled } = useLegacyCueConvertEnabled()
+
+// Migration flag: when on, the script surface renders the ProseMirror
+// ScriptEditor instead of the legacy contenteditable draggable list. Read once
+// at setup from localStorage (default OFF). Toggle: ff:useProseMirrorEditor.
+const useProseMirrorEditor = ref(useFeatureFlags().isEnabled('useProseMirrorEditor'))
+const scriptEditorRef = ref(null)
 
 const core = useScriptCore(props, emit, sanitizer)
 const {
@@ -10816,6 +10839,17 @@ function restoreCursorMemoryPosition(position) {
 // ============================================================================
 // defineExpose
 // ============================================================================
+// When the ProseMirror editor is active it owns the pending edits, not the
+// legacy edit buffer — so the exposed flush must delegate to it. Falls through
+// to the legacy flush otherwise.
+async function flushPendingChangesUnified() {
+  if (useProseMirrorEditor.value && scriptEditorRef.value?.flushPendingChanges) {
+    scriptEditorRef.value.flushPendingChanges()
+    return
+  }
+  await flushPendingChanges()
+}
+
 defineExpose({
   activelyEditingSegment,
   cachedScriptSegments,
@@ -10823,7 +10857,7 @@ defineExpose({
   restoreSegmentCursor: restoreCursorMemoryPosition,
   enterCrossPlacementMode,
   extractAndRemoveSegment,
-  flushPendingChanges,
+  flushPendingChanges: flushPendingChangesUnified,
   focusSlugField,
   focusedParagraphIndex,
   forceRefreshSegments,
