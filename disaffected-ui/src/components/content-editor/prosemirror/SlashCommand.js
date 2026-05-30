@@ -71,22 +71,25 @@ export const SlashCommand = Extension.create({
       suggestion: {
         char: '/',
         startOfLine: false,
-        command: ({ editor, range, props }) => {
-          // Remove the "/query" text the user typed, then hand the chosen cue
-          // type up to the host (EditorPanel) to launch its modal.
-          editor.chain().focus().deleteRange(range).run();
-          const cb = this.options.onSelectCue;
-          if (typeof cb === 'function') cb(props.type);
-        },
       },
     };
   },
 
   addProseMirrorPlugins() {
+    // Capture in a closure — `this` is the extension here, but NOT inside the
+    // suggestion `command` (which @tiptap/suggestion re-binds), so referencing
+    // `this.options` there throws. Bind it now instead.
+    const onSelectCue = this.options.onSelectCue;
     return [
       Suggestion({
         editor: this.editor,
         ...this.options.suggestion,
+        command: ({ editor, range, props }) => {
+          // Remove the "/query" text the user typed, then hand the chosen cue
+          // type up to the host (EditorPanel) to launch its modal.
+          editor.chain().focus().deleteRange(range).run();
+          if (typeof onSelectCue === 'function') onSelectCue(props.type);
+        },
         items: ({ query }) => filterItems(query),
         render: () => {
           let component;
