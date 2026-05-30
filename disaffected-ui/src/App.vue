@@ -308,8 +308,11 @@
     <!-- Screen Flash for modal triggers and aborts -->
     <ScreenFlash />
 
-    <!-- Initialization Overlay - shows while health check loads -->
-    <InitializationOverlay />
+    <!-- Initialization Overlay - shows while health check loads.
+         Gated on auth: before login there is no token, so the health poll 401s
+         and the overlay would flash forever, covering the login screen. Only
+         show it once authenticated (matches the rest of the chrome below). -->
+    <InitializationOverlay v-if="isAuthenticated" />
 
     <!-- Status Grid - Fixed at top right, each cell clickable with detail dropdown -->
     <div v-if="isAuthenticated" class="status-grid-overlay" @click.stop>
