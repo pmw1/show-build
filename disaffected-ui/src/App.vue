@@ -320,10 +320,11 @@
     <!-- Screen Flash for modal triggers and aborts -->
     <ScreenFlash />
 
-    <!-- Initialization Overlay - shows while health check loads.
-         Gated on auth: before login there is no token, so the health poll 401s
-         and the overlay would flash forever, covering the login screen. Only
-         show it once authenticated (matches the rest of the chrome below). -->
+    <!-- Initialization Overlay - shows while the health check loads. Gated on
+         auth: before login there's no token, so the health poll 401s and the
+         overlay would flash; only show once authenticated. (The reload-loop
+         "flashing" we chased turned out to be Cloudflare edge-caching a stale
+         HMR bundle — fixed separately — NOT this overlay.) -->
     <InitializationOverlay v-if="isAuthenticated" />
 
     <!-- Status Grid - Fixed at top right, each cell clickable with detail dropdown -->
