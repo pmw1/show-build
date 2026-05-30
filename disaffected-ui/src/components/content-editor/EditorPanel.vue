@@ -1471,9 +1471,9 @@ import { useCollapseMode } from '../../composables/useCollapseMode.js'
 import { useEditorPaste } from '../../composables/useEditorPaste.js'
 import { useScriptCore } from '../../composables/useScriptCore.js'
 // Migration: the TipTap/ProseMirror editor that replaces ONLY the contenteditable
-// script surface (the toolbar / mode toggles / cue-insert chrome around it stays).
+// script surface. Currently HARD-DISABLED (see useProseMirrorEditor below) — the
+// legacy editor is forced. Import kept so the swap can be re-enabled for testing.
 import ScriptEditor from './ScriptEditor.vue'
-import { useFeatureFlags } from '../../composables/useFeatureFlags.js'
 import { useMessages } from '../../composables/useMessages.js'
 import { useUserPrefs } from '../../composables/useUserPrefs.js'
 import {
@@ -1908,9 +1908,11 @@ const { parseGoogleDocsPaste, cleanGoogleDocsNode, parseGenericPaste } = useEdit
 const { enabled: legacyCueConvertEnabled } = useLegacyCueConvertEnabled()
 
 // Migration flag: when on, the script surface renders the ProseMirror
-// ScriptEditor instead of the legacy contenteditable draggable list. Read once
-// at setup from localStorage (default OFF). Toggle: ff:useProseMirrorEditor.
-const useProseMirrorEditor = ref(useFeatureFlags().isEnabled('useProseMirrorEditor'))
+// ScriptEditor instead of the legacy contenteditable draggable list.
+// HARD-DISABLED: forced to the LEGACY editor regardless of the localStorage
+// flag. To re-enable the ProseMirror editor for testing, restore the original
+// line: ref(useFeatureFlags().isEnabled('useProseMirrorEditor')).
+const useProseMirrorEditor = ref(false)
 const scriptEditorRef = ref(null)
 
 const core = useScriptCore(props, emit, sanitizer)
