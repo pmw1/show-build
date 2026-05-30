@@ -146,6 +146,31 @@ describe('frontmatter', () => {
   });
 });
 
+describe('revision markup (reject-on-save)', () => {
+  test('replacement proposal keeps the original (left of pipe)', () => {
+    const md = '<p class="josh">Hello <rev user="k" ts="t">old|new</rev> world</p>';
+    const out = roundTrip(md);
+    expect(out).toContain('Hello old world');
+    expect(out).not.toContain('<rev');
+    expect(out).not.toContain('new');
+  });
+
+  test('cut-only proposal keeps the marked text', () => {
+    const md = '<p class="josh">Keep <rev user="k" ts="t">this</rev> text</p>';
+    const out = roundTrip(md);
+    expect(out).toContain('Keep this text');
+    expect(out).not.toContain('<rev');
+  });
+
+  test('DOM-form rev chrome is stripped, original kept', () => {
+    const md = '<p class="josh">A <rev-kill>orig</rev-kill><rev-add>prop</rev-add> B</p>';
+    const out = roundTrip(md);
+    expect(out).toContain('orig');
+    expect(out).not.toContain('prop');
+    expect(out).not.toContain('<rev');
+  });
+});
+
 describe('loss assertion', () => {
   test('clean round-trip reports ok', () => {
     const md = '<!-- Begin Cue -->\n[Type: SOT]\n[Slug: x]\n<!-- End Cue -->';

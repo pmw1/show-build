@@ -28,6 +28,28 @@ const P_RE = /<p(?:\s+class="([^"]*)")?([^>]*)>([\s\S]*?)<\/p>/g;
 
 const MODIFIERS = new Set(['bullet']);
 
+/**
+ * Strip unresolved revision markup from paragraph text, keeping the ORIGINAL
+ * (reject-on-save semantics — identical to useContentSanitizer.stripRevisionMarkup).
+ * `<rev ...>original|replacement</rev>` -> `original` (left of pipe);
+ * `<rev ...>kill</rev>` (no pipe) -> `kill` (kept). Used on parse so saved content
+ * never carries proposal chrome; live proposals live as ProseMirror revision marks.
+ */
+function stripRevisionMarkup(text) {
+  if (!text || !text.includes('<rev')) return text;
+  let r = text.replace(/<rev\s+[^>]*>([\s\S]*?)<\/rev>/gi, (_m, inner) => {
+    const pipe = inner.indexOf('|');
+    return pipe === -1 ? inner : inner.slice(0, pipe);
+  });
+  r = r.replace(/<rev-actions>[\s\S]*?<\/rev-actions>/gi, '');
+  r = r.replace(/<rev-meta[^>]*>[\s\S]*?<\/rev-meta>/gi, '');
+  r = r.replace(/<rev-btn[^>]*>[\s\S]*?<\/rev-btn>/gi, '');
+  r = r.replace(/<rev-add[^>]*>[\s\S]*?<\/rev-add>/gi, '');
+  r = r.replace(/<rev-kill[^>]*>([\s\S]*?)<\/rev-kill>/gi, '$1');
+  r = r.replace(/<rev-block[^>]*>([\s\S]*?)<\/rev-block>/gi, '$1');
+  return r;
+}
+
 // ---------------------------------------------------------------------------
 // Frontmatter (out-of-band)
 // ---------------------------------------------------------------------------
@@ -62,7 +84,10 @@ export function splitFrontmatter(content) {
 
 function paragraphNode(text, attrs = {}) {
   const a = { speaker: 'josh', bullet: false, needsAttention: false, flagNote: '', ...attrs };
-  return schema.node('paragraph', a, text ? [schema.text(text)] : []);
+  // Unresolved revision proposals are rejected on parse (keep original text);
+  // live proposals are re-created as ProseMirror revision marks in the editor.
+  const clean = stripRevisionMarkup(text);
+  return schema.node('paragraph', a, clean ? [schema.text(clean)] : []);
 }
 
 function parseCueBlock(block) {
@@ -120,12 +145,8 @@ export function markdownToDoc(raw) {
   const blocks = [];
   let idx = 0;
 
-  while (true) {
-    const b = body.indexOf(BEGIN, idx);
-    if (b === -1) {
-      emitTextRegion(body.slice(idx), blocks);
-      break;
-    }
+  let b = body.indexOf(BEGIN, idx);
+  while (b !== -1) {
     emitTextRegion(body.slice(idx, b), blocks);
     const e = body.indexOf(END, b);
     const nextB = body.indexOf(BEGIN, b + BEGIN.length);
@@ -134,11 +155,13 @@ export function markdownToDoc(raw) {
     if (e === -1 || (nextB !== -1 && nextB < e)) {
       emitTextRegion(body.slice(b, b + BEGIN.length), blocks);
       idx = b + BEGIN.length;
-      continue;
+    } else {
+      blocks.push(parseCueBlock(body.slice(b + BEGIN.length, e)));
+      idx = e + END.length;
     }
-    blocks.push(parseCueBlock(body.slice(b + BEGIN.length, e)));
-    idx = e + END.length;
+    b = body.indexOf(BEGIN, idx);
   }
+  emitTextRegion(body.slice(idx), blocks);
 
   if (blocks.length === 0) blocks.push(paragraphNode(''));
   return { doc: schema.node('doc', null, blocks), frontmatter };
@@ -203,9 +226,8 @@ export function assertNoLoss(rawInput, serializedOutput) {
   const cueFieldValues = (s) => {
     const result = [];
     let idx = 0;
-    while (true) {
-      const b = s.indexOf(BEGIN, idx);
-      if (b === -1) break;
+    let b = s.indexOf(BEGIN, idx);
+    while (b !== -1) {
       const e = s.indexOf(END, b);
       if (e === -1) break;
       const vals = new Set();
@@ -218,6 +240,7 @@ export function assertNoLoss(rawInput, serializedOutput) {
       }
       result.push(vals);
       idx = e + END.length;
+      b = s.indexOf(BEGIN, idx);
     }
     return result;
   };
