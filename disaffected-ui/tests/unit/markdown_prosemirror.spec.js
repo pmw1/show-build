@@ -192,7 +192,7 @@ describe('loss assertion', () => {
 });
 
 describe('real episode corpus (skipped if extract absent)', () => {
-  const corpusPath = path.join(__dirname, '..', 'src', 'utils', '__phase0__', 'corpus.jsonl');
+  const corpusPath = path.join(__dirname, '..', '..', 'src', 'utils', '__phase0__', 'corpus.jsonl');
   const hasCorpus = fs.existsSync(corpusPath);
   const maybe = hasCorpus ? test : test.skip;
 
