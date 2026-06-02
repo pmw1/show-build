@@ -97,10 +97,100 @@ def upgrade():
         nullable=False, server_default='public',
     ))
 
+    # -----------------------------------------------------------------
+    # 3b. rundown_item_types lookup (drives publishable-slug uniqueness).
+    #     Flag-driven so adding a new content type later is a row update,
+    #     NOT a migration/index rebuild. Mirrors the access_tiers pattern.
+    #     Seeded from RundownItemType enum; is_publishable marks the
+    #     content-bearing types whose slugs become public URLs.
+    # -----------------------------------------------------------------
+    op.create_table(
+        'rundown_item_types',
+        sa.Column('slug', sa.String(40), primary_key=True),
+        sa.Column('label', sa.String(80), nullable=False),
+        sa.Column('is_publishable', sa.Boolean, nullable=False,
+                  server_default=sa.text('false')),
+        sa.Column('sort_order', sa.Integer, nullable=False, server_default='0'),
+        sa.Column('created_at', sa.DateTime(timezone=True),
+                  server_default=sa.func.now(), nullable=False),
+    )
+    # (slug, label, is_publishable, sort_order)
+    op.execute("""
+        INSERT INTO rundown_item_types (slug, label, is_publishable, sort_order) VALUES
+          ('segment',    'Segment',       true,  10),
+          ('open',       'Open',          true,  20),
+          ('coldopen',   'Cold Open',     true,  30),
+          ('interview',  'Interview',     true,  40),
+          ('package',    'Package',       true,  50),
+          ('reader',     'Reader',        true,  60),
+          ('tease',      'Tease',         false, 70),
+          ('ad',         'Ad',            false, 80),
+          ('promo',      'Promo',         false, 90),
+          ('transition', 'Transition',    false, 100),
+          ('stinger',    'Stinger',       false, 110),
+          ('rejoin',     'Rejoin',        false, 120),
+          ('close',      'Close',         false, 130),
+          ('break',      'Break',         false, 140)
+    """)
+
+    # Data cleanup: legacy 'advertisement' -> canonical 'ad' (enum renamed it).
+    op.execute("UPDATE rundown_items SET item_type = 'ad' WHERE item_type = 'advertisement'")
+
+    # Uniqueness rule: slug must be unique WITHIN a rundown, but ONLY for
+    # PUBLISHABLE item types (their slugs become public URLs) and only when a
+    # slug is actually set. Structural items (ad/promo/tease/break/...) repeat
+    # freely; blank/placeholder slugs are exempt until named.
+    #
+    # This is enforced by a trigger rather than a partial unique index because
+    # the "publishable" set is FLAG-DRIVEN (rundown_item_types.is_publishable)
+    # and Postgres partial-index predicates cannot contain a subquery. The
+    # trigger consults the lookup table at write time, so flipping a type's
+    # is_publishable flag changes enforcement instantly — no migration, no
+    # index rebuild. Adding a new content type = insert/flag a lookup row.
+    op.execute("""
+        CREATE OR REPLACE FUNCTION enforce_publishable_slug_unique()
+        RETURNS trigger AS $$
+        BEGIN
+            -- Only enforce for publishable types with a non-empty slug.
+            IF NEW.slug IS NULL OR NEW.slug = '' THEN
+                RETURN NEW;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM rundown_item_types t
+                WHERE t.slug = NEW.item_type AND t.is_publishable
+            ) THEN
+                RETURN NEW;
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM rundown_items ri
+                WHERE ri.rundown_id = NEW.rundown_id
+                  AND ri.slug = NEW.slug
+                  AND ri.id <> COALESCE(NEW.id, -1)
+                  AND EXISTS (
+                      SELECT 1 FROM rundown_item_types t2
+                      WHERE t2.slug = ri.item_type AND t2.is_publishable
+                  )
+            ) THEN
+                RAISE EXCEPTION
+                  'duplicate publishable slug % in rundown % (item_type %)',
+                  NEW.slug, NEW.rundown_id, NEW.item_type
+                  USING ERRCODE = 'unique_violation';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+    op.execute("""
+        CREATE TRIGGER trg_rundown_items_publishable_slug_unique
+        BEFORE INSERT OR UPDATE OF slug, item_type, rundown_id
+        ON rundown_items
+        FOR EACH ROW
+        EXECUTE FUNCTION enforce_publishable_slug_unique();
+    """)
+    # Non-unique helper index for the lookup/filter path the public API uses.
     op.create_index(
         'idx_rundown_items_episode_slug',
         'rundown_items', ['rundown_id', 'slug'],
-        unique=True,
     )
 
     # -----------------------------------------------------------------
@@ -138,6 +228,9 @@ def downgrade():
     op.drop_table('segment_transcripts')
 
     op.drop_index('idx_rundown_items_episode_slug', table_name='rundown_items')
+    op.execute("DROP TRIGGER IF EXISTS trg_rundown_items_publishable_slug_unique ON rundown_items")
+    op.execute("DROP FUNCTION IF EXISTS enforce_publishable_slug_unique()")
+    op.drop_table('rundown_item_types')
     op.drop_constraint('fk_rundown_items_access_tier', 'rundown_items', type_='foreignkey')
     op.drop_column('rundown_items', 'access_tier')
     op.drop_column('rundown_items', 'og_poster_path')
