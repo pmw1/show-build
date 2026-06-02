@@ -56,7 +56,8 @@ async def upload_sot_video(
     slug: str = Form(...),
     trim_start: str = Form("00:00:00"),
     trim_end: str = Form("00:00:00"),
-    current_user=Depends(get_current_user_or_key)
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
 ):
     """
     Upload SOT video file and queue for processing.
@@ -102,6 +103,11 @@ async def upload_sot_video(
         task = process_sot_video.apply_async(
             args=[str(upload_path), episode, slug, trim_start, trim_end],
             queue='media'
+        )
+
+        register_celery_job(
+            db, task.id, "services.ffmpeg_tasks.process_sot_video",
+            f"SOT: {slug or episode}", "sot", episode, "media"
         )
 
         return SOTUploadResponse(
@@ -240,6 +246,181 @@ async def upload_sot_background(
         print(f"🚨 UPLOAD ERROR: {str(e)}")
         print(f"🚨 TRACEBACK:\n{error_trace}")
         raise HTTPException(status_code=500, detail=f"Background upload failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Chunked background upload
+#
+# Large source files (>100 MB) cannot reach the server in one POST when the
+# app is accessed via the Cloudflare tunnel (showbuild.app), which rejects
+# request bodies over 100 MB with HTTP 413 at the edge. To support big SOT
+# sources from off-LAN, the frontend slices the file into <100 MB chunks and
+# sends them sequentially to /upload/chunk, then calls /upload/complete.
+#
+# Chunks are APPENDED in order to the same `{job_id}_upload.mp4` that
+# /upload/background writes — so everything downstream (process/multi-phase,
+# the SOTProcessingJob row, the modal's tempJobId gate) is unchanged. The
+# only difference from /upload/background is HOW the bytes arrive.
+# ---------------------------------------------------------------------------
+
+
+def _sot_working_dir(temp_job_id: str) -> Path:
+    """Working dir for a SOT upload job (matches /upload/background)."""
+    return Path("/shared_media") / "preproc" / "working" / temp_job_id
+
+
+def _sot_upload_path(temp_job_id: str) -> Path:
+    """Assembled upload file path (matches /upload/background)."""
+    return _sot_working_dir(temp_job_id) / f"{temp_job_id}_upload.mp4"
+
+
+class ChunkUploadResponse(BaseModel):
+    """Response model for a single chunk upload."""
+    temp_job_id: str
+    chunk_index: int
+    total_chunks: int
+    bytes_so_far: int
+    status: str  # 'receiving'
+
+
+@router.post("/upload/chunk", response_model=ChunkUploadResponse)
+async def upload_sot_chunk(
+    file: UploadFile = File(...),
+    temp_job_id: str = Form(...),
+    chunk_index: int = Form(...),
+    total_chunks: int = Form(...),
+    current_user=Depends(get_current_user_or_key),
+):
+    """
+    Append one chunk of a chunked SOT upload.
+
+    Chunks must be sent IN ORDER (0..total_chunks-1). Chunk 0 starts a fresh
+    file (truncating any previous attempt with the same temp_job_id); every
+    chunk is appended. No DB row is created here — that happens in
+    /upload/complete, mirroring /upload/background's single-shot behavior.
+
+    Args:
+        file: One chunk of the video file (<100 MB)
+        temp_job_id: Job ID that ties the chunks together (client-generated)
+        chunk_index: 0-based index of this chunk
+        total_chunks: Total number of chunks for the whole file
+
+    Returns:
+        ChunkUploadResponse with bytes received so far.
+    """
+    try:
+        if chunk_index < 0 or chunk_index >= total_chunks:
+            raise HTTPException(
+                status_code=400,
+                detail=f"chunk_index {chunk_index} out of range for total_chunks {total_chunks}",
+            )
+
+        working_dir = _sot_working_dir(temp_job_id)
+        working_dir.mkdir(parents=True, exist_ok=True)
+        upload_path = _sot_upload_path(temp_job_id)
+
+        # Chunk 0 truncates (fresh start / retry); later chunks append.
+        mode = "wb" if chunk_index == 0 else "ab"
+        with open(upload_path, mode) as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        bytes_so_far = upload_path.stat().st_size
+        return ChunkUploadResponse(
+            temp_job_id=temp_job_id,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            bytes_so_far=bytes_so_far,
+            status="receiving",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"🚨 CHUNK UPLOAD ERROR: {str(e)}")
+        print(f"🚨 TRACEBACK:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Chunk upload failed: {str(e)}")
+
+
+class CompleteUploadRequest(BaseModel):
+    """Request model for finalizing a chunked upload."""
+    temp_job_id: str
+    total_chunks: int
+    expected_size: Optional[int] = None  # client-known total byte size (sanity check)
+
+
+@router.post("/upload/complete", response_model=BackgroundUploadResponse)
+async def complete_sot_chunked_upload(
+    request: CompleteUploadRequest,
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db),
+):
+    """
+    Finalize a chunked SOT upload.
+
+    Verifies the assembled `{job_id}_upload.mp4` exists and (when provided)
+    matches the expected total size, then creates the SOTProcessingJob row
+    exactly like /upload/background. After this returns, the job is in the
+    same 'uploaded' state the rest of the pipeline expects.
+
+    Args:
+        request: temp_job_id, total_chunks, optional expected_size
+
+    Returns:
+        BackgroundUploadResponse with temp_job_id (status='uploaded').
+    """
+    try:
+        working_dir = _sot_working_dir(request.temp_job_id)
+        upload_path = _sot_upload_path(request.temp_job_id)
+
+        if not upload_path.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"No assembled upload found for {request.temp_job_id} — chunks missing",
+            )
+
+        actual_size = upload_path.stat().st_size
+        if actual_size == 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Assembled upload for {request.temp_job_id} is empty",
+            )
+        if request.expected_size is not None and actual_size != request.expected_size:
+            # Size mismatch => a chunk was lost/duplicated. Refuse rather than
+            # process a corrupt file downstream.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Assembled size {actual_size} != expected {request.expected_size} "
+                    f"for {request.temp_job_id} — upload incomplete or corrupt"
+                ),
+            )
+
+        # Idempotent: if a row already exists (e.g. retried /complete), reuse it.
+        job = db.query(SOTProcessingJob).filter_by(temp_job_id=request.temp_job_id).first()
+        if job is None:
+            job = SOTProcessingJob(
+                temp_job_id=request.temp_job_id,
+                current_phase='upload',
+                status='uploaded',
+                working_directory=str(working_dir),
+            )
+            db.add(job)
+            db.commit()
+
+        return BackgroundUploadResponse(
+            temp_job_id=request.temp_job_id,
+            message=f"Chunked upload assembled successfully ({actual_size} bytes)",
+            status="uploaded",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"🚨 COMPLETE UPLOAD ERROR: {str(e)}")
+        print(f"🚨 TRACEBACK:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Complete upload failed: {str(e)}")
 
 
 class MultiPhaseProcessRequest(BaseModel):
@@ -654,6 +835,10 @@ async def retry_failed_job(
         )
 
         job.celery_task_id = task.id
+        register_celery_job(
+            db, task.id, "services.ffmpeg_tasks.process_sot_video_multi_phase",
+            f"SOT retry: {job.slug or temp_job_id}", "sot", job.episode, "media"
+        )
         db.commit()
 
         return SOTUploadResponse(
@@ -1179,6 +1364,10 @@ async def reprocess_sot_by_asset_id(
         )
 
         new_job.celery_task_id = task.id
+        register_celery_job(
+            db, task.id, "services.ffmpeg_tasks.process_sot_video_multi_phase",
+            f"SOT reprocess: {slug or new_temp_job_id}", "sot", episode, "media"
+        )
         db.commit()
 
         return {
