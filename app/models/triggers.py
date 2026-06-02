@@ -32,12 +32,14 @@ class Trigger(Base):
     task_name = Column(String(255), nullable=False)
     task_args = Column(JSON, nullable=True)        # {"args": [...], "kwargs": {...}}
     queue = Column(String(50), nullable=True)
-    enabled = Column(Boolean, nullable=False, server_default="1", index=True)
+    # Postgres Boolean server_default must be 'true'/'false', NOT '1'/'0'
+    # (matches the migration's sa.true()/sa.false()). Per show-build review #727.
+    enabled = Column(Boolean, nullable=False, server_default="true", index=True)
     category = Column(String(50), nullable=False, server_default="general")
     owner_tool = Column(String(50), nullable=True)
     last_fired_at = Column(DateTime(timezone=True), nullable=True)
     last_task_id = Column(String(255), nullable=True)   # joins celery_job_log.task_id
     fire_count = Column(Integer, nullable=False, server_default="0")
-    consumed = Column(Boolean, nullable=False, server_default="0")
+    consumed = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
