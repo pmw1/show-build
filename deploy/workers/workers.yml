@@ -1,0 +1,73 @@
+# Declared worker fleet — single source of truth for placement.
+# A small generator renders each host's docker-compose.yml from this (replaces the
+# inline heredocs in scripts/deploy_celery_worker.sh).
+# DRAFT — review hosts/queues/concurrency against KB #6 before landing.
+
+registry: 192.168.51.206:3000/kevin     # Gitea container registry (AgentBox), kevin namespace
+
+defaults:
+  redis_url: redis://:${REDIS_PASSWORD}@192.168.51.223:6379/0
+  database_url: postgresql://showbuild:showbuild@192.168.51.238:5433/showbuild   # prefect (FIX: was hardcoded to .210 in old compose)
+  media_root: /mnt/sync/disaffected
+  restart: unless-stopped
+  max_tasks_per_child: 25
+  # MEDIA ACCESS MODEL (decided 2026-06-02): host mounts the NFS share, container
+  # BIND-mounts it in. In-container NFS self-mount was tested exhaustively and is
+  # refused by the server (NFSv4 same-IP lease collision when the host is already a
+  # client) — so bind is the reliable path. Every media worker must bind the host's
+  # already-mounted /mnt/sync. The host MUST have 192.168.51.210:/mnt/sync mounted
+  # first (prereq). The entrypoint detects the bind and skips self-mount.
+  media_bind: /mnt/sync:/mnt/sync          # host_path:container_path (NFS share)
+
+# flavors map to the Dockerfiles in this dir; build-push.sh tags them:
+#   <registry>/worker-base:<tag> | worker-media-cpu:<tag> | worker-media-gpu:<tag>
+flavors:
+  base:       worker-base
+  media-cpu:  worker-media-cpu
+  media-gpu:  worker-media-gpu
+
+workers:
+  # --- prefect (192.168.51.238) — host of broker-adjacent + LLM ---
+  - host: prefect
+    name: llm-content
+    flavor: base
+    queues: [llm_content]
+    concurrency: 1            # single-stream LLM
+  - host: prefect
+    name: media
+    flavor: media-gpu         # prefect has an RTX 3060
+    gpu: all
+    queues: [media, assets_high, assets, assets_low]
+    concurrency: 3            # tune to 3060 nvenc session ceiling
+    mounts: [/mnt/sync:/mnt/sync]   # bind host's NFS mount (host must mount .210:/mnt/sync first)
+  # celery-beat runs from the app image / compose, NOT a worker flavor (see note)
+
+  # --- kairo (192.168.51.197) — GPU media + fsq ---
+  - host: kairo
+    name: media
+    flavor: media-gpu         # RTX 3090
+    gpu: all
+    queues: [media, assets, fsq, assets_low]
+    concurrency: 4
+    mounts: [/mnt/sync:/mnt/sync]   # bind host's NFS mount
+
+  # --- proxima (192.168.51.208) — media (flavor depends on whether it has a card) ---
+  - host: proxima
+    name: media
+    flavor: media-gpu         # if no GPU, switch to media-cpu (failover code is identical)
+    gpu: all
+    queues: [media, assets_low]
+    concurrency: 4
+    mounts: [/mnt/sync:/mnt/sync]   # bind host's NFS mount
+
+  # --- whisperbox (192.168.51.210) — transcription, Redis-only, no DB ---
+  - host: whisperbox
+    name: whisper
+    flavor: base              # calls Whisper API over HTTP; no ffmpeg/GPU encode here
+    queues: [whisper]
+    concurrency: 2
+    redis_only: true          # omit DATABASE_URL
+
+# NOTE: celery-beat and the FastAPI `server` are NOT in this fleet — they build from
+# the existing /Dockerfile (app image) via the main docker-compose.yml and are out
+# of scope for the worker-flavor refactor. Beat stays a single instance.

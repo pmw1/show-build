@@ -29,7 +29,7 @@ from models.content import Segment, Script, Element, Cue, ContentVersion, Segmen
 from models.production import Speaker, ProductionRole, AssetLink, AssetMessage
 
 # Settings domain
-from models.settings import Settings, PromptOverride, GfxXpostCue
+from models.settings import Settings, PromptOverride, GfxXpostCue, WorkerDefinition
 
 # Jobs domain
 from models.jobs import CeleryJobLog, SOTProcessingJob
@@ -51,7 +51,7 @@ __all__ = [
     # Production
     "Speaker", "ProductionRole", "AssetLink", "AssetMessage",
     # Settings
-    "Settings", "PromptOverride", "GfxXpostCue",
+    "Settings", "PromptOverride", "GfxXpostCue", "WorkerDefinition",
     # Jobs
     "CeleryJobLog", "SOTProcessingJob",
     # Recording (showtime writeback)

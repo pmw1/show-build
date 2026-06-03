@@ -127,3 +127,40 @@ class GfxXpostCue(Base):
 
     # Relationships
     rundown_item = relationship("RundownItem", foreign_keys=[rundown_item_id])
+
+
+class WorkerDefinition(Base):
+    """Declarative definition of a Celery worker in the fleet.
+
+    The DB-backed source of truth for the worker fleet (replaces the static
+    deploy/workers/workers.yml). Each row describes ONE worker: its name, the
+    image/repo it runs, where it runs, which queues it consumes, and its
+    flavor/GPU/concurrency. v1 STORES definitions + surfaces live status; it does
+    NOT remotely deploy. See deploy/workers/README.md for the flavor model.
+    """
+    __tablename__ = "worker_definitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # human label, unique (matches celery --hostname's name part, e.g. "media")
+    name = Column(String(100), nullable=False, unique=True, index=True)
+    # container image or repo URL, e.g. 192.168.51.206:3000/showbuild/worker-media-gpu:latest
+    image = Column(String(500), nullable=False)
+    # image flavor: base | media-cpu | media-gpu (informational; mirrors README)
+    flavor = Column(String(40), nullable=True)
+    # host the worker runs on (prefect/kairo/proxima/whisperbox/...)
+    host = Column(String(100), nullable=True)
+    # queues this worker consumes (Celery -Q), stored as a JSON array of strings
+    queues = Column(JSON, nullable=False, server_default='[]')
+    # worker concurrency (--concurrency)
+    concurrency = Column(Integer, nullable=False, server_default='1')
+    # GPU request: null/'' = none, 'all' = --gpus all, or a device id
+    gpu = Column(String(20), nullable=True)
+    # extra host mounts (JSON array of strings), optional
+    mounts = Column(JSON, nullable=True)
+    # on/off switch for whether this worker SHOULD be running (intent, not live state)
+    enabled = Column(Boolean, nullable=False, server_default='true', index=True)
+    # which tool/owner this worker belongs to (show-build/showtime/media-prep/...)
+    owner_tool = Column(String(50), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
