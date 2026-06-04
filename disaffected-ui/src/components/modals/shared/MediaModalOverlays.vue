@@ -13,25 +13,6 @@
     class="overlay-info-display"
     style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 10001;"
   >
-    <!-- Top Center: Large Timecode Display -->
-    <div class="timecode-overlay" style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.85); padding: 14px 20px; border-radius: 9px; text-align: center; border: 2px solid rgba(255, 255, 255, 0.3); min-width: 520px;">
-      <div style="display: flex; gap: 12px; align-items: center; justify-content: center;">
-        <div style="color: white; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(255, 255, 255, 0.5); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">{{ currentTimecode }}</div>
-        <div style="padding: 8px 12px;">
-          <div style="color: #F44336; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(244, 67, 54, 0.8); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">-{{ remainingTimecode }}</div>
-        </div>
-      </div>
-      <div style="color: #90CAF9; font-size: 10px; font-weight: bold; font-family: 'Helvetica', Arial, sans-serif; margin-top: 6px;">{{ currentActionDisplay }}</div>
-
-      <!-- Clip Duration Display (slides down when IN and OUT are set) -->
-      <transition name="slide-down">
-        <div v-if="trimStart && trimEnd && clipDuration" class="clip-duration-display" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.2);">
-          <div style="color: #81C784; font-size: 12px; font-weight: bold; margin-bottom: 4px;">CLIP DURATION</div>
-          <div style="color: #4CAF50; font-size: 32px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(76, 175, 80, 0.5);">{{ clipDuration }}</div>
-        </div>
-      </transition>
-    </div>
-
     <!-- Playback Speed Indicator (Top Right) -->
     <transition name="speed-fade">
       <div v-if="showSpeedIndicator" class="speed-indicator" :style="`position: absolute; top: 20px; right: 50px; background: rgba(0, 0, 0, 0.9); padding: 20px; border-radius: 50%; width: 100px; height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 3px solid ${themeColors.speed}cc; box-shadow: 0 0 20px ${themeColors.speed}80;`">
@@ -56,39 +37,6 @@
       <div class="in-point-display" :style="`background: ${themeColors.in}e6; padding: 14px 20px; border-radius: 9px; border-left: 6px solid ${themeColors.inDark}; border: 2px solid ${themeColors.in}80; min-width: 200px;`">
         <div style="color: rgba(255,255,255,0.8); font-size: 10px; font-weight: bold; margin-bottom: 4px;">◄ IN POINT</div>
         <div :style="`color: white; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px ${themeColors.in}80;`">{{ trimStart || '--:--:--:--' }}</div>
-      </div>
-    </div>
-
-    <!-- Left Side: Hotkeys List -->
-    <div style="position: absolute; top: 100px; left: 50px; bottom: 70px; z-index: 999999;">
-      <div class="hotkeys-list" style="background: rgba(0, 0, 0, 0.92); padding: 15px; border-radius: 8px; width: 350px; height: 100%; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
-        <div @click="$emit('update:showHotkeys', !showHotkeys)" style="color: white; font-size: 14px; font-weight: bold; border-bottom: 2px solid rgba(255, 255, 255, 0.3); padding-bottom: 6px; cursor: pointer; margin-bottom: 8px; pointer-events: auto;">
-          ⌨️ HOTKEYS <span style="font-size: 10px; opacity: 0.6;">{{ showHotkeys ? '▼' : '▶' }}</span>
-          <span style="color: rgba(255,255,255,0.5); font-size: 9px; margin-left: 10px;">CTRL+1</span>
-        </div>
-        <div v-show="showHotkeys" style="color: white; font-size: 11px; line-height: 1.6; font-family: 'Helvetica', Arial, sans-serif; flex: 1; overflow-y: auto; padding-right: 8px; pointer-events: auto;">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">SPACE</span><span>Play/Pause</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">SHIFT+SPACE</span><span>Preview</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">I</span><span>Mark IN</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">O</span><span>Mark OUT</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">Q</span><span>Go to IN</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">W</span><span>Go to OUT</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">K</span><span>Play/Pause</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">J / L</span><span>-1s / +1s</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">← / →</span><span>-1f / +1f</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">↑ / ↓</span><span>-10s / +10s</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #4CAF50; font-weight: bold;">[ / ]</span><span style="color: #4CAF50;">Speed -/+</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #4CAF50; font-weight: bold;">\</span><span style="color: #4CAF50;">Speed 1×</span></div>
-          <div v-if="showThumbnailHotkey" style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #9C27B0; font-weight: bold;">ALT+T</span><span style="color: #9C27B0;">Mark Thumb</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #FF9800; font-weight: bold;">CTRL+ENTER</span><span style="color: #FF9800;">Take Clip</span></div>
-          <div v-if="clippingMethod === 'individual-clips'" style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #FFEB3B; font-weight: bold;">ENTER×2</span><span style="color: #FFEB3B;">Take Clip</span></div>
-          <div v-if="showCutTypeRow" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2); margin-bottom: 6px; color: rgba(255,255,255,0.7); font-size: 10px;">TYPE OF CUT</div>
-          <div v-if="showCutTypeRow" style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">N</span><span style="color: #64B5F6;">None</span></div>
-          <div v-if="showCutTypeRow" style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">S</span><span style="color: #64B5F6;">Single Trim</span></div>
-          <div v-if="showCutTypeRow" style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">M</span><span style="color: #64B5F6;">Multiple Clips</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2);"><span style="color: #4CAF50; font-weight: bold;">ALT+ENTER</span><span style="color: #4CAF50;">Submit</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #F44336; font-weight: bold;">ESC</span><span style="color: #F44336;">Cancel</span></div>
-        </div>
       </div>
     </div>
 
@@ -162,7 +110,92 @@
           </div>
           <div style="color: white; font-size: 16px; font-weight: bold; font-family: 'Roboto Mono', monospace; margin-bottom: 8px;">{{ clipSlug || slug || 'untitled' }}</div>
           <div style="color: white; font-size: 14px; font-family: 'Roboto Mono', monospace; margin-bottom: 4px;">{{ trimStart }} → {{ trimEnd }}</div>
-          <div style="color: rgba(255, 255, 255, 0.7); font-size: 13px; font-family: 'Roboto Mono', monospace;">Duration: {{ clipDuration }}</div>
+          <div style="color: rgba(255, 255, 255, 0.7); font-size: 13px; font-family: 'Roboto Mono', monospace;">Duration: {{ clipDurationTimecode }}</div>
+        </div>
+      </transition>
+    </div>
+  </div>
+
+  <!--
+    Hotkeys panel — rendered whenever the modal is shown (NOT gated on
+    mediaLoaded), so it's available before/without a video. Collapses to
+    just its header; Ctrl+1 (or clicking the header) toggles open/closed.
+    height:auto means the box shrinks to the header alone when collapsed.
+  -->
+  <div
+    v-if="show"
+    class="hotkeys-overlay"
+    style="position: fixed; top: 100px; left: 50px; bottom: 70px; pointer-events: none; z-index: 10002;"
+  >
+    <div class="hotkeys-list" :style="`background: rgba(0, 0, 0, 0.92); padding: 15px; border-radius: 8px; width: 350px; ${showHotkeys ? 'height: 100%;' : 'height: auto;'} display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0,0,0,0.5);`">
+      <div @click="$emit('update:showHotkeys', !showHotkeys)" :style="`color: white; font-size: 14px; font-weight: bold; ${showHotkeys ? 'border-bottom: 2px solid rgba(255, 255, 255, 0.3); padding-bottom: 6px; margin-bottom: 8px;' : ''} cursor: pointer; pointer-events: auto;`">
+        ⌨️ HOTKEYS <span style="font-size: 10px; opacity: 0.6;">{{ showHotkeys ? '▼' : '▶' }}</span>
+        <span style="color: rgba(255,255,255,0.5); font-size: 9px; margin-left: 10px;">CTRL+1</span>
+      </div>
+      <div v-show="showHotkeys" style="color: white; font-size: 11px; line-height: 1.6; font-family: 'Helvetica', Arial, sans-serif; flex: 1; overflow-y: auto; padding-right: 8px; pointer-events: auto;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">SPACE</span><span>Play/Pause</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">SHIFT+SPACE</span><span>Preview</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">I</span><span>Mark IN</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">O</span><span>Mark OUT</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">Q</span><span>Go to IN</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">W</span><span>Go to OUT</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">K</span><span>Play/Pause</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">J / L</span><span>-1s / +1s</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">← / →</span><span>-1f / +1f</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #90CAF9; font-weight: bold;">↑ / ↓</span><span>-10s / +10s</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #4CAF50; font-weight: bold;">[ / ]</span><span style="color: #4CAF50;">Speed -/+</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #4CAF50; font-weight: bold;">\</span><span style="color: #4CAF50;">Speed 1×</span></div>
+        <div v-if="showThumbnailHotkey" style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #9C27B0; font-weight: bold;">ALT+T</span><span style="color: #9C27B0;">Mark Thumb</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #FF9800; font-weight: bold;">CTRL+ENTER</span><span style="color: #FF9800;">Take Clip</span></div>
+        <div v-if="clippingMethod === 'individual-clips'" style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #FFEB3B; font-weight: bold;">ENTER×2</span><span style="color: #FFEB3B;">Take Clip</span></div>
+        <div v-if="showCutTypeRow" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2); margin-bottom: 6px; color: rgba(255,255,255,0.7); font-size: 10px;">TYPE OF CUT</div>
+        <div v-if="showCutTypeRow" style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">N</span><span style="color: #64B5F6;">None</span></div>
+        <div v-if="showCutTypeRow" style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">S</span><span style="color: #64B5F6;">Single Trim</span></div>
+        <div v-if="showCutTypeRow" style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="color: #64B5F6; font-weight: bold;">M</span><span style="color: #64B5F6;">Multiple Clips</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2);"><span style="color: #4CAF50; font-weight: bold;">ALT+ENTER</span><span style="color: #4CAF50;">Submit</span></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;"><span style="color: #F44336; font-weight: bold;">ESC</span><span style="color: #F44336;">Cancel</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!--
+    Top-center timecode pane — rendered whenever the modal is shown (NOT
+    gated on mediaLoaded) so it's visible before a video loads and can host
+    the modal's close (✕) button. Timecode reads 00:00:00:00 with no media.
+    The ✕ emits `close`, which the parent wires to the modal's cancel().
+  -->
+  <div
+    v-if="show"
+    class="timecode-overlay-root"
+    style="position: fixed; top: 5px; left: 50%; transform: translateX(-50%); pointer-events: none; z-index: 10002;"
+  >
+    <div class="timecode-overlay" style="position: relative; background: rgba(0, 0, 0, 0.85); padding: 10px 20px; border-radius: 9px; text-align: center; border: 2px solid rgba(255, 255, 255, 0.3); width: 800px; box-sizing: border-box;">
+      <!-- Close (✕) + ESC — top-right corner of the timecode pane -->
+      <div style="position: absolute; top: 6px; right: 6px; display: flex; gap: 5px; align-items: center;">
+        <button
+          @click="$emit('close')"
+          title="Close (ESC)"
+          style="background: #ff4444; color: white; border: none; border-radius: 6px; width: 34px; height: 34px; font-size: 18px; font-weight: bold; cursor: pointer; pointer-events: auto; line-height: 1;"
+        >✕</button>
+        <button
+          @click="$emit('close')"
+          title="Press ESC to close"
+          style="background: #ff4444; color: white; border: none; border-radius: 6px; height: 34px; padding: 0 11px; font-size: 12px; font-weight: bold; cursor: pointer; pointer-events: auto; line-height: 1;"
+        >ESC</button>
+      </div>
+      <div style="display: flex; gap: 12px; align-items: center; justify-content: center;">
+        <div style="color: white; font-size: 26px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(255, 255, 255, 0.5); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">{{ currentTimecode }}</div>
+        <div style="padding: 6px 12px;">
+          <div style="color: #F44336; font-size: 26px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(244, 67, 54, 0.8); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">-{{ remainingTimecode }}</div>
+        </div>
+      </div>
+      <div style="color: #90CAF9; font-size: 10px; font-weight: bold; font-family: 'Helvetica', Arial, sans-serif; margin-top: 6px;">{{ currentActionDisplay }}</div>
+
+      <!-- Clip Duration Display (slides down when IN and OUT are set) -->
+      <transition name="slide-down">
+        <div v-if="trimStart && trimEnd && clipDuration" class="clip-duration-display" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.2);">
+          <div style="color: #81C784; font-size: 12px; font-weight: bold; margin-bottom: 4px;">CLIP DURATION</div>
+          <div style="color: #4CAF50; font-size: 32px; font-weight: bold; font-family: 'Roboto Mono', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(76, 175, 80, 0.5);">{{ clipDurationTimecode }}</div>
         </div>
       </transition>
     </div>
@@ -185,6 +218,9 @@ defineProps({
   trimStart: { type: String, default: '' },
   trimEnd: { type: String, default: '' },
   clipDuration: { type: [String, Number], default: 0 },
+  // Pre-formatted hh:mm:ss:ff duration for display (clipDuration stays numeric
+  // for v-if guards / payload math; this is what the user actually sees).
+  clipDurationTimecode: { type: String, default: '00:00:00:00' },
 
   // Playback speed indicator
   showSpeedIndicator: { type: Boolean, default: false },
@@ -226,7 +262,7 @@ defineProps({
   }
 })
 
-defineEmits(['update:showHotkeys', 'update-clip-slug', 'remove-clip'])
+defineEmits(['update:showHotkeys', 'update-clip-slug', 'remove-clip', 'close'])
 </script>
 
 <style scoped>

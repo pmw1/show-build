@@ -10,6 +10,7 @@
     :trim-start="trimStart"
     :trim-end="trimEnd"
     :clip-duration="clipDuration"
+    :clip-duration-timecode="secondsToTimecode(clipDuration, true)"
     :show-speed-indicator="showSpeedIndicator"
     :playback-speed="playbackSpeed"
     :speed-label="speedLabel"
@@ -25,6 +26,7 @@
     v-model:show-hotkeys="showHotkeys"
     @remove-clip="removeClip"
     @update-clip-slug="(p) => { clips[p.index].slug = p.slug }"
+    @close="cancel"
   />
 
   <v-dialog
@@ -33,6 +35,7 @@
     max-width="800px"
     persistent
     class="sot-modal"
+    content-class="sot-modal-content"
     style="z-index: 9999;"
   >
     <!-- Full Modal Container with 70% transparent overlay -->
@@ -44,35 +47,14 @@
         style="background: #ff4444; color: white; height: 0; overflow: hidden; transition: all 0.3s ease; font-weight: bold; text-align: center; border-radius: 4px 4px 0 0;"
       ></div>
 
-      <!-- Header with Title and Close Buttons -->
-      <div class="modal-header d-flex justify-space-between align-center pa-3" style="padding: 10px 15px;">
-        <h2 class="text-uppercase font-weight-bold ma-0" style="font-size: 1.2em;">{{ editMode ? 'EDIT SOT CUE' : 'NEW SOT CUE' }}</h2>
-        <div class="d-flex" style="gap: 5px;">
-          <v-btn
-            @click="cancel"
-            size="x-small"
-            color="#ff4444"
-            variant="flat"
-            tabindex="-1"
-            style="color: white; min-width: 30px; height: 36px; font-size: 16px; font-weight: bold;"
-            title="Close modal"
-          >✕</v-btn>
-          <v-btn
-            @click="cancel"
-            size="x-small"
-            color="#666"
-            variant="flat"
-            tabindex="-1"
-            style="color: white; height: 36px; font-size: 10px; font-weight: bold; padding: 6px 11px;"
-            title="Press ESC to close"
-          >ESC</v-btn>
-        </div>
-      </div>
+      <!-- Header removed: title (NEW SOT CUE) + ✕/ESC buttons moved out.
+           The close ✕ now lives on the floating timecode overlay
+           (MediaModalOverlays.vue); ESC still closes via keyboard. -->
 
       <!-- Interior Container with light grey background -->
       <v-card-text
         class="pa-5 interior-container"
-        style="background-color: #f0f0f0; max-height: calc(80vh - 60px); overflow-y: auto; padding: 20px !important;"
+        style="background-color: #f0f0f0; max-height: 80vh; overflow-y: auto; padding: 20px !important;"
       >
         <v-form ref="sotFormRef">
           <!-- Type of Cut Selection (moved to top for workflow clarity) -->
@@ -555,21 +537,8 @@
               ></div>
             </div>
 
-            <!-- Live Timecode Display (Black Bar Above Video) -->
-            <div
-              ref="timecodeDisplay"
-              class="timecode-display"
-              style="width: 100%; background: #000; border: 2px solid #ccc; border-bottom: none; position: relative; z-index: 15; margin-bottom: 0;"
-              :style="{ borderRadius: uploadProgress > 0 && uploadProgress < 100 ? '0' : '4px 4px 0 0' }"
-            >
-              <div class="d-flex justify-space-between align-center pa-2" style="padding: 5px 15px;">
-                <div style="font-size: 18px; font-weight: bold; font-family: monospace; color: white;">{{ currentTimecode }}</div>
-                <div style="font-size: 12px; color: #ccc; font-family: monospace;">{{ durationTimecode }} | -{{ remainingTimecode }} | {{ currentFramerate }}fps</div>
-              </div>
-            </div>
-
             <!-- Video Player with Metadata Overlay -->
-            <div class="video-container" style="width: 100%; max-width: 100%; background: #000; border: 2px solid #ccc; border-top: none; border-radius: 0 0 4px 4px; overflow: hidden; position: relative; z-index: 10; margin-bottom: 0;">
+            <div class="video-container" style="width: 100%; max-width: 100%; background: #000; border: 2px solid #ccc; border-radius: 4px; overflow: hidden; position: relative; z-index: 10; margin-bottom: 0;">
               <video
                 ref="videoPlayerRef"
                 class="video-player"
@@ -1036,7 +1005,6 @@ const videoPlayerRef = ref(null)
 const trimStartInputRef = ref(null)
 const trimEndInputRef = ref(null)
 const topErrorEl = ref(null)
-const timecodeDisplay = ref(null)
 const videoInfoOverlay = ref(null)
 const creditsListRef = ref(null)
 const slugField = ref(null)
@@ -1071,7 +1039,7 @@ const {
   // Trim points
   trimStart, trimEnd, duration,
   // Playback / display
-  currentFramerate, isPlaying, currentTimecode, durationTimecode,
+  currentFramerate, isPlaying, currentTimecode,
   remainingTimecode, currentActionDisplay, thumbnailTimecode,
   // Speed
   playbackSpeed, showSpeedIndicator, speedLabel,
@@ -2054,6 +2022,13 @@ onBeforeUnmount(() => {
 /* Modal overlay with 70% transparency */
 .v-overlay {
   background-color: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Push the "NEW SOT CUE" dialog DOWN so its top clears the fixed page top bar
+   (time / backtime). Keep Vuetify's centering and just shift it down via
+   transform (margin/align-self fought the flex centering and moved it up). */
+:global(.v-overlay__content.sot-modal-content) {
+  transform: translateY(50px) !important;
 }
 
 /* Custom toast styling for Mark IN (blue, from left) */
