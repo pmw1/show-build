@@ -46,8 +46,11 @@ export function useFeatureFlags() {
     }
   };
 
-  // Reactive snapshot of the ProseMirror editor flag, read once at setup.
-  const useProseMirrorEditor = ref(read('useProseMirrorEditor'));
+  // The ProseMirror/TipTap ScriptEditor is now the ONLY script editor — the
+  // legacy contenteditable surface is retired. This is no longer flag-gated:
+  // it is always on, regardless of any stale `ff:useProseMirrorEditor` value a
+  // browser may still have in localStorage from the migration period.
+  const useProseMirrorEditor = ref(true);
 
   return { isEnabled, setFlag, useProseMirrorEditor };
 }
