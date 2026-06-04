@@ -324,6 +324,7 @@
                 @insert-cue="insertCueFromMenu"
                 @delete-cue="handlePmDeleteCue"
                 @edit-cue="handlePmEditCue"
+                @bulk-change-speaker="openSpeakerSelectorForPmSelection"
               />
 
               <draggable
@@ -2005,6 +2006,11 @@ const cueCardAlignment = ref('left') // Default alignment, loaded from settings
 const currentSegmentSpeaker = ref('josh')
 const editingSpeakerSegmentIndex = ref(null)
 const bulkSpeakerChange = ref(false) // true when SpeakerSelectorModal targets all multi-selected segments
+// true when SpeakerSelectorModal was opened from the ProseMirror editor's
+// multi-select "Change speaker" button — handleSpeakerChange routes the chosen
+// speaker back to the ScriptEditor via applyBulkSpeaker() instead of touching
+// the legacy scriptSegments array.
+const pmBulkSpeakerChange = ref(false)
 const showCuePlacement = ref(false)
 const showSwapErrorDialog = ref(false)
 const swapErrorMessage = ref('')
@@ -6492,6 +6498,17 @@ function openSpeakerSelectorForSelection() {
   showSpeakerSelector.value = true;
 }
 
+// Open the speaker selector for the ProseMirror editor's multi-selected
+// paragraphs. ScriptEditor emits `bulk-change-speaker` from its toolbar; on
+// confirm, handleSpeakerChange() routes the speaker back via applyBulkSpeaker().
+function openSpeakerSelectorForPmSelection() {
+  pmBulkSpeakerChange.value = true;
+  bulkSpeakerChange.value = false;
+  editingSpeakerSegmentIndex.value = null;
+  currentSegmentSpeaker.value = 'josh';
+  showSpeakerSelector.value = true;
+}
+
 function toggleMultiSelection(index) {
   console.log('Toggle multi-selection for index:', index);
   if (multiSelectedSegments.value.has(index)) {
@@ -7429,6 +7446,14 @@ function insertCueWithinParagraphInRawScript(placement, cueContent) {
 }
 
 function handleSpeakerChange(newSpeaker) {
+  // ProseMirror multi-select path: hand the speaker back to ScriptEditor, which
+  // sets it on every selected paragraph node + clears the selection.
+  if (pmBulkSpeakerChange.value) {
+    pmBulkSpeakerChange.value = false;
+    scriptEditorRef.value?.applyBulkSpeaker(newSpeaker);
+    return;
+  }
+
   // Bulk path: apply the chosen speaker to every multi-selected paragraph.
   if (bulkSpeakerChange.value) {
     const indices = Array.from(multiSelectedSegments.value);

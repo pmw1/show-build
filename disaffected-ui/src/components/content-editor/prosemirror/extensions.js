@@ -21,6 +21,7 @@ import { CueNode } from './CueNode.js';
 import { RevisionMark } from './RevisionMark.js';
 import { SlashCommand } from './SlashCommand.js';
 import { BlockDragHandle } from './BlockDragHandle.js';
+import { BlockMultiSelect } from './BlockMultiSelect.js';
 import { LineNumbers } from './LineNumbers.js';
 import { CollapseSummary } from './CollapseSummary.js';
 
@@ -43,6 +44,10 @@ export function buildScriptExtensions(opts = {}) {
     // live displacement, single-transaction move). Self-contained; reuses the
     // legacy --dropline-color / --draglight-color CSS vars.
     BlockDragHandle,
+    // Multi-selection of top-level blocks (Ctrl/Shift-click) + bulk ops
+    // (delete / swap / join paragraphs / bullet / set-speaker). Self-contained;
+    // reuses the same --dropline-color / --draglight-color accent.
+    BlockMultiSelect,
     // Per-paragraph line numbers (continuous across the show via offset).
     LineNumbers,
     // Collapsed-paragraph summaries (first5 … last3), only when collapse on.

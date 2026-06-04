@@ -25,6 +25,56 @@
       'script-editor--line-numbers': showLineNumbers,
     }"
   >
+    <!-- Multi-selection toolbar — floats at the top of the editor when one or
+         more blocks are Ctrl/Shift-click selected (BlockMultiSelect plugin).
+         Mirrors the legacy contenteditable editor's multi-select actions. -->
+    <div v-if="multiSel.count > 0" class="pm-multiselect-toolbar">
+      <div class="pm-ms-count">
+        <span class="pm-ms-count-num">{{ multiSel.count }}</span>
+        <span class="pm-ms-count-label">block{{ multiSel.count > 1 ? 's' : '' }} selected</span>
+      </div>
+      <div class="pm-ms-actions">
+        <v-btn
+          v-if="multiSel.count === 2"
+          color="primary" variant="flat" size="small"
+          prepend-icon="mdi-swap-vertical"
+          @click="swapSelectedBlocks"
+        >Swap</v-btn>
+        <v-btn
+          v-if="multiSel.paragraphCount >= 2"
+          color="info" variant="flat" size="small"
+          prepend-icon="mdi-set-merge"
+          @click="joinSelectedParagraphs"
+        >Join</v-btn>
+        <v-btn
+          v-if="multiSel.paragraphCount > 0"
+          :color="multiSel.anyParagraphUnbulleted ? 'default' : 'primary'"
+          :variant="multiSel.anyParagraphUnbulleted ? 'outlined' : 'flat'"
+          size="small"
+          prepend-icon="mdi-format-list-bulleted"
+          :title="multiSel.anyParagraphUnbulleted ? 'Add bullets to selected paragraphs' : 'Remove bullets from selected paragraphs'"
+          @click="toggleBulletOnSelection"
+        >{{ multiSel.anyParagraphUnbulleted ? 'Bullet' : 'Unbullet' }}</v-btn>
+        <v-btn
+          v-if="multiSel.paragraphCount > 0"
+          color="primary" variant="outlined" size="small"
+          prepend-icon="mdi-account-voice"
+          :title="`Change speaker for ${multiSel.paragraphCount} selected paragraph${multiSel.paragraphCount > 1 ? 's' : ''}`"
+          @click="changeSpeakerOnSelection"
+        >Change speaker</v-btn>
+        <v-btn
+          color="error" variant="flat" size="small"
+          prepend-icon="mdi-delete"
+          @click="deleteSelectedBlocks"
+        >Delete {{ multiSel.count }}</v-btn>
+        <v-btn
+          variant="text" size="small"
+          prepend-icon="mdi-close"
+          @click="clearMultiSelection"
+        >Cancel</v-btn>
+      </div>
+    </div>
+
     <!-- EditorContent (not a raw element mount): this is what forwards the
          host app's plugin context (Vuetify) into the cue NodeViews, so the
          cards' <v-card>/<v-btn> render. A manual `new Editor({element})` mount
@@ -38,6 +88,7 @@ import { ref, shallowRef, onMounted, onBeforeUnmount, watch } from 'vue';
 import { Editor, EditorContent } from '@tiptap/vue-3';
 import { buildScriptExtensions } from './prosemirror/extensions.js';
 import { lineNumbersPluginKey } from './prosemirror/LineNumbers.js';
+import { readMultiSelection } from './prosemirror/BlockMultiSelect.js';
 import { markdownToDoc, docToMarkdown, assertNoLoss } from '@/utils/prosemirror/markdown.js';
 
 const SAVE_DEBOUNCE_MS = 1500;
@@ -57,10 +108,18 @@ export default {
     // Settings → Interface → "Line numbers" toggle (editor.lineNumbers).
     showLineNumbers: { type: Boolean, default: true },
   },
-  emits: ['update:scriptContent', 'save-current', 'save-all', 'insert-cue', 'delete-cue', 'edit-cue'],
+  emits: ['update:scriptContent', 'save-current', 'save-all', 'insert-cue', 'delete-cue', 'edit-cue', 'bulk-change-speaker'],
   setup(props, { emit, expose }) {
     const editor = shallowRef(null);
     const isActivelyEditing = ref(false);
+
+    // Multi-selection summary (count / paragraph-count / bullet state), kept in
+    // sync with the BlockMultiSelect plugin via onTransaction so the floating
+    // toolbar is reactive. See prosemirror/BlockMultiSelect.js.
+    const multiSel = ref({ count: 0, paragraphCount: 0, indices: [], anyParagraphUnbulleted: false });
+    function refreshMultiSel() {
+      multiSel.value = readMultiSelection(editor.value);
+    }
 
     // Frontmatter is out-of-band: stripped on load, re-prepended on serialize.
     let frontmatter = '';
@@ -174,6 +233,10 @@ export default {
         }),
         content: initial.doc.toJSON(),
         onUpdate: () => scheduleSave(),
+        // Every transaction (incl. the multi-select plugin's meta-only txns)
+        // refreshes the toolbar's selection summary. Cheap: just reads plugin
+        // state. Kept separate from onUpdate (which only fires on doc changes).
+        onTransaction: () => refreshMultiSel(),
         // Cue cards delete through here, NOT inside the NodeView: the NodeView
         // calls editor.options.onDeleteCue with the cue's data and a removeNode()
         // that drops that exact atom node. We forward it up to EditorPanel so it
@@ -321,11 +384,50 @@ export default {
       return true;
     }
 
+    // ── Multi-select toolbar actions ─────────────────────────────────────────
+    // Each calls the matching BlockMultiSelect command. The commands run a single
+    // transaction (so UndoRedo covers them) and clear the selection where it makes
+    // sense; we then refresh the summary so the toolbar updates immediately.
+    function deleteSelectedBlocks() {
+      editor.value?.commands.deleteSelectedBlocks();
+      refreshMultiSel();
+    }
+    function swapSelectedBlocks() {
+      editor.value?.commands.swapSelectedBlocks();
+      refreshMultiSel();
+    }
+    function joinSelectedParagraphs() {
+      editor.value?.commands.joinSelectedParagraphs();
+      refreshMultiSel();
+    }
+    function toggleBulletOnSelection() {
+      editor.value?.commands.toggleBulletOnSelection();
+      refreshMultiSel();
+    }
+    function clearMultiSelection() {
+      editor.value?.commands.clearBlockSelection();
+      refreshMultiSel();
+    }
+    // Speaker change is the one op that needs UI we don't own: emit the selected
+    // paragraph positions up to EditorPanel, which opens the SpeakerSelectorModal
+    // and calls back applyBulkSpeaker(speaker) on confirm.
+    function changeSpeakerOnSelection() {
+      if (!multiSel.value.paragraphCount) return;
+      emit('bulk-change-speaker', { count: multiSel.value.paragraphCount });
+    }
+    function applyBulkSpeaker(speaker) {
+      editor.value?.commands.setSpeakerOnSelection(speaker);
+      editor.value?.commands.clearBlockSelection();
+      refreshMultiSel();
+      flushPendingChanges();
+    }
+
     // Parent reach-in contract (mirrors EditorPanel).
     expose({
       flushPendingChanges,
       isActivelyEditing,
       insertCueAtCursor,
+      applyBulkSpeaker,
       saveCurrent: () => {
         flushPendingChanges();
         emit('save-current');
@@ -336,7 +438,19 @@ export default {
       },
     });
 
-    return { editor, isActivelyEditing, flushPendingChanges };
+    return {
+      editor,
+      isActivelyEditing,
+      flushPendingChanges,
+      // multi-select toolbar
+      multiSel,
+      deleteSelectedBlocks,
+      swapSelectedBlocks,
+      joinSelectedParagraphs,
+      toggleBulletOnSelection,
+      changeSpeakerOnSelection,
+      clearMultiSelection,
+    };
   },
 };
 </script>
@@ -351,6 +465,42 @@ export default {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 12px 16px;
+}
+
+/* ===== Multi-selection toolbar ===== */
+.pm-multiselect-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--draglight-color, rgba(33, 150, 243, 0.12));
+  border-bottom: 2px solid var(--dropline-color, rgb(33, 150, 243));
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.pm-ms-count {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+.pm-ms-count-num {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--dropline-color, rgb(33, 150, 243));
+}
+.pm-ms-count-label {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.6);
+}
+.pm-ms-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 /* ProseMirror baseline so the editable area behaves like a document. */
 .script-editor-host :deep(.ProseMirror) {
