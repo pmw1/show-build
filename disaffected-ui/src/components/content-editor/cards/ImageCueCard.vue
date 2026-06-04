@@ -339,16 +339,16 @@ const getCardStyle = computed(() => {
   const state = props.cueData?.analysisState;
 
   if (state === 'analyzing') {
-    // Purple 7px border while analyzing
+    // AI-analyzing border (configurable via Settings → Colors → AI states)
     return {
-      borderColor: '#9C27B0',
+      borderColor: resolveVuetifyColor(getColorValue('ai-analyzing')),
       borderWidth: '7px',
       borderStyle: 'solid'
     };
   } else if (state === 'needs_review') {
-    // Red 7px border when needs review
+    // AI-needs-review border (configurable via Settings → Colors → AI states)
     return {
-      borderColor: '#D32F2F',
+      borderColor: resolveVuetifyColor(getColorValue('ai-rejected')),
       borderWidth: '7px',
       borderStyle: 'solid'
     };

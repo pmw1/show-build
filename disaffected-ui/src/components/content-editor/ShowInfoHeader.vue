@@ -540,7 +540,33 @@ watch(
   { immediate: true }
 )
 
-onMounted(() => nextTick(resizeEpDescTextarea))
+// Drive the thumbnail conversion-status border colors from the configurable
+// color system. CSS @keyframes can't call getColorValue, so we publish the
+// resolved colors as CSS custom properties the stylesheet references.
+function applyThumbnailStatusColors() {
+  const root = document.documentElement;
+  const attn = resolveVuetifyColor(getColorValue('needs-attention'));
+  const ok = resolveVuetifyColor(getColorValue('production'));
+  // Pulse highlight = the attention color blended 40% toward white.
+  const lighten = (hexColor, amt) => {
+    let h = (hexColor || '').replace('#', '');
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    if (h.length !== 6) return hexColor;
+    const mix = (c) => Math.round(c + (255 - c) * amt);
+    const r = mix(parseInt(h.slice(0, 2), 16));
+    const g = mix(parseInt(h.slice(2, 4), 16));
+    const b = mix(parseInt(h.slice(4, 6), 16));
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  };
+  root.style.setProperty('--thumb-attention', attn);
+  root.style.setProperty('--thumb-attention-pulse', lighten(attn, 0.4));
+  root.style.setProperty('--thumb-success', ok);
+}
+
+onMounted(() => {
+  nextTick(resizeEpDescTextarea);
+  applyThumbnailStatusColors();
+})
 
 // data
 const currentThumbnailIndex = ref(0);
@@ -1147,31 +1173,31 @@ defineExpose({
   border: 5px solid #4CAF50;
 }
 
-/* Red border for non-PNG thumbnails */
+/* Attention border for non-PNG thumbnails (color configurable via Settings → Colors) */
 .thumbnail-viewport.non-png {
-  border: 5px solid #F44336;
+  border: 5px solid var(--thumb-attention, #F44336);
 }
 
 /* Pulsing border during conversion */
 .thumbnail-viewport.converting {
-  border: 5px solid #F44336;
+  border: 5px solid var(--thumb-attention, #F44336);
   animation: pulse-border 1.5s ease-in-out infinite;
 }
 
 @keyframes pulse-border {
-  0%, 100% { border-color: #F44336; }
-  50% { border-color: #FF8A80; }
+  0%, 100% { border-color: var(--thumb-attention, #F44336); }
+  50% { border-color: var(--thumb-attention-pulse, #FF8A80); }
 }
 
-/* Blue border on successful conversion, fades out over 10s */
+/* Success border on successful conversion, fades out over 10s */
 .thumbnail-viewport.convert-success {
-  border: 5px solid #2196F3;
+  border: 5px solid var(--thumb-success, #2196F3);
   animation: fade-blue-border 10s ease-out forwards;
 }
 
 @keyframes fade-blue-border {
-  0% { border-color: #2196F3; }
-  70% { border-color: #2196F3; }
+  0% { border-color: var(--thumb-success, #2196F3); }
+  70% { border-color: var(--thumb-success, #2196F3); }
   100% { border-color: #ccc; }
 }
 

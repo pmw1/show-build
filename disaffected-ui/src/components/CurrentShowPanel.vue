@@ -69,7 +69,11 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useTheme } from 'vuetify'
 import axios from 'axios'
+import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap'
+
+const theme = useTheme()
 
 const currentShow = ref(null)
 const thumbnailUrl = ref(null)
@@ -127,14 +131,9 @@ function formatAirDate(dateString) {
 }
 
 function getStatusBgColor(status) {
-  const map = {
-    draft: '#757575',
-    approved: '#43a047',
-    production: '#fb8c00',
-    completed: '#1976d2',
-    promotion: '#8e24aa'
-  }
-  return map[status?.toLowerCase()] || '#fb8c00'
+  // Status colors are user-configurable via Settings → Colors (status category).
+  const key = status?.toLowerCase() || 'production'
+  return resolveVuetifyColor(getColorValue(key), theme)
 }
 
 onMounted(() => {

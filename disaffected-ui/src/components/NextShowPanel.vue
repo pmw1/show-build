@@ -114,8 +114,12 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useTheme } from 'vuetify'
 import axios from 'axios'
 import LiveClock from './LiveClock.vue'
+import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap'
+
+const theme = useTheme()
 
 const nextShow = ref(null)
 const loading = ref(true)
@@ -205,18 +209,11 @@ function formatTimeUntil(dateString) {
 }
 
 function getStatusBgColor(status) {
-  // Solid hex colors for the full-width status bar (named vuetify colors
-  // don't apply as CSS background values cleanly)
-  const map = {
-    scheduled: '#8e24aa',   // purple-darken-1 (was promotion's color)
-    draft: '#757575',       // grey-darken-1
-    production: '#fb8c00',  // orange-darken-1
-    running: '#43a047',     // green-darken-1
-    completed: '#1976d2',   // primary
-    // Legacy alias
-    promotion: '#8e24aa'
-  }
-  return map[status?.toLowerCase()] || '#757575'
+  // Status colors are user-configurable via Settings → Colors (status category).
+  // resolveVuetifyColor returns a concrete hex so it applies cleanly as a CSS
+  // background value.
+  const key = status?.toLowerCase() || 'draft'
+  return resolveVuetifyColor(getColorValue(key), theme)
 }
 
 onMounted(() => {

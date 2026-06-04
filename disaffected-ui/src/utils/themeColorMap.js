@@ -1,69 +1,11 @@
-// Default fallback colors using Vuetify theme colors
-const defaultColors = {
-  // Core content types
-  'segment': 'info',         // #2196F3 - Blue
-  'ad': 'primary',           // #1976D2 - Dark Blue
-  'promo': 'success',        // #4CAF50 - Green
-  'cta': 'accent',           // #82B1FF - Light Blue
-  'trans': 'secondary',      // #424242 - Grey
-  'unknown': 'grey',         // #9E9E9E - Light Grey
-  
-  // Broadcast production types
-  'pkg': 'purple',           // #9C27B0 - Purple for packages
-  'vo': 'deep-orange',       // #FF5722 - Orange for voice over
-  'sot': 'amber',            // #FFC107 - Amber for sound on tape
-  'interview': 'teal',       // #009688 - Teal for interviews
-  'live': 'red',             // #F44336 - Red for live shots
-  'block': 'grey-darken-1',  // #757575 - Dark grey for blocks
-  'tease': 'pink',           // #E91E63 - Pink for teases
-  'tag': 'indigo',           // #3F51B5 - Indigo for tags
-  'music': 'orange',         // #FF9800 - Orange for music
-  'gfx': 'cyan',             // #00BCD4 - Cyan for graphics
-  'fsq': 'lime',             // #CDDC39 - Lime for full screen quotes
-  'nat': 'light-green',      // #8BC34A - Light green for natural sound
-  'vox': 'yellow',           // #FFEB3B - Yellow for vox pops
-  'dir': 'amber-darken-3',   // #FF6F00 - Amber for director notes (legacy)
-  'note': 'amber-darken-3',  // #FF6F00 - Amber for notes
-  'bump': 'purple-darken-2', // #7B1FA2 - Purple for bumpers
-  'sting': 'pink-darken-2',  // #C2185B - Pink for stingers
-  'credits': 'blue-grey',    // #607D8B - Blue grey for credits
-  'weather': 'light-blue',   // #03A9F4 - Light blue for weather
-  'sports': 'green-darken-2',// #388E3C - Dark green for sports
-  'brief': 'grey-lighten-2', // #E0E0E0 - Light grey for news briefs
-  'reader': 'amber-lighten-2', // #FFD54F - Light amber for readers
-  'openclose': 'purple-darken-2', // #7B1FA2 - Dark purple for open/close
-  'coldopen': 'teal-darken-3', // #00695C - Dark teal for cold open
-  'cut': 'red-darken-1',       // #E53935 - Red for hard cuts
-  'fade': 'blue-grey-darken-1', // #546E7A - Blue grey for fades
-  'img': 'purple-lighten-2',    // #BA68C8 - Light purple for images
-  'rif': 'deep-purple-lighten-1', // #7986CB - Deep purple for riffs
+// Default fallback colors are DERIVED from the single source of truth:
+// src/utils/colorRegistry.js. Do NOT hand-maintain a second list here — add or
+// change a color slot in colorRegistry.js and it flows through automatically.
+import { colorRegistry, normalizeColorKeys, legacyKeyMap } from './colorRegistry';
 
-  // UI/System colors
-  'selection': 'warning',    // #FB8C00 - Orange
-  'hover': 'blue-lighten-4', // #BBDEFB - Very light blue
-  'draglight': 'cyan-lighten-4', // #B2EBF2 - Very light cyan
-  'highlight': 'yellow-lighten-3', // #FFF9C4 - Very light yellow
-  'dropline': 'green-lighten-4', // #C8E6C9 - Very light green
-  'needs-attention': 'orange-lighten-3', // #FFCC80 - Light orange for flagged paragraphs
-  
-  // Status highlight colors
-  'draft': 'grey-darken-2',  // #616161 - Dark grey
-  'approved': 'green-accent', // #69F0AE - Bright green
-  'production': 'blue-accent', // #448AFF - Bright blue
-  'promotion': 'deep-orange', // #FF5722 - Orange
-  'scheduled': 'deep-orange', // alias for legacy promotion → scheduled
-  'running': 'green-accent',  // green for in-flight episodes
-  'completed': 'yellow-accent', // #FFD740 - Bright yellow
-
-  // General UI section colors (configurable via Settings → Color Selector)
-  'block-header': 'blue',    // background of sidebar block headers (Segment Info, etc.)
-
-  // AI Interaction States
-  'ai-analyzing': 'amber',       // #FFC107 - Gold: AI considering something (don't know what yet)
-  'ai-rejected': 'red',          // #F44336 - Red: Change pending/possible rejection - needs human attention
-  'ai-approved': 'green',        // #4CAF50 - Green: AI generation approved by user
-  'ai-auto': 'blue'              // #2196F3 - Blue: AI auto-generation not requiring human approval
-};
+const defaultColors = Object.fromEntries(
+  colorRegistry.map((e) => [e.key, e.default])
+);
 
 // Export defaultColors for external use
 export { defaultColors };
@@ -89,24 +31,12 @@ export const updateColor = (type, newColor) => {
 };
 
 export const getColorValue = (type) => {
-  const key = type.toLowerCase();
+  // Fold any lingering legacy key (e.g. 'selection-interface') to canonical.
+  const lower = type.toLowerCase();
+  const key = legacyKeyMap[type] || legacyKeyMap[lower] || lower;
   const currentValue = currentColors[key];
   const defaultValue = defaultColors[key];
-  const result = currentValue || defaultValue || 'grey';
-
-  // Debug logging for selection-interface specifically
-  if (key === 'selection-interface') {
-    console.log('🔍 getColorValue debug for selection-interface:', {
-      key,
-      currentValue,
-      defaultValue,
-      result,
-      currentColorKeys: Object.keys(currentColors),
-      hasLoadedFromDatabase
-    });
-  }
-
-  return result;
+  return currentValue || defaultValue || 'grey';
 };
 
 export const getAllColors = () => {
@@ -122,20 +52,16 @@ export const loadColorsFromDatabase = async (profile = 'default') => {
       const data = await response.json();
       console.log('Database response:', data);
       if (data.success && data.colors) {
-        // Normalize database color keys to lowercase for consistent lookup
-        const normalizedDbColors = {};
-        for (const [key, value] of Object.entries(data.colors)) {
-          normalizedDbColors[key.toLowerCase()] = value;
-        }
+        // Normalize DB keys: lowercase + fold legacy PascalCase/suffix keys
+        // (e.g. 'Selection-interface') to canonical keys. Tolerates the
+        // historically-polluted profile that stored both forms.
+        const normalizedDbColors = normalizeColorKeys(data.colors);
 
         // Update current colors with database values
         currentColors = { ...defaultColors, ...normalizedDbColors };
         hasLoadedFromDatabase = true;
         // Also update localStorage as backup
         localStorage.setItem('themeColors', JSON.stringify(currentColors));
-        console.log('Colors loaded from database successfully:', currentColors);
-        console.log('Original DB keys:', Object.keys(data.colors));
-        console.log('Normalized keys:', Object.keys(normalizedDbColors));
         return currentColors;
       }
     }
@@ -147,9 +73,8 @@ export const loadColorsFromDatabase = async (profile = 'default') => {
       try {
         const storedColors = localStorage.getItem('themeColors');
         if (storedColors) {
-          const parsedColors = JSON.parse(storedColors);
+          const parsedColors = normalizeColorKeys(JSON.parse(storedColors));
           currentColors = { ...defaultColors, ...parsedColors };
-          console.log('Colors loaded from localStorage fallback:', currentColors);
         }
       } catch (localStorageError) {
         console.warn('Failed to load from localStorage, using defaults:', localStorageError);

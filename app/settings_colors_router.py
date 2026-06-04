@@ -15,6 +15,52 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
+# Legacy color-key fold. The frontend color system (colorRegistry.js) is the
+# single source of truth for canonical lowercase keys; defaults live there, NOT
+# here. This map only folds the historical PascalCase + suffix keys back to
+# canonical so any server-side reader sees clean data. Keep in sync with the
+# `legacyKeys` declared in colorRegistry.js.
+LEGACY_COLOR_KEY_MAP = {
+    "selection-interface": "selection",
+    "hover-interface": "hover",
+    "highlight-interface": "highlight",
+    "dropline-interface": "dropline",
+    "draglight-interface": "draglight",
+    "locatorflash-interface": "locatorflash",
+    "draft-script": "draft",
+    "approved-script": "approved",
+    "production-script": "production",
+    "promotion-script": "promotion",
+    "scheduled-script": "scheduled",
+    "running-script": "running",
+    "completed-script": "completed",
+    "autosave-global": "autosave",
+    "needs-attention-global": "needs-attention",
+    "block-header-ui": "block-header",
+}
+
+
+def normalize_color_keys(raw_colors: Dict[str, str]) -> Dict[str, str]:
+    """Lowercase keys and fold legacy keys to canonical; canonical wins on collision."""
+    if not isinstance(raw_colors, dict):
+        return {}
+    out: Dict[str, str] = {}
+    canonical_seen = set()
+    # Pass 1: canonical / unknown keys (canonical wins over any legacy alias).
+    for key, value in raw_colors.items():
+        lower = str(key).lower()
+        if lower in LEGACY_COLOR_KEY_MAP:
+            continue
+        out[lower] = value
+        canonical_seen.add(lower)
+    # Pass 2: fold legacy keys without clobbering a canonical value.
+    for key, value in raw_colors.items():
+        lower = str(key).lower()
+        canonical = LEGACY_COLOR_KEY_MAP.get(lower)
+        if canonical and canonical not in canonical_seen:
+            out[canonical] = value
+    return out
+
 class ColorSettings(BaseModel):
     """Color configuration model"""
     colors: Dict[str, str]
@@ -58,68 +104,20 @@ async def get_color_settings(
         ).first()
         
         if settings:
+            # Normalize legacy keys so callers always see canonical lowercase keys.
             return {
                 "success": True,
                 "profile": profile,
-                "colors": settings.value
+                "colors": normalize_color_keys(settings.value or {})
             }
         else:
-            # Return default colors if profile not found
-            default_colors = {
-                # Rundown Item Colors
-                'segment': 'blue',
-                'ad': 'indigo',
-                'promo': 'green',
-                'cta': 'cyan',
-                'live': 'red',
-                'tease': 'pink',
-                'tag': 'indigo',
-
-                # Rundown Regions
-                'block': 'grey',
-                'block-a': 'blue',
-                'block-b': 'green',
-                'block-c': 'purple',
-                'block-d': 'red',
-                'block-e': 'orange',
-                'block-f': 'cyan',
-                'block-g': 'pink',
-                'block-h': 'yellow',
-
-                # Elements and Cues
-                'trans': 'secondary',
-                'pkg': 'purple',
-                'vo': 'deep-orange',
-                'sot': 'amber',
-                'interview': 'teal',
-                'music': 'orange',
-                'reader': 'amber',
-                'gfx': 'cyan',
-                'fsq': 'lime',
-                'nat': 'light-green',
-                'img': 'purple',
-
-                # Interface Colors
-                'Selection-interface': 'orange',
-                'Hover-interface': 'blue',
-                'Highlight-interface': 'yellow',
-                'Dropline-interface': 'green',
-                'DragLight-interface': 'cyan',
-
-                # Status Colors
-                'Draft-script': 'grey',
-                'Approved-script': 'green',
-                'Production-script': 'blue',
-                'Promotion-script': 'deep-orange',
-                'Completed-script': 'amber',
-
-                # Fallback
-                'unknown': 'grey'
-            }
+            # No stored profile: return empty. The frontend merges these over its
+            # registry-derived defaults (colorRegistry.js), so an empty response
+            # still yields a fully-correct palette. Defaults are NOT duplicated here.
             return {
                 "success": True,
                 "profile": profile,
-                "colors": default_colors
+                "colors": {}
             }
     except Exception as e:
         logger.error(f"Failed to get color settings: {e}")
