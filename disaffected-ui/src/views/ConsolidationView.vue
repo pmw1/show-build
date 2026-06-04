@@ -671,39 +671,15 @@ onMounted(async () => {
   await loadEpisodes()
 })
 
-// Helper function to send error notifications to backend
-async function sendErrorNotification(title, message, operationId = null) {
+// Show an error notification. The old backend POST /api/llm/notifications was
+// removed (dead endpoint — llm_state_router retired 2026-06-04); surface the
+// error via the standard toast instead.
+function sendErrorNotification(title, message, operationId = null) {
+  void operationId
   try {
-    const token = localStorage.getItem('auth-token') || localStorage.getItem('token')
-    const notificationData = {
-      notifications: [{
-        id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        title: title,
-        message: message,
-        priority: 'high',
-        type: 'operation-error',
-        operationId: operationId,
-        success: false,
-        read: false,
-        dismissed: false,
-        timestamp: Date.now(),
-        error: {
-          message: message,
-          component: 'ConsolidationView'
-        }
-      }]
-    }
-
-    await fetch('/api/llm/notifications', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(notificationData)
-    })
+    notifyUserStandard(`${title}<small>${message}</small>`, NOTIFICATION_COLORS.ERROR, 6000)
   } catch (error) {
-    console.error('Failed to send error notification:', error)
+    console.error('Failed to show error notification:', error)
   }
 }
 

@@ -56,6 +56,11 @@ def route_fsq_task(name, args, kwargs, options, task=None, **kw):
     if name == 'services.asset_processing.generate_fsq_png':
         # Route to dedicated FSQ queue - only Kairo worker listens to this
         return {'queue': 'fsq'}
+    # Transcription chain link must run on the dedicated whisper queue, NOT
+    # the default media queue that the `services.ffmpeg_tasks.*` rule would
+    # otherwise assign it. This dynamic route takes precedence.
+    if name == 'services.ffmpeg_tasks.transcribe_sot_audio':
+        return {'queue': 'whisper'}
     return None
 
 
@@ -106,6 +111,10 @@ celery_app.conf.update(
         'media': {
             'exchange': 'media',
             'routing_key': 'media',
+        },
+        'whisper': {
+            'exchange': 'whisper',
+            'routing_key': 'whisper',
         },
         'fsq': {
             'exchange': 'fsq',

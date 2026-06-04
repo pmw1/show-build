@@ -28,7 +28,6 @@
  */
 
 import { computed, reactive } from 'vue'
-import axios from 'axios'
 import { useUserPrefs } from './useUserPrefs'
 
 // Global state shared across all component instances
@@ -38,17 +37,18 @@ const dismissedNotificationIds = reactive(new Set())
 let notificationIdCounter = 0
 let operationIdCounter = 0
 
-// Database persistence via backend API
-const API_ENDPOINTS = {
-  OPERATIONS: '/api/llm/operations',
-  NOTIFICATIONS: '/api/llm/notifications'
-}
+// NOTE (2026-06-04): the old backend persistence endpoints /api/llm/operations
+// and /api/llm/notifications (llm_state_router) were REMOVED — they were an
+// orphaned design whose `llm_notifications` table schema no longer matched the
+// model, so every call 500'd. LLM operation/notification state is now purely
+// in-memory for the session, with localStorage as a soft restore + per-user
+// prefs as the source of truth for DISMISSED notification IDs (both still work).
 
-// Load persisted state from database
+// Load persisted state (dismissed IDs from prefs/localStorage; ops/notifs from
+// the localStorage fallback). No backend calls.
 async function loadPersistedState() {
   try {
-    // CRITICAL: Load dismissed notification IDs FIRST.
-    // Per-user pref wins; legacy localStorage is a fallback for first migration.
+    // Load dismissed notification IDs: per-user pref wins; legacy localStorage fallback.
     const userPrefs = useUserPrefs()
     const savedDismissedFromPrefs = userPrefs.get('notifications.dismissed', null)
     if (Array.isArray(savedDismissedFromPrefs) && savedDismissedFromPrefs.length > 0) {
@@ -63,48 +63,10 @@ async function loadPersistedState() {
       }
     }
 
-    const token = localStorage.getItem('auth-token')
-    if (!token) {
-      console.log('⏭️ No auth token - skipping LLM state restoration')
-      return
-    }
-
-    const headers = { 'Authorization': `Bearer ${token}` }
-
-    // Load active operations
-    const opsResponse = await axios.get(API_ENDPOINTS.OPERATIONS, { headers })
-    if (opsResponse.data && opsResponse.data.operations) {
-      opsResponse.data.operations.forEach(op => {
-        activeOperations.set(op.id, op)
-        // Update counter to prevent ID conflicts
-        const opNum = parseInt(op.id.split('-').pop())
-        if (opNum >= operationIdCounter) {
-          operationIdCounter = opNum + 1
-        }
-      })
-      console.log(`♻️ Restored ${opsResponse.data.operations.length} LLM operations from database`)
-    }
-
-    // Load notifications (filter out dismissed ones)
-    const notifsResponse = await axios.get(API_ENDPOINTS.NOTIFICATIONS, { headers })
-    if (notifsResponse.data && notifsResponse.data.notifications) {
-      // Only restore notifications that haven't been dismissed
-      const activeNotifs = notifsResponse.data.notifications.filter(n => !n.dismissed && !dismissedNotificationIds.has(n.id))
-      notifications.push(...activeNotifs)
-
-      // Update counter from all notifications (including dismissed ones)
-      notifsResponse.data.notifications.forEach(n => {
-        const notifNum = parseInt(n.id.split('-').pop())
-        if (notifNum >= notificationIdCounter) {
-          notificationIdCounter = notifNum + 1
-        }
-      })
-      console.log(`♻️ Restored ${activeNotifs.length} active notifications from database (${notifsResponse.data.notifications.length - activeNotifs.length} dismissed)`)
-    }
-  } catch (error) {
-    console.warn('Failed to load persisted LLM state from database:', error.message)
-    // Fallback to localStorage if database unavailable
+    // Restore operations/notifications from localStorage (the only persistence now).
     loadFromLocalStorageFallback()
+  } catch (error) {
+    console.warn('Failed to load persisted LLM state:', error.message)
   }
 }
 
@@ -131,41 +93,22 @@ function loadFromLocalStorageFallback() {
   }
 }
 
-// Save state to database
+// Save state (localStorage for ops/notifs; per-user prefs for dismissed IDs).
+// No backend calls — the old /api/llm/* persistence endpoints were removed.
 async function savePersistedState() {
   try {
-    const token = localStorage.getItem('auth-token')
-    if (!token) return
-
-    const headers = {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    }
-
-    // Save operations (only persistent ones)
     const persistentOps = Array.from(activeOperations.values())
       .filter(op => op.persistent)
-
-    await axios.post(API_ENDPOINTS.OPERATIONS, {
-      operations: persistentOps
-    }, { headers })
-
-    // Save recent notifications (last 50)
     const recentNotifs = notifications.slice(-50)
-    await axios.post(API_ENDPOINTS.NOTIFICATIONS, {
-      notifications: recentNotifs
-    }, { headers })
 
-    // Also save to localStorage as fallback (offline / unauthenticated reload)
     localStorage.setItem('llm-operations-fallback', JSON.stringify(persistentOps))
     localStorage.setItem('llm-notifications-fallback', JSON.stringify(recentNotifs))
     const dismissedArray = Array.from(dismissedNotificationIds)
     localStorage.setItem('llm-dismissed-notifications', JSON.stringify(dismissedArray))
     // Source of truth for dismissed IDs is per-user prefs.
     useUserPrefs().set('notifications.dismissed', dismissedArray)
-
   } catch (error) {
-    console.warn('Failed to save LLM state to database:', error.message)
+    console.warn('Failed to save LLM state:', error.message)
   }
 }
 

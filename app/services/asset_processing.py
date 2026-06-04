@@ -139,7 +139,8 @@ def generate_fsq_png(
     max_attribution_size: int = None,
     duration: str = '00:00:05:00',
     enumerator: str = None,
-    priority: str = 'normal'
+    priority: str = 'normal',
+    existing_media_url: str = None
 ):
     """
     Generate FSQ (Full Screen Quote) PNG asset using Celery background processing.
@@ -170,6 +171,8 @@ def generate_fsq_png(
         duration: Timecode duration
         enumerator: Optional enumerator prefix for filename (e.g., "10_05")
         priority: Task priority ('high', 'normal', 'low') - affects queue routing
+        existing_media_url: When set (cue already has a PNG), render to that exact
+            file to overwrite in place instead of minting a new slug-based name.
 
     Returns:
         dict: Generation results with asset_path and asset_url
@@ -258,17 +261,51 @@ def generate_fsq_png(
 
         renderer = FSQPNGRenderer(**renderer_kwargs)
 
-        # Build output filename
-        clean_slug = slug.lower().replace(' ', '-').replace('_', '-')
-        # Remove any non-alphanumeric characters except hyphens
-        clean_slug = re.sub(r'[^\w\-]', '', clean_slug)
+        # Output path resolution.
+        #
+        # REGENERATE-IN-PLACE: if the cue already has a rendered PNG, the
+        # frontend hands us its existing media URL. We render to that exact
+        # file so the regenerate OVERWRITES it — no slug-renamed orphan, and
+        # the cue's stored mediaUrl never has to change. The asset URL is
+        # always "/episodes/{path-relative-to-episodes_root}", so we reverse
+        # that mapping. A path-traversal guard keeps the resolved file inside
+        # this episode's quotes/ dir; if anything looks off we fall through to
+        # fresh naming rather than writing somewhere unexpected.
+        output_path = None
+        if existing_media_url:
+            try:
+                rel = existing_media_url.split('?', 1)[0]  # drop cache-buster
+                rel = rel.lstrip('/')
+                if rel.startswith('episodes/'):
+                    rel = rel[len('episodes/'):]
+                candidate = (path_manager.episodes_root / rel).resolve()
+                if str(candidate).startswith(str(assets_dir.resolve()) + '/') \
+                        and candidate.suffix.lower() == '.png':
+                    output_path = candidate
+                    logger.info(f"   ♻️  Regenerate-in-place → {output_path}")
+                else:
+                    logger.warning(
+                        f"   ⚠️ existing_media_url {existing_media_url!r} resolved "
+                        f"outside quotes dir ({candidate}); using fresh name"
+                    )
+            except Exception as url_err:
+                logger.warning(f"   ⚠️ Could not resolve existing_media_url "
+                               f"{existing_media_url!r}: {url_err}; using fresh name")
 
-        if enumerator:
-            output_filename = f"{enumerator}-{clean_slug}.png"
-        else:
-            output_filename = f"fsq_{clean_slug}.png"
+        if output_path is None:
+            # Fresh name (first-time generation or unresolvable existing URL)
+            clean_slug = slug.lower().replace(' ', '-').replace('_', '-')
+            # Remove any non-alphanumeric characters except hyphens
+            clean_slug = re.sub(r'[^\w\-]', '', clean_slug)
 
-        output_path = assets_dir / output_filename
+            if enumerator:
+                output_filename = f"{enumerator}-{clean_slug}.png"
+            else:
+                output_filename = f"fsq_{clean_slug}.png"
+
+            output_path = assets_dir / output_filename
+
+        output_filename = output_path.name
 
         # Update progress
         self.update_state(

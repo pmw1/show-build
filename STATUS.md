@@ -58,8 +58,20 @@ branch / dev environment.
 
 The dev stack is **separate from live** and was shut down at pause. To resume:
 
-1. **Dev backend** (points at `showbuild_dev` DB copy, 6 workers):
+1. **Dev backend + dev Celery worker** (both point at `showbuild_dev`, Redis `/1`):
    `cd /srv/show-build && docker compose -f docker-compose.dev.yml up -d`
+   - Backend now mounts the **worktree** `app/` (branch code), not live's, and uses
+     Redis index `/1` — fully isolated from live (`/0` + `showbuild`).
+   - `show-build-assets-worker-dev` consumes `media,assets_*,ffmpeg` against
+     `showbuild_dev`. **This is what makes SOT/media processing work in dev** — the
+     live worker is on the live DB and would stall a dev job (cue lives in
+     `showbuild_dev`, not `showbuild`). Verify: `docker exec
+     show-build-assets-worker-dev celery -A celery_app inspect ping
+     --destination assets_worker@prefect-dev`.
+   - Whisper transcription is **fail-soft** (worktree `ffmpeg_tasks.py`): dead
+     `whisper-medium` docker entry removed, short connect timeout, both callers
+     already catch failures. A dead whisper no longer stalls phase1. (This fix is
+     branch-only so far — it belongs on `main` too; live still has the old block.)
 2. **Dev frontend** (MUST set the env var, or the reload loop returns):
    `cd /home/kevin/show-build-migration/disaffected-ui && DEV_API_TARGET=http://localhost:8889 node_modules/.bin/vue-cli-service serve --port 8092`
    (Verify env landed: `cat /proc/<pid>/environ | tr '\0' '\n' | grep DEV_API_TARGET`)
