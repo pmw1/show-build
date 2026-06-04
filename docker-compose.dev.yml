@@ -1,0 +1,67 @@
+# Dev backend for the ProseMirror/TipTap editor migration.
+#
+# A SEPARATE, opt-in backend that points at the showbuild_dev database copy, so
+# the migration's dev frontend (worktree, port 8092 / dev.showbuild.app) can read
+# and write without ever touching live show data. Reuses the live `show-build-server`
+# image and the same code mount, but a different DB, port, and worker count.
+#
+# This file is OPT-IN — it is NOT part of the default `docker compose up`. Bring
+# it up explicitly:
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# Tear it down:
+#
+#   docker compose -f docker-compose.dev.yml down
+#
+# It joins the live stack's existing network as `external`, so postgres/redis are
+# reachable by their service names — but it never starts or stops the live stack.
+#
+# NOTE: depends on the live image `show-build-server` already being built (it is,
+# since the live stack runs it). If the image is missing, run the normal
+# `docker compose build server` first.
+
+services:
+  server-dev:
+    image: show-build-server
+    container_name: show-build-server-dev
+    user: "1000:1001"
+    ports:
+      - "0.0.0.0:8889:80"
+    environment:
+      - TZ=America/New_York
+      - MODULE_NAME=main
+      - VARIABLE_NAME=app
+      # More workers than the 2 a hand-run container had: the dev backend is a
+      # full prod clone that makes outbound HTTP calls (Drive, Ollama, KairoBox)
+      # on many requests; too few workers get starved and the frontend's init
+      # burst hangs at the setup/loading screen. 6 keeps the simple endpoints
+      # responsive under that load.
+      - WEB_CONCURRENCY=6
+      - TIMEOUT=120
+      - GRACEFUL_TIMEOUT=30
+      - FORWARDED_ALLOW_IPS=*
+      # The whole point: the DEV database copy, never live `showbuild`.
+      - DATABASE_URL=postgresql://showbuild:showbuild@postgres:5432/showbuild_dev
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-ea7GZD3mQy3EZYD4YZsFmr/9JwBgZFCaWyznnjhOyow=}
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=2880
+      - MEDIA_ROOT=/home
+      - REDIS_URL=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
+    volumes:
+      - ./app:/app
+      - ./app/storage:/app/storage
+      - ./tools/blueprints:/tools/blueprints:ro
+      - ${EPISODES_PATH:-/data/sync/disaffected/episodes}:/home/episodes
+      - ${REPO_PATH:-/data/sync/disaffected/repo}:/home/repo
+      - ${MEDIA_ASSETS_PATH:-/data/sync/media_assets}:/home/media_assets
+    networks:
+      - video-post
+    # Self-heal: if a worker deadlocks/crashes, the container comes back on its own.
+    restart: unless-stopped
+
+networks:
+  # Join the live stack's existing network without managing it.
+  video-post:
+    external: true
+    name: show-build_video-post

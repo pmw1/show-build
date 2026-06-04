@@ -80,95 +80,69 @@ export class CueParser {
 
     const segments = [];
 
-    // Check if content already has <p> tags with speaker classes
-    const existingParagraphs = textContent.match(/<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/g);
-
-    if (existingParagraphs) {
-      // Parse each paragraph tag into individual speaker segments
-      existingParagraphs.forEach(paragraphHtml => {
-        // Extract class, data-needs-attention, data-flag-note, and content from paragraph
-        const match = paragraphHtml.match(/<p(?:\s+class="([^"]*)")?([^>]*)>([\s\S]*?)<\/p>/);
-        if (match) {
-          const rawClass = match[1] || '';
-          const classTokens = rawClass.split(/\s+/).filter(Boolean);
-          // Modifier tokens are not speakers — they ride alongside the speaker class.
-          const MODIFIERS = new Set(['bullet']);
-          const speakerToken = classTokens.find(t => !MODIFIERS.has(t));
-          const speaker = speakerToken || 'josh';
-          const bullet = classTokens.includes('bullet');
-          const otherAttributes = match[2] || '';
-          const content = match[3].trim();
-
-          // Check for data-needs-attention attribute
-          const needsAttention = otherAttributes.includes('data-needs-attention="true"') ||
-                                 otherAttributes.includes("data-needs-attention='true'");
-
-          // Extract data-flag-note attribute value
-          const flagNoteMatch = otherAttributes.match(/data-flag-note="([^"]*)"/);
-          const flagNote = flagNoteMatch ? flagNoteMatch[1] : '';
-
-          // Always push segment, even if empty (allows editing empty paragraphs)
-          if (content) {
-            // Split content on line breaks to create separate paragraphs
-            const contentParagraphs = content.split(/\n\s*\n/).filter(p => p.trim());
-            if (contentParagraphs.length > 1) {
-              // Multiple paragraphs found - split them
-              contentParagraphs.forEach(paragraph => {
-                segments.push({
-                  type: 'text',
-                  content: paragraph.trim(),
-                  speaker: speaker,
-                  bullet: bullet,
-                  needsParagraphTags: true,
-                  needsAttention: needsAttention,
-                  flagNote: flagNote
-                });
-              });
-            } else {
-              // Single paragraph
-              segments.push({
-                type: 'text',
-                content: content,
-                speaker: speaker,
-                bullet: bullet,
-                needsParagraphTags: true,
-                needsAttention: needsAttention,
-                flagNote: flagNote
-              });
-            }
-          } else {
-            // Empty paragraph - still create segment for editing
-            segments.push({
-              type: 'text',
-              content: '',
-              speaker: speaker,
-              bullet: bullet,
-              needsParagraphTags: true,
-              needsAttention: needsAttention,
-              flagNote: flagNote
-            });
-          }
-        }
-      });
-    } else {
-      // Parse raw text into paragraphs and apply speaker detection
-      const paragraphs = textContent.split(/\n\s*\n/).filter(p => p.trim());
-
+    // Emit bare (non-<p>-wrapped) text as one segment per blank-line-separated
+    // paragraph, with speaker detection.
+    const pushBareText = (text) => {
+      const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim());
       for (const paragraph of paragraphs) {
         const cleanParagraph = paragraph.trim();
         if (!cleanParagraph) continue;
-
-        // Detect speaker (default to 'josh' for now)
-        const speaker = this.detectSpeaker(cleanParagraph);
-
         segments.push({
           type: 'text',
           content: cleanParagraph,
-          speaker: speaker,
+          speaker: this.detectSpeaker(cleanParagraph),
           needsParagraphTags: true
         });
       }
+    };
+
+    // Emit one <p>...</p> element as its speaker-tagged segment(s).
+    const pushParagraphTag = (paragraphHtml) => {
+      const match = paragraphHtml.match(/<p(?:\s+class="([^"]*)")?([^>]*)>([\s\S]*?)<\/p>/);
+      if (!match) return;
+      const rawClass = match[1] || '';
+      const classTokens = rawClass.split(/\s+/).filter(Boolean);
+      // Modifier tokens are not speakers — they ride alongside the speaker class.
+      const MODIFIERS = new Set(['bullet']);
+      const speakerToken = classTokens.find(t => !MODIFIERS.has(t));
+      const speaker = speakerToken || 'josh';
+      const bullet = classTokens.includes('bullet');
+      const otherAttributes = match[2] || '';
+      const content = match[3].trim();
+      const needsAttention = otherAttributes.includes('data-needs-attention="true"') ||
+                             otherAttributes.includes("data-needs-attention='true'");
+      const flagNoteMatch = otherAttributes.match(/data-flag-note="([^"]*)"/);
+      const flagNote = flagNoteMatch ? flagNoteMatch[1] : '';
+
+      const base = { type: 'text', speaker, bullet, needsParagraphTags: true, needsAttention, flagNote };
+      if (content) {
+        const contentParagraphs = content.split(/\n\s*\n/).filter(p => p.trim());
+        if (contentParagraphs.length > 1) {
+          contentParagraphs.forEach(p => segments.push({ ...base, content: p.trim() }));
+        } else {
+          segments.push({ ...base, content });
+        }
+      } else {
+        // Empty paragraph - still create segment for editing
+        segments.push({ ...base, content: '' });
+      }
+    };
+
+    // Walk the region in document order, interleaving <p> elements with the
+    // bare text between/around them. The previous implementation took an
+    // all-or-nothing branch: if ANY <p> tag was present it processed ONLY the
+    // <p> matches and silently DISCARDED all surrounding bare markdown — a
+    // catastrophic data-loss bug (a script with one stray <p> lost everything
+    // else). Scanning in order preserves every paragraph regardless of mix.
+    const pRe = /<p(?:\s+class="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/g;
+    let lastIndex = 0;
+    let pMatch;
+    while ((pMatch = pRe.exec(textContent)) !== null) {
+      pushBareText(textContent.slice(lastIndex, pMatch.index)); // bare text BEFORE this <p>
+      pushParagraphTag(pMatch[0]);
+      lastIndex = pRe.lastIndex;
     }
+    pushBareText(textContent.slice(lastIndex)); // bare text AFTER the last <p>
 
     return segments;
   }
@@ -205,9 +179,12 @@ export class CueParser {
 
     // Parse fields [FieldName: value] where value may contain ] characters
     // and may span multiple lines. Terminator is ] followed by either the next
-    // field marker (\n[), end-cue marker (\n<!--), or end of content.
+    // field marker (\n[), end-cue marker (\n<!--), an embedded <img> line
+    // (\n<img — common in GFX/IMG cues), or end of content.
+    // Without the \n<img alternative, a [Field:] immediately before an <img>
+    // line fails to match and is silently dropped (data loss on re-parse).
     // [\s\S] matches any character including newlines (JS has no DOTALL flag).
-    const fieldRegex = /\[([^:\n[\]]+):\s*([\s\S]*?)\](?=\s*(?:\n\s*\[|\n\s*<!--|$))/g;
+    const fieldRegex = /\[([^:\n[\]]+):\s*([\s\S]*?)\](?=\s*(?:\n\s*\[|\n\s*<!--|\n\s*<img|$))/g;
 
     let match;
     while ((match = fieldRegex.exec(cueContent)) !== null) {

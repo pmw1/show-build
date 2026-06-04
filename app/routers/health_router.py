@@ -717,6 +717,74 @@ async def health():
     return health_status
 
 
+async def _check_database_status():
+    """Fast DB-only connectivity probe shared by /health/critical."""
+    try:
+        import json
+        import asyncpg
+
+        config_dir = Path("/app/config") if Path("/app").exists() else Path("app/config")
+        db_config_file = config_dir / "database.json"
+        if not db_config_file.exists():
+            return "no_config"
+        with open(db_config_file, 'r') as f:
+            db_config = json.load(f)
+        conn = await asyncpg.connect(
+            host=db_config.get("host", "postgres"),
+            port=db_config.get("port", 5432),
+            database=db_config.get("database", "showbuild"),
+            user=db_config.get("username", "showbuild"),
+            password=db_config.get("password", "showbuild"),
+        )
+        await conn.fetchval("SELECT 1")
+        await conn.close()
+        return "connected"
+    except Exception as e:
+        error_type = type(e).__name__
+        if "InvalidAuthorizationSpecification" in error_type:
+            return "auth_failed"
+        if "InvalidCatalogName" in error_type:
+            return "db_not_found"
+        if isinstance(e, OSError):
+            return "connection_refused"
+        return f"error: {str(e)[:50]}"
+
+
+@router.get("/health/critical")
+async def health_critical():
+    """
+    FAST health check — backend + database only. Returns in milliseconds so the
+    UI status indicators resolve immediately instead of waiting ~6-7s for the full
+    /health (which deep-checks Ollama, Celery, XTTS, Asterisk, etc. and made the
+    dashboard flash). The frontend polls this first (useSystemHealth
+    fetchHealthProgressive), then /health/secondary for the slow services.
+    """
+    db_status = await _check_database_status()
+    return {
+        "status": "healthy" if db_status in ("connected", "no_config") else "degraded",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "services": {"database": db_status},
+    }
+
+
+@router.get("/health/secondary")
+async def health_secondary():
+    """
+    SLOW health check — all external services (Ollama, Redis, Celery, XTTS,
+    Asterisk, Google Drive, vMix, Whisper, NFS, TTS). Loaded in the background by
+    the frontend after /health/critical has already turned the indicators green.
+    Reuses the full /health logic and strips the (already-reported) database key.
+    """
+    full = await health()
+    services = dict(full.get("services", {}))
+    services.pop("database", None)
+    return {
+        "status": full.get("status", "healthy"),
+        "timestamp": full.get("timestamp"),
+        "services": services,
+    }
+
+
 @router.get("/health/vmix")
 async def get_vmix_health():
     """Dedicated vMix health check endpoint."""
