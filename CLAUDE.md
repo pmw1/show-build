@@ -2,6 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚑ THIS IS THE DEV FOLDER — orient before editing (added 2026-06-03)
+
+**You are in `/home/kevin/show-build-migration` — the DEV working directory.**
+- This folder is the git worktree on branch **`feat/script-editor-tiptap`**, and it
+  is what **dev.showbuild.app** actually runs (`show-build-server-dev` on :8889,
+  database **`showbuild_dev`**). **Do dev edits HERE.**
+- **`/srv/show-build` is the separate LIVE folder** — branch `main`, runs
+  **showbuild.app** (`show-build-server` :8888, database `showbuild`). Touch it only
+  for LIVE operations (restart live server, migrate the live `showbuild` DB).
+- The `dev-fork` branch was **deleted 2026-06-03** (an orphan from a mistake); don't
+  recreate it. All work is on `feat/script-editor-tiptap` (this branch) or `main`.
+- **After backend Python edits, restart the DEV backend**, not live:
+  `docker compose -f /srv/show-build/docker-compose.dev.yml restart server-dev`
+- Recent dev work on this branch: TipTap/ProseMirror editor migration (this branch's
+  purpose), g015 alembic fix + merge, job-ledger fix, and the multi-flavor worker
+  images + Settings→Infrastructure (Workers + Sibling Tools) UI. Alembic head =
+  `g019_worker_definitions`. Worker images in Gitea `192.168.51.206:3000/kevin/worker-*`.
+- See the memory MEMORY.md for this project for the full topology, worker, and NFS notes.
+
 ## Production Environment
 
 - **Host**: `prefect` (192.168.51.238) — all show-build services run here
