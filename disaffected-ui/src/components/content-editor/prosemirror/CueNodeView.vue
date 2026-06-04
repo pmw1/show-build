@@ -21,12 +21,22 @@
       <image-cue-card
         v-if="isImageType"
         :cue-data="cueData"
+        :collapsed="node.attrs.collapsed"
+        @toggle-collapsed="onToggleCollapsed"
         @update:cue-data="onCardUpdate"
+        @update-meta="onUpdateMeta"
+        @delete="onDelete"
       />
       <placeholder-cue-card
         v-else
         :cue-data="cueData"
+        :collapsed="node.attrs.collapsed"
+        @toggle-collapsed="onToggleCollapsed"
         @update:cue-data="onCardUpdate"
+        @update-meta="onUpdateMeta"
+        @edit-fsq="onEditCue('fsq', $event)"
+        @edit-gfx="onEditCue('gfx', $event)"
+        @delete="onDelete"
       />
     </div>
   </node-view-wrapper>
@@ -43,7 +53,11 @@ import PlaceholderCueCard from '@/components/content-editor/cards/PlaceholderCue
 function fieldsToParsedCue(fields, imgTag, cueType) {
   const parsed = {};
   for (const [label, value] of Object.entries(fields || {})) {
-    parsed[CueParser.toCamelCase(label)] = value;
+    const key = CueParser.toCamelCase(label);
+    // Strip the storage-wrapping quotes from the Quote field — exactly as
+    // parseCueBlock does. Without this, the TipTap path kept the [Quote: "..."]
+    // marks, so the FSQ rendered (and re-saved) with accumulating quotes.
+    parsed[key] = key === 'quote' ? CueParser.stripWrappingQuotes(value) : value;
   }
   parsed.type = parsed.type || cueType;
   if (imgTag) {
@@ -84,6 +98,77 @@ export default {
         fields[label] = String(val);
       }
       this.updateAttributes({ fields });
+    },
+    // Single-field updates emitted by the cards (e.g. the FSQ generate-PNG
+    // completion writes `{ field: 'mediaUrl', value }`, the per-cue style
+    // sliders write `{ field: 'fontSize', value }`). Fold the one field into
+    // the node's label-ordered `fields` map so it persists into the document
+    // and the saved markdown — and so the card re-renders with the new value
+    // (this is what makes View/Download PNG appear after a render).
+    // Toggle the cue's collapsed state. This is a UI-state attr kept SEPARATE
+    // from `fields` (it must never leak into card content), written straight to
+    // the node so it survives drag-drop and persists into the saved markdown
+    // (via the Begin-Cue marker suffix in markdown.js).
+    onToggleCollapsed() {
+      this.updateAttributes({ collapsed: !this.node.attrs.collapsed });
+    },
+    onUpdateMeta(payload) {
+      if (!payload || !payload.field) return;
+      const { field, value } = payload;
+      const fields = { ...this.node.attrs.fields };
+      const existingLabel = Object.keys(fields).find(
+        (l) => CueParser.toCamelCase(l) === field
+      );
+      // Canonical labels for fields the rest of the codebase writes a specific
+      // way (formatFieldForDisplay would emit "Media Url"; the codebase uses
+      // "MediaURL"). Both round-trip to the same camelCase key, but keep the
+      // markdown consistent.
+      const canonicalLabels = { mediaUrl: 'MediaURL' };
+      const label = existingLabel || canonicalLabels[field] || CueParser.formatFieldForDisplay(field);
+      fields[label] = value == null ? '' : String(value);
+      this.updateAttributes({ fields });
+    },
+    // Edit (FSQ / GFX) is handled by EditorPanel, which owns the modals.
+    // Same bridge pattern as onDelete: hand the cue's data up via an editor
+    // option callback. EditorPanel opens the existing FsqModal / GfxModal in
+    // edit mode (initial-data = this cue), where the user edits the quote text
+    // and every other detail; the modal writes back through scriptContent.
+    onEditCue(kind, cueData) {
+      const fn = this.editor?.options?.onEditCue;
+      if (typeof fn === 'function') {
+        fn({ kind, cueData: cueData || this.cueData });
+      } else {
+        console.warn('[CueNodeView] onEditCue bridge not wired; edit ignored');
+      }
+    },
+    // NOTE: "Apply All" (apply-all-fsq/gfx) is intentionally NOT bridged here
+    // yet — the legacy handler iterates the old scriptSegments array, which is
+    // not the source of truth in this editor, so it would be a silent no-op.
+    // Wiring it correctly means walking the PM doc and updateAttributes per
+    // cue node; tracked separately.
+    // Delete is NOT decided here. We hand the cue up to EditorPanel (via the
+    // editor's onDeleteCue callback, mirroring the slash-menu's onSelectCue
+    // bridge) so it can open the SAME delete-disposition modals the legacy
+    // editor used — "Delete Cue Only" vs "Delete Cue & Media" for image cues,
+    // a plain confirm for the rest. EditorPanel calls the `removeNode` we pass
+    // here once the user confirms a choice; that's what actually removes this
+    // exact atom node from the document.
+    onDelete() {
+      const onDeleteCue = this.editor?.options?.onDeleteCue;
+      const removeNode = () => {
+        if (typeof this.deleteNode === 'function') {
+          this.deleteNode();
+        } else if (typeof this.getPos === 'function' && this.getPos() != null) {
+          const pos = this.getPos();
+          this.editor.chain().focus().deleteRange({ from: pos, to: pos + this.node.nodeSize }).run();
+        }
+      };
+      if (typeof onDeleteCue === 'function') {
+        onDeleteCue({ cueData: this.cueData, isImageType: this.isImageType, removeNode });
+      } else {
+        // No bridge wired (shouldn't happen) — fail safe by removing the node.
+        removeNode();
+      }
     },
   },
 };

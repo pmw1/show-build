@@ -181,6 +181,7 @@
           :current-episode="currentEpisodeNumber"
           :current-episode-title="currentEpisodeTitle"
           :script-content="scriptContent"
+          :line-number-offset="lineNumberOffset"
           @update:script-content="updateScriptContent"
           @user-initiated-shrink="handleUserInitiatedShrink"
           v-model:scratch-content="scratchContent"
@@ -1753,6 +1754,24 @@ Try dropping an image or video file here!`
       return (this.rundownItems && this.rundownItems[this.selectedItemIndex]) || null
     },
 
+    // Continuous-across-show line numbering: the number of script paragraphs in
+    // every rundown item BEFORE the currently-open one. The ScriptEditor adds
+    // this to its per-paragraph count so line numbers run from the START OF THE
+    // SHOW (first paragraph of the first item = 1) and never reset per item.
+    // Counts top-level paragraphs only (cues are not numbered), matching the
+    // LineNumbers plugin. Placeholder rows contribute nothing.
+    lineNumberOffset() {
+      if (!Array.isArray(this.rundownItems) || this.selectedItemIndex <= 0) return 0
+      let total = 0
+      for (let i = 0; i < this.selectedItemIndex; i++) {
+        const item = this.rundownItems[i]
+        if (!item || item.isPlaceholder) continue
+        const md = item.script_content || item.script || ''
+        total += this.countScriptParagraphs(md)
+      }
+      return total
+    },
+
     currentSpeakerWpm() {
       // Get speaker WPM from current rundown item's speaker data
       // Default to 150 if no speaker is set or WPM is not available
@@ -1822,6 +1841,48 @@ Try dropping an image or video file here!`
     }
   },
   methods: {
+    /**
+     * Count top-level SCRIPT PARAGRAPHS in a raw script_content string, the
+     * same units the editor's LineNumbers plugin numbers (cues excluded). Used
+     * to compute the continuous-across-show line-number offset for an item.
+     *
+     * Mirrors markdownToDoc's paragraph sources without importing the full PM
+     * parser: (1) text outside cue blocks split on blank lines = bare
+     * paragraphs; (2) each <p>…</p> may itself hold blank-line-separated
+     * paragraphs. Cue blocks (<!-- Begin Cue -->…<!-- End Cue -->) are removed
+     * first so they don't count.
+     */
+    countScriptParagraphs(raw) {
+      if (!raw || typeof raw !== 'string') return 0;
+      // Strip YAML frontmatter if present.
+      let body = raw;
+      const fm = body.match(/^---\n[\s\S]*?\n---\n?/);
+      if (fm) body = body.slice(fm[0].length);
+      // Remove cue blocks entirely (they are not numbered).
+      body = body.replace(/<!--\s*Begin Cue\s*-->[\s\S]*?<!--\s*End Cue\s*-->/gi, '\n\n');
+
+      let count = 0;
+      const pRe = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+      let last = 0;
+      let m;
+      const countBare = (s) => {
+        for (const para of s.split(/\n\s*\n/)) {
+          if (para.trim()) count += 1;
+        }
+      };
+      while ((m = pRe.exec(body)) !== null) {
+        countBare(body.slice(last, m.index));
+        const inner = (m[1] || '').trim();
+        if (inner) {
+          const parts = inner.split(/\n\s*\n/).filter((p) => p.trim());
+          count += parts.length || 1;
+        }
+        last = pRe.lastIndex;
+      }
+      countBare(body.slice(last));
+      return count;
+    },
+
     /**
      * Return whichever script editor is currently mounted (the flag-gated
      * ScriptEditor or the legacy EditorPanel). Both expose the same reach-in
@@ -2472,6 +2533,21 @@ Try dropping an image or video file here!`
       console.log('📄 Text to append length:', textToAppend.length);
       console.log('📝 Text to append full content:\n', textToAppend);
       console.log('📍 Insert after paragraph:', insertAfterParagraph);
+
+      // ProseMirror editor path: the string-append + scriptSegments/focusedParagraphIndex
+      // machinery below does NOT work in the new editor (it has no scriptSegments and
+      // focusedParagraphIndex is always null there), so cues landed at the bottom.
+      // Delegate to EditorPanel.insertCueAtSnapshotPosition, which inserts at the
+      // ProseMirror CURSOR (via ScriptEditor.insertCueAtCursor). The new editor then
+      // serializes back into scriptContent on its own.
+      if (this.$refs.editorPanel?.useProseMirrorEditor && this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
+        console.log('📍 ProseMirror active — routing cue insert to the editor cursor');
+        // textToAppend arrives wrapped as `\n<cue>\n`; the cue inserter handles its own
+        // spacing, so pass the trimmed cue block.
+        this.$refs.editorPanel.insertCueAtSnapshotPosition(textToAppend.trim());
+        this.hasUnsavedChanges = true;
+        return;
+      }
       console.log('📊 this.parsedContent exists:', !!this.parsedContent);
       console.log('📊 this.parsedContent.scriptContent exists:', !!this.parsedContent?.scriptContent);
 
@@ -3409,6 +3485,18 @@ Try dropping an image or video file here!`
       }
       if (this.selectedItemIndex < 0 || !this.currentRundownItem) {
         console.log('Cannot save - no valid item selected');
+        return;
+      }
+
+      // GUARD: never save while an item's content is still loading. During a
+      // load `rawMarkdownContent` may briefly hold the PREVIOUS item's content;
+      // a save firing now would write that stale content onto the NEW item.
+      // This is the safety net behind the "same cue appeared in every item"
+      // corruption (a frozen editor left rawMarkdownContent stuck, and each
+      // switch saved it onto the next item). Manual saves are exempt — they are
+      // explicit user intent and only fire when the editor is settled.
+      if (!isManualSave && this.isLoadingItemContent) {
+        console.warn('⏭️ saveCurrentItem skipped — item content is still loading (avoids cross-item content bleed)');
         return;
       }
 
@@ -8940,6 +9028,23 @@ Try dropping an image or video file here!`
         return;
       }
 
+      // ⚠️ FLUSH LIVE EDITS BEFORE SNAPSHOTTING THE BASE SCRIPT.
+      // We append the generated text onto the item's EXISTING script. The
+      // displayed item's freshly-typed content lives in the editor's edit
+      // buffer / rawMarkdownContent and may not yet be persisted onto
+      // targetItem.script_content. If we read script_content without
+      // flushing first, the base is stale (often empty) and the "append"
+      // silently overwrites what's on screen — looking like a replace.
+      // Flush, then snapshot the LIVE content for the displayed item.
+      const isTargetDisplayed = this.currentRundownItem?.id === targetItemId;
+      if (isTargetDisplayed) {
+        try {
+          await this.$refs.editorPanel?.flushPendingChanges?.();
+        } catch (e) {
+          console.warn('flushPendingChanges before generate failed (continuing):', e);
+        }
+      }
+
       // Get target item's duration or use default
       const duration = targetItem.duration || '3';
       const segmentType = targetItem.type || 'segment';
@@ -9040,8 +9145,15 @@ Try dropping an image or video file here!`
         );
 
         // ⚠️ INSERT INTO TARGET ITEM - Not currently displayed item
-        // Get target item's current script content (might be different from displayed scriptContent)
-        const targetScript = targetItem?.script_content || '';
+        // Get target item's current script content. For the item that's
+        // actually open in the editor, rawMarkdownContent is the live source
+        // of truth (flushed above) and is fresher than the rundown-array
+        // copy on targetItem.script_content; use it so we append rather than
+        // clobber the on-screen text. For a non-displayed item, the array
+        // copy is correct.
+        const targetScript = isTargetDisplayed
+          ? (this.rawMarkdownContent || targetItem?.script_content || '')
+          : (targetItem?.script_content || '');
 
         console.log('📝 Generated text length:', generatedText?.length, 'chars');
         console.log('📝 Generated text preview:', generatedText?.substring(0, 100));

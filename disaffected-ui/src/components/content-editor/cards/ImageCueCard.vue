@@ -3,15 +3,28 @@
     class="cue-card image-cue-card"
     :class="[
       { 'selected': selected },
+      { 'cue-collapsed': collapsed },
       getAnalysisClass
     ]"
     :style="getCardStyle"
     variant="elevated"
     @click="$emit('select')"
   >
-    <!-- Card Header -->
-    <v-card-title class="cue-card-header" :style="headerStyle">
+    <!-- Card Header — the entire header is the double-click hotzone for collapse -->
+    <v-card-title class="cue-card-header" :style="headerStyle" @dblclick.stop="$emit('toggle-collapsed')">
       <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 8px; color: white;">mdi-drag-vertical</v-icon>
+      <v-btn
+        icon
+        size="x-small"
+        variant="text"
+        class="collapse-toggle"
+        color="white"
+        tabindex="-1"
+        :title="collapsed ? 'Expand cue' : 'Collapse cue'"
+        @click.stop="$emit('toggle-collapsed')"
+      >
+        <v-icon size="small">{{ collapsed ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
+      </v-btn>
       <div class="cue-type-badge" :style="badgeStyle">
         {{ cueData.type }}
       </div>
@@ -49,7 +62,7 @@
     </v-card-title>
 
     <!-- Card Content -->
-    <v-card-text class="cue-card-content">
+    <v-card-text v-if="!collapsed" class="cue-card-content">
       <!-- Image Display -->
       <div class="image-container">
         <!-- Loading Placeholder -->
@@ -224,7 +237,7 @@
     </v-card-text>
 
     <!-- Card Footer -->
-    <v-card-actions class="cue-card-footer" :style="headerStyle">
+    <v-card-actions v-if="!collapsed" class="cue-card-footer" :style="headerStyle">
       <v-spacer></v-spacer>
       <div class="image-path">
         <v-icon size="small" class="path-icon">mdi-file-image</v-icon>
@@ -252,10 +265,16 @@ const props = defineProps({
   orderNumber: {
     type: [String, Number],
     default: null
+  },
+  // Controlled collapsed state — owned by the cue node (via CueNodeView), so it
+  // survives drag-drop and persists into the saved markdown.
+  collapsed: {
+    type: Boolean,
+    default: false
   }
 });
 
-const emit = defineEmits(['select', 'edit', 'delete', 'modify', 'update-meta']);
+const emit = defineEmits(['select', 'edit', 'delete', 'modify', 'update-meta', 'toggle-collapsed']);
 
 // ── Reactive state ──
 const imageError = ref(false);

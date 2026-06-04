@@ -14,10 +14,17 @@
   the legacy markdown form and emits it, so ContentEditor's save/reload/undo/
   remote-sync machinery (the ~9,900-line parent) stays untouched.
 
-  Flag-gated OFF by default via useFeatureFlags (useProseMirrorEditor).
+  This is the only script editor — the legacy contenteditable surface is retired
+  and it is no longer flag-gated.
 -->
 <template>
-  <div class="script-editor-root">
+  <div
+    class="script-editor-root"
+    :class="{
+      'script-editor--collapsed': collapsed,
+      'script-editor--line-numbers': showLineNumbers,
+    }"
+  >
     <!-- EditorContent (not a raw element mount): this is what forwards the
          host app's plugin context (Vuetify) into the cue NodeViews, so the
          cards' <v-card>/<v-btn> render. A manual `new Editor({element})` mount
@@ -30,6 +37,7 @@
 import { ref, shallowRef, onMounted, onBeforeUnmount, watch } from 'vue';
 import { Editor, EditorContent } from '@tiptap/vue-3';
 import { buildScriptExtensions } from './prosemirror/extensions.js';
+import { lineNumbersPluginKey } from './prosemirror/LineNumbers.js';
 import { markdownToDoc, docToMarkdown, assertNoLoss } from '@/utils/prosemirror/markdown.js';
 
 const SAVE_DEBOUNCE_MS = 1500;
@@ -39,8 +47,17 @@ export default {
   components: { EditorContent },
   props: {
     scriptContent: { type: String, default: '' },
+    // Collapse mode: render every paragraph/cue as a compact one-line summary
+    // (read-only except drag-reorder). Toggled from EditorPanel (Ctrl+Shift+C).
+    collapsed: { type: Boolean, default: false },
+    // Continuous line numbering across the show: the number of paragraphs in
+    // all rundown items BEFORE this one. First paragraph here = offset + 1.
+    lineNumberOffset: { type: Number, default: 0 },
+    // Show the per-paragraph line-number gutter. Driven by the
+    // Settings → Interface → "Line numbers" toggle (editor.lineNumbers).
+    showLineNumbers: { type: Boolean, default: true },
   },
-  emits: ['update:scriptContent', 'save-current', 'save-all', 'insert-cue'],
+  emits: ['update:scriptContent', 'save-current', 'save-all', 'insert-cue', 'delete-cue', 'edit-cue'],
   setup(props, { emit, expose }) {
     const editor = shallowRef(null);
     const isActivelyEditing = ref(false);
@@ -57,16 +74,36 @@ export default {
       return docToMarkdown(editor.value.state.doc, frontmatter);
     }
 
-    function flushPendingChanges() {
+    // allowIntentionalDelete=true is passed when the flush FOLLOWS a deliberate
+    // cue/content removal (e.g. delete-cue). Without it the loss assertion below
+    // sees the cue count drop, treats it as accidental loss, and SUPPRESSES the
+    // emit — so the deletion never reaches the DB and the cue reappears on the
+    // next item switch. The delete path knows the removal is intentional, so it
+    // tells us to skip the count-drop guard (we still block `undefined` markup
+    // and dropped FIELD values inside surviving cues).
+    function flushPendingChanges(allowIntentionalDelete = false) {
       if (saveTimer) {
         clearTimeout(saveTimer);
         saveTimer = null;
       }
+      // CRITICAL: clear the editing guard too. flushPendingChanges() is called
+      // on every item switch; if isActivelyEditing stayed true here, the
+      // scriptContent reload watcher would bail on the NEXT switch and the
+      // editor would freeze on the current item (the "stuck on one item" bug).
+      isActivelyEditing.value = false;
       const md = serialize();
       // Loss assertion: never emit a serialization that drops a cue or value
       // (successor to safeEmitScriptContent). On failure, keep the prior content.
       const loss = assertNoLoss(props.scriptContent, md);
-      if (!loss.ok) {
+      // A negative cueDelta is EXPECTED during an intentional delete; only the
+      // accidental-loss signals (undefined markup, dropped fields in surviving
+      // cues) should still block.
+      // During an intentional delete, BOTH a negative cueDelta AND dropped field
+      // values are EXPECTED (the removed cue's fields are gone) — so the only
+      // thing we still guard is `undefined` markup (a true serialization-corruption
+      // marker). Otherwise the full loss assertion applies.
+      const blocked = allowIntentionalDelete ? loss.hasUndefined : !loss.ok;
+      if (blocked) {
         // eslint-disable-next-line no-console
         console.error('🚨 ScriptEditor: serialization would lose content — emit suppressed', loss);
         return;
@@ -74,8 +111,16 @@ export default {
       if (md !== props.scriptContent) emit('update:scriptContent', md);
     }
 
+    // Set while WE dispatch a programmatic, doc-unchanging transaction (line-
+    // number refresh, collapse toggle). onUpdate fires for ALL transactions, so
+    // without this our meta-only dispatches would call scheduleSave() — which
+    // sets isActivelyEditing=true and then makes the NEXT item-switch reload
+    // bail (the editor freezes on the last item). Guard those out.
+    let programmaticDispatch = false;
+
     function scheduleSave() {
       if (applyingExternal) return;
+      if (programmaticDispatch) return; // ignore our own meta-only transactions
       isActivelyEditing.value = true;
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
@@ -83,6 +128,18 @@ export default {
         isActivelyEditing.value = false;
         flushPendingChanges();
       }, SAVE_DEBOUNCE_MS);
+    }
+
+    // Dispatch a transaction without tripping scheduleSave / isActivelyEditing.
+    function dispatchQuiet(trFn) {
+      if (!editor.value) return;
+      programmaticDispatch = true;
+      try {
+        const { state, view } = editor.value;
+        view.dispatch(trFn(state.tr));
+      } finally {
+        programmaticDispatch = false;
+      }
     }
 
     function loadContent(raw) {
@@ -117,8 +174,68 @@ export default {
         }),
         content: initial.doc.toJSON(),
         onUpdate: () => scheduleSave(),
+        // Cue cards delete through here, NOT inside the NodeView: the NodeView
+        // calls editor.options.onDeleteCue with the cue's data and a removeNode()
+        // that drops that exact atom node. We forward it up to EditorPanel so it
+        // opens the existing delete-disposition modal ("Delete Cue Only" /
+        // "Delete Cue & Media" for image cues). EditorPanel calls removeNode()
+        // once the user confirms a choice.
+        onDeleteCue: (payload) => {
+          emit('delete-cue', payload);
+        },
+        // Cue cards edit through here too: the NodeView calls
+        // editor.options.onEditCue with { kind: 'fsq'|'gfx', cueData }. We
+        // forward to EditorPanel, which opens the matching modal (FsqModal /
+        // GfxModal) in edit mode so the user can change the quote text and
+        // every other field. The modal writes back through scriptContent.
+        onEditCue: (payload) => {
+          emit('edit-cue', payload);
+        },
       });
+
+      // Seed the line-number offset (continuous-across-show numbering) and the
+      // collapse flag into editor storage so the plugin + cue NodeViews read
+      // them. CueNodeView reads editor.storage.collapse.on.
+      editor.value.storage.lineNumbers.offset = props.lineNumberOffset || 0;
+      editor.value.storage.collapse = { on: props.collapsed };
     });
+
+    // Force the line-number decorations to recompute (used when only the offset
+    // changes, with no doc edit). Dispatches an empty transaction carrying the
+    // plugin meta so its apply() rebuilds.
+    function refreshLineNumbers() {
+      dispatchQuiet((tr) => tr.setMeta(lineNumbersPluginKey, { offset: true }));
+    }
+
+    // Set the `collapsed` attr on every cue node in the doc (whole-editor
+    // collapse). One transaction so it's a single undo step.
+    //   - quiet=false (default, user pressed Ctrl+Shift+C): dispatches normally
+    //     so the collapse choice persists (marker → markdown → save).
+    //   - quiet=true (item-switch re-apply): dispatched through the programmatic
+    //     guard so it does NOT mark the freshly-loaded item dirty / autosave it.
+    function setAllCuesCollapsed(on, quiet = false) {
+      if (!editor.value) return;
+      const { state, view } = editor.value;
+      let tr = state.tr;
+      let changed = false;
+      state.doc.descendants((node, pos) => {
+        if (node.type.name === 'cue') {
+          if (!!node.attrs.collapsed !== !!on) {
+            tr = tr.setNodeAttribute(pos, 'collapsed', on);
+            changed = true;
+          }
+          return false; // cues are atoms; don't descend
+        }
+        return false; // only top-level cues; skip descending into paragraphs
+      });
+      if (!changed) return;
+      if (quiet) {
+        programmaticDispatch = true;
+        try { view.dispatch(tr); } finally { programmaticDispatch = false; }
+      } else {
+        view.dispatch(tr);
+      }
+    }
 
     onBeforeUnmount(() => {
       if (saveTimer) clearTimeout(saveTimer);
@@ -134,13 +251,81 @@ export default {
         if (!editor.value) return;
         if (next === serialize()) return; // already in sync
         loadContent(next);
+        // If collapse mode is ON, the newly-loaded item's cues come in with
+        // collapsed=false (their default / their own saved marker). Re-apply the
+        // whole-editor collapse so switching items keeps cues collapsed too —
+        // paragraphs already follow via the CSS class, but cue collapse is a
+        // per-node attr that must be set on the fresh nodes.
+        if (props.collapsed) {
+          setAllCuesCollapsed(true, true); // quiet — don't dirty the loaded item
+        }
       }
     );
+
+    // Continuous line-numbering: when the offset (paragraphs in prior rundown
+    // items) changes — e.g. switching rundown items — update storage and
+    // recompute the gutter numbers.
+    watch(
+      () => props.lineNumberOffset,
+      (next) => {
+        if (!editor.value) return;
+        editor.value.storage.lineNumbers.offset = next || 0;
+        refreshLineNumbers();
+      }
+    );
+
+    // Whole-editor collapse toggle (Ctrl+Shift+C). Master switch that:
+    //   1) sets EVERY cue node's `collapsed` attr to match (reuses the per-cue
+    //      collapse mechanism, so it persists via the Begin-Cue marker), and
+    //   2) flips the root .script-editor--collapsed class (the `collapsed` prop
+    //      drives it in the template) to squash paragraphs to one line.
+    // The paragraph squash is pure CSS (no doc change). The cue-attr sweep IS a
+    // doc change, so we let it dispatch normally (it should persist) but mark it
+    // programmatic so it doesn't latch isActivelyEditing / freeze item-switch.
+    watch(
+      () => props.collapsed,
+      (on) => {
+        if (!editor.value) return;
+        editor.value.storage.collapse = { on };
+        setAllCuesCollapsed(on);
+        // Rebuild the collapsed-paragraph summaries (first5 … last3). The cue
+        // sweep above may be a no-op (no cues), so dispatch the toggle meta
+        // explicitly and quietly so the summary plugin always recomputes.
+        dispatchQuiet((tr) => tr.setMeta('collapseToggle', on));
+      }
+    );
+
+    // Insert a cue block (raw markdown, e.g. a "<!-- Begin Cue -->...<!-- End Cue -->"
+    // string) at the CURRENT cursor position — not at the end of the doc. The cue
+    // markdown is parsed to PM node(s) via markdownToDoc, and inserted at the
+    // current selection with insertContentAt. We insert at the END of the block
+    // the cursor sits in (a cue is a block atom; it can't go mid-paragraph), so it
+    // lands right after the paragraph/cue the user has the caret in.
+    function insertCueAtCursor(cueMarkdown) {
+      if (!editor.value) return false;
+      const { doc: parsed } = markdownToDoc(cueMarkdown || '');
+      // Collect the parsed cue node(s) as JSON (skip empty placeholder paragraphs
+      // markdownToDoc adds when a region is blank).
+      const nodes = [];
+      parsed.forEach((child) => {
+        if (child.type.name === 'cue') nodes.push(child.toJSON());
+      });
+      if (nodes.length === 0) return false;
+      // Insert position: end of the top-level block containing the cursor, so the
+      // cue drops in right after the current line rather than splitting it.
+      const { $from } = editor.value.state.selection;
+      const insertPos = $from.after(1); // after the depth-1 (top-level) block
+      editor.value.chain().focus().insertContentAt(insertPos, nodes).run();
+      // Flush so the new content serializes back to scriptContent immediately.
+      flushPendingChanges();
+      return true;
+    }
 
     // Parent reach-in contract (mirrors EditorPanel).
     expose({
       flushPendingChanges,
       isActivelyEditing,
+      insertCueAtCursor,
       saveCurrent: () => {
         flushPendingChanges();
         emit('save-current');
@@ -174,10 +359,149 @@ export default {
 }
 .script-editor-host :deep(.ProseMirror p) {
   margin: 0 0 0.6em;
-  line-height: 1.5;
+  /* Per-user knobs (Settings → Content Editor → Editor Display). These CSS vars
+     are set globally by useEditorDisplayPrefs; the legacy contenteditable editor
+     consumed them and the new ProseMirror editor must too, or the Script text
+     size / line spacing settings do nothing. */
+  font-size: var(--editor-script-font-size, 16px);
+  line-height: var(--editor-script-line-height, 1.5);
 }
 .script-editor-host :deep(rev.pm-revision) {
   background: rgba(126, 87, 194, 0.18);
   border-bottom: 1px dashed #7e57c2;
+}
+
+/* ===== Per-paragraph line numbers ===== */
+/* The number is a widget decoration injected at each paragraph start. By
+   default it's hidden; the gutter only appears when the Settings toggle is on
+   (root gets .script-editor--line-numbers). When shown, paragraphs are indented
+   to make room and the number is pulled into the gutter. */
+.script-editor-host :deep(.pm-line-number) {
+  display: none;
+}
+.script-editor--line-numbers .script-editor-host :deep(.ProseMirror) {
+  /* room for the gutter to the left of every block */
+  padding-left: 3.2em;
+}
+.script-editor--line-numbers .script-editor-host :deep(.pm-line-number) {
+  display: inline-block;
+  position: absolute;
+  left: -3.2em;
+  width: 2.6em;
+  text-align: right;
+  user-select: none;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72em;
+  line-height: var(--editor-script-line-height, 1.5);
+  color: rgba(0, 0, 0, 0.32);
+  font-family: 'Courier New', monospace;
+}
+/* Paragraphs must be position:relative so the absolutely-positioned number
+   anchors to the paragraph's own top edge. */
+.script-editor--line-numbers .script-editor-host :deep(.ProseMirror p) {
+  position: relative;
+}
+
+/* ===== Collapse mode ===== */
+/* Each paragraph becomes one summary line:
+     "first five words …"            (left-aligned)
+                          "… last 3" (right-aligned)
+   The real inline text is hidden; the summary is drawn from data attributes
+   set by the CollapseSummary plugin. Line numbers stay visible (the gutter is
+   NOT hidden in collapse mode) and the rows get +1em extra spacing. */
+.script-editor--collapsed .script-editor-host :deep(.ProseMirror p.pm-collapsed-para) {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  /* +1em spacing between collapsed lines (on top of normal paragraph rhythm) */
+  margin-bottom: 1em;
+  padding-top: 1px;
+  padding-bottom: 1px;
+  cursor: default;
+  caret-color: transparent;
+}
+/* Collapsed row: the real paragraph text is collapsed to font-size:0 (so it
+   takes no space and can't overflow); the two summary widget spans carry the
+   visible text at their own font-size. Gray pill behind it all. The class
+   reliably reaches the <p> (node decoration), so these rules are the source of
+   truth; the plugin also sets matching inline styles as a belt-and-suspenders. */
+/* Collapsed paragraph: a relative block row. The real text is hidden
+   (font-size:0); the two summary spans + line number are ABSOLUTELY positioned
+   inside it (see CollapseSummary.js inline styles), so layout is immune to
+   inherited speaker text-align and the drag gutter — every row's left summary
+   starts at the same x. These rules just back up the inline styles. */
+.script-editor--collapsed .script-editor-host :deep(.ProseMirror p.pm-collapsed-para) {
+  position: relative !important;
+  display: block !important;
+  white-space: nowrap;
+  overflow: visible;                /* don't clip the absolute summary spans */
+  font-size: 0 !important;          /* hide the paragraph's own bare text */
+  background: transparent;
+  height: 24px !important;          /* absolute — em would be 0 at font-size:0 */
+  min-height: 24px !important;
+  padding: 0 !important;
+  margin-bottom: 24px !important;   /* ~one blank line between collapsed rows (px, not em) */
+  text-align: left !important;
+  text-indent: 0 !important;
+}
+.script-editor--collapsed .script-editor-host :deep(.pm-collapse-left) {
+  position: absolute !important;
+  left: 64px !important;            /* after line-number (0-26px) + grabber (28-62px) */
+  top: 2px;
+  max-width: 55%;
+  color: #000 !important;
+  font-size: var(--editor-script-font-size, 16px) !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left !important;
+}
+/* In collapse mode push the drag grabber to the RIGHT of the line number:
+   line number occupies 0-26px, grabber sits at 28px. */
+.script-editor--collapsed .script-editor-host :deep(.ProseMirror p.pm-collapsed-para.pm-drag-gutter)::before {
+  left: 28px !important;
+  width: 34px !important;
+}
+.script-editor--collapsed .script-editor-host :deep(.pm-collapse-right) {
+  position: absolute !important;
+  right: 0 !important;
+  top: 2px;
+  color: #000 !important;
+  font-size: var(--editor-script-font-size, 16px) !important;
+  white-space: nowrap;
+  text-align: right;
+}
+/* Collapse mode ALWAYS shows line numbers (regardless of the Settings toggle).
+   The line number sits in the 34px gutter reserved by the collapsed paragraph's
+   padding-left. It is a child of the (font-size:0, position:relative) <p>, so we
+   absolutely-position it into the gutter and force an explicit font-size/color
+   (it would otherwise inherit font-size:0 and vanish). High specificity beats
+   the base `.pm-line-number { display:none }` and the drag-gutter rules. */
+.script-editor--collapsed .script-editor-host :deep(.ProseMirror p.pm-collapsed-para .pm-line-number) {
+  display: inline-block !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 2px;
+  width: 28px;
+  text-align: right;
+  user-select: none;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  font-family: 'Courier New', monospace;
+  color: #000 !important;
+  font-size: 11px !important;       /* absolute — the parent <p> is font-size:0 */
+  order: 0;
+}
+.script-editor--collapsed .script-editor-host :deep(.ProseMirror) {
+  caret-color: transparent;
+  /* In collapse mode the line number / grabber / summary are absolutely placed
+     relative to each <p>, so we don't want the big line-numbers gutter padding
+     pushing everything right — start hard against the editor's left edge. */
+  padding-left: 0 !important;
 }
 </style>

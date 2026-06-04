@@ -7,16 +7,27 @@
       { 'cue-complete': cueStatus === 'complete' },
       { 'cue-needs-attention': cueStatus === 'needs_attention' },
       { 'cue-urgent-attention': cueStatus === 'urgent_attention' },
-      { 'cue-collapsed': isCollapsed },
+      { 'cue-collapsed': collapsed },
       getAnalysisClass
     ]"
     :style="cardStyleWithStatus"
     variant="elevated"
     @click="$emit('select')"
   >
-    <!-- Card Header -->
-    <v-card-title class="cue-card-header" :style="headerStyleWithStatus" @dblclick.stop="isCollapsed = !isCollapsed">
+    <!-- Card Header — the entire header is the double-click hotzone for collapse -->
+    <v-card-title class="cue-card-header" :style="headerStyleWithStatus" @dblclick.stop="$emit('toggle-collapsed')">
       <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 8px;">mdi-drag-vertical</v-icon>
+      <v-btn
+        icon
+        size="x-small"
+        variant="text"
+        class="collapse-toggle"
+        tabindex="-1"
+        :title="collapsed ? 'Expand cue' : 'Collapse cue'"
+        @click.stop="$emit('toggle-collapsed')"
+      >
+        <v-icon size="small">{{ collapsed ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
+      </v-btn>
       <div class="cue-type-badge" :style="badgeStyle">
         {{ cueTypeBadgeLabel }}
       </div>
@@ -88,11 +99,16 @@
       </div>
     </v-card-title>
 
-    <!-- Card Content (hidden entirely for RIF) -->
-    <v-card-text v-if="cueData.type !== 'RIF' && !isCollapsed" class="cue-card-content">
-      <!-- FSQ-specific Display - Delegated to FsqCueContent -->
+    <!-- Card Content (RIF is header-only by design — it has no body to collapse) -->
+    <v-card-text v-if="cueData.type !== 'RIF' && !collapsed" class="cue-card-content">
+      <!-- FSQ-specific Display - Delegated to FsqCueContent.
+           Render for ANY FSQ cue, even before a quote is entered. The old
+           "&& cueData.quote" guard made a quote-less FSQ fall through to the
+           generic "Display not yet implemented" placeholder, which read as the
+           cue "disappearing" on reload. FsqCueContent handles an empty quote
+           (renders an empty preview box / edit affordance). -->
       <FsqCueContent
-        v-if="cueData.type === 'FSQ' && cueData.quote"
+        v-if="cueData.type === 'FSQ'"
         ref="fsqContentRef"
         :cue-data="cueData"
         :fsq-dirty="fsqDirty"
@@ -103,6 +119,7 @@
         @delete="$emit('delete')"
         @generate-png="handleGeneratePNG"
         @download-png="downloadFsqPNG"
+        @view-png="openFsqFullResModal"
         @open-fsq-preview="openFsqPreviewModal"
         @update-meta="handleChildUpdateMeta"
         @apply-all-fsq="$emit('apply-all-fsq', $event)"
@@ -261,7 +278,7 @@
     </v-card-text>
 
     <!-- Card Footer (hidden for RIF and collapsed) -->
-    <v-card-actions v-if="cueData.type !== 'RIF' && !isCollapsed" class="cue-card-footer" :style="footerStyle">
+    <v-card-actions v-if="cueData.type !== 'RIF' && !collapsed" class="cue-card-footer" :style="footerStyle">
       <!-- Show duration in footer -->
       <div class="duration-display">
         <v-icon size="small" color="white">mdi-timer-outline</v-icon>
@@ -427,6 +444,50 @@
       </v-card>
     </v-dialog>
 
+    <!-- FSQ Full-Resolution 1:1 Viewer — the ACTUAL rendered 1920×1080 PNG,
+         shown at native size on a fullscreen black canvas. ESC to exit. -->
+    <v-dialog
+      v-model="showFsqFullResModal"
+      fullscreen
+      :scrim="false"
+      transition="dialog-bottom-transition"
+    >
+      <div class="fsq-fullres-stage" @click.self="closeFsqFullResModal">
+        <v-btn
+          icon
+          size="small"
+          variant="flat"
+          color="grey-darken-3"
+          class="fsq-fullres-close"
+          @click="closeFsqFullResModal"
+        >
+          <v-icon color="white">mdi-close</v-icon>
+          <v-tooltip activator="parent" location="left">Close (ESC)</v-tooltip>
+        </v-btn>
+        <!-- 1:1 canvas: looping background video, with the rendered PNG (which
+             has a transparent window where the video shows through) on top.
+             Both are exactly 1920×1080 so they stay pixel-aligned. -->
+        <div class="fsq-fullres-canvas" @click.self="closeFsqFullResModal">
+          <video
+            class="fsq-fullres-video"
+            autoplay
+            loop
+            muted
+            playsinline
+          >
+            <source :src="fsqBackgroundVideoUrl" type="video/mp4">
+          </video>
+          <img
+            v-if="cueData.mediaUrl"
+            :src="fsqThumbnailUrl"
+            class="fsq-fullres-img"
+            alt="FSQ full resolution"
+          />
+        </div>
+        <div class="fsq-fullres-hint text-caption">{{ cueData.slug || 'FSQ' }} · 1920×1080 · press ESC to exit</div>
+      </div>
+    </v-dialog>
+
     <!-- SOT Preview Modal (960x540 video player) -->
     <v-dialog
       v-model="showSotPreviewModal"
@@ -492,7 +553,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
-import { getColorValue, resolveVuetifyColor } from '../../../utils/themeColorMap.js';
+import { getColorValue, resolveVuetifyColor, getReadableTextColor } from '../../../utils/themeColorMap.js';
 import { useSOTProcessing } from '../../../composables/useSOTProcessing.js';
 import FsqCueContent from './cue-types/FsqCueContent.vue'; // eslint-disable-line no-unused-vars
 import SotCueContent from './cue-types/SotCueContent.vue'; // eslint-disable-line no-unused-vars
@@ -516,10 +577,17 @@ const props = defineProps({
   currentEpisode: {
     type: String,
     default: ''
+  },
+  // Controlled collapsed state — owned by the cue node (via CueNodeView), so it
+  // survives drag-drop and persists into the saved markdown. The card emits
+  // 'toggle-collapsed' and never mutates this directly.
+  collapsed: {
+    type: Boolean,
+    default: false
   }
 });
 
-const emit = defineEmits(['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq', 'apply-all-gfx', 'status-changed']);
+const emit = defineEmits(['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq', 'apply-all-gfx', 'status-changed', 'toggle-collapsed']);
 
 const route = useRoute();
 const { getJobByAssetId, retryFailedJob, reprocessJob } = useSOTProcessing();
@@ -533,9 +601,12 @@ const inlineVideoPlayer = ref(null);
 
 // Reactive data (was data())
 const orbitalOpen = ref(false);
-const isCollapsed = ref(false);
 const generatingPNG = ref(false);
-const fsqDirty = ref(true); // Assume dirty until proven generated (no PNG = needs generation)
+// Dirty = the rendered PNG no longer matches the cue. On mount, a cue that
+// already has a rendered PNG (mediaUrl) is considered up-to-date; one without
+// is dirty (needs a first render). Any subsequent edit flips this true via
+// handleChildUpdateMeta; a successful render flips it false.
+const fsqDirty = ref(!props.cueData?.mediaUrl);
 const generatingGfx = ref(false);       // GFX generation in progress
 const gfxImageError = ref(false);       // GFX image failed to load
 const gfxGenerationStatus = ref(null);  // GFX generation status: null, 'queued', 'generating', 'completed', 'failed'
@@ -554,6 +625,8 @@ const gfxGeneratedUrl = ref(null);  // Local override for immediate card refresh
 const showInlinePlayer = ref(false);
 // FSQ preview modal state
 const showFsqPreviewModal = ref(false);
+// Full-resolution 1:1 PNG viewer (the actual rendered 1920×1080 file)
+const showFsqFullResModal = ref(false);
 // SOT preview modal state
 const showSotPreviewModal = ref(false);
 // Preview countdown state
@@ -581,24 +654,27 @@ const cueTypeBadgeLabel = computed(() => {
 const cardStyleWithStatus = computed(() => {
   const baseStyle = getCardStyle.value;
 
+  // Status colors are configurable via Settings → Colors (Global Action Colors).
   switch (cueStatus.value) {
-    case 'complete':
+    case 'complete': {
+      const completeHex = resolveVuetifyColor(getColorValue('complete'));
       return {
         ...baseStyle,
-        backgroundColor: '#C8E6C9',  // Light green background
-        borderColor: '#4CAF50'       // Green border
+        backgroundColor: lightenColor(completeHex, 75),
+        borderColor: completeHex
       };
+    }
     case 'needs_attention':
       return {
         ...baseStyle,
         // Keep body background unchanged, just border
-        borderColor: '#FFC107'       // Yellow/amber border
+        borderColor: resolveVuetifyColor(getColorValue('needs-attention'))
       };
     case 'urgent_attention':
       return {
         ...baseStyle,
         // Keep body background unchanged, just border
-        borderColor: '#D32F2F',      // Red border
+        borderColor: resolveVuetifyColor(getColorValue('urgent-attention')),
         borderWidth: '5px'           // Slightly thicker for urgency
       };
     default:
@@ -610,22 +686,21 @@ const cardStyleWithStatus = computed(() => {
  * Header style based on cue_status
  */
 const headerStyleWithStatus = computed(() => {
+  // Header bg derived from the same configurable status colors; text color is
+  // chosen for contrast automatically.
   switch (cueStatus.value) {
-    case 'complete':
-      return {
-        backgroundColor: '#388E3C',  // Darker green header
-        color: 'white'
-      };
-    case 'needs_attention':
-      return {
-        backgroundColor: '#FFD54F',  // Bright yellow header
-        color: '#1a1a1a'             // Dark text for readability
-      };
-    case 'urgent_attention':
-      return {
-        backgroundColor: '#D32F2F',  // Red header
-        color: 'white'
-      };
+    case 'complete': {
+      const bg = darkenColor(resolveVuetifyColor(getColorValue('complete')), 0.2);
+      return { backgroundColor: bg, color: getReadableTextColor(bg) };
+    }
+    case 'needs_attention': {
+      const bg = resolveVuetifyColor(getColorValue('needs-attention'));
+      return { backgroundColor: bg, color: getReadableTextColor(bg) };
+    }
+    case 'urgent_attention': {
+      const bg = resolveVuetifyColor(getColorValue('urgent-attention'));
+      return { backgroundColor: bg, color: getReadableTextColor(bg) };
+    }
     default:
       return headerStyle.value;
   }
@@ -1563,6 +1638,27 @@ function closeFsqPreviewModal() {
 }
 
 /**
+ * Open the full-resolution 1:1 PNG viewer (actual rendered 1920×1080 file).
+ */
+function openFsqFullResModal() {
+  if (!props.cueData?.mediaUrl) return;
+  console.log('🔍 Opening FSQ full-resolution 1:1 viewer');
+  showFsqFullResModal.value = true;
+  nextTick(() => {
+    document.addEventListener('keydown', handlePreviewModalEsc);
+  });
+}
+
+/**
+ * Close the full-resolution 1:1 PNG viewer.
+ */
+function closeFsqFullResModal() {
+  console.log('🔍 Closing FSQ full-resolution viewer');
+  showFsqFullResModal.value = false;
+  document.removeEventListener('keydown', handlePreviewModalEsc);
+}
+
+/**
  * Open SOT preview modal with video player
  */
 function openSotPreviewModal() {
@@ -1636,6 +1732,9 @@ function onPreviewVideoReady() {
  */
 function handlePreviewModalEsc(event) {
   if (event.key === 'Escape') {
+    if (showFsqFullResModal.value) {
+      closeFsqFullResModal();
+    }
     if (showFsqPreviewModal.value) {
       closeFsqPreviewModal();
     }
@@ -1969,7 +2068,11 @@ async function handleGeneratePNG() {
       box_opacity: localBoxOpacity,
       line_spacing: localLineSpacing,
       attribution_size: scaledAttributionSize,
-      duration: props.cueData.duration || '00:00:05:00'
+      duration: props.cueData.duration || '00:00:05:00',
+      // Overwrite-in-place: when the cue already has a rendered PNG, hand the
+      // worker its existing path so the regenerate writes to the SAME file
+      // (no slug-renamed orphan). New FSQs send null → worker names it fresh.
+      existing_media_url: props.cueData.mediaUrl || null
     };
 
     console.log('📤 Sending FSQ PNG generation request:', requestData);
@@ -2291,6 +2394,30 @@ function stopPolling() {
 
 // Watchers
 // Watch for assetId changes to start/stop polling dynamically
+// Mark an FSQ dirty whenever its content/style changes (e.g. quote text edited
+// via the FSQ modal, or any style param) so the rendered PNG is treated as
+// stale: the button reverts to "Regenerate" and View/Download PNG hide until a
+// new PNG is generated. We deliberately exclude mediaUrl from the signature —
+// a successful render updates mediaUrl and must NOT re-mark the cue dirty.
+watch(
+  () => {
+    if (props.cueData?.type !== 'FSQ') return null;
+    const d = props.cueData;
+    return [
+      d.quote, d.attribution, d.source, d.alignment, d.style,
+      d.fontFamily, d.fontSize, d.attributionSize,
+      d.boxHeight, d.boxOpacity, d.lineSpacing,
+    ].join('|');
+  },
+  (next, prev) => {
+    // Skip the initial run (prev === undefined) and non-FSQ cues.
+    if (prev === undefined || next === null) return;
+    if (next !== prev) {
+      fsqDirty.value = true;
+    }
+  }
+);
+
 watch(showJobStatus, (newVal, oldVal) => {
   console.log('👁️ showJobStatus changed:', oldVal, '->', newVal);
   if (newVal && !oldVal) {
@@ -3614,6 +3741,69 @@ defineExpose({
 }
 
 /* FSQ Preview Modal Styles */
+/* Full-resolution 1:1 FSQ viewer — black fullscreen canvas; the PNG is shown
+   at its native 1920×1080 (no scaling). If the viewport is smaller, the stage
+   scrolls so the image stays true 1:1. */
+.fsq-fullres-stage {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+/* The true-1:1 canvas: fixed 1920×1080 box holding the video + PNG layers. */
+.fsq-fullres-canvas {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  flex: 0 0 auto;       /* never let flexbox shrink it below native size */
+  background: #000;
+}
+
+.fsq-fullres-video {
+  position: absolute;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  object-fit: cover;
+  z-index: 1;
+}
+
+.fsq-fullres-img {
+  position: absolute;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  object-fit: none;     /* render the PNG 1:1, no resampling */
+  z-index: 2;           /* PNG sits over the video; its transparent window shows it through */
+  display: block;
+}
+
+.fsq-fullres-close {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+}
+
+.fsq-fullres-hint {
+  position: fixed;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
 .fsq-preview-modal-card {
   border-radius: 0 !important;
   overflow: hidden;

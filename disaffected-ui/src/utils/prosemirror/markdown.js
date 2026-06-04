@@ -20,7 +20,27 @@
 import { schema } from './schema.js';
 
 const BEGIN = '<!-- Begin Cue -->';
+// A collapsed cue carries a suffix on its Begin marker. The prefix is identical
+// to BEGIN, so every existing scan (indexOf(BEGIN), countCues, the legacy
+// cueParser) still finds the cue; the suffix is inert text outside any field.
+// Default (expanded) cues emit the plain BEGIN, so untouched scripts are
+// byte-identical and no cue churns.
+const BEGIN_COLLAPSED = '<!-- Begin Cue collapsed -->';
 const END = '<!-- End Cue -->';
+
+// Find the next Begin-Cue marker (either the plain or the collapsed variant) at
+// or after `from`. Returns { index, markerLen, collapsed } or null. The two
+// markers share no usable substring (`<!-- Begin Cue -->` is NOT inside
+// `<!-- Begin Cue collapsed -->`), so we scan for both and take the earliest.
+function findBegin(body, from) {
+  const p = body.indexOf(BEGIN, from);
+  const c = body.indexOf(BEGIN_COLLAPSED, from);
+  if (p === -1 && c === -1) return null;
+  if (c === -1 || (p !== -1 && p <= c)) {
+    return { index: p, markerLen: BEGIN.length, collapsed: false };
+  }
+  return { index: c, markerLen: BEGIN_COLLAPSED.length, collapsed: true };
+}
 
 // Field terminator: next field marker, end-cue comment, an <img> line, or EOF.
 const FIELD_RE = /\[([^:\n[\]]+):\s*([\s\S]*?)\](?=\s*(?:\n\s*\[|\n\s*<!--|\n\s*<img|$))/g;
@@ -90,7 +110,7 @@ function paragraphNode(text, attrs = {}) {
   return schema.node('paragraph', a, clean ? [schema.text(clean)] : []);
 }
 
-function parseCueBlock(block) {
+function parseCueBlock(block, collapsed = false) {
   const fields = {};
   let m;
   FIELD_RE.lastIndex = 0;
@@ -99,7 +119,7 @@ function parseCueBlock(block) {
   }
   const img = block.match(/<img[^>]*>/);
   const cueType = fields.Type || fields.type || 'NOTE';
-  return schema.node('cue', { cueType, fields, imgTag: img ? img[0] : '' });
+  return schema.node('cue', { cueType, fields, imgTag: img ? img[0] : '', collapsed });
 }
 
 // Emit blocks for a region of plain/HTML text — handles <p> tags AND bare
@@ -145,21 +165,23 @@ export function markdownToDoc(raw) {
   const blocks = [];
   let idx = 0;
 
-  let b = body.indexOf(BEGIN, idx);
-  while (b !== -1) {
-    emitTextRegion(body.slice(idx, b), blocks);
-    const e = body.indexOf(END, b);
-    const nextB = body.indexOf(BEGIN, b + BEGIN.length);
+  let m = findBegin(body, idx);
+  while (m) {
+    emitTextRegion(body.slice(idx, m.index), blocks);
+    const e = body.indexOf(END, m.index);
+    const next = findBegin(body, m.index + m.markerLen);
     // Malformed cue (no End before the next Begin): treat Begin marker as text,
     // do NOT merge into the next cue (matches CueParser's imperative scan).
-    if (e === -1 || (nextB !== -1 && nextB < e)) {
-      emitTextRegion(body.slice(b, b + BEGIN.length), blocks);
-      idx = b + BEGIN.length;
+    if (e === -1 || (next && next.index < e)) {
+      emitTextRegion(body.slice(m.index, m.index + m.markerLen), blocks);
+      idx = m.index + m.markerLen;
     } else {
-      blocks.push(parseCueBlock(body.slice(b + BEGIN.length, e)));
+      // The marker after its length is the cue body; the ` collapsed` suffix (if
+      // any) is consumed as part of markerLen so it never reaches the field parser.
+      blocks.push(parseCueBlock(body.slice(m.index + m.markerLen, e), m.collapsed));
       idx = e + END.length;
     }
-    b = body.indexOf(BEGIN, idx);
+    m = findBegin(body, idx);
   }
   emitTextRegion(body.slice(idx), blocks);
 
@@ -180,7 +202,7 @@ function serializeParagraph(node) {
 }
 
 function serializeCue(node) {
-  let s = BEGIN + '\n';
+  let s = (node.attrs.collapsed ? BEGIN_COLLAPSED : BEGIN) + '\n';
   for (const [label, value] of Object.entries(node.attrs.fields)) {
     if (value === '' || value == null) continue; // drop empties (harmless; matches legacy)
     s += `[${label}: ${value}]\n`;
@@ -210,7 +232,10 @@ export function docToMarkdown(doc, frontmatter = '') {
 // Loss assertion — successor to safeEmitScriptContent
 // ---------------------------------------------------------------------------
 
-const countCues = (s) => (s.match(/<!-- Begin Cue -->/g) || []).length;
+// Match the Begin-Cue marker whether or not it carries the ` collapsed` suffix,
+// so the loss tripwire counts collapsed cues correctly (a collapsed cue must not
+// read as a "lost" cue).
+const countCues = (s) => (s.match(/<!-- Begin Cue(?: collapsed)? -->/g) || []).length;
 
 /**
  * Compare a serialized output against its source and report any structural loss.
@@ -226,12 +251,12 @@ export function assertNoLoss(rawInput, serializedOutput) {
   const cueFieldValues = (s) => {
     const result = [];
     let idx = 0;
-    let b = s.indexOf(BEGIN, idx);
-    while (b !== -1) {
-      const e = s.indexOf(END, b);
+    let beg = findBegin(s, idx);
+    while (beg) {
+      const e = s.indexOf(END, beg.index);
       if (e === -1) break;
       const vals = new Set();
-      const block = s.slice(b + BEGIN.length, e);
+      const block = s.slice(beg.index + beg.markerLen, e);
       let m;
       FIELD_RE.lastIndex = 0;
       while ((m = FIELD_RE.exec(block)) !== null) {
@@ -240,7 +265,7 @@ export function assertNoLoss(rawInput, serializedOutput) {
       }
       result.push(vals);
       idx = e + END.length;
-      b = s.indexOf(BEGIN, idx);
+      beg = findBegin(s, idx);
     }
     return result;
   };

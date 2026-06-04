@@ -34,6 +34,10 @@ export const CueNode = Node.create({
       cueType: { default: 'NOTE' },
       fields: { default: {} },
       imgTag: { default: '' },
+      // Per-cue collapsed UI state. Lives on the node so it survives drag-drop
+      // (BlockDragHandle reuses the same node object on move) and is persisted
+      // into the saved markdown via the Begin-Cue marker suffix (see markdown.js).
+      collapsed: { default: false },
     };
   },
 

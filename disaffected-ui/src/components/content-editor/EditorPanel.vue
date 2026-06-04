@@ -129,14 +129,8 @@
           </div>
         </div>
 
-        <!-- Collapse Mode Indicator (centered, prominent) -->
-        <div v-if="collapseMode && editorMode === 'script'" class="collapse-mode-indicator">
-          <v-icon size="small" class="mr-1">mdi-arrow-collapse-vertical</v-icon>
-          COLLAPSE MODE
-          <v-tooltip activator="parent" location="bottom">
-            Press Ctrl+Shift+C to exit collapse mode
-          </v-tooltip>
-        </div>
+        <!-- Collapse Mode Indicator moved to a bar at the bottom of
+             .segment-title-header (see below). -->
 
       </v-toolbar>
 
@@ -287,8 +281,15 @@
             </div>
 
             <!-- Segment Title -->
-            <div v-if="useVisualScriptMode && !hasNoItem" class="segment-title-header" :class="{ 'segment-title-placeholder': !item?.title || /^Segment-\d+$/i.test(item.title) }">
-              {{ item?.title && !/^Segment-\d+$/i.test(item.title) ? item.title : 'Enter a segment title' }}
+            <div v-if="useVisualScriptMode && !hasNoItem" class="segment-title-header" :class="{ 'segment-title-placeholder': !item?.title || /^Segment-\d+$/i.test(item.title), 'segment-title-header--collapsed': collapseMode }">
+              <span class="segment-title-text">{{ item?.title && !/^Segment-\d+$/i.test(item.title) ? item.title : 'Enter a segment title' }}</span>
+              <!-- Collapse-mode bar: spans the bottom of the title header, color-
+                   tuned to the header, only while collapse mode is active. -->
+              <div v-if="collapseMode && editorMode === 'script'" class="collapse-mode-bar">
+                <v-icon size="x-small" class="mr-1">mdi-arrow-collapse-vertical</v-icon>
+                COLLAPSE MODE
+                <v-tooltip activator="parent" location="bottom">Press Ctrl+Shift+C to exit collapse mode</v-tooltip>
+              </div>
             </div>
 
             <!-- Enhanced Script Content with Visual Cue Cards -->
@@ -314,10 +315,15 @@
                 v-if="useProseMirrorEditor"
                 ref="scriptEditorRef"
                 :script-content="props.scriptContent"
+                :collapsed="collapseMode"
+                :show-line-numbers="showLineNumbers"
+                :line-number-offset="lineNumberOffset"
                 @update:script-content="(v) => emit('update:scriptContent', v)"
                 @save-current="() => emit('save-current')"
                 @save-all="() => emit('save-all')"
                 @insert-cue="insertCueFromMenu"
+                @delete-cue="handlePmDeleteCue"
+                @edit-cue="handlePmEditCue"
               />
 
               <draggable
@@ -1321,6 +1327,27 @@
     @delete-preserve-assets="handleDeletePreserveAssets"
   />
 
+  <!-- Generic Delete Cue + media disposition modal (all media-linked cue types) -->
+  <DeleteCueWithMediaModal
+    v-model:show="showDeleteCueWithMedia"
+    :cue-type="deletingCueData?.type || ''"
+    :cue-slug="deletingCueData?.slug || ''"
+    :media-files="deletingCueMedia"
+    @delete-only="handleDeleteCueOnly"
+    @delete-with-media="handleDeleteWithMedia"
+    @delete-release-to-pool="handleDeleteReleaseToPool"
+  />
+
+  <!-- Warning shown when a media delete/release fails after the cue was removed -->
+  <MediaDeleteFailedModal
+    v-model:show="showMediaDeleteFailed"
+    :errors="mediaDeleteErrors"
+    :action="lastMediaDisposition"
+    @acknowledge="handleMediaFailAcknowledge"
+    @retry="handleMediaFailRetry"
+    @restore="handleMediaFailRestore"
+  />
+
   <!-- Speaker Selector Modal -->
   <SpeakerSelectorModal
     v-model:show="showSpeakerSelector"
@@ -1462,6 +1489,8 @@ import DeleteImgCueModal from './modals/DeleteImgCueModal.vue'
 import ImageCueCard from './cards/ImageCueCard.vue'
 import PlaceholderCueCard from './cards/PlaceholderCueCard.vue'
 import SpeakerSelectorModal from './modals/SpeakerSelectorModal.vue'
+import DeleteCueWithMediaModal from './modals/DeleteCueWithMediaModal.vue'
+import MediaDeleteFailedModal from './modals/MediaDeleteFailedModal.vue'
 import CueParser from '../../utils/cueParser.js'
 import { useTts } from '../../composables/useTts.js'
 import { useAsyncAnalysis } from '../../composables/useAsyncAnalysis.js'
@@ -1474,7 +1503,6 @@ import { useScriptCore } from '../../composables/useScriptCore.js'
 // Migration: the TipTap/ProseMirror editor that replaces ONLY the contenteditable
 // script surface (the toolbar / mode toggles / cue-insert chrome around it stays).
 import ScriptEditor from './ScriptEditor.vue'
-import { useFeatureFlags } from '../../composables/useFeatureFlags.js'
 import { useMessages } from '../../composables/useMessages.js'
 import { useUserPrefs } from '../../composables/useUserPrefs.js'
 import {
@@ -1630,6 +1658,13 @@ lockInfo: {
     lockedBy: '',
     lockedAt: null
   })
+},
+// Continuous-across-show line numbering: number of script paragraphs in all
+// rundown items BEFORE the current one. Supplied by ContentEditor, which owns
+// the rundown. The current item's first paragraph is numbered offset + 1.
+lineNumberOffset: {
+  type: Number,
+  default: 0
 }
 
 })
@@ -1908,10 +1943,10 @@ const { parseGoogleDocsPaste, cleanGoogleDocsNode, parseGenericPaste } = useEdit
 
 const { enabled: legacyCueConvertEnabled } = useLegacyCueConvertEnabled()
 
-// Migration flag: when on, the script surface renders the ProseMirror
-// ScriptEditor instead of the legacy contenteditable draggable list. Read once
-// at setup from localStorage (default OFF). Toggle: ff:useProseMirrorEditor.
-const useProseMirrorEditor = ref(useFeatureFlags().isEnabled('useProseMirrorEditor'))
+// The ProseMirror ScriptEditor is now the only script surface; the legacy
+// contenteditable draggable list is retired. Kept as a const ref (always true)
+// so the v-if/guards downstream still read cleanly without churn.
+const useProseMirrorEditor = ref(true)
 const scriptEditorRef = ref(null)
 
 const core = useScriptCore(props, emit, sanitizer)
@@ -1952,9 +1987,15 @@ const showStylesFlyout = ref(false)
 const showImgModal = ref(false)
 const showDeleteImgModal = ref(false)
 const showDeleteCueConfirm = ref(false)
+const showDeleteCueWithMedia = ref(false)   // disposition modal for media-linked cues
+const showMediaDeleteFailed = ref(false)    // post-deletion warning when media op fails
 const editingCueData = ref(null)
 const deletingCueData = ref(null)
 const deletingCueIndex = ref(null)
+const deletingCueMedia = ref([])            // linked file URLs for the cue being deleted
+const mediaDeleteErrors = ref([])           // [{ path, reason }] surfaced in the warning modal
+const lastMediaDisposition = ref(null)      // 'delete' | 'pool' — what to retry
+const restorableCue = ref(null)             // { removedRegion, removeStart, joinerLen }
 const selectedCueIndex = ref(null)
 const selectedSegmentIndex = ref(null)
 const pendingCueInsertionIndex = ref(null) // Snapshotted at cue-button-press time, survives modal interaction
@@ -2084,6 +2125,28 @@ const scrollContainerRef = ref(null)
 const scriptContainerRef = ref(null)
 const colorLoadTrigger = ref(0) // Reactive trigger to force re-computation of color-dependent properties
 const collapseMode = ref(false) // Collapse mode for easier drag-and-drop reordering
+
+// Whether to show the per-paragraph line-number gutter. Driven by
+// Settings → Interface → "Line numbers" (editor.lineNumbers / editorLineNumbers).
+// Reactive to settings changes via the `storage` event + a manual bump.
+const lineNumbersSettingTick = ref(0)
+const showLineNumbers = computed(() => {
+  void lineNumbersSettingTick.value // dependency so it recomputes on bump
+  try {
+    const s = JSON.parse(localStorage.getItem('showbuild_interface_settings') || '{}')
+    return s.editorLineNumbers !== false // default ON
+  } catch {
+    return true
+  }
+})
+// Re-read when interface settings change in another tab/the settings page.
+function _onInterfaceSettingsStorage(e) {
+  if (!e || e.key === 'showbuild_interface_settings') lineNumbersSettingTick.value++
+}
+
+// Continuous-across-show line numbering: forward the offset ContentEditor
+// computed (paragraphs in prior rundown items) straight to ScriptEditor.
+const lineNumberOffset = computed(() => props.lineNumberOffset || 0)
 // segmentReparseKey — moved to useScriptCore composable
 const isPasting = ref(false) // Show spinner overlay during Google Docs paste processing
 const lastMultiSelectAnchor = ref(null) // Anchor index for shift+click range selection
@@ -5576,6 +5639,24 @@ function handleEditGfx(cueData) {
 }
 
 /**
+ * Edit request bridged up from a ProseMirror cue NodeView (TipTap editor).
+ * The NodeView is outside the normal component tree, so the edit travels
+ * through editor.options.onEditCue → ScriptEditor → here. Dispatch by kind to
+ * the same handlers the legacy cards use, which open FsqModal / GfxModal in
+ * edit mode (initial-data = this cue) — letting the user change the quote text
+ * and every other field.
+ */
+function handlePmEditCue({ kind, cueData }) {
+  if (kind === 'fsq') {
+    handleEditFsq(cueData);
+  } else if (kind === 'gfx') {
+    handleEditGfx(cueData);
+  } else {
+    console.warn('handlePmEditCue: unknown cue kind', kind);
+  }
+}
+
+/**
  * Handle SOT job status change (especially completion)
  * Emits to ContentEditor to trigger content refresh
  */
@@ -5775,19 +5856,255 @@ function deleteCue(index) {
   showDeleteCueConfirm.value = true;
 }
 
-function confirmDeleteCue() {
+// ──────────────────────────────────────────────────────────────────────────
+// Cue delete + media disposition (ported from live 2026-06-01 work, adapted to
+// the ProseMirror editor). The disposition logic, the media API calls, and the
+// restore-on-failure flow are IDENTICAL to live. The only adaptation: the
+// ProseMirror cue NodeView is detached from scriptSegments indices, so when a PM
+// cue is deleted it hands us a removeNode() that drops that exact atom node.
+// `removeCueFromDocument()` uses removeNode() when set, else the legacy
+// index-based performCueDeletion — so every handler below is editor-agnostic.
+// ──────────────────────────────────────────────────────────────────────────
+const pmRemoveNode = ref(null);
+
+// Bridge entry: the PM NodeView's cue card emitted `delete`. Collect the cue's
+// own linked media and open the right modal — same branching as live deleteCue.
+// Cue types that carry media and therefore get the 3-way disposition modal
+// (Delete Cue Only / Delete Cue & Media / Release to Pool). Routing is by TYPE,
+// not by whether collectCueMedia() currently finds a resolvable URL — a freshly
+// processed SOT may still hold a transient blob: URL (which collectCueMedia
+// rightly skips for the delete API), but the user must STILL be offered the
+// disposition choice. Gating on collected-media length is what dropped SOTs to
+// the plain confirm and "lost the 3 options".
+const MEDIA_CUE_TYPES = ['SOT', 'VO', 'NAT', 'PKG', 'IMG', 'GFX', 'FSQ', 'BUMP', 'STING'];
+
+function handlePmDeleteCue({ cueData, removeNode }) {
+  pmRemoveNode.value = removeNode || null;
+  deletingCueData.value = cueData || null;
+  deletingCueIndex.value = null; // PM path is index-less
+  deletingCueMedia.value = collectCueMedia(cueData);
+
+  const cueType = (cueData?.type || '').toString().toUpperCase();
+  if (MEDIA_CUE_TYPES.includes(cueType)) {
+    showDeleteCueWithMedia.value = true;
+  } else {
+    showDeleteCueConfirm.value = true;
+  }
+}
+
+/**
+ * Collect every media file a cue links to. ALWAYS driven by the cue's own
+ * URL fields — never by globbing the AssetID, because one AssetID can be
+ * shared by multiple cues pointing at different files.
+ */
+function collectCueMedia(cueData) {
+  if (!cueData) return [];
+  const raw = cueData.rawData || {};
+  const urls = [];
+  const push = (v) => {
+    if (!v || typeof v !== 'string') return;
+    const s = v.trim();
+    if (!s) return;
+    // Skip in-browser-only URLs: a blob:/data: URL is a transient object URL
+    // (e.g. an unsaved SOT upload's inline-preview source), NOT a file on disk.
+    // The cue cards guard against these too (see PlaceholderCueCard mediaUrl/thumbnailUrl).
+    if (s.startsWith('blob:') || s.startsWith('data:')) return;
+    urls.push(s);
+  };
+  push(cueData.mediaUrl); push(raw.mediaurl); push(raw.MediaURL);
+  push(cueData.audioUrl); push(raw.audiourl); push(raw.AudioURL);
+  push(cueData.thumbnailUrl); push(raw.thumbnailurl); push(raw.ThumbnailURL);
+  const opts = cueData.thumbnailOptions || raw.thumbnailOptions;
+  if (Array.isArray(opts)) opts.forEach(push);
+  return [...new Set(urls)];
+}
+
+// Remove the cue from the document. PM path: drop the exact node and flush.
+// Legacy path: index-based raw-content removal (performCueDeletion, kept below).
+function removeCueFromDocument() {
+  if (typeof pmRemoveNode.value === 'function') {
+    pmRemoveNode.value();
+    // allowIntentionalDelete=true: this flush ALWAYS follows a deliberate cue
+    // removal (both "delete cue only" and "delete + media" route here), so the
+    // loss assertion must NOT suppress the (cue-count-reducing, field-dropping)
+    // emit — otherwise the delete never persists and the cue returns on reload.
+    if (scriptEditorRef.value?.flushPendingChanges) scriptEditorRef.value.flushPendingChanges(true);
+    emit('user-initiated-shrink');
+    nextTick(() => emit('save'));
+    pmRemoveNode.value = null;
+    return;
+  }
   if (deletingCueIndex.value != null) {
     performCueDeletion(deletingCueIndex.value, false);
   }
+}
+
+function confirmDeleteCue() {
+  removeCueFromDocument();
   showDeleteCueConfirm.value = false;
   deletingCueData.value = null;
   deletingCueIndex.value = null;
+  deletingCueMedia.value = [];
 }
 
 function cancelDeleteCue() {
   showDeleteCueConfirm.value = false;
   deletingCueData.value = null;
   deletingCueIndex.value = null;
+  deletingCueMedia.value = [];
+  pmRemoveNode.value = null;
+}
+
+function buildAuthHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  try {
+    // This branch standardized on the 'auth-token' key (useAuth.js / stores/auth.js);
+    // fall back to legacy keys just in case.
+    const token = localStorage.getItem('auth-token')
+      || localStorage.getItem('auth_token')
+      || localStorage.getItem('token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  } catch (e) { /* ignore */ }
+  return headers;
+}
+
+// Call the backend to delete or release the cue's linked media files.
+async function dispatchMediaDisposition(disposition, media, cueData) {
+  const ep = currentEpisodeNumber.value;
+  if (!ep) throw new Error('No episode selected');
+  const endpoint = disposition === 'pool'
+    ? `/api/episodes/${ep}/cue-assets/move-to-pool`
+    : `/api/episodes/${ep}/cue-assets/delete`;
+  const body = disposition === 'pool'
+    ? { media_urls: media, slug: cueData?.slug || '', cue_type: cueData?.type || '', asset_id: cueData?.assetId || cueData?.rawData?.assetid || '' }
+    : { media_urls: media };
+  const resp = await fetch(endpoint, {
+    method: 'POST',
+    headers: buildAuthHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+  return resp.json();
+}
+
+// Shared flow: remove the cue, then run the chosen media disposition. On any
+// media error, surface the warning modal (with retry / restore).
+async function runCueDispositionFlow(disposition) {
+  const cueData = deletingCueData.value;
+  const media = [...deletingCueMedia.value];
+
+  removeCueFromDocument();
+  showDeleteCueWithMedia.value = false;
+
+  if (media.length > 0) {
+    lastMediaDisposition.value = disposition;
+    try {
+      const result = await dispatchMediaDisposition(disposition, media, cueData);
+      const errs = result?.errors || [];
+      if (errs.length > 0) {
+        mediaDeleteErrors.value = errs;
+        showMediaDeleteFailed.value = true;
+        return;
+      }
+      flashMessage.value = {
+        show: true,
+        text: disposition === 'pool'
+          ? `Cue deleted · ${result.moved?.length || media.length} file(s) released to pool`
+          : `Cue deleted · ${result.deleted?.length || 0} file(s) removed`,
+        color: 'success',
+        timeout: 2000,
+      };
+    } catch (err) {
+      mediaDeleteErrors.value = [{ path: media.join(', '), reason: err.message || 'Request failed' }];
+      showMediaDeleteFailed.value = true;
+      return;
+    }
+  }
+
+  deletingCueData.value = null;
+  deletingCueIndex.value = null;
+  deletingCueMedia.value = [];
+  restorableCue.value = null;
+}
+
+// Disposition modal handlers (3-way)
+function handleDeleteCueOnly() {
+  showDeleteCueWithMedia.value = false;
+  removeCueFromDocument();
+  deletingCueData.value = null;
+  deletingCueIndex.value = null;
+  deletingCueMedia.value = [];
+  restorableCue.value = null;
+}
+
+function handleDeleteWithMedia() {
+  runCueDispositionFlow('delete');
+}
+
+function handleDeleteReleaseToPool() {
+  runCueDispositionFlow('pool');
+}
+
+// Media-failure warning modal handlers
+function handleMediaFailAcknowledge() {
+  showMediaDeleteFailed.value = false;
+  mediaDeleteErrors.value = [];
+  deletingCueData.value = null;
+  deletingCueIndex.value = null;
+  deletingCueMedia.value = [];
+  restorableCue.value = null;
+}
+
+async function handleMediaFailRetry() {
+  const media = [...deletingCueMedia.value];
+  const cueData = deletingCueData.value;
+  const disposition = lastMediaDisposition.value || 'delete';
+  try {
+    const result = await dispatchMediaDisposition(disposition, media, cueData);
+    const errs = result?.errors || [];
+    if (errs.length > 0) {
+      mediaDeleteErrors.value = errs;
+      return;
+    }
+    showMediaDeleteFailed.value = false;
+    mediaDeleteErrors.value = [];
+    flashMessage.value = {
+      show: true,
+      text: disposition === 'pool' ? 'Media released to pool' : 'Media deleted',
+      color: 'success',
+      timeout: 2000,
+    };
+    deletingCueData.value = null;
+    deletingCueIndex.value = null;
+    deletingCueMedia.value = [];
+    restorableCue.value = null;
+  } catch (err) {
+    mediaDeleteErrors.value = [{ path: media.join(', '), reason: err.message || 'Request failed' }];
+  }
+}
+
+// "Cancel deletion" on failure: PM path can't re-splice a removed node from a
+// raw-string snapshot, so restore by reloading the prior scriptContent. The
+// legacy index path uses restorableCue (set by performCueDeletion).
+function handleMediaFailRestore() {
+  if (restorableCue.value) {
+    const snap = restorableCue.value;
+    const current = props.scriptContent || '';
+    const before = current.substring(0, snap.removeStart);
+    const after = current.substring(snap.removeStart + (snap.joinerLen || 0));
+    const restored = before + snap.removedRegion + after;
+    cachedScriptSegments.value = null;
+    lastParsedContent.value = null;
+    clearEditBuffer();
+    emit('update:scriptContent', restored);
+    nextTick(() => emit('save'));
+  }
+  showMediaDeleteFailed.value = false;
+  mediaDeleteErrors.value = [];
+  deletingCueData.value = null;
+  deletingCueIndex.value = null;
+  deletingCueMedia.value = [];
+  restorableCue.value = null;
 }
 
 function performCueDeletion(index, deleteAssets = false) {
@@ -5929,20 +6246,20 @@ function performCueDeletion(index, deleteAssets = false) {
   }
 }
 
+// Legacy IMG modal handlers — route into the same disposition flow.
 function handleDeleteWithAssets() {
-  if (deletingCueIndex.value !== null) {
-    performCueDeletion(deletingCueIndex.value, true);
-    deletingCueData.value = null;
-    deletingCueIndex.value = null;
+  // "Delete Cue & Media" path of the IMG modal.
+  if (deletingCueMedia.value.length === 0) {
+    deletingCueMedia.value = collectCueMedia(deletingCueData.value);
   }
+  showDeleteImgModal.value = false;
+  runCueDispositionFlow('delete');
 }
 
 function handleDeletePreserveAssets() {
-  if (deletingCueIndex.value !== null) {
-    performCueDeletion(deletingCueIndex.value, false);
-    deletingCueData.value = null;
-    deletingCueIndex.value = null;
-  }
+  // "Delete Cue Only" path of the IMG modal.
+  showDeleteImgModal.value = false;
+  handleDeleteCueOnly();
 }
 
 /**
@@ -6913,14 +7230,25 @@ function insertCueAtSnapshotPosition(cueContent) {
   // single guard covers every cue type that routes through here (FSQ, SOT, VOX,
   // MUS, LIVE, IMG, and the multi-SOT loop).
   if (useProseMirrorEditor.value) {
-    // Make sure any pending ProseMirror edit is flushed into rawScriptContent
-    // first so we append onto current content, not a stale snapshot.
+    pendingCueInsertionIndex.value = null;
+    // Insert at the CURSOR via the editor's own API (parses the cue markdown to a
+    // PM node and drops it at the current selection) — not at the bottom.
+    if (scriptEditorRef.value?.insertCueAtCursor) {
+      const ok = scriptEditorRef.value.insertCueAtCursor(cueContent);
+      if (ok) {
+        console.log('📍 ProseMirror active — inserted cue at cursor');
+        return;
+      }
+      // insertCueAtCursor returned false (no selection / parse miss) — fall through
+      // to the append fallback below so the cue is never lost.
+    }
+    // Fallback: append to the raw script (used only if the editor ref/cursor is
+    // unavailable). Flush first so we append onto current content, not a stale snapshot.
     if (scriptEditorRef.value?.flushPendingChanges) scriptEditorRef.value.flushPendingChanges();
     const current = rawScriptContent.value || '';
     const sep = current && !current.endsWith('\n') ? '\n\n' : '';
     rawScriptContent.value = `${current}${sep}${cueContent}\n`;
-    pendingCueInsertionIndex.value = null;
-    console.log('📍 ProseMirror active — appended cue to rawScriptContent');
+    console.log('📍 ProseMirror active — appended cue to rawScriptContent (fallback)');
     return;
   }
 
@@ -10517,6 +10845,8 @@ emit('duration-calculated', newDuration);
 onMounted(() => {
   console.log('EditorPanel mounted with metadata:', props.currentItemMetadata);
 
+  window.addEventListener('storage', _onInterfaceSettingsStorage);
+
   // Wire up useScriptCore draggable handlers
   setPendingCueContextGetter(() => ({
   pendingCueData: pendingCueData.value,
@@ -10734,6 +11064,8 @@ onBeforeUnmount(() => {
   // Clean up timers
   stopAutoscrubTimer();
   clearAutoscrubDebounce();
+
+  window.removeEventListener('storage', _onInterfaceSettingsStorage);
 })
 
 // ============================================================================
@@ -12048,6 +12380,30 @@ defineExpose({
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
   margin: 0 0 0 0;
   background-color: rgba(0, 0, 0, 0.03);
+  /* Let the collapse-mode bar span the full width along the bottom edge. */
+  position: relative;
+  padding-bottom: 4px;
+}
+
+/* Collapse-mode bar: spans the bottom of the title header. Keeps the original
+   orange indicator color (gradient + white text), just reshaped into a
+   full-width bar along the header's bottom edge. */
+.collapse-mode-bar {
+  margin: 6px -40px 0 -40px;   /* break out of the header's horizontal padding */
+  padding: 4px 40px;
+  background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+  color: white;
+  font-family: 'Roboto', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  cursor: default;
+}
+.segment-title-header--collapsed {
+  padding-bottom: 0;
 }
 
 .segment-title-placeholder {

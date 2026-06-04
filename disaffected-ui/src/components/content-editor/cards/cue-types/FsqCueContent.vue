@@ -69,8 +69,23 @@
           Edit FSQ
         </v-btn>
 
+        <!-- View / Download show only when a CURRENT (not-dirty) PNG exists.
+             Any edit flips fsqDirty true → these hide until a new PNG renders. -->
         <v-btn
-          v-if="cueData.mediaUrl"
+          v-if="cueData.mediaUrl && !fsqDirty"
+          block
+          size="small"
+          variant="text"
+          color="deep-purple"
+          class="mb-2"
+          @click.stop="$emit('view-png')"
+        >
+          <v-icon size="small" start>mdi-eye</v-icon>
+          View PNG
+        </v-btn>
+
+        <v-btn
+          v-if="cueData.mediaUrl && !fsqDirty"
           block
           size="small"
           variant="text"
@@ -306,7 +321,7 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['edit-fsq', 'delete', 'generate-png', 'download-png', 'open-fsq-preview', 'update-meta', 'apply-all-fsq']);
+const emit = defineEmits(['edit-fsq', 'delete', 'generate-png', 'download-png', 'view-png', 'open-fsq-preview', 'update-meta', 'apply-all-fsq']);
 
 // Collapsible adjustments panel
 const adjustmentsOpen = ref(false);

@@ -58,6 +58,9 @@ export const schema = new Schema({
         // Raw embedded <img ...> tag, kept verbatim and distinct from the
         // mediaUrl field so neither absorbs the other (Phase 0 BUG 2 fix).
         imgTag: { default: '' },
+        // Per-cue collapsed UI state. Persisted via the Begin-Cue marker suffix
+        // in markdown.js; survives drag-drop (the node object is reused on move).
+        collapsed: { default: false },
       },
       // Cues have no DOM parse rule — they are produced only by the markdown
       // parser. The NodeView (Phase 2) owns their rendering.
