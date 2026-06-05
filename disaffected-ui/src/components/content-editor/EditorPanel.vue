@@ -114,18 +114,6 @@
               <v-icon left size="small">mdi-tablet</v-icon>
               iPad
             </v-btn>
-            <v-btn size="small" class="mode-btn" rounded="0" disabled>
-              <v-icon left size="small">mdi-phone-outline</v-icon>
-              Caller
-            </v-btn>
-            <v-btn size="small" class="mode-btn" rounded="0" disabled>
-              <v-icon left size="small">mdi-monitor-eye</v-icon>
-              Director
-            </v-btn>
-            <v-btn size="small" class="mode-btn" rounded="0" disabled>
-              <v-icon left size="small">mdi-script-text</v-icon>
-              Prompter
-            </v-btn>
           </div>
         </div>
 
@@ -1468,17 +1456,6 @@
     </v-card>
   </v-dialog>
 
-  <!-- Stub View Modal -->
-  <v-dialog v-model="showStubModal" max-width="400">
-    <v-card>
-      <v-card-title class="text-h6">{{ stubViewName }}</v-card-title>
-      <v-card-text>This function is not yet available.</v-card-text>
-      <v-card-actions>
-        <v-spacer></v-spacer>
-        <v-btn variant="text" @click="showStubModal = false">OK</v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
 </template>
 
 <script setup>
@@ -2020,8 +1997,6 @@ const pendingPlacement = ref(null)
 const temporaryEpisode = ref(null) // For episode requirement callback
 const pendingCueData = ref(null) // Store IMG cue data for post-modal placement
 const useVisualScriptMode = ref(true) // Toggle for visual cue cards vs traditional text - RE-ENABLED, fixing visibility issue
-const showStubModal = ref(false)
-const stubViewName = ref('')
 const hoveredParagraphIndex = ref(null) // Track which paragraph is being hovered
 const hoveredCueIndex = ref(null) // Track which cue is being hovered (for flag button)
 const activeFlagNoteIndex = ref(null) // Track which segment's flag note panel is open
@@ -2440,16 +2415,6 @@ function openIpadMode() {
   // Open iPad scroll view in new window/tab
   const url = `/ipad-scroll/${currentEpisodeNumber.value}`
   window.open(url, '_blank')
-}
-
-function openCallerView() {
-  stubViewName.value = 'Caller View'
-  showStubModal.value = true
-}
-
-function openDirectorView() {
-  stubViewName.value = 'Director View'
-  showStubModal.value = true
 }
 
 /**
