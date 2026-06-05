@@ -361,6 +361,7 @@
                           { 'region-item-selected': isItemRegionSelected(item) },
                           { 'generating-item': getItemGlobalIndex(item) === generatingItemIndex },
                           { 'needs-attention-item': itemHasNeedsAttention(item) },
+                          { 'locked-by-other': isLockedByOther(item) },
                           llmState ? llmState.getVisualClass('item', item.id) : ''
                         ]"
                         :style="Object.assign({},
@@ -415,9 +416,9 @@
                                 v-for="u in presentUsersFor(item)"
                                 :key="u.id"
                                 :color="u.chip_color || 'primary'"
-                                size="18"
+                                size="28"
                                 class="presence-avatar"
-                                :title="`${u.display_name || u.username} is here`"
+                                :title="`Locked — ${u.display_name || u.username} is editing this segment`"
                               >
                                 <v-img v-if="u.profile_picture" :src="u.profile_picture" />
                                 <span v-else class="presence-initials">{{ avatarInitials(u) }}</span>
@@ -1185,6 +1186,13 @@ function presentUsersFor(item) {
     && u.current_location?.segment_id != null
     && String(u.current_location.segment_id) === String(itemId)
   )
+}
+
+// True when another user is present on this item (proxy for "locked by
+// someone else"). Drives the greyed-out card + enlarged presence badge so the
+// rundown list shows at a glance which segments are occupied by another editor.
+function isLockedByOther(item) {
+  return presentUsersFor(item).length > 0
 }
 
 function avatarInitials(u) {
@@ -3568,18 +3576,36 @@ defineExpose({
   flex-shrink: 0;
 }
 .presence-stack .presence-avatar {
-  margin-left: -6px;
-  border: 1.5px solid #fff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+  margin-left: -8px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 .presence-stack .presence-avatar:first-child {
   margin-left: 0;
 }
 .presence-initials {
-  font-size: 9px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   color: #fff;
   letter-spacing: 0;
+}
+
+/* Locked by another user (todo #41): grey out the whole row so it reads as
+   occupied/read-only at a glance. We desaturate + dim the row's text/cells via
+   grayscale (NOT opacity, so the badge below can re-saturate cleanly), and make
+   the enlarged presence avatar amber-ringed so it stays the obvious "locked by
+   whom" indicator against the greyed row. */
+.rundown-item-card.locked-by-other .compact-rundown-row {
+  filter: grayscale(0.9) brightness(0.88) contrast(0.92);
+  transition: filter 0.15s ease;
+}
+.rundown-item-card.locked-by-other .compact-rundown-row .presence-stack {
+  /* grayscale is reversible on a descendant — restore the badge's colour. */
+  filter: grayscale(0) brightness(1.15);
+}
+.rundown-item-card.locked-by-other .compact-rundown-row .presence-stack .presence-avatar {
+  border-color: #ffd54f;            /* amber ring = "locked" cue */
+  box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.65), 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 .slug-text {
   font-weight: normal;
