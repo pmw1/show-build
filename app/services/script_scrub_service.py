@@ -28,9 +28,12 @@ suspended client-side because it removed blank paragraphs users need around cues
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # --- Pattern source-of-truth (mirror of disaffected-ui legacyCueConvert/patterns.js) ---
 # Invalid legacy cue codes like {SOT/slug} or (VO/slug) that must never reach
@@ -71,8 +74,13 @@ class ScrubSettings:
     remove_leading_dashes: bool = True
     clean_whitespace: bool = True
 
+    interval: int = 30
+
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "ScrubSettings":
+        """Build from a settings dict. Accepts both the snake_case server keys
+        (InterfaceSettings: autoscrub_enabled, …) and the legacy camelCase
+        localStorage keys (autoscrubEnabled / autoformatEnabled, …)."""
         d = d or {}
 
         def pick(*keys, default=True):
@@ -81,12 +89,33 @@ class ScrubSettings:
                     return d[k] is not False
             return default
 
+        def pick_int(*keys, default=30):
+            for k in keys:
+                if k in d and d[k] is not None:
+                    try:
+                        return int(d[k])
+                    except (TypeError, ValueError):
+                        pass
+            return default
+
         return cls(
-            enabled=pick("autoscrubEnabled", "autoformatEnabled"),
-            strip_spans=pick("autoscrubStripSpans", "autoformatStripSpans"),
-            remove_leading_dashes=pick("autoscrubRemoveLeadingDashes", "autoformatRemoveLeadingDashes"),
-            clean_whitespace=pick("autoscrubCleanWhitespace", "autoformatCleanWhitespace"),
+            enabled=pick("autoscrub_enabled", "autoscrubEnabled", "autoformatEnabled"),
+            strip_spans=pick("autoscrub_strip_spans", "autoscrubStripSpans", "autoformatStripSpans"),
+            remove_leading_dashes=pick("autoscrub_remove_leading_dashes", "autoscrubRemoveLeadingDashes", "autoformatRemoveLeadingDashes"),
+            clean_whitespace=pick("autoscrub_clean_whitespace", "autoscrubCleanWhitespace", "autoformatCleanWhitespace"),
+            interval=pick_int("autoscrub_interval", "autoscrubInterval", "autoformatInterval"),
         )
+
+
+def load_scrub_settings() -> ScrubSettings:
+    """Read the admin-configured Autoscrub settings from the DB-backed interface
+    settings. Safe to call from a Celery worker or a request handler. Falls back
+    to defaults if settings can't be loaded."""
+    try:
+        from routers.settings._shared import load_settings
+        return ScrubSettings.from_dict((load_settings() or {}).get("interface"))
+    except Exception:
+        return ScrubSettings()
 
 
 @dataclass
@@ -209,3 +238,74 @@ def scrub_script_content(content: str, settings: Optional[ScrubSettings] = None)
         notes.append("cleared resolved flags")
 
     return ScrubResult(content=out, changed=(out != content), notes=notes)
+
+
+# ---------------------------------------------------------------------------
+# Celery beat task — normalize idle rundown items across active episodes.
+# Registered in app/celery_app.py beat_schedule. The save endpoint handles the
+# focused item; this catches items edited by other users / never opened, and
+# items pasted into before the client save lands. Items touched in the last
+# 2 minutes are SKIPPED so we never rewrite something being actively edited.
+# ---------------------------------------------------------------------------
+try:
+    from celery import shared_task
+except Exception:  # celery not importable in some contexts (tests) — task optional
+    shared_task = None
+
+
+def _scrub_idle_items_impl(limit: int = 200) -> dict:
+    from database import SessionLocal
+    from sqlalchemy import text
+
+    settings = load_scrub_settings()
+    if not settings.enabled:
+        return {"status": "disabled", "scrubbed": 0, "scanned": 0}
+
+    db = SessionLocal()
+    scrubbed = 0
+    scanned = 0
+    try:
+        rows = db.execute(text("""
+            SELECT ri.asset_id, ri.script_content
+            FROM rundown_items ri
+            JOIN rundowns r ON r.id = ri.rundown_id
+            JOIN episodes e ON e.id = r.episode_id
+            WHERE e.status IN ('draft', 'production')
+              AND ri.script_content IS NOT NULL
+              AND LENGTH(ri.script_content) > 0
+              AND ri.updated_at < NOW() - INTERVAL '2 minutes'
+            ORDER BY ri.updated_at ASC
+            LIMIT :lim
+        """), {"lim": limit}).fetchall()
+
+        for row in rows:
+            scanned += 1
+            result = scrub_script_content(row.script_content or "", settings)
+            if not result.changed:
+                continue
+            # Re-check the row hasn't been touched since we read it (avoid
+            # clobbering an edit that started mid-sweep), then write.
+            upd = db.execute(text("""
+                UPDATE rundown_items
+                SET script_content = :sc, updated_at = updated_at
+                WHERE asset_id = :aid
+                  AND updated_at < NOW() - INTERVAL '2 minutes'
+            """), {"sc": result.content, "aid": row.asset_id})
+            if upd.rowcount:
+                scrubbed += 1
+                logger.info(f"[scrub-sweep] {row.asset_id}: {', '.join(result.notes)}")
+        db.commit()
+        return {"status": "ok", "scanned": scanned, "scrubbed": scrubbed}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[scrub-sweep] failed: {e}")
+        return {"status": "error", "error": str(e), "scanned": scanned, "scrubbed": scrubbed}
+    finally:
+        db.close()
+
+
+if shared_task is not None:
+    @shared_task(name="services.script_scrub_service.sweep_idle_items_for_scrub")
+    def sweep_idle_items_for_scrub(limit: int = 200) -> dict:
+        """Beat task: normalize idle rundown items (>2min since last edit)."""
+        return _scrub_idle_items_impl(limit)

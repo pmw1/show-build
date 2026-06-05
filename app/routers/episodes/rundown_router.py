@@ -429,6 +429,19 @@ async def update_rundown_item(
             new_script = item_data['script_content']
             existing_script = item.script_content or ''
 
+            # Server-side Autoscrub: normalize the focused item as it lands
+            # (strip span/div cruft, clean whitespace, flag invalid cues, etc).
+            # This is the "scrub on save" slice — safe because the edit is done.
+            # See docs/AUTOSCRUB_SERVER_REFACTOR_PLAN.md.
+            try:
+                from services.script_scrub_service import scrub_script_content, load_scrub_settings
+                _scrub = scrub_script_content(new_script or '', load_scrub_settings())
+                if _scrub.changed:
+                    new_script = _scrub.content
+                    logger.info(f"Autoscrub normalized {item_id} on save: {', '.join(_scrub.notes)}")
+            except Exception as _e:
+                logger.warning(f"Autoscrub skipped for {item_id}: {_e}")
+
             # Calculate content lengths (strip HTML tags)
             import re
             new_content_length = len(re.sub(r'<[^>]+>', '', new_script or '').strip())

@@ -41,7 +41,8 @@ celery_app = Celery(
         "services.tools_tasks",  # Production tools (validation, reports)
         "celery_cleanup",  # Orphaned job cleanup tasks
         "services.auto_description_service",  # Background tone + description generation
-        "services.phase2_enrichment_service"  # Async Phase 2 Grok enrichment
+        "services.phase2_enrichment_service",  # Async Phase 2 Grok enrichment
+        "services.script_scrub_service",  # Autoscrub: normalize idle rundown items
     ]
 )
 
@@ -82,6 +83,9 @@ celery_app.conf.update(
             "services.ffmpeg_tasks.*": {"queue": "media"},
             "services.auto_description_service.*": {"queue": "llm_content"},
             "services.phase2_enrichment_service.*": {"queue": "llm_content"},
+            # Autoscrub sweep is lightweight (regex + DB); route to the general
+            # 'assets' queue, which the worker fleet consumes.
+            "services.script_scrub_service.*": {"queue": "assets"},
         }
     ],
 
@@ -159,6 +163,14 @@ celery_app.conf.update(
         'episode-desc-sweep-every-120s': {
             'task': 'services.auto_description_service.sweep_episodes_for_auto_generation',
             'schedule': 120.0,
+        },
+        # Autoscrub: normalize idle rundown items (>2min since last edit). The
+        # task itself reads autoscrub_enabled from interface settings each run,
+        # so toggling it off in the UI stops the work even though beat fires.
+        # See docs/AUTOSCRUB_SERVER_REFACTOR_PLAN.md.
+        'autoscrub-idle-items-every-60s': {
+            'task': 'services.script_scrub_service.sweep_idle_items_for_scrub',
+            'schedule': 60.0,
         },
     },
 )

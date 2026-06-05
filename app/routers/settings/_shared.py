@@ -45,6 +45,15 @@ class InterfaceSettings(BaseModel):
     default_view: str = Field("grid", description="Default episode view (grid/list)")
     cue_card_alignment: str = Field("left", description="Cue card alignment in script mode (left/center/right)")
     legacy_cue_convert_enabled: bool = Field(True, description="Enable the Legacy Cue Convert module — adds a 'Convert to Cue' button on Auto-Scrub-flagged paragraphs containing legacy {SOT/foo} or (SOT/foo) tokens")
+    # Autoscrub (script_content normalization) — read server-side by the scrub
+    # service (app/services/script_scrub_service.py). Relocated here from
+    # browser localStorage so the Celery beat job + save endpoint can read them.
+    # See docs/AUTOSCRUB_SERVER_REFACTOR_PLAN.md.
+    autoscrub_enabled: bool = Field(True, description="Enable server-side Autoscrub normalization of script content")
+    autoscrub_strip_spans: bool = Field(True, description="Autoscrub: strip <span>/<div> cruft, convert weight/style spans to <b>/<i>")
+    autoscrub_remove_leading_dashes: bool = Field(True, description="Autoscrub: strip a leading dash from a paragraph (unless it is a dash list)")
+    autoscrub_clean_whitespace: bool = Field(True, description="Autoscrub: convert &nbsp; to spaces and collapse runs of spaces")
+    autoscrub_interval: int = Field(30, description="Autoscrub beat-job interval in seconds")
 
 class RundownSettings(BaseModel):
     """Rundown configuration"""
