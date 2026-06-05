@@ -266,8 +266,8 @@
           <div v-if="showWaveform" class="waveform-wrapper">
             <AudioWaveform
               :waveform-data="waveformData"
-              :current-time="videoPlayerRef?.currentTime || 0"
-              :duration="videoPlayerRef?.duration || 0"
+              :current-time="currentTimeSec"
+              :duration="durationSec"
               :height="60"
               background-color="rgba(0, 0, 0, 0.7)"
               wave-color="#FF8F00"
@@ -453,6 +453,7 @@ const props = defineProps({
   episode: String,
   duplicateSlugs: { type: Array, default: () => [] },
   cueType: { type: String, default: 'vo' }, // eslint-disable-line no-unused-vars
+  prefillData: { type: Object, default: null },
 })
 const emit = defineEmits(['update:show', 'submit', 'submit-multiple'])
 
@@ -488,7 +489,7 @@ const trim = useTrimmableMediaModal({
 const {
   // State
   trimStart, trimEnd, duration, currentFramerate, isPlaying,
-  currentTimecode, durationTimecode, remainingTimecode,
+  currentTimecode, currentTimeSec, durationSec, durationTimecode, remainingTimecode,
   currentActionDisplay, thumbnailTimecode,
   playbackSpeed, showSpeedIndicator, speedLabel,
   showFrameCounter, currentFrameNumber, totalFrames, frameStepDirection,
@@ -532,6 +533,11 @@ const topError = ref('')
 const videoSpecs = ref({})
 let uploadAbortFn = null
 
+// When reinserting a pooled file, the media already exists on disk — no
+// upload/processing needed. These hold the existing URL + asset id.
+const prefilledMediaUrl = ref('')
+const prefilledAssetId = ref('')
+
 // Cut-mode focus state
 const focusedCutMode = ref(null)
 
@@ -570,6 +576,8 @@ const {
 // Derived
 // ---------------------------------------------------------------------------
 const canSubmit = computed(() => {
+  // Reinserting an existing pooled file: only a slug is required.
+  if (prefilledMediaUrl.value) return !!slug.value.trim()
   if (!blobUrl.value || !uploadComplete.value) return false
   if (clippingMethod.value === 'individual-clips') {
     // Need at least one clip taken
@@ -703,6 +711,8 @@ function onVideoMetadata() {
   }
   currentFramerate.value = videoSpecs.value.framerate
   duration.value = secondsToTimecode(dur, false)
+  // Reactive seconds for the waveform in/out markers + region (todo #32).
+  if (dur && dur > 0) durationSec.value = dur
 
   if (videoInfoOverlayRef.value) {
     videoInfoOverlayRef.value.innerHTML = `
@@ -791,6 +801,33 @@ useDoubleEnterToSlug(() => props.show, slugFieldRef)
 // ---------------------------------------------------------------------------
 async function submit() {
   if (isSubmitting.value) return
+
+  // Reinserting an existing pooled file — emit a cue pointing at the
+  // existing media URL; no upload or background processing required.
+  if (prefilledMediaUrl.value) {
+    if (!slug.value.trim()) {
+      slugError.value = 'Slug required'
+      return
+    }
+    isSubmitting.value = true
+    try {
+      emit('submit', {
+        type: 'VO',
+        slug: slug.value.trim(),
+        description: description.value,
+        duration: duration.value || '00:00:30',
+        mediaURL: prefilledMediaUrl.value,
+        assetID: prefilledAssetId.value,
+        hasAudio: hasAudio.value,
+      })
+      resetForm()
+      emit('update:show', false)
+    } finally {
+      isSubmitting.value = false
+    }
+    return
+  }
+
   if (!blobUrl.value || !uploadComplete.value) {
     toast.warning('Wait for upload to complete')
     return
@@ -879,11 +916,29 @@ function handleEscapeKey() {
   cancel()
 }
 
+// Populate from a pooled file being reinserted. The media already exists
+// on disk; we point the preview <video> at the served URL and stash the
+// URL/asset id so submit() can skip upload + processing.
+function applyPrefill() {
+  const pf = props.prefillData
+  if (!pf || !pf.mediaUrl) return
+  prefilledMediaUrl.value = pf.mediaUrl
+  prefilledAssetId.value = pf.assetId || ''
+  if (pf.slug) slug.value = pf.slug
+  if (pf.title && !description.value) description.value = pf.title
+  // Show the existing media in the preview player (served URL, not a blob).
+  blobUrl.value = pf.mediaUrl
+  uploadComplete.value = true
+  uploadProgress.value = 100
+}
+
 function resetForm() {
   slug.value = ''
   slugError.value = ''
   description.value = ''
   topError.value = ''
+  prefilledMediaUrl.value = ''
+  prefilledAssetId.value = ''
   trimStart.value = '00:00:00'
   trimEnd.value = '00:00:00'
   clippingMethod.value = 'none'
@@ -915,6 +970,7 @@ watch(
   (newValue, oldValue) => {
     if (newValue && !oldValue) {
       kbd.install()
+      applyPrefill()
       nextTick(() => {
         focusTrap.install()
         // Auto-focus first cut-mode button (NONE)

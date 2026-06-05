@@ -573,8 +573,8 @@
               <div v-if="showWaveform" class="waveform-wrapper" style="width: 100%; margin-bottom: 15px;">
                 <AudioWaveform
                   :waveform-data="waveformData"
-                  :current-time="videoPlayerRef?.currentTime || 0"
-                  :duration="videoPlayerRef?.duration || 0"
+                  :current-time="currentTimeSec"
+                  :duration="durationSec"
                   :height="60"
                   background-color="rgba(0, 0, 0, 0.7)"
                   wave-color="#4CAF50"
@@ -1039,7 +1039,7 @@ const {
   // Trim points
   trimStart, trimEnd, duration,
   // Playback / display
-  currentFramerate, isPlaying, currentTimecode,
+  currentFramerate, isPlaying, currentTimecode, currentTimeSec, durationSec,
   remainingTimecode, currentActionDisplay, thumbnailTimecode,
   // Speed
   playbackSpeed, showSpeedIndicator, speedLabel,
@@ -1330,6 +1330,8 @@ const handleVideoMetadataLoaded = () => { // eslint-disable-line no-unused-vars
   // Auto-populate duration with frame-accurate timecode
   if (videoDuration && videoDuration > 0) {
     duration.value = secondsToTimecode(videoDuration, true)
+    // Reactive seconds for the waveform in/out markers + region (todo #32).
+    durationSec.value = videoDuration
     toast.success(`Duration auto-detected: ${duration.value} @ ${currentFramerate.value}fps`)
   }
 
@@ -1808,6 +1810,13 @@ watch(
       setupKeyboardShortcuts()
       nextTick(() => {
         setupFocusTrap()
+        // If editing/reinserting existing media, the video element only exists
+        // now that the modal is shown — point it at the served URL so it plays
+        // instead of staying black. (Blob uploads set src in their own path.)
+        if (mediaUrl.value && !blobUrl.value && videoPlayerRef.value && !videoPlayerRef.value.src) {
+          videoPlayerRef.value.src = mediaUrl.value
+          videoPlayerRef.value.load()
+        }
         // Auto-focus first cut mode button when modal opens (follows tab order)
         // Use setTimeout to ensure DOM is fully rendered and focus trap is ready
         setTimeout(() => {
@@ -1846,7 +1855,19 @@ watch(
       if (newData.duration) duration.value = newData.duration
 
       // Populate URLs
-      if (newData.mediaUrl) mediaUrl.value = newData.mediaUrl
+      if (newData.mediaUrl) {
+        mediaUrl.value = newData.mediaUrl
+        // The <video> element has no :src binding — its source is normally set
+        // imperatively after a blob upload. For existing/pooled media we must
+        // point the element at the served URL ourselves, or it stays black.
+        // Wait a tick so the v-if="mediaUrl" video element is mounted.
+        nextTick(() => {
+          if (videoPlayerRef.value) {
+            videoPlayerRef.value.src = newData.mediaUrl
+            videoPlayerRef.value.load()
+          }
+        })
+      }
       if (newData.thumbnailUrl) thumbnailUrl.value = newData.thumbnailUrl
 
       // Populate trim times if available
