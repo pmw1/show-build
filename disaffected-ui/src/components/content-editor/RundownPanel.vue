@@ -364,7 +364,9 @@
                           { 'locked-by-other': isLockedByOther(item) },
                           llmState ? llmState.getVisualClass('item', item.id) : ''
                         ]"
-                        :style="Object.assign({},
+                        :style="isLockedByOther(item)
+                          ? { backgroundColor: '#bdbdbd', color: '#616161' }
+                          : Object.assign({},
                           {
                             backgroundColor: (joinSelectMode && joinSelectedIds.has(item.asset_id || item.id))
                               ? 'rgba(103, 58, 183, 0.35)'
@@ -3590,14 +3592,25 @@ defineExpose({
   letter-spacing: 0;
 }
 
-/* Locked by another user (todo #41): grey out the whole row so it reads as
-   occupied/read-only at a glance. We desaturate + dim the row's text/cells via
-   grayscale (NOT opacity, so the badge below can re-saturate cleanly), and make
-   the enlarged presence avatar amber-ringed so it stays the obvious "locked by
-   whom" indicator against the greyed row. */
+/* Locked by another user (todo #41): the whole row goes GRAY so it reads as
+   occupied/read-only at a glance. The solid gray bg/text is forced on the card
+   via inline style (so it beats the per-type colour); this block desaturates
+   any child cells that carry their OWN colour (status bars, type label, chips,
+   icons) so nothing stays coloured. The presence avatar is lifted back out and
+   amber-ringed so "who is editing" stays the one vivid indicator. */
+.rundown-item-card.locked-by-other {
+  background-color: #bdbdbd !important;
+  color: #616161 !important;
+}
 .rundown-item-card.locked-by-other .compact-rundown-row {
-  filter: grayscale(0.9) brightness(0.88) contrast(0.92);
-  transition: filter 0.15s ease;
+  filter: grayscale(1) brightness(0.97);
+}
+.rundown-item-card.locked-by-other .compact-rundown-row .index-number,
+.rundown-item-card.locked-by-other .compact-rundown-row .type-label,
+.rundown-item-card.locked-by-other .compact-rundown-row .slug-text,
+.rundown-item-card.locked-by-other .compact-rundown-row .duration-display,
+.rundown-item-card.locked-by-other .compact-rundown-row .content-char-count {
+  color: #616161 !important;
 }
 .rundown-item-card.locked-by-other .compact-rundown-row .presence-stack {
   /* grayscale is reversible on a descendant — restore the badge's colour. */
