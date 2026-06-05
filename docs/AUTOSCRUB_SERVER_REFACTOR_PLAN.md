@@ -1,14 +1,40 @@
 # Move Autoscrub Server-Side (and Disable the Client Scrub in the Interim)
 
-## Status
+## Status — IMPLEMENTED (commits 6cb9294, e8ff8f0; dev beat added)
 
-- **Interim step (do first):** disable the client-side Autoscrub entirely.
-  Blocked only on the editor-lane coordination hold — `EditorPanel.vue` is
-  currently claimed by sibling session 746024 (todos #37/#34/#35). Apply once
-  that lane clears.
-- **Full refactor (do after):** reimplement Autoscrub as a server-side
-  normalization function. Larger, multi-file, touches the SSE plan (#24) and
-  `SAVE_RELOAD_SPEC.md`; deserves its own focused pass.
+- ✅ Client scrub DISABLED — `AUTOSCRUB_DISABLED` guard in
+  `EditorPanel.runAutoscrub()`.
+- ✅ Server normalizer — `app/services/script_scrub_service.py` (faithful,
+  idempotent port; verified). `load_scrub_settings()` reads DB settings.
+- ✅ Settings relocated to `InterfaceSettings` (`autoscrub_*`), DB-backed.
+- ✅ Save-endpoint scrub — `rundown_router` PATCH `/item/{id}` scrubs the
+  focused item on save. **Verified end-to-end via real HTTP** (span→`<b>`,
+  `&nbsp;`→space stored). Synchronous, needs no broker.
+- ✅ Celery beat sweep — `sweep_idle_items_for_scrub` (idle >2min, skips
+  items being edited), routed to `assets` queue, beat every 60s. Ran
+  successfully against dev (scanned 22, scrubbed 2).
+- ✅ **Dev beat container** — added `celery-beat-dev` to the RUNNING
+  `/srv/show-build/docker-compose.dev.yml` (Redis /1, dev DB). The live
+  `celery-beat` is on Redis /0 and cannot drive the dev worker, so dev needs
+  its own. **This change lives in `/srv` only — the repo's tracked
+  `docker-compose.dev.yml` is a stale, divergent copy; do NOT sync it
+  blindly.** Beat confirmed dispatching `autoscrub-idle-items-every-60s`.
+
+### Known infra caveat (not a code defect)
+The async beat→worker path depends on the farmhouse `.223` Redis broker, which
+is intermittently flaky (see project memory: `.223` write-disable zombie). When
+`.223` is healthy the sweep runs; during a blip, `.delay()` may transiently get
+`[Errno 111] Connection refused` while the next 60s beat tick retries. The
+user-facing **save-endpoint scrub is unaffected** (synchronous, no broker).
+
+### Remaining (optional polish)
+- Settings UI: expose the `autoscrub_*` toggles (model fields + server read
+  exist; the Settings page still writes the legacy localStorage keys, which the
+  service also accepts — so it works, just not surfaced).
+- SSE rundown-changed channel → `refreshAllItemContentInPlace()` for multi-user
+  live refresh (todo #24).
+
+## Original plan (for reference)
 
 ## Problem
 
