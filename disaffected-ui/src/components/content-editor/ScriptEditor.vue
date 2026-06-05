@@ -109,6 +109,10 @@ export default {
   components: { EditorContent },
   props: {
     scriptContent: { type: String, default: '' },
+    // When false, the editor renders the script with full Script-Mode styling
+    // (paragraphs, speakers, cue cards) but is NOT editable — used for the
+    // read-only version preview (todo #35). No saves, no cue modals fire.
+    editable: { type: Boolean, default: true },
     // Collapse mode: render every paragraph/cue as a compact one-line summary
     // (read-only except drag-reorder). Toggled from EditorPanel (Ctrl+Shift+C).
     collapsed: { type: Boolean, default: false },
@@ -243,7 +247,8 @@ export default {
           },
         }),
         content: initial.doc.toJSON(),
-        onUpdate: () => scheduleSave(),
+        editable: props.editable,
+        onUpdate: () => { if (props.editable) scheduleSave(); },
         // Every transaction (incl. the multi-select plugin's meta-only txns)
         // refreshes the toolbar's selection summary. Cheap: just reads plugin
         // state. Kept separate from onUpdate (which only fires on doc changes).

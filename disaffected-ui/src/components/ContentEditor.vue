@@ -669,7 +669,17 @@
           <div v-if="versionPreviewLoading" class="text-center py-6">
             <v-progress-circular indeterminate color="primary" />
           </div>
-          <pre v-else class="version-preview-content">{{ versionPreviewContent }}</pre>
+          <!-- Render the version with the same Script-Mode visuals (paragraphs,
+               speakers, cue cards) instead of raw markdown. Read-only: no save,
+               cue action buttons are harmless no-ops (no listeners wired). -->
+          <div v-else-if="showVersionPreview" class="version-preview-script">
+            <ScriptEditor
+              :key="versionPreviewNumber"
+              :script-content="versionPreviewContent"
+              :editable="false"
+              :show-line-numbers="false"
+            />
+          </div>
         </v-card-text>
         <v-divider />
         <v-card-actions>
@@ -690,6 +700,7 @@ import axios from 'axios';
 
 // Core panels - always visible, load eagerly
 import EditorPanel from './content-editor/EditorPanel.vue';
+import ScriptEditor from './content-editor/ScriptEditor.vue'; // read-only version preview (todo #35)
 // Migration: the TipTap/ProseMirror ScriptEditor is mounted INSIDE EditorPanel
 // (it swaps only the contenteditable surface). EditorPanel owns the flag; nothing
 // to import here.
@@ -776,6 +787,7 @@ export default {
   name: 'ContentEditor',
   components: {
     EditorPanel,
+    ScriptEditor,
     RundownPanel,
     // eslint-disable-next-line vue/no-unused-components
     MetadataPanel,
@@ -10403,14 +10415,17 @@ Try dropping an image or video file here!`
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* Read-only version preview (todo #35) */
-.version-preview-content {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: 'Roboto Mono', monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  margin: 0;
+/* Read-only version preview (todo #35): render the version with Script-Mode
+   visuals via a non-editable ScriptEditor. */
+.version-preview-script {
+  cursor: default;
+}
+/* Soften the editing affordances so it reads as a preview, not the live editor. */
+.version-preview-script :deep(.ProseMirror) {
+  cursor: default;
+}
+.version-preview-script :deep(.ProseMirror-focused) {
+  outline: none;
 }
 
 </style>
