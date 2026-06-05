@@ -58,6 +58,7 @@
         </v-btn>
 
         <v-btn
+          v-if="!readonly"
           block
           size="small"
           variant="text"
@@ -277,7 +278,7 @@
     </div>
 
     <!-- Delete button - bottom right of FSQ placeholder -->
-    <div class="fsq-footer-row">
+    <div v-if="!readonly" class="fsq-footer-row">
       <v-spacer></v-spacer>
       <v-btn
         size="small"
@@ -302,6 +303,11 @@ const props = defineProps({
   cueData: {
     type: Object,
     required: true
+  },
+  // Read-only render (version preview): hide edit/delete affordances (todo #35).
+  readonly: {
+    type: Boolean,
+    default: false
   },
   fsqDirty: {
     type: Boolean,

@@ -44,7 +44,7 @@
 
       <!-- RIF: Show action buttons and duration in header -->
       <template v-if="cueData.type === 'RIF'">
-        <div class="cue-actions">
+        <div v-if="!readonly" class="cue-actions">
           <v-btn
             icon
             size="small"
@@ -75,7 +75,7 @@
       </template>
 
       <!-- Non-RIF/GFX: Show action buttons in header (GFX has its own controls) -->
-      <div v-if="cueData.type !== 'RIF' && cueData.type !== 'GFX'" class="cue-actions">
+      <div v-if="!readonly && cueData.type !== 'RIF' && cueData.type !== 'GFX'" class="cue-actions">
         <v-btn
           icon
           size="small"
@@ -111,6 +111,7 @@
         v-if="cueData.type === 'FSQ'"
         ref="fsqContentRef"
         :cue-data="cueData"
+        :readonly="readonly"
         :fsq-dirty="fsqDirty"
         :generatingPNG="generatingPNG"
         :fsq-generation-status="fsqGenerationStatus"
@@ -172,6 +173,7 @@
         v-else-if="cueData.type === 'GFX'"
         ref="gfxContentRef"
         :cue-data="cueData"
+        :readonly="readonly"
         :has-gfx-asset="hasGfxAsset"
         :generating-gfx="generatingGfx"
         :gfx-generation-status="gfxGenerationStatus"
@@ -582,6 +584,12 @@ const props = defineProps({
   // survives drag-drop and persists into the saved markdown. The card emits
   // 'toggle-collapsed' and never mutates this directly.
   collapsed: {
+    type: Boolean,
+    default: false
+  },
+  // Read-only render (version preview): hide edit/delete affordances. The card
+  // still renders fully, it just can't be mutated. (todo #35)
+  readonly: {
     type: Boolean,
     default: false
   }

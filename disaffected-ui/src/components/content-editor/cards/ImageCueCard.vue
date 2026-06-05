@@ -37,7 +37,7 @@
         </div>
       </div>
       <v-spacer></v-spacer>
-      <div class="cue-actions">
+      <div v-if="!readonly" class="cue-actions">
         <v-btn
           size="small"
           variant="text"
@@ -257,6 +257,11 @@ const props = defineProps({
     type: Object,
     required: true,
     default: () => ({})
+  },
+  // Read-only render (version preview): hide edit/delete affordances (todo #35).
+  readonly: {
+    type: Boolean,
+    default: false
   },
   selected: {
     type: Boolean,

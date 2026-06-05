@@ -10427,6 +10427,15 @@ Try dropping an image or video file here!`
 .version-preview-script :deep(.ProseMirror-focused) {
   outline: none;
 }
+/* Hide the drag gutter in the read-only preview (reordering is disabled). Cue
+   edit/delete buttons are hidden at the source via the cards' `readonly` prop,
+   driven by editor.isEditable in CueNodeView. */
+.version-preview-script :deep(.pm-drag-gutter::before) {
+  display: none !important;
+}
+.version-preview-script :deep(.pm-drag-gutter) {
+  padding-left: 0 !important;
+}
 
 </style>
 

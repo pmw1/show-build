@@ -22,6 +22,7 @@
         v-if="isImageType"
         :cue-data="cueData"
         :collapsed="node.attrs.collapsed"
+        :readonly="!editor.isEditable"
         @toggle-collapsed="onToggleCollapsed"
         @update:cue-data="onCardUpdate"
         @update-meta="onUpdateMeta"
@@ -31,6 +32,7 @@
         v-else
         :cue-data="cueData"
         :collapsed="node.attrs.collapsed"
+        :readonly="!editor.isEditable"
         @toggle-collapsed="onToggleCollapsed"
         @update:cue-data="onCardUpdate"
         @update-meta="onUpdateMeta"
