@@ -62,6 +62,17 @@
           :title="`Change speaker for ${multiSel.paragraphCount} selected paragraph${multiSel.paragraphCount > 1 ? 's' : ''}`"
           @click="changeSpeakerOnSelection"
         >Change speaker</v-btn>
+        <!-- Stub: bulk AI modify of the selected blocks. Wired but not yet
+             functional — see modifyWithAi (todo #38). -->
+        <v-btn
+          color="purple" variant="outlined" size="small"
+          prepend-icon="mdi-robot"
+          title="Modify the selected blocks with AI (coming soon)"
+          @click="modifyWithAi"
+        >Modify with AI</v-btn>
+        <!-- Reserved placeholder slots for future bulk actions (todo #38). -->
+        <v-btn variant="text" size="small" disabled title="Reserved for a future bulk action">—</v-btn>
+        <v-btn variant="text" size="small" disabled title="Reserved for a future bulk action">—</v-btn>
         <v-btn
           color="error" variant="flat" size="small"
           prepend-icon="mdi-delete"
@@ -422,6 +433,21 @@ export default {
       flushPendingChanges();
     }
 
+    // STUB (todo #38): bulk AI modify of the selected blocks. Not yet functional —
+    // it surfaces the selected block indices and notifies the user. When the AI
+    // bulk-modify endpoint exists, wire it here (read the selection via
+    // readMultiSelection, send block content + a prompt, apply the result in one
+    // transaction so UndoRedo covers it).
+    function modifyWithAi() {
+      const sel = readMultiSelection(editor.value);
+      if (!sel.count) return;
+      // eslint-disable-next-line no-console
+      console.log('[modifyWithAi stub] selected block indices:', sel.indices);
+      if (window.notifyUserStandard) {
+        window.notifyUserStandard(`AI bulk-modify coming soon (${sel.count} block${sel.count > 1 ? 's' : ''} selected)`, '#7e57c2', 3000);
+      }
+    }
+
     // Parent reach-in contract (mirrors EditorPanel).
     expose({
       flushPendingChanges,
@@ -449,6 +475,7 @@ export default {
       joinSelectedParagraphs,
       toggleBulletOnSelection,
       changeSpeakerOnSelection,
+      modifyWithAi,
       clearMultiSelection,
     };
   },
