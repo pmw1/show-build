@@ -197,6 +197,7 @@
           @save="() => saveCurrentItem(true)"
           @save-all="saveEverything"
           @save-current="handleEditorSaveCurrent"
+          @take-over-segment="handleTakeOverSegment"
           @toggle-rundown-panel="showRundownPanel = !showRundownPanel"
           @toggle-metadata-panel="showMetadataPanel = !showMetadataPanel"
           @show-asset-browser-modal="showAssetBrowserModal = true"
@@ -650,6 +651,31 @@
         <v-card-actions style="background: #333;">
           <v-spacer />
           <v-btn variant="text" color="white" @click="showRelocatePicker = false; pendingRelocate = null;">Cancel</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Eviction notice (todo #41): shown when another user took over the
+         editing lock on the segment this session was editing. -->
+    <v-dialog :model-value="!!segmentLockState?.evicted?.value" max-width="460" persistent>
+      <v-card>
+        <v-card-title class="d-flex align-center text-error">
+          <v-icon class="mr-2" color="error">mdi-account-lock</v-icon>
+          Editing taken over
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          You have been evicted from this Rundown Item by
+          <strong>{{ segmentLockState?.evictedBy?.value || 'another user' }}</strong>.
+          <div class="text-caption text-grey mt-2">
+            This segment is now read-only. Your unsaved changes are kept in the editor
+            so you can copy anything you still need before reloading.
+          </div>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="segmentLockState?.clearEviction?.()">OK</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -3825,6 +3851,27 @@ Try dropping an image or video file here!`
         this.versionPreviewContent = `Failed to load version: ${errorMsg}`;
       } finally {
         this.versionPreviewLoading = false;
+      }
+    },
+
+    // Take over the editing lock on the current segment, evicting the holder
+    // (todo #41). After claiming, reload the item content fresh so the new
+    // editor starts from the latest server copy (not a stale local one).
+    async handleTakeOverSegment() {
+      if (!this.segmentLockState || !this.currentRundownItem) return;
+      const assetId = this.currentRundownItem.asset_id || this.currentRundownItem.AssetID;
+      if (!assetId) return;
+      const result = await this.segmentLockState.takeOverLock(assetId);
+      if (result.success) {
+        const who = result.evictedUsername ? ` (was ${result.evictedUsername})` : '';
+        notifyUserStandard(`You now hold the editing lock${who}`, NOTIFICATION_COLORS.SUCCESS, 2500);
+        // Reload fresh so we don't edit from a stale copy.
+        const idx = this.selectedItemIndex;
+        if (idx >= 0 && this.rundownItems[idx]) {
+          this.loadItemContent(this.rundownItems[idx]);
+        }
+      } else {
+        notifyUserStandard('Could not take over this segment', NOTIFICATION_COLORS.ERROR, 3000);
       }
     },
 

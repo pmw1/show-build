@@ -772,6 +772,46 @@ async def save_rundown_items(
                     # CRITICAL: Only update script_content if explicitly provided
                     # Frontend sends script only for currently edited item
                     if 'script' in item_data:
+                        # SINGLE-WRITER LOCK ENFORCEMENT (todo #41): a script-content
+                        # write is only allowed by the user who holds the LIVE editing
+                        # lock on this item (or when no live lock exists). Server-side
+                        # backstop that makes the #33 concurrent-clobber impossible
+                        # regardless of stale client state. Order/metadata-only saves
+                        # (no 'script' key) are unaffected. API-key callers (no user id)
+                        # bypass the check for service-to-service writes.
+                        try:
+                            from datetime import datetime, timezone
+                            from models_v2 import SegmentLock
+                            current_uid = current_user.get('id') if isinstance(current_user, dict) else None
+                            if current_uid is not None:
+                                lock = db.query(SegmentLock).filter(
+                                    SegmentLock.rundown_item_asset_id == str(asset_id)
+                                ).first()
+                                if lock is not None and lock.user_id != current_uid:
+                                    exp = lock.expires_at
+                                    if exp is not None and exp.tzinfo is None:
+                                        exp = exp.replace(tzinfo=timezone.utc)
+                                    is_live = exp is not None and exp > datetime.now(timezone.utc)
+                                    if is_live:
+                                        from models_user import User as _User
+                                        holder_row = db.query(_User).filter(_User.id == lock.user_id).first()
+                                        holder = holder_row.username if holder_row else None
+                                        raise HTTPException(
+                                            status_code=409,
+                                            detail={
+                                                "error": "segment_locked",
+                                                "message": f"This segment is being edited by {holder or 'another user'}. Your changes were not saved.",
+                                                "rundown_item_asset_id": str(asset_id),
+                                                "holder_username": holder,
+                                                "holder_user_id": lock.user_id,
+                                            },
+                                        )
+                        except HTTPException:
+                            raise
+                        except Exception as lock_err:
+                            # Never let a lock-check bug block a legitimate save; log and proceed.
+                            logger.warning(f"Lock check skipped for {asset_id}: {lock_err}")
+
                         new_script = item_data['script']
                         existing_script = rundown_item.script_content or ''
 

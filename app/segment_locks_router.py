@@ -241,6 +241,72 @@ async def acquire_lock(
     }
 
 
+@router.post("/{asset_id}/take-over")
+async def take_over_lock(
+    asset_id: str,
+    current_user: dict = Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Forcibly claim a segment lock, EVICTING the current holder (todo #41).
+    Reassigns the lock to the requesting user. Returns the previous holder so
+    the frontend can show the eviction notice; the evicted user learns of the
+    eviction on their next heartbeat (which will report taken_over=True).
+    """
+    rundown_item = db.query(RundownItem).filter(RundownItem.asset_id == asset_id).first()
+    if not rundown_item:
+        raise HTTPException(status_code=404, detail="Rundown item not found")
+
+    current_user_id = current_user.get("user_id") or current_user.get("id")
+    if not current_user_id:
+        raise HTTPException(status_code=401, detail="User ID not found in authentication context")
+
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=LOCK_TTL_SECONDS)
+
+    lock = db.query(SegmentLock).filter(
+        SegmentLock.rundown_item_asset_id == asset_id
+    ).first()
+
+    evicted_user_id = None
+    evicted_username = None
+    if lock is not None:
+        if lock.user_id != current_user_id:
+            evicted_user_id = lock.user_id
+            evicted_holder = db.query(User).filter(User.id == evicted_user_id).first()
+            evicted_username = get_user_display_name(evicted_holder) if evicted_holder else "another user"
+        # Reassign the existing lock row to the requester.
+        lock.user_id = current_user_id
+        lock.locked_at = now
+        lock.expires_at = expires_at
+        lock.last_heartbeat = now
+    else:
+        lock = SegmentLock(
+            asset_id=AssetIDService.generate(entity_type="lock"),
+            rundown_item_asset_id=asset_id,
+            user_id=current_user_id,
+            locked_at=now,
+            expires_at=expires_at,
+            last_heartbeat=now,
+        )
+        db.add(lock)
+
+    db.commit()
+    logger.info(
+        f"Lock TAKEN OVER on {asset_id} by user {current_user_id} "
+        f"(evicted user {evicted_user_id})"
+    )
+
+    return {
+        "success": True,
+        "message": "Lock taken over",
+        "lock_asset_id": lock.asset_id,
+        "expires_at": expires_at.isoformat(),
+        "evicted_user_id": evicted_user_id,
+        "evicted_username": evicted_username,
+    }
+
+
 @router.post("/{asset_id}/heartbeat")
 async def heartbeat_lock(
     asset_id: str,
@@ -250,12 +316,16 @@ async def heartbeat_lock(
     """
     Extend lock TTL via heartbeat.
     Should be called every 15 seconds by the client.
+
+    If the caller no longer holds the lock — because another user took it over
+    (todo #41) or it expired and was reclaimed — return 409 with taken_over info
+    so the client can show the eviction notice and flip to read-only.
     """
     current_user_id = current_user.get("user_id") or current_user.get("id")
     if not current_user_id:
         raise HTTPException(status_code=401, detail="User ID not found in authentication context")
 
-    # Find the lock
+    # The caller's own live lock?
     lock = db.query(SegmentLock).filter(
         and_(
             SegmentLock.rundown_item_asset_id == asset_id,
@@ -264,6 +334,21 @@ async def heartbeat_lock(
     ).first()
 
     if not lock:
+        # Did someone else take it over? Report that distinctly so the client
+        # can render "You have been evicted from this Rundown Item by {username}".
+        other = db.query(SegmentLock).filter(
+            SegmentLock.rundown_item_asset_id == asset_id
+        ).first()
+        if other is not None:
+            holder = db.query(User).filter(User.id == other.user_id).first()
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "taken_over",
+                    "taken_over_by": get_user_display_name(holder) if holder else "another user",
+                    "taken_over_by_id": other.user_id,
+                },
+            )
         raise HTTPException(status_code=404, detail="No lock found for this segment")
 
     # Extend the lock

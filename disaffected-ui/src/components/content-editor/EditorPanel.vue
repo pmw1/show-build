@@ -69,6 +69,18 @@
         <div v-if="lockInfo.lockedAt" class="locked-time">
           Started {{ formatRelativeTime(lockInfo.lockedAt) }}
         </div>
+        <!-- Take-over: evict the current holder and claim the lock (todo #41). -->
+        <v-btn
+          color="error"
+          variant="flat"
+          size="small"
+          class="mt-4"
+          prepend-icon="mdi-account-lock-open"
+          @click="$emit('take-over-segment')"
+        >Take over editing</v-btn>
+        <div class="locked-time mt-1" style="opacity:0.7;">
+          The current editor will be locked out.
+        </div>
       </div>
     </div>
 
@@ -1649,6 +1661,7 @@ lineNumberOffset: {
 
 const emit = defineEmits([
     'toggle-rundown',
+    'take-over-segment',
     'toggle-metadata-panel',
     'update:editorMode',
     'show-asset-browser',
