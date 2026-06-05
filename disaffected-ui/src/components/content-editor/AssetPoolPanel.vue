@@ -129,49 +129,138 @@
           <p class="text-caption text-grey">Use Workflow Tools to generate scripts</p>
         </div>
         <div v-else class="scripts-list">
-          <div v-for="doc in scriptsData" :key="doc.filename" class="script-entry">
-            <div class="script-row d-flex align-center">
-              <v-icon size="small" :color="getScriptIconColor(doc.format)" class="mr-2">{{ doc.icon }}</v-icon>
-              <div class="flex-grow-1" style="min-width: 0;">
-                <div class="script-name text-body-2 font-weight-medium">{{ doc.label }}</div>
-                <div class="text-caption text-grey d-flex align-center ga-2">
-                  <v-chip size="x-small" color="primary" variant="tonal" style="height: 14px; font-size: 0.6rem;">R{{ doc.revision || '?' }}</v-chip>
-                  <span>{{ doc.format?.toUpperCase() }}</span>
-                  <span v-if="doc.size_formatted">{{ doc.size_formatted }}</span>
+          <div v-for="g in groupedScripts" :key="g.type" class="script-entry">
+            <div class="script-row d-flex align-start">
+              <v-icon size="small" :color="getScriptIconColor(g.selected)" class="mr-2 script-icon">{{ getScriptIcon(g.selected) }}</v-icon>
+              <div class="flex-grow-1 d-flex align-center flex-wrap ga-2" style="min-width: 0;">
+                <span class="script-name text-body-2 font-weight-medium text-truncate">{{ g.label }}</span>
+                <!-- The revision chip is clickable when older revisions exist:
+                     it expands this row to list the selected format's revisions. -->
+                <v-chip
+                  size="x-small"
+                  color="primary"
+                  :variant="g.doc.pastRevisions && g.doc.pastRevisions.length > 0 ? 'flat' : 'tonal'"
+                  style="height: 14px; font-size: 0.6rem;"
+                  :class="{ 'revision-chip-clickable': g.doc.pastRevisions && g.doc.pastRevisions.length > 0 }"
+                  @click="g.doc.pastRevisions && g.doc.pastRevisions.length > 0 && toggleOlderRevisions(g.type + '_' + g.selected)"
+                >
+                  R{{ g.doc.revision || '?' }}
+                  <v-icon
+                    v-if="g.doc.pastRevisions && g.doc.pastRevisions.length > 0"
+                    end
+                    size="x-small"
+                    :class="{ 'rotate-180': scriptRevisionsOpen[g.type + '_' + g.selected] }"
+                  >mdi-chevron-down</v-icon>
+                  <v-tooltip v-if="g.doc.pastRevisions && g.doc.pastRevisions.length > 0" activator="parent" location="top">
+                    {{ g.doc.pastRevisions.length }} older revision{{ g.doc.pastRevisions.length === 1 ? '' : 's' }}
+                  </v-tooltip>
+                </v-chip>
+                <!-- Format selector: one row per script type, format chosen here. -->
+                <div class="format-toggle d-flex align-center">
+                  <button
+                    v-for="fmt in g.available"
+                    :key="fmt"
+                    class="format-chip"
+                    :class="{ 'format-chip-active': fmt === g.selected }"
+                    @click="selectScriptFormat(g.type, fmt)"
+                  >{{ fmt.toUpperCase() }}</button>
+                </div>
+                <span v-if="g.doc.size_formatted" class="text-caption text-grey">{{ g.doc.size_formatted }}</span>
+              </div>
+              <v-btn icon size="x-small" variant="text" color="primary" @click="openScript(g.doc)">
+                <v-icon size="small">mdi-open-in-new</v-icon>
+                <v-tooltip activator="parent" location="top">Preview {{ g.selected.toUpperCase() }}</v-tooltip>
+              </v-btn>
+              <v-btn icon size="x-small" variant="text" color="grey" @click="downloadScript(g.doc)">
+                <v-icon size="small">mdi-download</v-icon>
+                <v-tooltip activator="parent" location="top">Download {{ g.selected.toUpperCase() }}</v-tooltip>
+              </v-btn>
+            </div>
+            <!-- Older revisions of the selected format — expanded by the chip -->
+            <v-expand-transition v-if="g.doc.pastRevisions && g.doc.pastRevisions.length > 0">
+              <div v-if="scriptRevisionsOpen[g.type + '_' + g.selected]" class="older-revisions ml-4">
+                <div v-for="rev in g.doc.pastRevisions" :key="rev.filename" class="revision-row d-flex align-center py-1">
+                  <v-chip size="x-small" variant="tonal" color="grey" style="height: 14px; font-size: 0.55rem;" class="mr-2">R{{ rev.revision || '?' }}</v-chip>
+                  <span class="text-caption text-grey flex-grow-1">{{ rev.modified_formatted }}</span>
+                  <v-btn icon size="x-small" variant="text" color="grey" @click="openScript(rev)">
+                    <v-icon size="x-small">mdi-open-in-new</v-icon>
+                  </v-btn>
+                  <v-btn icon size="x-small" variant="text" color="grey" @click="downloadScript(rev)">
+                    <v-icon size="x-small">mdi-download</v-icon>
+                  </v-btn>
                 </div>
               </div>
-              <v-btn icon size="x-small" variant="text" color="primary" @click="openScript(doc)">
-                <v-icon size="small">mdi-open-in-new</v-icon>
+            </v-expand-transition>
+          </div>
+        </div>
+      </template>
+
+      <!-- Media: files preserved in the pool for this episode (released-from-cue
+           media). Double-click an item to re-insert it as a cue (a cue-type
+           picker appears, filtered to the file's kind). Small preview/download
+           icons sit on the right of each row. -->
+      <template v-else-if="activeTab === 'media'">
+        <!-- Tiny upload button: media can also be added directly to the pool,
+             not just via cue deletion. -->
+        <div class="d-flex align-center justify-end mb-1">
+          <input
+            ref="poolUploadInputRef"
+            type="file"
+            multiple
+            style="display: none;"
+            @change="onPoolUploadSelected"
+          />
+          <v-btn size="x-small" variant="tonal" color="primary" @click="triggerPoolUpload" :loading="poolUploading">
+            <v-icon size="small" start>mdi-upload</v-icon>
+            Upload
+          </v-btn>
+        </div>
+        <div v-if="filteredPoolMedia.length === 0" class="text-center py-4">
+          <p class="text-caption text-grey">No pooled media for this episode</p>
+        </div>
+        <v-list v-else density="compact" class="asset-pool-list pa-0">
+          <v-list-item
+            v-for="m in filteredPoolMedia"
+            :key="m.asset_id"
+            class="asset-pool-item pool-media-item"
+            @dblclick="reinsertPoolMedia(m)"
+          >
+            <template #prepend>
+              <v-btn
+                icon
+                size="x-small"
+                variant="tonal"
+                color="success"
+                @click.stop="reinsertPoolMedia(m)"
+                class="place-btn mr-2"
+              >
+                <v-icon size="small">mdi-plus</v-icon>
+                <v-tooltip activator="parent" location="left">{{ addToLabel }}</v-tooltip>
+              </v-btn>
+            </template>
+            <div class="flex-grow-1" style="min-width: 0;">
+              <div class="text-caption font-weight-medium text-truncate d-flex align-center ga-1 pool-media-name">
+                <v-icon size="x-small" :color="poolKindColor(m.kind)">{{ poolKindIcon(m.kind) }}</v-icon>
+                <span class="text-truncate">{{ m.original_filename || m.filename }}</span>
+              </div>
+              <div class="text-caption text-grey d-flex align-center ga-2">
+                <span>{{ (m.kind || 'file').toUpperCase() }}</span>
+                <span v-if="m.file_size">{{ formatBytes(m.file_size) }}</span>
+                <span v-if="m.origin_cue_type" class="text-truncate">· from {{ m.origin_cue_type }}</span>
+              </div>
+            </div>
+            <template #append>
+              <v-btn icon size="x-small" variant="text" color="primary" @click.stop="previewPoolMedia(m)">
+                <v-icon size="small">mdi-eye</v-icon>
                 <v-tooltip activator="parent" location="top">Preview</v-tooltip>
               </v-btn>
-              <v-btn icon size="x-small" variant="text" color="grey" @click="downloadScript(doc)">
+              <v-btn icon size="x-small" variant="text" color="grey" @click.stop="downloadPoolMedia(m)">
                 <v-icon size="small">mdi-download</v-icon>
                 <v-tooltip activator="parent" location="top">Download</v-tooltip>
               </v-btn>
-            </div>
-            <!-- Older revisions -->
-            <div v-if="doc.pastRevisions && doc.pastRevisions.length > 0">
-              <v-btn size="x-small" variant="text" color="grey" class="mt-1 mb-1" @click="toggleOlderRevisions(doc.type + '_' + doc.format)">
-                <v-icon size="x-small" :class="{ 'rotate-90': scriptRevisionsOpen[doc.type + '_' + doc.format] }">mdi-chevron-right</v-icon>
-                Older revisions ({{ doc.pastRevisions.length }})
-              </v-btn>
-              <v-expand-transition>
-                <div v-if="scriptRevisionsOpen[doc.type + '_' + doc.format]" class="older-revisions ml-4">
-                  <div v-for="rev in doc.pastRevisions" :key="rev.filename" class="revision-row d-flex align-center py-1">
-                    <v-chip size="x-small" variant="tonal" color="grey" style="height: 14px; font-size: 0.55rem;" class="mr-2">R{{ rev.revision || '?' }}</v-chip>
-                    <span class="text-caption text-grey flex-grow-1">{{ rev.modified_formatted }}</span>
-                    <v-btn icon size="x-small" variant="text" color="grey" @click="openScript(rev)">
-                      <v-icon size="x-small">mdi-open-in-new</v-icon>
-                    </v-btn>
-                    <v-btn icon size="x-small" variant="text" color="grey" @click="downloadScript(rev)">
-                      <v-icon size="x-small">mdi-download</v-icon>
-                    </v-btn>
-                  </div>
-                </div>
-              </v-expand-transition>
-            </div>
-          </div>
-        </div>
+            </template>
+          </v-list-item>
+        </v-list>
       </template>
 
       <!-- Flat list for scheduled/other -->
@@ -233,6 +322,55 @@
         </v-list>
       </template>
     </div>
+
+    <!-- Pooled-media preview modal (image/video shown inline, not a new tab) -->
+    <v-dialog v-model="poolPreview.show" max-width="900" @keydown.esc="closePoolPreview">
+      <v-card v-if="poolPreview.item">
+        <v-toolbar density="compact" color="grey-darken-3">
+          <v-toolbar-title class="text-body-2 text-truncate">
+            {{ poolPreview.item.original_filename || poolPreview.item.filename }}
+          </v-toolbar-title>
+          <v-spacer />
+          <v-btn icon size="small" @click="downloadPoolMedia(poolPreview.item)">
+            <v-icon size="small">mdi-download</v-icon>
+            <v-tooltip activator="parent" location="bottom">Download</v-tooltip>
+          </v-btn>
+          <v-btn icon size="small" @click="closePoolPreview">
+            <v-icon size="small">mdi-close</v-icon>
+          </v-btn>
+        </v-toolbar>
+        <div class="pool-preview-body">
+          <video
+            v-if="poolPreview.item.kind === 'video'"
+            :src="poolPreview.item.url"
+            controls
+            autoplay
+            class="pool-preview-media"
+          />
+          <img
+            v-else-if="poolPreview.item.kind === 'image'"
+            :src="poolPreview.item.url"
+            class="pool-preview-media"
+            :alt="poolPreview.item.filename"
+          />
+          <audio
+            v-else-if="poolPreview.item.kind === 'audio'"
+            :src="poolPreview.item.url"
+            controls
+            autoplay
+            class="pa-6"
+            style="width: 100%;"
+          />
+          <div v-else class="text-center pa-8 text-grey">
+            <v-icon size="48" class="mb-2">{{ poolKindIcon(poolPreview.item.kind) }}</v-icon>
+            <div class="text-body-2">No inline preview for this file type.</div>
+            <v-btn class="mt-3" size="small" variant="tonal" color="primary" @click="downloadPoolMedia(poolPreview.item)">
+              <v-icon start size="small">mdi-download</v-icon> Download
+            </v-btn>
+          </div>
+        </div>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -252,22 +390,74 @@ const props = defineProps({
   panelWidth: {
     type: String,
     default: 'wide'
+  },
+  // Friendly label of the currently-selected rundown item's type (e.g.
+  // "Segment", "Advertisement"). Drives the "Add to {type}" tooltip.
+  selectedItemLabel: {
+    type: String,
+    default: ''
   }
 })
 
-const emit = defineEmits(['place-item', 'create-new-item'])
+const emit = defineEmits(['place-item', 'create-new-item', 'reinsert-pool-media'])
+
+// "Add to {selected rundown item type}" — falls back to a generic label when
+// no item is selected.
+const addToLabel = computed(() =>
+  props.selectedItemLabel ? `Add to ${props.selectedItemLabel}` : 'Add to rundown item'
+)
 
 // ── Reactive state ──
-const activeTab = ref('whiteboard')
+const activeTab = ref('media')
 const searchQuery = ref('')
 const loading = ref(false)
 const categories = ref([
+  { label: 'Media', value: 'media' },
   { label: 'Whiteboard', value: 'whiteboard' },
-  { label: 'Scripts', value: 'scripts' },
-  { label: 'Scheduled', value: 'scheduled' }
+  { label: 'Scheduled', value: 'scheduled' },
+  { label: 'Scripts', value: 'scripts' }
 ])
+// Pooled media for this episode (released-from-cue media + loose uploads).
+const poolMedia = ref([])
+const poolUploadInputRef = ref(null)
+const poolUploading = ref(false)
+// Preview modal state for pooled media (image/video shown inline, not a new tab).
+const poolPreview = reactive({ show: false, item: null })
 const scriptsData = ref([]) // [{type, label, format, latest: doc, pastRevisions: [doc,...]}]
 const scriptRevisionsOpen = reactive({}) // { 'host_full_pdf': true } toggles
+// Per script-type: which format the user has selected to view (e.g. host_full → 'pdf').
+const selectedScriptFormat = reactive({})
+
+// Preferred format order when picking the default for a type.
+const FORMAT_PRIORITY = ['pdf', 'html', 'md']
+
+// Collapse the per-(type,format) documents into one row per type, with the
+// available formats selectable. Each format keeps its own url/revision/size/
+// pastRevisions; the row shows whichever format is currently selected.
+const groupedScripts = computed(() => {
+  const byType = new Map()
+  for (const doc of scriptsData.value) {
+    if (!byType.has(doc.type)) {
+      byType.set(doc.type, { type: doc.type, label: doc.label, formats: {} })
+    }
+    byType.get(doc.type).formats[doc.format] = doc
+  }
+  return Array.from(byType.values()).map(g => {
+    const available = Object.keys(g.formats)
+      .sort((a, b) => {
+        const ia = FORMAT_PRIORITY.indexOf(a); const ib = FORMAT_PRIORITY.indexOf(b)
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+      })
+    const selected = selectedScriptFormat[g.type] && g.formats[selectedScriptFormat[g.type]]
+      ? selectedScriptFormat[g.type]
+      : available[0]
+    return { ...g, available, selected, doc: g.formats[selected] }
+  })
+})
+
+function selectScriptFormat(type, format) {
+  selectedScriptFormat[type] = format
+}
 const itemsCache = reactive({})
 const currentItems = ref([])
 const whiteboardTree = ref([])
@@ -316,6 +506,16 @@ const filteredTree = computed(() => {
   }).filter(Boolean)
 })
 
+const filteredPoolMedia = computed(() => {
+  if (!searchQuery.value) return poolMedia.value
+  const q = searchQuery.value.toLowerCase()
+  return poolMedia.value.filter(m =>
+    (m.original_filename || m.filename || '').toLowerCase().includes(q) ||
+    (m.origin_slug || '').toLowerCase().includes(q) ||
+    (m.kind || '').toLowerCase().includes(q)
+  )
+})
+
 const placedAssetIds = computed(() => {
   const ids = new Set()
   for (const ri of props.rundownItems) {
@@ -335,6 +535,8 @@ async function loadCategory(category) {
   if (itemsCache[category]) {
     if (category === 'whiteboard') {
       whiteboardTree.value = itemsCache[category]
+    } else if (category === 'media') {
+      poolMedia.value = itemsCache[category]
     } else {
       currentItems.value = itemsCache[category]
     }
@@ -368,6 +570,11 @@ async function loadCategory(category) {
       return
     }
 
+    if (category === 'media') {
+      await loadPoolMedia()
+      return
+    }
+
     const data = await fetchJson(`/api/content-library/?item_type=${category}&is_active=true&limit=100`)
     const items = data?.items || data || []
     itemsCache[category] = items
@@ -377,6 +584,89 @@ async function loadCategory(category) {
     currentItems.value = []
   } finally {
     loading.value = false
+  }
+}
+
+async function loadPoolMedia() {
+  if (!props.episodeNumber) {
+    poolMedia.value = []
+    loading.value = false
+    return
+  }
+  try {
+    const data = await fetchJson(`/api/episodes/${props.episodeNumber}/cue-assets/pool`)
+    const items = data?.items || []
+    itemsCache['media'] = items
+    poolMedia.value = items
+  } catch (error) {
+    console.error('Error loading pool media:', error)
+    poolMedia.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+// ── Pool media helpers ──
+function poolKindIcon(kind) {
+  return { video: 'mdi-filmstrip', image: 'mdi-image', audio: 'mdi-music-note' }[kind] || 'mdi-file'
+}
+function poolKindColor(kind) {
+  return { video: 'blue', image: 'green', audio: 'purple' }[kind] || 'grey'
+}
+function formatBytes(n) {
+  if (!n) return ''
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB'
+  if (n >= 1024) return (n / 1024).toFixed(0) + ' KB'
+  return n + ' B'
+}
+function previewPoolMedia(m) {
+  // Show the file inline in a modal (served via the /pool static mount).
+  poolPreview.item = m
+  poolPreview.show = true
+}
+function closePoolPreview() {
+  poolPreview.show = false
+  poolPreview.item = null
+}
+function downloadPoolMedia(m) {
+  const a = document.createElement('a')
+  a.href = m.url
+  a.download = m.original_filename || m.filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+function reinsertPoolMedia(m) {
+  // Hand the pooled file up to ContentEditor, which shows a cue-type picker
+  // (filtered to this file's kind) and then opens the matching cue modal
+  // pre-loaded with the file URL.
+  emit('reinsert-pool-media', m)
+}
+function triggerPoolUpload() {
+  poolUploadInputRef.value?.click()
+}
+async function onPoolUploadSelected(e) {
+  const files = Array.from(e.target.files || [])
+  if (!files.length || !props.episodeNumber) return
+  poolUploading.value = true
+  try {
+    const token = localStorage.getItem('auth-token')
+    for (const f of files) {
+      const fd = new FormData()
+      fd.append('file', f)
+      await fetch(`/api/episodes/${props.episodeNumber}/cue-assets/pool/upload`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd
+      })
+    }
+    delete itemsCache['media']   // force refresh
+    await loadPoolMedia()
+  } catch (err) {
+    console.error('Pool upload failed:', err)
+  } finally {
+    poolUploading.value = false
+    if (poolUploadInputRef.value) poolUploadInputRef.value.value = ''  // reset picker
   }
 }
 
@@ -871,6 +1161,56 @@ defineExpose({ refreshCategory, refreshScripts })
 .script-name {
   font-size: 0.8rem !important;
   line-height: 1.2;
+  /* Fixed column so the R#/format/size metadata lines up across rows.
+     Sized to fit the longest common label ("Director Script") without
+     crowding the action buttons; longer labels truncate. */
+  flex: 0 0 auto;
+  width: 100px;
+}
+/* Keep the leading icon flush with the first text line (top-aligned row). */
+.script-icon {
+  margin-top: 1px;
+}
+/* Compact format selector (PDF / HTML / MD) for each script type. */
+.format-toggle {
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.format-chip {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  line-height: 1.4;
+  color: rgba(0, 0, 0, 0.55);
+  background: transparent;
+  border: none;
+  border-right: 1px solid rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.format-chip:last-child {
+  border-right: none;
+}
+.format-chip:hover {
+  background: rgba(25, 118, 210, 0.08);
+}
+.format-chip-active {
+  background: #1976d2;
+  color: #fff;
+}
+
+/* The revision chip doubles as the revisions expander when older
+   revisions exist. */
+.revision-chip-clickable {
+  cursor: pointer;
+}
+.revision-chip-clickable :deep(.v-icon) {
+  transition: transform 0.2s ease;
+}
+.rotate-180 {
+  transform: rotate(180deg);
 }
 .older-revisions {
   border-left: 2px solid rgba(0, 0, 0, 0.08);
@@ -882,11 +1222,6 @@ defineExpose({ refreshCategory, refreshScripts })
 .revision-row:last-child {
   border-bottom: none;
 }
-.rotate-90 {
-  transform: rotate(90deg);
-  transition: transform 0.2s;
-}
-
 .asset-pool-panel {
   display: flex;
   flex-direction: column;
@@ -1134,5 +1469,27 @@ defineExpose({ refreshCategory, refreshScripts })
 .placed-chip {
   font-size: 0.55rem !important;
   height: 16px !important;
+}
+
+/* Pooled-media row: slightly smaller filename text */
+.pool-media-name {
+  font-size: 0.78rem !important;
+  line-height: 1.2;
+}
+
+/* Pooled-media preview modal */
+.pool-preview-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  max-height: 80vh;
+  overflow: hidden;
+}
+.pool-preview-media {
+  display: block;
+  max-width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
 }
 </style>

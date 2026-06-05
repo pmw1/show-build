@@ -64,6 +64,12 @@
   - Database-first approach
   - Implementation status
 
+### Media storage
+- **[`EPISODE_DIRECTORY_STANDARD.md`](EPISODE_DIRECTORY_STANDARD.md)** - Per-episode asset tree (authoritative)
+- **[`MEDIA_POOL_STANDARD.md`](MEDIA_POOL_STANDARD.md)** - Unbound media pool: `media_assets/pool/{episodes,ads,repo,whiteboard}` (authoritative)
+  - Cue-release + whiteboard media; flat per-episode layout
+  - `ShowBuildPaths.get_pool_*` helpers; `/pool` static mount; `POOL` AssetID prefix
+
 ---
 
 ## Common Issues Quick Reference

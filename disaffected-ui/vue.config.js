@@ -151,6 +151,12 @@ module.exports = defineConfig({
         changeOrigin: true,
         secure: false
       },
+      // Unbound media pool (cue-released + whiteboard media moved here from /repo).
+      '/pool': {
+        target: API_TARGET,
+        changeOrigin: true,
+        secure: false
+      },
       '/asterisk-ws': {
         target: 'ws://192.168.51.223:8088/ws',
         changeOrigin: true,

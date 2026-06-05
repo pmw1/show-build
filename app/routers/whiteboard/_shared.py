@@ -66,11 +66,12 @@ def _save_media_to_filesystem(base64_data: str, episode_number: str, asset_id: s
     file_path = media_dir / filename
     file_path.write_bytes(base64.b64decode(raw_data))
 
-    # Relative path within repo/whiteboard/{episode}/
+    # Relative path within the pool (pool/whiteboard/{episode}/). Stored relative
+    # so only the serving prefix changes if the pool ever moves again.
     relative_path = f"whiteboard/{episode_number}/{filename}"
 
-    # Serving URL via the /repo static mount
-    media_url = f"/repo/{relative_path}"
+    # Serving URL via the /pool static mount (whiteboard media relocated from /repo)
+    media_url = f"/pool/{relative_path}"
 
     logger.info(f"Saved whiteboard media: {filename} ({file_path.stat().st_size:,} bytes)")
 

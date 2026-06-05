@@ -175,7 +175,8 @@ Show-Build is a **database-first broadcast production platform** for the Disaffe
 - [`docs/EDITOR_PANEL_ARCHITECTURE.md`](docs/EDITOR_PANEL_ARCHITECTURE.md) — **READ BEFORE editing ContentEditor/EditorPanel**
 - [`docs/SAVE_RELOAD_SPEC.md`](docs/SAVE_RELOAD_SPEC.md) — Save/reload system spec (authoritative)
 - [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md) — Strategic decisions and rationale
-- [`docs/EPISODE_DIRECTORY_STANDARD.md`](docs/EPISODE_DIRECTORY_STANDARD.md) — Media asset organization (authoritative)
+- [`docs/EPISODE_DIRECTORY_STANDARD.md`](docs/EPISODE_DIRECTORY_STANDARD.md) — Per-episode media asset organization (authoritative)
+- [`docs/MEDIA_POOL_STANDARD.md`](docs/MEDIA_POOL_STANDARD.md) — Unbound media pool (`media_assets/pool/`) layout + helpers (authoritative)
 - [`docs/RBAC_AUTHENTICATION_GUIDE.md`](docs/RBAC_AUTHENTICATION_GUIDE.md) — Complete RBAC reference
 - [`docs/DASHBOARD_ANNOUNCEMENTS.md`](docs/DASHBOARD_ANNOUNCEMENTS.md) — Dashboard announcement creation
 - [`docs/X_API_COMPLETE_REFERENCE.md`](docs/X_API_COMPLETE_REFERENCE.md) — X/Twitter API v2 reference
@@ -321,7 +322,21 @@ When typing in Script Mode, edits go into `segmentEditBuffer` (non-reactive, inv
 ## Data Storage
 
 **Database**: All content — episodes, rundowns, segments, cues, scripts, metadata
-**Filesystem**: Media assets only — `/mnt/sync/disaffected/episodes/{episode}/assets/{video,images,audio,graphics}/`
+**Filesystem**: Media assets only.
+
+Two media filesystems (see [`docs/EPISODE_DIRECTORY_STANDARD.md`](docs/EPISODE_DIRECTORY_STANDARD.md) + [`docs/MEDIA_POOL_STANDARD.md`](docs/MEDIA_POOL_STANDARD.md), both authoritative):
+
+1. **Per-episode asset tree** (media a cue is actively using):
+   `/home/episodes/{episode}/assets/{video,images,audio,graphics}/` (host `/data/sync/disaffected/episodes/...`).
+2. **Unbound media pool** (released-from-cue / reusable media), container `/home/pool`
+   (host `/data/sync/media_assets/pool`, env `POOL_PATH`), served at `/pool/...`:
+   - `pool/episodes/{ep}/{file}` — cue-released media + loose per-episode uploads. **FLAT** (no `assets/{type}` subdirs).
+   - `pool/whiteboard/{ep}/{file}` — whiteboard media (relocated here from `repo/whiteboard`; URLs now `/pool/...` not `/repo/...`).
+   - `pool/ads/{advertiserID}/` and `pool/repo/` — reusables (ads / promos / CTAs). **SCAFFOLD only** (dirs + `ShowBuildPaths.get_pool_*` helpers; no upload/browse flow yet).
+   - Tracked in `asset_pool_files` + `asset_tags`; pooled AssetIDs use the `POOL` prefix. NEVER hardcode pool paths — use `ShowBuildPaths.get_pool_*()`.
+   - Cue-release endpoint: `POST /api/episodes/{ep}/cue-assets/move-to-pool` (moves by the cue's own URL fields, never by globbing the AssetID).
+   - Pool dirs must be writable by container uid 1000 / gid 1001 (`disaffected`).
+   - **Live data migration deferred**: implemented on dev (`feat/script-editor-tiptap`); live still uses the old pool host path until a maintenance window. The legacy non-episode `/mnt/sync/asset-pool` store is separate and out of scope.
 
 Each rundown item has a `script_content` TEXT field containing markdown. YAML frontmatter is stripped on load, content body is what the editor works with.
 

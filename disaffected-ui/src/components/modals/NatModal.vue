@@ -44,6 +44,10 @@ const props = defineProps({
   cueType: {
     type: String,
     default: 'nat'
+  },
+  prefillData: {
+    type: Object,
+    default: null
   }
 })
 
@@ -58,6 +62,9 @@ const description = ref('')
 const duration = ref('')
 const timestamp = ref('')
 const file = ref(null)
+// When reinserting a pooled file, its existing URL is used in place of a new upload.
+const prefilledMediaUrl = ref('')
+const prefilledAssetId = ref('')
 
 // Keyboard handler reference
 let keydownHandler = null
@@ -142,7 +149,22 @@ function reset() {
   duration.value = ''
   timestamp.value = ''
   file.value = null
+  prefilledMediaUrl.value = ''
+  prefilledAssetId.value = ''
   emit('update:show', false)
+}
+
+// Populate from a pooled file being reinserted (existing media, no upload needed).
+function applyPrefill() {
+  const pf = props.prefillData
+  if (!pf) return
+  prefilledMediaUrl.value = pf.mediaUrl || ''
+  prefilledAssetId.value = pf.assetId || ''
+  if (pf.slug) slug.value = pf.slug
+  if (pf.title && !description.value) description.value = pf.title
+  // The Submit button requires a duration; seed a default so a reinserted
+  // pooled file can be submitted without forcing the user to type one.
+  if (!duration.value) duration.value = '00:00:00'
 }
 
 function handleAbort() {
@@ -163,6 +185,20 @@ async function handleSubmit() {
 async function submit() {
   const normalizedSlug = slug.value.toLowerCase().replace(/['".,!?]/g, '').replace(/\s+/g, '-')
   try {
+    // Reinserting an existing pooled file: reuse its asset ID + media URL, skip upload.
+    if (prefilledMediaUrl.value) {
+      emit('submit', {
+        description: description.value,
+        duration: duration.value,
+        timestamp: timestamp.value,
+        slug: normalizedSlug,
+        assetID: prefilledAssetId.value,
+        mediaURL: prefilledMediaUrl.value
+      })
+      if (toast) toast.success('NAT cue added')
+      reset()
+      return
+    }
     const formData = new FormData()
     formData.append('type', 'nat')
     formData.append('slug', normalizedSlug)
@@ -209,6 +245,7 @@ async function submit() {
 watch(() => props.show, (newVal) => {
   if (newVal) {
     setupKeyboardHandlers()
+    applyPrefill()
     nextTick(() => {
       focusSlugField()
     })

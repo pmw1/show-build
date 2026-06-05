@@ -44,6 +44,7 @@ class AssetIDService:
         "element": "ELM",
         "cue": "CUE",
         "generic": "AST",  # Generic asset
+        "pool": "POOL",  # Media released to / stored in the unbound media pool
         "whiteboard_media": "WTB",  # Whiteboard-sourced media
         "whiteboard_image": "WTB",
         "whiteboard_video": "WTB",

@@ -191,7 +191,7 @@ async def _download_twitter_media(
 
         if is_episode_wb:
             relative_path = f"whiteboard/{identifier}/{file_name}"
-            file_url = f"/repo/{relative_path}"
+            file_url = f"/pool/{relative_path}"  # whiteboard media moved to the pool
         else:
             relative_path = str(dest_path)
             file_url = f"/asset-pool/{file_name}"
@@ -262,7 +262,7 @@ async def _download_twitter_media(
             with open(avatar_dest, 'wb') as f:
                 f.write(resp.content)
             if is_episode_wb:
-                local_avatar_url = f"/repo/whiteboard/{identifier}/{avatar_filename}"
+                local_avatar_url = f"/pool/whiteboard/{identifier}/{avatar_filename}"
             else:
                 local_avatar_url = f"/asset-pool/{avatar_filename}"
             logger.info(f"Cached author avatar for @{tweet_data.get('author_handle')} -> {avatar_dest}")
@@ -447,7 +447,7 @@ async def _download_via_ytdlp(
 
             if is_episode_wb:
                 relative_path = f"whiteboard/{identifier}/{file_name}"
-                file_url = f"/repo/{relative_path}"
+                file_url = f"/pool/{relative_path}"  # whiteboard media moved to the pool
             else:
                 relative_path = str(dest_path)
                 file_url = f"/asset-pool/{file_name}"
@@ -576,7 +576,7 @@ async def _download_via_ytdlp(
                     with open(thumb_dest, 'wb') as f:
                         f.write(resp.content)
                     if is_episode_wb:
-                        local_thumbnail_url = f"/repo/whiteboard/{identifier}/{thumb_filename}"
+                        local_thumbnail_url = f"/pool/whiteboard/{identifier}/{thumb_filename}"
                     else:
                         local_thumbnail_url = f"/asset-pool/{thumb_filename}"
                     content_data['thumbnail_url'] = local_thumbnail_url

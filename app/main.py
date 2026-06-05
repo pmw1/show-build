@@ -153,6 +153,9 @@ app.mount("/episodes", StaticFiles(directory="/home/episodes"), name="episodes")
 for mount_path, mount_dir, mount_name in [
     ("/repo", "/home/repo", "repo"),
     ("/media_assets", "/home/media_assets", "media_assets"),
+    # Unbound media pool (episodes/, ads/, repo/, whiteboard/). Whiteboard media
+    # and cue-released media are served from here; was /repo/whiteboard.
+    ("/pool", "/home/pool", "pool"),
     ("/api/profile-pictures", "/home/profile_pictures", "profile_pictures"),
 ]:
     try:
