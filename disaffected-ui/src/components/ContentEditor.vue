@@ -260,13 +260,16 @@
         @open-wpm-tool="showWpmTool = true"
         @generate-script="handleGenerateScript"
         @generate-host-script="handleGenerateScript"
+        @cues-enumerated="handleCuesEnumerated"
         @generate-media-list="handleGenerateMediaList"
         @generate-prompter-files="handleGeneratePrompterFiles"
         @restore-version="restoreToVersion"
+        @preview-version="previewVersion"
         @place-library-item="handleLibraryItemSelected"
         @create-new-library-item="handleCreateNewLibraryItem"
         @save-all="saveEverything"
         @insert-whiteboard-cue="handleInsertWhiteboardCue"
+        @reinsert-pool-media="handleReinsertPoolMedia"
       />
 
       <!-- Collapse Metadata toggle (inner border, visible when panel is open) -->
@@ -339,12 +342,39 @@
     <VoModal
       v-model:show="showVoModal"
       :episode="currentEpisodeNumber"
+      :prefill-data="voPrefillData"
       @submit="submitVo"
       @submit-multiple="submitMultipleVos"
     />
-    <NatModal v-model:show="showNatModal" @submit="submitNat" />
+    <NatModal v-model:show="showNatModal" :prefill-data="natPrefillData" @submit="submitNat" />
     <RifModal v-model:show="showRifModal" :edit-cue-data="editingRifCueData" @submit="submitRif" />
-    <PkgModal v-model:show="showPkgModal" @submit="submitPkg" />
+    <PkgModal v-model:show="showPkgModal" :prefill-data="pkgPrefillData" @submit="submitPkg" />
+
+    <!-- Pool re-insert: choose a cue type for the picked pooled file (filtered
+         to the file's kind), then the matching cue modal opens pre-loaded. -->
+    <v-dialog v-model="showPoolCueTypePicker" max-width="360">
+      <v-card>
+        <v-card-title class="text-body-1 d-flex align-center">
+          <v-icon class="mr-2" size="small">mdi-shape-plus</v-icon>
+          Insert as which cue?
+        </v-card-title>
+        <v-card-text class="text-caption text-grey">
+          {{ poolReinsertFile?.original_filename || poolReinsertFile?.filename }}
+        </v-card-text>
+        <v-card-actions class="flex-wrap ga-2 px-4 pb-4">
+          <v-btn
+            v-for="ct in poolCueTypeOptions"
+            :key="ct"
+            size="small"
+            variant="tonal"
+            color="primary"
+            @click="choosePoolCueType(ct)"
+          >{{ ct }}</v-btn>
+          <v-spacer></v-spacer>
+          <v-btn size="small" variant="text" @click="showPoolCueTypePicker = false">Cancel</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
     <DirModal v-model:show="showDirModal" :editing-cue-data="editingDirCueData" @submit="submitDir" />
     <BumpModal v-model:show="showBumpModal" @submit="submitBump" />
     <StingModal v-model:show="showStingModal" @submit="submitSting" />
@@ -620,6 +650,32 @@
         <v-card-actions style="background: #333;">
           <v-spacer />
           <v-btn variant="text" color="white" @click="showRelocatePicker = false; pendingRelocate = null;">Cancel</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Read-only version preview (todo #35). Shows a past version's script
+         content without restoring it. -->
+    <v-dialog v-model="showVersionPreview" max-width="800" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-eye</v-icon>
+          Version {{ versionPreviewNumber }} preview
+          <v-spacer />
+          <span class="text-caption text-grey">read-only</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text style="max-height: 60vh;">
+          <div v-if="versionPreviewLoading" class="text-center py-6">
+            <v-progress-circular indeterminate color="primary" />
+          </div>
+          <pre v-else class="version-preview-content">{{ versionPreviewContent }}</pre>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" color="warning" prepend-icon="mdi-restore" @click="restoreFromPreview">Restore this version</v-btn>
+          <v-btn variant="text" @click="showVersionPreview = false">Close</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -1486,6 +1542,14 @@ Good night!
       
       // Graphic attachment state
       whiteboardPrefillData: null,
+      // Re-inserting a pooled media file as a cue: the picked file + the
+      // cue-type picker state. On pick we build a prefill and open the modal.
+      poolReinsertFile: null,        // the AssetPoolFile row being re-inserted
+      showPoolCueTypePicker: false,  // the "which cue type?" chooser
+      poolCueTypeOptions: [],        // filtered cue types for the file's kind
+      voPrefillData: null,           // existing-media prefill for VO/NAT/PKG modals
+      natPrefillData: null,
+      pkgPrefillData: null,
       lastModalCloseTime: 0,
       showGfxModal: false,
       showFsqModal: false,
@@ -1548,6 +1612,12 @@ Good night!
 
       // Delete Cue Modal
       showDeleteCueModal: false,
+
+      // Read-only version preview (todo #35)
+      showVersionPreview: false,
+      versionPreviewNumber: null,
+      versionPreviewContent: '',
+      versionPreviewLoading: false,
 
       // Unresolved Revisions Blocker Modal
       showRevisionBlockerModal: false,
@@ -3707,6 +3777,46 @@ Try dropping an image or video file here!`
       }
     },
 
+    // Read-only preview of a past version (todo #35). Fetches the version's full
+    // content via the existing GET versions/{n} endpoint and shows it in a dialog
+    // WITHOUT restoring (the live item is untouched).
+    async previewVersion(versionNumber) {
+      if (!this.currentRundownItem) {
+        notifyUserStandard('No item selected', NOTIFICATION_COLORS.WARNING, 2000);
+        return;
+      }
+      const assetId = this.currentRundownItem.asset_id || this.currentRundownItem.AssetID;
+      if (!assetId) {
+        notifyUserStandard('Cannot preview - item has no asset ID', NOTIFICATION_COLORS.WARNING, 2000);
+        return;
+      }
+      this.versionPreviewNumber = versionNumber;
+      this.versionPreviewContent = '';
+      this.versionPreviewLoading = true;
+      this.showVersionPreview = true;
+      try {
+        const headers = this.getAuthHeaders();
+        const response = await axios.get(
+          `/api/episodes/rundown-item/${assetId}/versions/${versionNumber}`,
+          { headers }
+        );
+        this.versionPreviewContent = response.data?.script_content || '(empty version)';
+      } catch (error) {
+        console.error('Version preview failed:', error);
+        const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
+        this.versionPreviewContent = `Failed to load version: ${errorMsg}`;
+      } finally {
+        this.versionPreviewLoading = false;
+      }
+    },
+
+    // Restore directly from the preview dialog (convenience).
+    restoreFromPreview() {
+      const n = this.versionPreviewNumber;
+      this.showVersionPreview = false;
+      if (n != null) this.restoreToVersion(n);
+    },
+
     // Sync rundown order - update order values to match current positions
     async syncRundownOrder() {
       if (!this.rundownItems || this.rundownItems.length === 0) {
@@ -4138,6 +4248,80 @@ Try dropping an image or video file here!`
           console.warn('captureUndoState after load failed (non-fatal):', e);
         }
       });
+    },
+
+    // Event alias: cue enumeration finished → refresh content in place.
+    async handleCuesEnumerated() {
+      await this.refreshAllItemContentInPlace();
+    },
+
+    // Refresh ALL rundown items' content from the server while preserving the
+    // current selection, then reload the open item into the editor — WITHOUT a
+    // page reload and WITHOUT the structural teardown of reloadFromDatabase()
+    // (which clears selection). Reusable for any server-side operation that
+    // rewrites cue/script content across items but leaves the rundown structure
+    // (the set/order of items) unchanged — e.g. cue enumeration, and future
+    // bulk operations like re-slugging cues or rewriting MediaURLs.
+    //
+    // Do NOT use this when items are added/removed/reordered — use
+    // reloadFromDatabase() for structural changes.
+    //
+    // FUTURE / MULTI-USER: this is the "refresh half" of collaborative editing —
+    // it pulls another user's saved content into the open editor in place, no
+    // page reload, selection preserved. It is NOT a concurrency solution on its
+    // own: it has no trigger (nothing tells this client another user saved) and
+    // no conflict/merge policy (a refresh mid-edit on the SAME item is
+    // last-write-wins). The intended trigger is a server push — see the SSE
+    // plan, docs/SSE_JOB_STATUS_PLAN.md (standing todo #24, "Replace polling
+    // with SSE for job status"); a "rundown changed" SSE channel would call
+    // this to live-refresh other users' edits. NOT a fit for Autoscrub, which
+    // mutates the local in-memory copy and would have its work discarded by a
+    // server re-fetch.
+    async refreshAllItemContentInPlace() {
+      if (!this.currentEpisodeNumber) return;
+      try {
+        // Flush + save any in-flight editor edits so they aren't clobbered.
+        if (this.$refs.editorPanel?.flushPendingChanges) {
+          this.$refs.editorPanel.flushPendingChanges();
+          await this.$nextTick();
+        }
+
+        const response = await axios.get(`/api/episodes/${this.currentEpisodeNumber}/rundown`);
+        const items = response.data.items || [];
+        if (!items.length) return;
+
+        // Remember which item is open (by id, since indexes can shift).
+        const openId = this.selectedItemIndex >= 0
+          ? (this.currentRundownItem?.id ?? this.currentRundownItem?.asset_id)
+          : null;
+
+        // Replace the rundown array wholesale so every item carries the freshly
+        // enumerated script content.
+        this.rundownItems = items;
+
+        // Force EditorPanel to discard its parse cache / edit buffer.
+        if (this.$refs.editorPanel) {
+          this.$refs.editorPanel.segmentReparseKey++;
+          this.$refs.editorPanel.cachedScriptSegments = null;
+          this.$refs.editorPanel.lastParsedContent = null;
+          this.$refs.editorPanel.segmentEditBuffer = {};
+        }
+
+        // Re-resolve and reload the previously-open item into the editor.
+        if (openId != null) {
+          const newIdx = items.findIndex(
+            it => (it.id ?? it.asset_id) === openId
+          );
+          if (newIdx >= 0) {
+            this.selectedItemIndex = newIdx;
+            await this.$nextTick();
+            this.loadItemContent(items[newIdx]);
+          }
+        }
+        console.log('✅ Rundown content refreshed after cue enumeration');
+      } catch (error) {
+        console.error('Failed to refresh after enumeration:', error);
+      }
     },
 
     async reloadCurrentItemContent() {
@@ -5825,6 +6009,96 @@ Try dropping an image or video file here!`
       }
     },
 
+    // ── Re-insert a pooled media file as a cue ──
+    // Double-clicking a file in the AssetPoolPanel "Media" tab lands here. We
+    // don't know the cue type (a video could be VO/SOT/NAT/PKG; an image
+    // IMG/GFX), so we show a cue-type picker filtered to the file's kind, then
+    // open the matching modal pre-loaded with the file URL.
+    handleReinsertPoolMedia(file) {
+      if (!file || !file.url) return;
+      this.poolReinsertFile = file;
+      // GFX is text/title-card/social only — it has no image-file ingest path,
+      // so a pooled image reinserts as IMG (not GFX).
+      const KIND_CUE_TYPES = {
+        video: ['SOT', 'VO', 'NAT', 'PKG'],
+        image: ['IMG'],
+        audio: ['VO', 'NAT'],
+      };
+      this.poolCueTypeOptions = KIND_CUE_TYPES[file.kind] || ['SOT', 'VO', 'NAT', 'PKG', 'IMG'];
+      this.showPoolCueTypePicker = true;
+    },
+
+    // User picked a cue type for the pooled file → build a prefill and open the
+    // matching modal pre-loaded with the existing media URL (no fresh upload).
+    choosePoolCueType(cueType) {
+      const file = this.poolReinsertFile;
+      this.showPoolCueTypePicker = false;
+      if (!file) return;
+
+      // Derive a usable slug from the filename when the pooled file has no
+      // origin_slug (e.g. manual uploads), so the cue modals' Submit button
+      // (which requires a slug) is enabled.
+      const baseName = (file.original_filename || file.filename || '')
+        .replace(/\.[^.]+$/, '');
+      const fallbackSlug = baseName
+        .toLowerCase()
+        .replace(/['".,!?]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+
+      // Shared prefill shape consumed by the cue modals (mirrors buildModalPrefill).
+      const prefill = {
+        type: cueType.toLowerCase(),
+        mediaUrl: file.url,
+        assetId: file.asset_id,
+        title: file.origin_slug || file.original_filename || file.filename || '',
+        slug: file.origin_slug || fallbackSlug || '',
+        fromPool: true,
+      };
+
+      this.whiteboardPrefillData = null;
+      switch (cueType) {
+        case 'SOT':
+          // SotModal pre-loads from top-level initialData.mediaUrl + slug
+          // (its editMode watcher reads those fields directly).
+          this.editingSotCueData = {
+            mediaUrl: file.url,
+            assetId: file.asset_id,
+            slug: file.origin_slug || fallbackSlug || '',
+            fromPool: true,
+          };
+          this.showSotModal = true;
+          break;
+        case 'IMG':
+          // ImgCueModal reads editData.rawData.mediaurl for the preview and the
+          // reuse-existing-media submit path.
+          this.editingImgCueData = {
+            rawData: { mediaurl: file.url, slug: file.origin_slug || fallbackSlug || '' },
+            slug: file.origin_slug || fallbackSlug || '',
+            mediaUrl: file.url,
+            assetId: file.asset_id,
+            fromPool: true,
+          };
+          this.showImgCueModal = true;
+          break;
+        case 'VO':
+          this.voPrefillData = prefill;
+          this.showVoModal = true;
+          break;
+        case 'NAT':
+          this.natPrefillData = prefill;
+          this.showNatModal = true;
+          break;
+        case 'PKG':
+          this.pkgPrefillData = prefill;
+          this.showPkgModal = true;
+          break;
+        default:
+          console.warn('Pool reinsert: unsupported cue type', cueType);
+      }
+      this.poolReinsertFile = null;
+    },
+
     async submitGraphic(gfxCueData) {
       console.log('🎨 GFX cue submitted:', gfxCueData);
 
@@ -6454,9 +6728,13 @@ Try dropping an image or video file here!`
         //   isStandardEdit → user edited metadata only; replace cue in
         //                 place, REUSE the original AssetID
         //   else        → new cue; insert at cursor
+        // A pooled-file reinsert pre-populates via editingSotCueData (so the
+        // modal's editMode watcher fills the form), but it is a NEW cue, not an
+        // edit of an existing one — never take the in-place replace path.
+        const isPoolReinsert = !!editing?.fromPool;
         const isReupload = editing?.isReupload;
         const originalAssetId = editing?.originalAssetId;
-        const isStandardEdit = !!editing && !isReupload;
+        const isStandardEdit = !!editing && !isReupload && !isPoolReinsert;
         const standardEditAssetId = isStandardEdit
           ? (editing.assetId || editing.rawData?.assetId || data.assetId)
           : null;
@@ -6666,13 +6944,19 @@ Try dropping an image or video file here!`
         console.log(`✅ SOT cue inserted successfully`);
         this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
 
+        // Clear the pooled-reinsert prefill state now that the new cue is in.
+        if (isPoolReinsert) this.editingSotCueData = null;
+
         // Wait for Vue to process the content update, then save
         await this.$nextTick();
         await this.saveCurrentItem();
 
-        // Trigger processing NOW that cue is in database
-        console.log('🔄 About to trigger SOT processing...');
-        await this.triggerSOTProcessing(data);
+        // Trigger processing NOW that cue is in database. A pooled reinsert
+        // points at already-processed media (no tempJobId), so skip it.
+        if (!isPoolReinsert) {
+          console.log('🔄 About to trigger SOT processing...');
+          await this.triggerSOTProcessing(data);
+        }
         console.log('🎬🎬🎬 submitSot COMPLETED');
         console.log('🎬🎬🎬 ===============================================');
 
@@ -7945,8 +8229,11 @@ Try dropping an image or video file here!`
       // Snapshot edit state at function entry — modal close watcher may clear
       // this.editingImgCueData mid-flight as the modal animates away.
       const editing = this.editingImgCueData;
-      const isEdit = !!editing;
-      console.log('🖼️ IMG cue submitted (isEdit=' + isEdit + '):', imgCueData);
+      // A pooled-file reinsert pre-populates via editingImgCueData (so the modal
+      // shows the existing image), but it is a NEW cue — not an in-place edit.
+      const isPoolReinsert = !!editing?.fromPool;
+      const isEdit = !!editing && !isPoolReinsert;
+      console.log('🖼️ IMG cue submitted (isEdit=' + isEdit + ', poolReinsert=' + isPoolReinsert + '):', imgCueData);
       if (isEdit) {
         console.log('🖼️ Editing cue snapshot:', {
           assetId: editing.assetId,
@@ -8121,6 +8408,13 @@ Try dropping an image or video file here!`
         this.hasUnsavedChanges = true;
         this.$toast?.success('IMG cue inserted successfully!');
         this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
+        // Clear the pooled-reinsert prefill state and close the modal.
+        if (isPoolReinsert) {
+          this.editingImgCueData = null;
+          this.showImgCueModal = false;
+          await this.$nextTick();
+          await this.saveCurrentItem();
+        }
         console.log('✅ IMG cue inserted');
 
       } catch (error) {
@@ -10099,6 +10393,16 @@ Try dropping an image or video file here!`
 .revision-blocker-actions {
   padding: 12px 20px !important;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Read-only version preview (todo #35) */
+.version-preview-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
 }
 
 </style>
