@@ -8500,7 +8500,18 @@ function autoscrubContent() {
 }
 
 // Run autoscrub and show status
+// Autoscrub is being moved server-side. The client-side scrub is fully
+// disabled in the interim — this guard is the single chokepoint that stops the
+// 30s interval scrub, the 5s debounced scrub, the open-item scrub
+// (autoscrubContent), the orphaned-cursor-marker sweep, AND the
+// autoscrub-all-items emit (so ContentEditor.autoscrubAllItems never fires).
+// See docs/AUTOSCRUB_SERVER_REFACTOR_PLAN.md (todo #31). The dormant functions
+// below are kept as the reference implementation for the server port.
+const AUTOSCRUB_DISABLED = true;
+
 function runAutoscrub() {
+  if (AUTOSCRUB_DISABLED) return;
+
   const wasFormatted = autoscrubContent();
 
   // YAML frontmatter validation and synchronization - DISABLED
