@@ -504,12 +504,14 @@ const { toggleModal: toggleHotkeyModal } = useHotkeys()
 const undoManager = useUndoManager()
 
 // True when the keyboard target is a real text-entry element where the
-// browser's native undo should win (sidebar fields, modal inputs, etc).
-// Script-mode paragraph contenteditables are excluded — they carry the
-// `script-paragraph` class and belong to our undo manager because the
-// reactive `rawMarkdownContent` is the source of truth, not the DOM.
+// browser's native (or editor-owned) undo should win (sidebar fields, modal
+// inputs, etc) — in those cases the global useUndoManager must NOT fire.
+// The ProseMirror script editor (.ProseMirror) is included: it owns Ctrl+Z
+// with its own fine-grained history, so a Ctrl+Z inside it must reach PM and
+// never be intercepted by the global manager (todo #34).
 function isInNativeTextField(target) {
   if (!target || !(target instanceof Element)) return false
+  if (target.closest('.ProseMirror')) return true
   return !!target.closest('input, textarea, [contenteditable="true"]:not(.script-paragraph)')
 }
 

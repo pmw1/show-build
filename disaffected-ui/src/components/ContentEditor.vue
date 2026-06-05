@@ -1083,8 +1083,14 @@ export default {
             this.debouncedScratchSave(); // 2s debounce
           }
 
-          // Capture undo state
-          this.debouncedCaptureUndoState();
+          // Capture undo state — but NOT in Script Mode. There the ProseMirror
+          // editor owns Ctrl+Z with its own fine-grained history; capturing a
+          // coarse whole-script snapshot here too would make App.vue's global
+          // handler steal Ctrl+Z and undo a whole snapshot instead of one PM
+          // step (todo #34). The global manager is for Code Mode + Scratch only.
+          if (this.editorMode !== 'script') {
+            this.debouncedCaptureUndoState();
+          }
         }
       }
     },
@@ -4241,9 +4247,11 @@ Try dropping an image or video file here!`
         this.hasUnsavedChanges = false;
         if (this._loadGuardSafetyTimer) { clearTimeout(this._loadGuardSafetyTimer); this._loadGuardSafetyTimer = null; }
         console.log('🔓 Content load complete - autosave re-enabled');
-        // Capture initial snapshot so first Ctrl+Z can revert to the loaded state
+        // Capture initial snapshot so first Ctrl+Z can revert to the loaded state.
+        // Skip in Script Mode — PM owns undo there; a baseline entry would make the
+        // global manager's canUndo true and let App.vue steal Ctrl+Z (todo #34).
         try {
-          this.captureUndoState();
+          if (this.editorMode !== 'script') this.captureUndoState();
         } catch (e) {
           console.warn('captureUndoState after load failed (non-fatal):', e);
         }
