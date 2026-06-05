@@ -380,6 +380,10 @@
                         @click="handleItemSelect(item, $event)"
                         @dblclick="handleItemDoubleClick(item)"
                       >
+                        <!-- Locked-by-other padlock overlay (todo #41) -->
+                        <div v-if="isLockedByOther(item)" class="locked-padlock-overlay" :title="`Locked — being edited by another user`">
+                          <v-icon color="red" size="20">mdi-lock</v-icon>
+                        </div>
                         <div class="compact-rundown-row">
                             <!-- Index Number Cell -->
                             <div class="index-number-cell">
@@ -3601,6 +3605,25 @@ defineExpose({
 .rundown-item-card.locked-by-other {
   background-color: #bdbdbd !important;
   color: #616161 !important;
+  position: relative;   /* anchor the padlock overlay */
+}
+
+/* Red padlock centered over the greyed locked row (todo #41). pointer-events
+   none so it never blocks the row's click/dblclick (take-over still works). */
+.locked-padlock-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  pointer-events: none;
+}
+.locked-padlock-overlay .v-icon {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
 }
 .rundown-item-card.locked-by-other .compact-rundown-row {
   filter: grayscale(1) brightness(0.97);
