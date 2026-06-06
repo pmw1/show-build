@@ -289,9 +289,16 @@
               </div>
             </div>
 
-            <!-- Segment Title -->
+            <!-- Segment Title (editable inline) -->
             <div v-if="useVisualScriptMode && !hasNoItem" class="segment-title-header" :class="{ 'segment-title-placeholder': !item?.title || /^Segment-\d+$/i.test(item.title), 'segment-title-header--collapsed': collapseMode }">
-              <span class="segment-title-text">{{ item?.title && !/^Segment-\d+$/i.test(item.title) ? item.title : 'Enter a segment title' }}</span>
+              <input
+                type="text"
+                class="segment-title-text segment-title-input"
+                :value="item?.title && !/^Segment-\d+$/i.test(item.title) ? item.title : ''"
+                placeholder="Enter a segment title"
+                @input="updateMetadata('title', $event.target.value)"
+                @keydown.enter.prevent="$event.target.blur()"
+              />
               <!-- Collapse-mode bar: spans the bottom of the title header, color-
                    tuned to the header, only while collapse mode is active. -->
               <div v-if="collapseMode && editorMode === 'script'" class="collapse-mode-bar">
@@ -7517,6 +7524,18 @@ function handleTypingKeydown(event) {
   }
 }
 
+// Capture-phase ESC handler: dismisses the Segment Locked overlay BEFORE any
+// other (bubble-phase) ESC handler can act on it. Only intercepts when the
+// overlay is actually showing (todo #41).
+function handleLockOverlayEscCapture(event) {
+  if (event.key === 'Escape' && props.isSegmentLocked && !lockOverlayDismissed.value) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+    dismissLockOverlay();
+  }
+}
+
 function handleGlobalKeydown(event) {
   // ESC dismisses the "Segment Locked" overlay (todo #41) — highest priority so
   // a locked-out user can always back out without taking over.
@@ -11046,6 +11065,11 @@ onMounted(() => {
   document.addEventListener('keydown', handleGlobalKeydown);
   document.addEventListener('keyup', handleGlobalKeyup);
 
+  // ESC-to-dismiss the Segment Locked overlay, in the CAPTURE phase so it wins
+  // over App.vue's global/modal-stack ESC handlers (which register first and
+  // could otherwise consume ESC before this component sees it) — todo #41.
+  document.addEventListener('keydown', handleLockOverlayEscCapture, true);
+
   // Reset ALT key state when window loses focus (prevents stuck ALT key)
   window.addEventListener('blur', handleWindowBlur);
 
@@ -11078,6 +11102,7 @@ onUnmounted(() => {
   window.removeEventListener('scroll', handleScrollForFlagNotes, true);
   // Clean up event listeners
   document.removeEventListener('keydown', handleGlobalKeydown);
+  document.removeEventListener('keydown', handleLockOverlayEscCapture, true);
   document.removeEventListener('keyup', handleGlobalKeyup);
   document.removeEventListener('keydown', handleCursorCharacterKeydown);
   window.removeEventListener('blur', handleWindowBlur);
@@ -12454,6 +12479,27 @@ defineExpose({
 }
 
 .segment-title-placeholder {
+  color: #bbb;
+  font-weight: 400;
+  font-style: italic;
+}
+
+/* Editable segment title: borderless input that inherits the header's serif
+   styling so it looks like the old static text but is click-to-edit. */
+.segment-title-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  padding: 0;
+  margin: 0;
+}
+.segment-title-input::placeholder {
   color: #bbb;
   font-weight: 400;
   font-style: italic;
