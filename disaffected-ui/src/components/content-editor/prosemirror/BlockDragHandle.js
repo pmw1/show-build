@@ -60,19 +60,27 @@ let editorView = null;
 const DROPLINE = 'var(--dropline-color, rgb(33, 150, 243))';
 const DRAGLIGHT = 'var(--draglight-color, rgba(33, 150, 243, 0.15))';
 
+// ── Drag animation tuning (todo #39) ───────────────────────────────────────
+// One-knob feel, mirroring the rundown panel's SortableJS :animation="200".
+// Displacement is GPU-composited (transform: translateY) — no per-frame reflow.
+const DRAG_SHIFT_PX = 64;          // how far blocks slide down to open the drop space
+const DRAG_ANIM_MS = 200;          // displacement + FLIP-settle duration
+const DRAG_EASE = 'cubic-bezier(0.2, 0, 0, 1)';  // smooth, no overshoot
+
 // CSS injected once per page. Kept inline (not a scoped .vue block) because this
 // plugin's DOM is created imperatively and lives inside the ProseMirror surface.
 const STYLE_ID = 'pm-block-drag-handle-styles';
 const STYLE_TEXT = `
 /* All draggable blocks are position:relative (for the grip anchor + displacement).
-   The margin transition animates the displacement: as the drop target moves, the
-   blocks above/below slide apart smoothly instead of snapping. */
+   Displacement is driven by transform:translateY (GPU-composited — no per-frame
+   layout reflow, unlike the old margin animation), so it stays smooth (todo #39). */
 .ProseMirror .pm-drag-block {
   position: relative;
-  /* Springy displacement: rows slide apart with a slight overshoot/settle so the
-     reflow reads as a clear, lively motion as the drop target moves around. */
-  transition: margin-top 0.32s cubic-bezier(0.34, 1.56, 0.64, 1),
-              margin-bottom 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform ${DRAG_ANIM_MS}ms ${DRAG_EASE};
+}
+/* Only pay the compositing cost while a drag is live. */
+.ProseMirror.pm-dragging-active .pm-drag-block {
+  will-change: transform;
 }
 /* PARAGRAPHS get a 34px left gutter with a grip drawn via ::before. Cue cards do
    NOT (they have their own mdi-drag-vertical handle). */
@@ -128,11 +136,14 @@ const STYLE_TEXT = `
   border-radius: 4px;
   opacity: 0.9;
 }
-/* Live displacement: the block just AFTER the target gap is pushed down, and the
-   block just BEFORE it is pushed up — surrounding rows reflow to open a big,
-   obvious gap for the "DROP HERE" block to sit in. */
-.ProseMirror .pm-displace-after { margin-top: 64px; }
-.ProseMirror .pm-displace-before { margin-bottom: 64px; }
+/* Live displacement: the dropline indicator stays cast in place at the target
+   gap, and every block AT/BELOW it slides DOWN (transform) to open the space for
+   the "DROP HERE" block — the rows move out of the indicator's way (todo #39). */
+.ProseMirror .pm-shift-down { transform: translateY(${DRAG_SHIFT_PX}px); }
+/* FLIP helper: during the invert step we set an inline transform with NO
+   transition so the block jumps to its old position, then clearing the inline
+   transform animates (via .pm-drag-block's transition) the glide to its new spot. */
+.ProseMirror .pm-flip-no-anim { transition: none !important; }
 /* Drop-confirmation flash. Moved block: 3 rapid full-dropline pulses. Neighbors:
    2 lighter pulses. Theme-colored via --dropline-color (+ --draglight-color for
    the lighter neighbor tint). */
@@ -172,6 +183,8 @@ const STYLE_TEXT = `
   border-radius: 6px;
   box-shadow: 0 0 12px ${DROPLINE};
   transform-origin: center;
+  /* Fade-in fires ONCE (first-appear); repositioning the cast indicator to a new
+     gap reuses the same element, so it no longer re-flashes on every move (#39). */
   animation: pm-drop-gap-in 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 /* Cursor-attached drag ghost — a floating chip showing what's being dragged.
@@ -331,11 +344,11 @@ function buildDecorations(state, dragState) {
     const classes = ['pm-drag-block'];
     if (b.type !== 'cue') classes.push('pm-drag-gutter');
 
-    // NOTE: the displacement classes (pm-displace-after/before) are NOT applied
-    // here. Doing it via the node decoration re-renders the element on every gap
-    // change, so the margin jumps with no CSS transition (no stable from->to on
-    // the same element). Instead we toggle them on the PERSISTENT block DOM in
-    // applyDisplacement() (called from onMove), so the same element animates.
+    // NOTE: the displacement class (pm-shift-down) is NOT applied here. Doing it
+    // via the node decoration re-renders the element on every gap change, killing
+    // the CSS transition (no stable from->to on the same element). Instead we
+    // toggle it on the PERSISTENT block DOM in applyDisplacement() (called from
+    // onMove), so the same element animates the transform smoothly.
     if (dragState && dragState.active && b.index === dragState.sourceIndex) {
       classes.push('pm-drag-source');
     }
@@ -368,7 +381,10 @@ function buildDecorations(state, dragState) {
       label.className = 'pm-drop-gap-label';
       label.textContent = dragLabel(sourceNode);
       box.appendChild(label);
-      decos.push(Decoration.widget(gapPos, box, { side: -1, key: `pm-drop-gap-${gi}` }));
+      // Stable key (NOT gap-indexed) so ProseMirror REUSES the same widget DOM
+      // when the gap moves — it repositions instead of destroy+recreate, so the
+      // fade-in fires once on first appear rather than re-flashing each move (#39).
+      decos.push(Decoration.widget(gapPos, box, { side: -1, key: 'pm-drop-gap' }));
     }
   }
 
@@ -393,8 +409,9 @@ function createGhost(node, sourceEl) {
   // clone is unavailable.
   if (sourceEl && sourceEl.cloneNode) {
     const clone = sourceEl.cloneNode(true);
-    clone.classList.remove('pm-grabbing', 'pm-displace-after', 'pm-displace-before', 'pm-drag-source');
+    clone.classList.remove('pm-grabbing', 'pm-shift-down', 'pm-flip-no-anim', 'pm-drag-source');
     clone.style.margin = '0';
+    clone.style.transform = '';
     clone.style.width = `${Math.round(sourceEl.getBoundingClientRect().width)}px`;
     const inner = document.createElement('div');
     inner.className = 'pm-drag-ghost-clone';
@@ -435,6 +452,10 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
   createGhost(srcNode, blockEl);
   moveGhost(downEvent.clientX, downEvent.clientY);
 
+  // Mark the editor as actively dragging so the will-change compositing hint
+  // applies only during the drag (todo #39).
+  if (view.dom && view.dom.classList) view.dom.classList.add('pm-dragging-active');
+
   const setDrag = (patch) => {
     const tr = view.state.tr.setMeta(blockDragHandleKey, patch);
     tr.setMeta('addToHistory', false); // drag preview must not enter undo stack
@@ -468,6 +489,7 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
     window.removeEventListener('pointercancel', onUp, true);
     removeGhost(); // detach the cursor ghost
     applyDisplacement(view, null, sourceIndex); // clear displacement classes
+    if (view.dom && view.dom.classList) view.dom.classList.remove('pm-dragging-active');
 
     const cur = blockDragHandleKey.getState(view.state);
     // Clear the drag-preview state first.
@@ -476,16 +498,13 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
     if (cur && cur.active && cur.gapIndex != null) {
       const moveTr = buildMoveTransaction(view.state, sourceIndex, cur.gapIndex);
       if (moveTr) {
-        view.dispatch(moveTr);
-        // The moved block's NEW top-level index: dropping past the source shifts
-        // the landing index down by one (the source was removed above it).
+        // FLIP settle: dispatch the move inside flipReorder so every block glides
+        // from its old to new position instead of snapping (todo #39). The glide
+        // itself confirms the drop, so the old heavy moved-block flash is dropped;
+        // a subtle neighbor flash is kept for a touch of landing feedback.
+        flipReorder(view, () => view.dispatch(moveTr));
         const landedIndex = cur.gapIndex > sourceIndex ? cur.gapIndex - 1 : cur.gapIndex;
-        // Flash after the DOM settles. The moved block and the one below it get
-        // FRESH DOM from the insert (and a follow-up redraw clears pm-drag-source),
-        // so flashing too early lets that redraw wipe the class — which is why
-        // only the (untouched) block above was flashing. Delay past the redraw,
-        // then re-query elements at flash time.
-        setTimeout(() => flashDrop(view, landedIndex), 90);
+        setTimeout(() => flashNeighbors(view, landedIndex), 90);
       }
     }
     view.focus();
@@ -515,10 +534,12 @@ function nearestGap(view, clientY) {
   return blocks.length; // below everything -> trailing gap
 }
 
-// Toggle the displacement classes on the PERSISTENT block DOM elements (not via
-// node decorations, which re-render and kill the CSS transition). Same element
-// gains/loses the class, so margin animates from 0 -> 64px. Pass gapIndex=null
-// to clear all displacement (drag end).
+// Toggle the displacement on the PERSISTENT block DOM elements (not via node
+// decorations, which re-render and kill the CSS transition). The dropline stays
+// cast in place; every block AT/BELOW the gap gets pm-shift-down (translateY) so
+// the rows slide DOWN out of the indicator's way, opening the drop space. Same
+// element gains/loses the class, so the transform animates smoothly (GPU, no
+// reflow). Pass gapIndex=null to clear all displacement (drag end). (todo #39)
 function applyDisplacement(view, gapIndex, sourceIndex) {
   const blocks = topLevelBlocks(view.state.doc);
   const noop = gapIndex == null || gapIndex === sourceIndex || gapIndex === sourceIndex + 1;
@@ -526,8 +547,9 @@ function applyDisplacement(view, gapIndex, sourceIndex) {
     const dom = view.nodeDOM(blocks[i].start);
     const el = dom && dom.nodeType === 1 ? dom : (dom && dom.parentElement);
     if (!el || !el.classList) continue;
-    el.classList.toggle('pm-displace-after', !noop && i === gapIndex);
-    el.classList.toggle('pm-displace-before', !noop && i === gapIndex - 1);
+    // Shift down every block at/below the gap (except the dragged source itself).
+    const shift = !noop && i >= gapIndex && i !== sourceIndex;
+    el.classList.toggle('pm-shift-down', shift);
   }
 }
 
@@ -542,20 +564,66 @@ function blockElAt(view, index) {
   return dom && dom.nodeType === 1 ? dom : (dom && dom.parentElement) || null;
 }
 
-function flashDrop(view, landedIndex) {
-  const moved = blockElAt(view, landedIndex);
+// FLIP settle (todo #39): capture each block's position BEFORE the reorder, run
+// `commitFn` (which dispatches the move, reordering the DOM), then on the next
+// frame invert each block to its old spot (no transition) and clear it so the
+// .pm-drag-block transition glides each block from old -> new position — the same
+// FLIP technique SortableJS uses, so the drop reads as a smooth settle, not a snap.
+function flipReorder(view, commitFn) {
+  // FIRST: snapshot current top of every block element.
+  const before = new Map();
+  const blocksBefore = topLevelBlocks(view.state.doc);
+  for (const b of blocksBefore) {
+    const dom = view.nodeDOM(b.start);
+    const el = dom && dom.nodeType === 1 ? dom : (dom && dom.parentElement);
+    if (el && el.getBoundingClientRect) before.set(el, el.getBoundingClientRect().top);
+  }
+
+  commitFn(); // LAST: the doc reorders; DOM moves to final positions.
+
+  requestAnimationFrame(() => {
+    const blocksAfter = topLevelBlocks(view.state.doc);
+    const movers = [];
+    for (const b of blocksAfter) {
+      const dom = view.nodeDOM(b.start);
+      const el = dom && dom.nodeType === 1 ? dom : (dom && dom.parentElement);
+      if (!el || !el.getBoundingClientRect) continue;
+      const oldTop = before.get(el);
+      if (oldTop == null) continue;
+      const delta = oldTop - el.getBoundingClientRect().top;
+      if (!delta) continue;
+      // INVERT: jump back to the old position with no animation.
+      el.classList.add('pm-flip-no-anim');
+      el.style.transform = `translateY(${delta}px)`;
+      movers.push(el);
+    }
+    if (!movers.length) return;
+    // PLAY: next frame, drop the no-anim flag + clear the transform so the
+    // .pm-drag-block transition animates each block to its real (new) spot.
+    requestAnimationFrame(() => {
+      for (const el of movers) {
+        el.classList.remove('pm-flip-no-anim');
+        el.style.transform = '';
+      }
+      // Clean up will-change after the settle completes.
+      setTimeout(() => { for (const el of movers) el.style.transform = ''; }, DRAG_ANIM_MS + 50);
+    });
+  });
+}
+
+// Lighter landing feedback used with the FLIP settle (todo #39): the moved block
+// glides (no flash needed), only its new neighbors get a subtle tint pulse.
+function flashNeighbors(view, landedIndex) {
   const above = blockElAt(view, landedIndex - 1);
   const below = blockElAt(view, landedIndex + 1);
   const fire = (el, cls, ms) => {
     if (!el || !el.classList) return;
     el.classList.remove(cls);
-    // force reflow so re-adding restarts the animation
     void el.offsetWidth;
     el.classList.add(cls);
     setTimeout(() => el.classList.remove(cls), ms);
   };
-  fire(moved, 'pm-flash-drop', 700);      // 3x ~0.2s each
-  fire(above, 'pm-flash-neighbor', 520);  // 2x ~0.24s each
+  fire(above, 'pm-flash-neighbor', 520);
   fire(below, 'pm-flash-neighbor', 520);
 }
 
