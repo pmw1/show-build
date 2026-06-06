@@ -756,16 +756,20 @@ export default {
   z-index: 50;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 0.4em;
   background: #fff;
   border: 1px solid #7e57c2;
   border-radius: 6px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-  padding: 4px 6px;
-  max-width: 420px;
+  padding: 0.35em 0.5em;
+  max-width: 36em;
+  /* Match the user/admin script typesetting (size + font) so the popup feels
+     like part of the document, not a tiny chip. */
+  font-size: var(--editor-script-font-size, 16px);
+  font-family: var(--editor-script-font-family, monospace);
 }
 .rev-popup-label {
-  font-size: 11px;
+  font-size: 0.7em;
   font-weight: 600;
   color: #7e57c2;
   white-space: nowrap;
@@ -773,9 +777,10 @@ export default {
 .rev-popup-input {
   border: 1px solid #ddd;
   border-radius: 4px;
-  padding: 3px 6px;
-  font-size: 13px;
-  min-width: 220px;
+  padding: 0.2em 0.45em;
+  font-size: 0.9em;
+  font-family: inherit;
+  min-width: 16em;
   outline: none;
 }
 .rev-popup-input:focus {
@@ -785,9 +790,9 @@ export default {
   cursor: pointer;
   border: none;
   border-radius: 50%;
-  width: 22px;
-  height: 22px;
-  font-size: 12px;
+  width: 1.5em;
+  height: 1.5em;
+  font-size: 0.85em;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -880,19 +885,25 @@ export default {
 .script-editor-host :deep(rev-actions) {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  margin: 0 4px;
+  gap: 0.4em;
+  margin: 0 0.4em;
   vertical-align: middle;
   user-select: none;
+  /* Reflect the user/admin script typesetting so the inline revision UI matches
+     the body text size + font (was a hardcoded ~10-11px). Children use em so
+     they scale together. */
+  font-size: var(--editor-script-font-size, 16px);
+  font-family: var(--editor-script-font-family, monospace);
 }
 .script-editor-host :deep(rev-add) {
   background-color: rgba(76, 175, 80, 0.22);
   color: #1b5e20;
   border-radius: 2px;
-  padding: 0 3px;
+  padding: 0 0.25em;
+  font-size: 1em;
 }
 .script-editor-host :deep(rev-meta) {
-  font-size: 10px;
+  font-size: 0.7em;
   color: #888;
   font-style: italic;
 }
@@ -900,10 +911,10 @@ export default {
   cursor: pointer;
   border: none;
   border-radius: 50%;
-  width: 18px;
-  height: 18px;
-  font-size: 11px;
-  line-height: 18px;
+  width: 1.4em;
+  height: 1.4em;
+  font-size: 0.8em;
+  line-height: 1.4em;
   text-align: center;
   display: inline-flex;
   align-items: center;
