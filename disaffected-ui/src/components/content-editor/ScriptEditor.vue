@@ -1184,7 +1184,26 @@ export default {
   height: 1.36em;
 }
 .script-editor-host :deep(na-btn.na-flag:hover) { color: #fb8c00; background: rgba(251, 140, 0, 0.14); }
-.script-editor-host :deep(na-btn.na-flag.is-active) { color: #e53935; }
+/* The persistent "needs attention" flag left on a flagged block reads as a
+   badge: a WHITE flag inside a RED rounded box, 2.5x larger, so the block is
+   clearly flagged even when not focused. */
+.script-editor-host :deep(na-btn.na-flag.is-active) {
+  color: #fff;                 /* the flag glyph (currentColor) is white */
+  background: #e53935;         /* red box */
+  width: 2.5em;
+  height: 2.5em;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.script-editor-host :deep(na-btn.na-flag.is-active:hover) {
+  background: #d32f2f;
+  color: #fff;
+}
+.script-editor-host :deep(na-btn.na-flag.is-active svg) {
+  width: 1.6em;                /* glyph sized to sit nicely inside the box */
+  height: 1.6em;
+  fill: currentColor;
+}
 .script-editor-host :deep(na-btn.na-delete:hover) { color: #e53935; background: rgba(229, 57, 53, 0.14); }
 
 /* Flag note panel (attached to the right of a flagged paragraph). */
