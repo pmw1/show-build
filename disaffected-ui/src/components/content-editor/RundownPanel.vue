@@ -3675,10 +3675,15 @@ defineExpose({
 /* Only the ROW CONTENT goes grey. The padlock + presence avatar are siblings
    of .compact-rundown-row (card-level overlays), so this filter never touches
    them — they stay full colour. */
+/* IMPORTANT: do NOT put `filter:` on .compact-rundown-row — a filter makes it a
+   containing block, which would re-anchor the absolutely-positioned
+   .duration-display to the (20px-narrower) row instead of the overhanging card
+   and shift it out of place. Instead the solid gray bg/text comes from the
+   inline style + the per-element rules below, and we desaturate only the few
+   child elements that carry their own colour. */
 .rundown-item-card.locked-by-other .compact-rundown-row {
-  filter: grayscale(1) brightness(0.97);
-  /* Make room at the left for the leading padlock + name badge group so it reads
-     as the first thing in the row rather than overlapping the index cell. */
+  /* Make room at the left for the leading padlock + name badge group. Padding
+     does not move the right-anchored duration. */
   padding-left: 66px;
 }
 .rundown-item-card.locked-by-other .compact-rundown-row .index-number,
@@ -3687,6 +3692,14 @@ defineExpose({
 .rundown-item-card.locked-by-other .compact-rundown-row .duration-display,
 .rundown-item-card.locked-by-other .compact-rundown-row .content-char-count {
   color: #616161 !important;
+}
+/* Desaturate the small coloured accents (status bar, type/library icons, chips)
+   without filtering the row container itself. */
+.rundown-item-card.locked-by-other .compact-rundown-row .status-indicator,
+.rundown-item-card.locked-by-other .compact-rundown-row .library-badge,
+.rundown-item-card.locked-by-other .compact-rundown-row .v-chip,
+.rundown-item-card.locked-by-other .compact-rundown-row .v-icon {
+  filter: grayscale(1) brightness(0.9);
 }
 .slug-text {
   font-weight: normal;
