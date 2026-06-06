@@ -1012,7 +1012,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import { themeColorMap, getColorValue, resolveVuetifyColor, getTextColorForBackground, loadColorsFromDatabase } from '@/utils/themeColorMap'
 import { useRegions } from '@/composables/useRegions'
 import { useUserPrefs } from '@/composables/useUserPrefs'
@@ -1182,25 +1182,107 @@ function _currentMe() {
   } catch { return { id: null, username: null } }
 }
 
-function presentUsersFor(item) {
-  if (!item) return []
-  const itemId = item.asset_id || item.id
-  if (!itemId) return []
-  const { id: myId, username: myUsername } = _currentMe()
-  return (_messagesApi.users.value || []).filter(u =>
-    (myId == null || String(u.id) !== String(myId))
-    && (myUsername == null || u.username !== myUsername)
-    && u.online
-    && u.current_location?.segment_id != null
-    && String(u.current_location.segment_id) === String(itemId)
-  )
+// ──────────────────────────────────────────────────────────────────
+// Near-instant lock state (todo #41). Source of truth = the server
+// segment_locks table, delivered via the /api/locks/events SSE stream so a
+// lock acquire/release/take-over shows up on every other user's rundown in
+// <1s with NO polling. Seeded once from /api/locks/active on mount.
+//   lockedByOther: Map<rundown_item_asset_id, { holder_user_id, holder_username }>
+//   (only holds locks owned by OTHER users; my own lock is excluded.)
+// ──────────────────────────────────────────────────────────────────
+const lockedByOther = ref(new Map())
+let _lockEventSource = null
+
+function _isMine(holderUserId) {
+  const { id: myId } = _currentMe()
+  return myId != null && String(holderUserId) === String(myId)
 }
 
-// True when another user is present on this item (proxy for "locked by
-// someone else"). Drives the greyed-out card + enlarged presence badge so the
-// rundown list shows at a glance which segments are occupied by another editor.
+async function _seedActiveLocks() {
+  try {
+    const token = localStorage.getItem('auth-token')
+    const res = await fetch('/api/locks/active', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    const m = new Map()
+    for (const l of (data?.locks || [])) {
+      if (!l.held_by_me && l.rundown_item_asset_id) {
+        m.set(String(l.rundown_item_asset_id),
+          { holder_user_id: l.holder_user_id, holder_username: l.holder_username })
+      }
+    }
+    lockedByOther.value = m
+  } catch (e) {
+    console.warn('[locks] seed /active failed:', e)
+  }
+}
+
+function _applyLockEvent(evt) {
+  const itemId = evt?.rundown_item_asset_id != null ? String(evt.rundown_item_asset_id) : null
+  if (!itemId) return
+  const next = new Map(lockedByOther.value)  // new ref so Vue reacts
+  if (evt.action === 'released') {
+    next.delete(itemId)
+  } else {
+    // acquired / taken_over
+    if (_isMine(evt.holder_user_id)) {
+      next.delete(itemId)  // my own lock never greys my row
+    } else {
+      next.set(itemId, { holder_user_id: evt.holder_user_id, holder_username: evt.holder_username })
+    }
+  }
+  lockedByOther.value = next
+}
+
+function _connectLockEvents() {
+  try {
+    if (_lockEventSource) { _lockEventSource.close(); _lockEventSource = null }
+    const token = localStorage.getItem('auth-token') || ''
+    // EventSource can't set headers — token goes via query param.
+    _lockEventSource = new EventSource(`/api/locks/events?token=${encodeURIComponent(token)}`)
+    _lockEventSource.addEventListener('lock', (e) => {
+      try { _applyLockEvent(JSON.parse(e.data)) } catch (err) { console.warn('[locks] bad event', err) }
+    })
+    _lockEventSource.onerror = () => {
+      // EventSource auto-reconnects; on reconnect, re-seed to catch missed events.
+      _seedActiveLocks()
+    }
+  } catch (e) {
+    console.warn('[locks] EventSource connect failed:', e)
+  }
+}
+
+onMounted(() => {
+  _seedActiveLocks()
+  _connectLockEvents()
+})
+onUnmounted(() => {
+  if (_lockEventSource) { _lockEventSource.close(); _lockEventSource = null }
+})
+
+// Users present on this item, for the avatar. Prefer the authoritative lock
+// holder (from SSE); fall back to presence so the avatar still resolves a name.
+function presentUsersFor(item) {
+  if (!item) return []
+  const itemId = String(item.asset_id || item.id || '')
+  if (!itemId) return []
+  const lock = lockedByOther.value.get(itemId)
+  if (lock) {
+    // Try to enrich with the full user row (for colour/avatar); else synthesize.
+    const u = (_messagesApi.users.value || []).find(x => String(x.id) === String(lock.holder_user_id))
+    return [u || { id: lock.holder_user_id, username: lock.holder_username, display_name: lock.holder_username }]
+  }
+  return []
+}
+
+// True when another user holds the lock on this item (server truth via SSE).
+// Drives the greyed-out row + red padlock + enlarged avatar.
 function isLockedByOther(item) {
-  return presentUsersFor(item).length > 0
+  if (!item) return false
+  const itemId = String(item.asset_id || item.id || '')
+  return itemId !== '' && lockedByOther.value.has(itemId)
 }
 
 function avatarInitials(u) {
