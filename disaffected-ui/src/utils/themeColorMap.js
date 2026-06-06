@@ -360,23 +360,17 @@ export function getContrastRatio(color1, color2) {
 // Get readable text color (black or white) for a given background color
 export function getReadableTextColor(backgroundColor) {
   if (!backgroundColor) return '#FFFFFF'; // Default to white if no background
-  
+
   // Resolve the background color to hex format
   const resolvedBg = resolveVuetifyColor(backgroundColor);
-  
+
+  // Pure highest-contrast decision: return whichever of white/black actually
+  // reads better against this background. No threshold bias — a dark background
+  // gets white, a light one gets black, and mid-tones get whichever wins the
+  // contrast ratio outright. (Ties default to white.)
   const whiteContrast = getContrastRatio(resolvedBg, '#FFFFFF');
   const blackContrast = getContrastRatio(resolvedBg, '#000000');
-  
-  // WCAG AA standard requires 4.5:1 contrast ratio for normal text
-  // Return the color with better contrast, preferring white if both meet standards
-  if (whiteContrast >= 4.5) {
-    return '#FFFFFF';
-  } else if (blackContrast >= 4.5) {
-    return '#000000';
-  } else {
-    // If neither meets the standard, choose the one with better contrast
-    return whiteContrast > blackContrast ? '#FFFFFF' : '#000000';
-  }
+  return whiteContrast >= blackContrast ? '#FFFFFF' : '#000000';
 }
 
 // Utility function to get text color for a theme color name
