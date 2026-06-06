@@ -375,6 +375,19 @@ function buildDecorations(state, dragState) {
       }
     }
 
+    // Drop-confirmation flash (todo #46): applied via the DECORATION (not an
+    // imperative class) so it survives the autosave round-trip that re-renders
+    // the paragraph DOM right after a drop — that re-render was wiping any class
+    // set imperatively on the freshly-rebuilt <p>, so paragraphs never flashed
+    // (cue NodeViews kept their DOM, which is why only cues flashed). ProseMirror
+    // re-applies the decoration class on every redraw, so the keyframe runs.
+    if (dragState && dragState.flash) {
+      if (b.index === dragState.flash.landed) classes.push('pm-flash-drop');
+      else if (b.index === dragState.flash.landed - 1 || b.index === dragState.flash.landed + 1) {
+        classes.push('pm-flash-neighbor');
+      }
+    }
+
     // The grab handle is NOT a separate widget (a widget at b.start renders
     // BETWEEN blocks and anchors to the editor root, so they all piled up at the
     // top — only block 0 was visible, and atom cues got none). Instead the
@@ -522,14 +535,21 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
         // FLIP settle: dispatch the move inside flipReorder so every block glides
         // from its old to new position instead of snapping (todo #39).
         flipReorder(view, () => view.dispatch(moveTr));
-        // Drop-confirmation flash (todo #46): the dropped block flashes 3x fast in
-        // the drag colour; its new neighbours flash 2x slower at half opacity.
-        // Fired after a short delay so the moved block's FRESH DOM (from the insert
-        // + the redraw that clears pm-drag-source) exists, then re-queried at flash
-        // time — flashing too early lets that redraw wipe the class. The flash
-        // (bg + box-shadow) coexists with the FLIP glide (transform).
+        // Drop-confirmation flash (todo #46): set flash state in the plugin so the
+        // class is applied via DECORATION (survives the autosave re-render). Clear
+        // it after the animation finishes. Dispatched on a short delay so it lands
+        // after the move + its immediate redraws settle.
         const landedIndex = cur.gapIndex > sourceIndex ? cur.gapIndex - 1 : cur.gapIndex;
-        setTimeout(() => flashDrop(view, landedIndex), 90);
+        setTimeout(() => {
+          const t1 = view.state.tr.setMeta(blockDragHandleKey, { flash: { landed: landedIndex } });
+          t1.setMeta('addToHistory', false);
+          view.dispatch(t1);
+          setTimeout(() => {
+            const t2 = view.state.tr.setMeta(blockDragHandleKey, { flash: null });
+            t2.setMeta('addToHistory', false);
+            view.dispatch(t2);
+          }, 750); // a touch past the 3x ~0.2s drop animation
+        }, 120);
       }
     }
     view.focus();
@@ -604,34 +624,6 @@ function flipReorder(view, commitFn) {
       setTimeout(() => { for (const el of movers) el.style.transform = ''; }, DRAG_ANIM_MS + 50);
     });
   });
-}
-
-// Drop-confirmation flash (todo #46): the dropped block flashes 3x fast in the
-// drag colour; its new above/below neighbours flash 2x slower at half opacity.
-// Flash a block by INDEX (re-resolved against the live view each time). The move
-// + the autosave round-trip re-render the document, so a DOM element captured
-// earlier becomes detached (connected=false → nothing paints) — #46. We resolve
-// the element fresh at fire time and, if it's not yet connected (view still
-// reconciling), retry on the next frame a few times until the live node exists.
-function fireFlashByIndex(view, index, cls, ms, retries = 8) {
-  const blocks = topLevelBlocks(view.state.doc);
-  if (index < 0 || index >= blocks.length) return; // no such neighbour
-  const dom = view.nodeDOM(blocks[index].start);
-  const el = dom && dom.nodeType === 1 ? dom : (dom && dom.parentElement);
-  if (!el || !el.classList || !el.isConnected) {
-    if (retries > 0) requestAnimationFrame(() => fireFlashByIndex(view, index, cls, ms, retries - 1));
-    return;
-  }
-  el.classList.remove(cls);
-  void el.offsetWidth; // force reflow so re-adding restarts the animation
-  el.classList.add(cls);
-  setTimeout(() => { if (el && el.classList) el.classList.remove(cls); }, ms);
-}
-
-function flashDrop(view, landedIndex) {
-  fireFlashByIndex(view, landedIndex, 'pm-flash-drop', 700);     // dropped block, 3x
-  fireFlashByIndex(view, landedIndex - 1, 'pm-flash-neighbor', 520); // above, 2x half-opacity
-  fireFlashByIndex(view, landedIndex + 1, 'pm-flash-neighbor', 520); // below, 2x half-opacity
 }
 
 export const BlockDragHandle = Extension.create({
