@@ -153,15 +153,19 @@ const STYLE_TEXT = `
      neighbours strobe and for the same length again after.
    Colours read on bare <p> (the old 0.15 alpha was invisible; cue cards masked it
    via their solid card bg): drop fill ~0.45 + dropline ring; neighbour ~0.225. */
+/* Both flashes fill with the theme's --draglight-color (no ring). The TARGET
+   starts at the FULL draglight opacity and slowly fades out; the NEIGHBOURS peak
+   at 50% of that (via the element opacity) and strobe (#46, per Kevin). */
 @keyframes pm-flash-drop {
-  /* Instant on, slow linear fade to nothing. Fill = the theme's --draglight-color
-     (as defined). NO ring/border (per Kevin). */
   0%   { background-color: ${DRAGLIGHT}; }
   100% { background-color: transparent; }
 }
 @keyframes pm-flash-neighbor {
+  /* 50% of the draglight fill — mixed 50/50 with transparent so only the BG tint
+     is halved (NOT the text, which element opacity would dim). color-mix is
+     widely supported; the same draglight var feeds it. */
   0%, 100% { background-color: transparent; }
-  50%      { background-color: ${DRAGLIGHT}; }
+  50%      { background-color: color-mix(in srgb, ${DRAGLIGHT} 50%, transparent); }
 }
 /* Paragraphs are full-width and padding-less; a flash bg butts right to the edge.
    Round the corners a touch so the fill reads as a block, not a full-bleed bar. */
