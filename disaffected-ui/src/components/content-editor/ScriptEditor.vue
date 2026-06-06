@@ -580,17 +580,27 @@ export default {
    the editable text. */
 .script-editor-host :deep(.ProseMirror p.bullet) {
   position: relative;
-  padding-left: 1.6em;
+  /* Indent the WHOLE paragraph to the right (every line, not just the first),
+     and reserve room for the marker on the left of that indent. */
+  margin-left: 2.4em;
+  padding-left: 1.4em;
 }
 .script-editor-host :deep(.ProseMirror p.bullet)::before {
   content: "\2022"; /* • */
   position: absolute;
-  left: 0.25em;
+  left: 0;
   top: 0;
-  font-size: 1.4em;
-  line-height: var(--editor-script-line-height, 1.5);
+  /* The marker box is exactly ONE text line tall (font-size × line-height of the
+     paragraph) and centers the glyph within it, so the • lands on the vertical
+     center of the FIRST line regardless of the glyph's own size. Using a flex
+     box avoids the em-cascade pitfall of translateY offsets. */
+  height: calc(var(--editor-script-font-size, 16px) * var(--editor-script-line-height, 1.5));
+  display: flex;
+  align-items: center;
+  font-size: 1.7em; /* bigger glyph */
+  line-height: 1;
   font-weight: bold;
-  color: rgba(0, 0, 0, 0.8);
+  color: #000; /* black */
   pointer-events: none;
 }
 
