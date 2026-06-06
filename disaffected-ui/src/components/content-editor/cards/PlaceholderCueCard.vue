@@ -16,12 +16,13 @@
   >
     <!-- Card Header — the entire header is the double-click hotzone for collapse -->
     <v-card-title class="cue-card-header" :style="headerStyleWithStatus" @dblclick.stop="$emit('toggle-collapsed')">
-      <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 8px;">mdi-drag-vertical</v-icon>
+      <v-icon size="small" class="drag-handle" :color="headerTextColor" style="cursor: grab; margin-right: 8px;">mdi-drag-vertical</v-icon>
       <v-btn
         icon
         size="x-small"
         variant="text"
         class="collapse-toggle"
+        :color="headerTextColor"
         tabindex="-1"
         :title="collapsed ? 'Expand cue' : 'Collapse cue'"
         @click.stop="$emit('toggle-collapsed')"
@@ -49,6 +50,7 @@
             icon
             size="small"
             variant="text"
+            :color="headerTextColor"
             @click.stop="$emit('edit')"
             class="action-btn"
             tabindex="-1"
@@ -60,6 +62,7 @@
             icon
             size="small"
             variant="text"
+            :color="headerTextColor"
             @click.stop="$emit('delete')"
             class="action-btn delete-btn"
             tabindex="-1"
@@ -69,7 +72,7 @@
           </v-btn>
         </div>
         <div class="duration-display-header">
-          <v-icon size="small" color="white">mdi-timer-outline</v-icon>
+          <v-icon size="small" :color="headerTextColor">mdi-timer-outline</v-icon>
           <span class="duration-text-header">{{ cueData.duration || '00:00:00:00' }}</span>
         </div>
       </template>
@@ -80,6 +83,7 @@
           icon
           size="small"
           variant="text"
+          :color="headerTextColor"
           @click.stop="$emit('edit')"
           class="action-btn"
         >
@@ -90,6 +94,7 @@
           icon
           size="small"
           variant="text"
+          :color="headerTextColor"
           @click.stop="$emit('delete')"
           class="action-btn delete-btn"
         >
@@ -293,7 +298,7 @@
     <v-card-actions v-if="cueData.type !== 'RIF' && !collapsed" class="cue-card-footer" :style="footerStyle">
       <!-- Show duration in footer -->
       <div class="duration-display">
-        <v-icon size="small" color="white">mdi-timer-outline</v-icon>
+        <v-icon size="small" :color="footerTextColor">mdi-timer-outline</v-icon>
         <span class="duration-text-footer">{{ cueData.duration || '00:00:00:00' }}</span>
       </div>
 
@@ -1284,11 +1289,24 @@ const cueTypeColor = computed(() => {
   return resolveVuetifyColor(colorName);
 });
 
+// Single source of truth for the header/footer FOREGROUND color (text + icons +
+// buttons). Mirrors whatever background the header is actually showing — the
+// cue-type color, or the status-border color when one is active — and resolves
+// to black or white for WCAG contrast. Bound to every header child so nothing
+// stays hardcoded white on a light cue color (FSQ lime, NAT, NOTE, ...).
+const headerTextColor = computed(() => headerStyleWithStatus.value.color || '#FFFFFF');
+// Footer foreground mirrors the footer background (the cue-type color).
+const footerTextColor = computed(() => getReadableTextColor(cueTypeColor.value));
+
+// Text/icon color is chosen for CONTRAST against the cue-type background via
+// getReadableTextColor (WCAG 4.5:1; prefers white, flips to black on light cue
+// colors like FSQ lime / NAT light-green / NOTE light-yellow). Previously these
+// hardcoded white, which was unreadable on light backgrounds.
 const cueTypeStyle = computed(() => { // eslint-disable-line no-unused-vars
   const backgroundColor = cueTypeColor.value;
   return {
     backgroundColor: backgroundColor,
-    color: 'white'
+    color: getReadableTextColor(backgroundColor)
   };
 });
 
@@ -1296,7 +1314,7 @@ const headerStyle = computed(() => {
   const backgroundColor = cueTypeColor.value;
   return {
     backgroundColor: backgroundColor,
-    color: 'white'
+    color: getReadableTextColor(backgroundColor)
   };
 });
 
@@ -1306,9 +1324,11 @@ const badgeStyle = computed(() => {
   const lighterColor = (typeof baseColor === 'string' && baseColor.startsWith('#'))
     ? lightenColor(baseColor, 20)
     : baseColor;
+  const bg = lighterColor || '#666';
   return {
-    backgroundColor: lighterColor || '#666',
-    color: 'white'
+    backgroundColor: bg,
+    // contrast against the LIGHTENED badge color, not the base
+    color: getReadableTextColor(bg)
   };
 });
 
@@ -1316,7 +1336,7 @@ const footerStyle = computed(() => {
   const backgroundColor = cueTypeColor.value;
   return {
     backgroundColor: backgroundColor,
-    color: 'white'
+    color: getReadableTextColor(backgroundColor)
   };
 });
 
@@ -2612,8 +2632,10 @@ defineExpose({
   border-radius: 4px;
   font-weight: bold;
   font-size: 0.9rem;
-  background-color: rgba(255, 255, 255, 0.2);
-  color: white;
+  /* tint from currentColor so the badge chip + its text both follow the header's
+     contrast-aware color (readable on light cue colors, not hardcoded white) */
+  background-color: color-mix(in srgb, currentColor 18%, transparent);
+  color: currentColor;
   display: flex;
   align-items: center;
   margin-left: -8px;
@@ -2650,7 +2672,9 @@ defineExpose({
 
 .action-btn {
   opacity: 0.7;
-  color: white;
+  /* inherit the header's contrast-aware color (headerTextColor) instead of
+     forcing white — so Edit/Delete icons stay readable on light cue colors */
+  color: currentColor;
 }
 
 .action-btn:hover {
@@ -2658,7 +2682,8 @@ defineExpose({
 }
 
 .delete-btn:hover {
-  color: white;
+  /* keep contrast on hover too (was hardcoded white) */
+  color: currentColor;
 }
 
 /* Duration Display in Header (RIF only) */
@@ -2667,7 +2692,8 @@ defineExpose({
   align-items: center;
   gap: 8px;
   font-size: 0.9rem;
-  color: white;
+  /* inherit the header's contrast-aware color (was hardcoded white) */
+  color: currentColor;
   font-weight: 500;
   margin-right: 8px;
 }
@@ -4076,7 +4102,8 @@ defineExpose({
   align-items: center;
   gap: 8px;
   font-size: 0.9rem;
-  color: white;
+  /* inherit the footer's contrast-aware color (was hardcoded white) */
+  color: currentColor;
   font-weight: 500;
 }
 
