@@ -16,6 +16,7 @@ services:
       - ${EPISODES_PATH:-/data/sync/disaffected/episodes}:/home/episodes
       - ${REPO_PATH:-/data/sync/disaffected/repo}:/home/repo
       - ${MEDIA_ASSETS_PATH:-/data/sync/media_assets}:/home/media_assets
+      - ${POOL_PATH:-/data/sync/media_assets/pool}:/home/pool  # unbound media pool (cue-released assets), episode-foldered for provenance
       - ${ASTERISK_PATH:-/mnt/asterisk/recordings}:/asterisk/recordings:ro
       - /home/kevin/.claude/todos:/home/kevin/.claude/todos:ro
     networks:
@@ -115,6 +116,7 @@ services:
       - ./app/storage:/app/storage
       - ${EPISODES_PATH:-/data/sync/disaffected/episodes}:/home/episodes
       - ${REPO_PATH:-/data/sync/disaffected/repo}:/home/repo
+      - ${POOL_PATH:-/data/sync/media_assets/pool}:/home/pool  # unbound media pool (cue-released assets)
     networks:
       - video-post
     environment:
