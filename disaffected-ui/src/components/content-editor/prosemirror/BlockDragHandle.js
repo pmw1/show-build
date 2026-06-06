@@ -559,17 +559,6 @@ function nearestGap(view, clientY) {
   return blocks.length; // below everything -> trailing gap
 }
 
-// Drop-confirmation flash: the moved block flashes the dropline color 3x; the
-// blocks directly above and below it flash 2x in a lighter tint. Classes drive
-// CSS keyframe animations (pm-flash-drop / pm-flash-neighbor) and are removed
-// after they finish so they can re-fire on the next drop.
-function blockElAt(view, index) {
-  const blocks = topLevelBlocks(view.state.doc);
-  if (index < 0 || index >= blocks.length) return null;
-  const dom = view.nodeDOM(blocks[index].start);
-  return dom && dom.nodeType === 1 ? dom : (dom && dom.parentElement) || null;
-}
-
 // FLIP settle (todo #39): capture each block's position BEFORE the reorder, run
 // `commitFn` (which dispatches the move, reordering the DOM), then on the next
 // frame invert each block to its old spot (no transition) and clear it so the
@@ -619,20 +608,30 @@ function flipReorder(view, commitFn) {
 
 // Drop-confirmation flash (todo #46): the dropped block flashes 3x fast in the
 // drag colour; its new above/below neighbours flash 2x slower at half opacity.
+// Flash a block by INDEX (re-resolved against the live view each time). The move
+// + the autosave round-trip re-render the document, so a DOM element captured
+// earlier becomes detached (connected=false → nothing paints) — #46. We resolve
+// the element fresh at fire time and, if it's not yet connected (view still
+// reconciling), retry on the next frame a few times until the live node exists.
+function fireFlashByIndex(view, index, cls, ms, retries = 8) {
+  const blocks = topLevelBlocks(view.state.doc);
+  if (index < 0 || index >= blocks.length) return; // no such neighbour
+  const dom = view.nodeDOM(blocks[index].start);
+  const el = dom && dom.nodeType === 1 ? dom : (dom && dom.parentElement);
+  if (!el || !el.classList || !el.isConnected) {
+    if (retries > 0) requestAnimationFrame(() => fireFlashByIndex(view, index, cls, ms, retries - 1));
+    return;
+  }
+  el.classList.remove(cls);
+  void el.offsetWidth; // force reflow so re-adding restarts the animation
+  el.classList.add(cls);
+  setTimeout(() => { if (el && el.classList) el.classList.remove(cls); }, ms);
+}
+
 function flashDrop(view, landedIndex) {
-  const moved = blockElAt(view, landedIndex);
-  const above = blockElAt(view, landedIndex - 1);
-  const below = blockElAt(view, landedIndex + 1);
-  const fire = (el, cls, ms) => {
-    if (!el || !el.classList) return;
-    el.classList.remove(cls);
-    void el.offsetWidth; // force reflow so re-adding restarts the animation
-    el.classList.add(cls);
-    setTimeout(() => el.classList.remove(cls), ms);
-  };
-  fire(moved, 'pm-flash-drop', 700);      // 3x ~0.2s each — the dropped block
-  fire(above, 'pm-flash-neighbor', 520);  // 2x ~0.24s each — half-opacity neighbours
-  fire(below, 'pm-flash-neighbor', 520);
+  fireFlashByIndex(view, landedIndex, 'pm-flash-drop', 700);     // dropped block, 3x
+  fireFlashByIndex(view, landedIndex - 1, 'pm-flash-neighbor', 520); // above, 2x half-opacity
+  fireFlashByIndex(view, landedIndex + 1, 'pm-flash-neighbor', 520); // below, 2x half-opacity
 }
 
 export const BlockDragHandle = Extension.create({
