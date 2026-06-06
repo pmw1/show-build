@@ -408,7 +408,24 @@ export function useLLMState() {
       })
     }
 
-    activeOperations.delete(operationId)
+    // #47: after a successful op, LINGER the just-generated visual for 15s, then
+    // dissolve back to normal — instead of clearing instantly. Flip the op to a
+    // terminal 'just-generated' state (so getVisualClass emits
+    // .llm-just-generated.llm-scope-{scope}, which the CSS holds-then-fades) and
+    // delete it after the linger. Failures/early states are unaffected. A
+    // re-started op on the same target supersedes the linger (its own startOp
+    // adds a newer active op; getVisualClass uses the most recent).
+    const LINGER_MS = 15000
+    if (result.success !== false && (op.state === STATE.GENERATING || op.state === STATE.ANALYZING || op.state === STATE.MODIFYING)) {
+      op.state = 'just-generated'
+      op.lingering = true
+      if (op._lingerTimer) clearTimeout(op._lingerTimer)
+      op._lingerTimer = setTimeout(() => {
+        activeOperations.delete(operationId)
+      }, LINGER_MS)
+    } else {
+      activeOperations.delete(operationId)
+    }
   }
 
   /**

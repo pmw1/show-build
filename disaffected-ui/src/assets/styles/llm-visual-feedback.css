@@ -66,6 +66,46 @@
   color: #fff !important;
 }
 
+/* #47: after generation completes, HOLD the busy color solid for 15s then
+   DISSOLVE back to the row's normal background (the row's own inline bg shows
+   through as this overlay fades). No border, no pulse — just a calm linger. */
+.llm-just-generated.llm-scope-item {
+  border: none !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  position: relative !important;
+  /* hold solid, then fade the overlay to transparent over the last ~2s */
+  animation: llm-linger-fade 15s ease-out forwards !important;
+}
+/* Text is white while the busy color is solid, then fades back to the row's
+   own color as the background dissolves (kept in sync with llm-linger-fade). */
+.llm-just-generated.llm-scope-item *:not(.v-icon) {
+  animation: llm-linger-text-fade 15s ease-out forwards !important;
+}
+
+@keyframes llm-linger-fade {
+  0% {
+    background-color: var(--llm-busy-color, #9C27B0);
+  }
+  /* hold the color for the first ~87% (~13s of 15s) */
+  87% {
+    background-color: var(--llm-busy-color, #9C27B0);
+  }
+  /* dissolve away over the final ~2s */
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes llm-linger-text-fade {
+  0%, 87% {
+    color: #fff;
+  }
+  100% {
+    color: inherit;
+  }
+}
+
 .llm-analyzing.llm-scope-asset {
   border: 5px dashed var(--llm-analyzing) !important;
   border-radius: 0 !important;
@@ -379,13 +419,15 @@
   }
 }
 
-/* #47: whole-row background pulse for a busy rundown item (purple <-> deeper). */
+/* #47: whole-row background pulse for a busy rundown item. Color follows the
+   user-configurable "AI Generated" Settings color via --llm-busy-color (deeper
+   trough via --llm-busy-color-deep); falls back to purple if the vars are unset. */
 @keyframes llm-bg-throb {
   0%, 100% {
-    background-color: #9C27B0; /* purple */
+    background-color: var(--llm-busy-color, #9C27B0);
   }
   50% {
-    background-color: #5E1378; /* deeper purple */
+    background-color: var(--llm-busy-color-deep, #5E1378);
   }
 }
 

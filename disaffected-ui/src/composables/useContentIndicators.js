@@ -6,9 +6,21 @@
  * Singleton: settings are loaded once from localStorage and shared.
  */
 import { computed } from 'vue'
+import { getColorValue, resolveVuetifyColor } from '@/utils/themeColorMap'
 
 const DEFAULT_LLM_TEXT = '#7e57c2'
 const DEFAULT_LLM_BORDER = '#7e57c2'
+
+/** Darken a #rrggbb hex by `amount` (0..1) -> "#rrggbb". */
+function darkenHex(hex, amount) {
+  const h = (hex || '').replace('#', '')
+  if (h.length !== 6) return hex
+  const r = Math.max(0, Math.round(parseInt(h.slice(0, 2), 16) * (1 - amount)))
+  const g = Math.max(0, Math.round(parseInt(h.slice(2, 4), 16) * (1 - amount)))
+  const b = Math.max(0, Math.round(parseInt(h.slice(4, 6), 16) * (1 - amount)))
+  const to2 = (n) => n.toString(16).padStart(2, '0')
+  return `#${to2(r)}${to2(g)}${to2(b)}`
+}
 
 function loadIndicators() {
   try {
@@ -67,4 +79,12 @@ export function applyIndicatorCSSVars() {
   const g = parseInt(hex.substring(2, 4), 16)
   const b = parseInt(hex.substring(4, 6), 16)
   document.documentElement.style.setProperty('--llm-indicator-overlay', `rgba(${r}, ${g}, ${b}, 0.85)`)
+
+  // #47: the rundown busy/just-generated row color follows the user-configurable
+  // "AI Generated" color from the Settings color picker (registry key
+  // 'ai-generated'). Set it (and a darker trough for the pulse) as CSS vars so
+  // the global llm-visual-feedback.css throb/linger uses the live color.
+  const busy = resolveVuetifyColor(getColorValue('ai-generated')) || DEFAULT_LLM_BORDER
+  document.documentElement.style.setProperty('--llm-busy-color', busy)
+  document.documentElement.style.setProperty('--llm-busy-color-deep', darkenHex(busy, 0.35))
 }
