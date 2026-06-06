@@ -3529,7 +3529,6 @@ defineExpose({
   font-family: 'Roboto Mono', monospace;
   height: 100%;
   min-height: 2.5em;
-  position: relative;  /* anchor the absolutely-positioned presence avatar */
 }
 
 .rundown-panel.narrow .compact-rundown-row {
