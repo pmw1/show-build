@@ -11353,14 +11353,17 @@ defineExpose({
 }
 
 .segment-locked-overlay {
-  position: absolute;
+  /* Fixed to the VIEWPORT (not absolute to the scrollable editor content) so the
+     locked message is always centered on screen and never below the fold — todo
+     #41. The dim/blur covers the whole viewport. */
+  position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
   background: rgba(128, 128, 128, 0.85);
   backdrop-filter: blur(2px);
-  z-index: 100;
+  z-index: 2000;
   display: flex;
   align-items: center;
   justify-content: center;
