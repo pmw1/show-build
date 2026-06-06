@@ -149,24 +149,30 @@ const STYLE_TEXT = `
 /* Drop-confirmation flash. Moved block: 3 rapid full-dropline pulses. Neighbors:
    2 lighter pulses. Theme-colored via --dropline-color (+ --draglight-color for
    the lighter neighbor tint). */
+/* The dropped block flashes a clearly-visible drag-colour fill + ring (todo #46).
+   The previous 0.15-alpha tint was imperceptible on a bare <p> (cue cards showed
+   it only because of their solid card bg). Use a strong fill (~0.45) so it reads
+   on plain paragraphs too. */
 @keyframes pm-flash-drop {
   0%, 100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
-  50%      { background-color: ${DRAGLIGHT};
+  50%      { background-color: var(--dropflash-color, rgba(33, 150, 243, 0.45));
              box-shadow: 0 0 0 3px ${DROPLINE}, 0 0 14px ${DROPLINE}; }
 }
 @keyframes pm-flash-neighbor {
-  /* Half the strength of the dropped block's flash (todo #46): the drop flash
-     tints with the full --draglight (≈0.15 alpha); neighbours echo it at ~half
-     that (≈0.075) so they read as a lighter pulse. */
+  /* Half the strength of the dropped block's flash: ~0.225 fill, no ring. */
   0%, 100% { background-color: transparent; }
-  50%      { background-color: var(--draglight-color-half, rgba(33, 150, 243, 0.075)); }
+  50%      { background-color: var(--dropflash-color-half, rgba(33, 150, 243, 0.225)); }
+}
+/* Paragraphs are full-width and padding-less; a flash bg butts right to the edge.
+   These give the flash a little inset breathing room so the fill + ring read. */
+.ProseMirror .pm-flash-drop,
+.ProseMirror .pm-flash-neighbor {
+  border-radius: 4px;
 }
 .ProseMirror .pm-flash-drop {
-  border-radius: 4px;
   animation: pm-flash-drop 0.2s ease-in-out 3 !important;
 }
 .ProseMirror .pm-flash-neighbor {
-  border-radius: 4px;
   animation: pm-flash-neighbor 0.24s ease-in-out 2 !important;
 }
 /* The drop target — a "DROP HERE" block (mirrors the legacy .ghost-segment),
@@ -611,8 +617,8 @@ function flipReorder(view, commitFn) {
   });
 }
 
-// Lighter landing feedback used with the FLIP settle (todo #39): the moved block
-// glides (no flash needed), only its new neighbors get a subtle tint pulse.
+// Drop-confirmation flash (todo #46): the dropped block flashes 3x fast in the
+// drag colour; its new above/below neighbours flash 2x slower at half opacity.
 function flashDrop(view, landedIndex) {
   const moved = blockElAt(view, landedIndex);
   const above = blockElAt(view, landedIndex - 1);
