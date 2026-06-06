@@ -942,14 +942,19 @@ onMounted(async () => {
   padding: 4px;
 }
 
-/* Fix textarea top line fading/clipping issue */
+/* Fix textarea top line fading/clipping under the outlined label notch.
+   Give the first line clear space below the top border + label so its top edge
+   isn't clipped by the field's overflow. */
 .prompt-manager :deep(.v-textarea .v-field__input) {
-  padding-top: 12px !important;
+  padding-top: 18px !important;
   min-height: 60px;
+  -webkit-mask-image: none !important;
+          mask-image: none !important;
 }
 
 .prompt-manager :deep(.v-textarea textarea) {
-  padding-top: 8px !important;
+  padding-top: 4px !important;
+  margin-top: 0 !important;
 }
 
 /* Make disabled category/operation fields more visible */
