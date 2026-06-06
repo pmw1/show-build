@@ -380,9 +380,25 @@
                         @click="handleItemSelect(item, $event)"
                         @dblclick="handleItemDoubleClick(item)"
                       >
-                        <!-- Locked-by-other padlock overlay (todo #41) -->
+                        <!-- Locked-by-other overlays (todo #41): padlock + the
+                             editor's avatar. Both are siblings of (not inside)
+                             .compact-rundown-row so the row's grey filter never
+                             touches them — they stay full colour. -->
                         <div v-if="isLockedByOther(item)" class="locked-padlock-overlay" :title="`Locked — being edited by another user`">
-                          <v-icon color="red" size="20">mdi-lock</v-icon>
+                          <v-icon class="locked-padlock-icon" size="20">mdi-lock</v-icon>
+                        </div>
+                        <div v-if="presentUsersFor(item).length > 0" class="presence-stack">
+                          <v-avatar
+                            v-for="u in presentUsersFor(item)"
+                            :key="u.id"
+                            :color="u.chip_color || 'primary'"
+                            size="28"
+                            class="presence-avatar"
+                            :title="`Locked — ${u.display_name || u.username} is editing this segment`"
+                          >
+                            <v-img v-if="u.profile_picture" :src="u.profile_picture" />
+                            <span v-else class="presence-initials">{{ avatarInitials(u) }}</span>
+                          </v-avatar>
                         </div>
                         <div class="compact-rundown-row">
                             <!-- Index Number Cell -->
@@ -417,20 +433,6 @@
                                 WC: {{ getWordCount(item) }}
                               </div>
                             </div>
-                            <div v-if="presentUsersFor(item).length > 0" class="presence-stack">
-                              <v-avatar
-                                v-for="u in presentUsersFor(item)"
-                                :key="u.id"
-                                :color="u.chip_color || 'primary'"
-                                size="28"
-                                class="presence-avatar"
-                                :title="`Locked — ${u.display_name || u.username} is editing this segment`"
-                              >
-                                <v-img v-if="u.profile_picture" :src="u.profile_picture" />
-                                <span v-else class="presence-initials">{{ avatarInitials(u) }}</span>
-                              </v-avatar>
-                            </div>
-
                             <!-- Duration (Right side) -->
                             <div class="duration-display">
                               {{ formatDurationShort(getEffectiveItemDuration(item)) }}
@@ -3488,6 +3490,7 @@ defineExpose({
   font-family: 'Roboto Mono', monospace;
   height: 100%;
   min-height: 2.5em;
+  position: relative;  /* anchor the absolutely-positioned presence avatar */
 }
 
 .rundown-panel.narrow .compact-rundown-row {
@@ -3575,16 +3578,27 @@ defineExpose({
 
 /* Presence avatars: small overlapping circles to the right of the slug,
    indicating other users currently editing this segment. */
+/* Presence/lock avatar: overlaid on the right edge of the row, absolutely
+   positioned so the enlarged (28px) avatar does NOT push the slug / char-count
+   / duration cells out of alignment (todo #41). The row is position:relative
+   when locked-by-other; the .rundown-item-card is the positioning context. */
 .presence-stack {
+  position: absolute;
+  top: 50%;
+  /* Sit just LEFT of the reserved 90px duration/delete zone so the enlarged
+     avatar overlays without colliding with the duration or pushing grid cells. */
+  right: 96px;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
-  margin-left: 6px;
   flex-shrink: 0;
+  z-index: 7;          /* above the padlock overlay (z-index 6) */
+  pointer-events: none;
 }
 .presence-stack .presence-avatar {
   margin-left: -8px;
-  border: 2px solid #fff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.3);
+  border: 2px solid #ffd54f;   /* amber lock ring */
+  box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.65), 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 .presence-stack .presence-avatar:first-child {
   margin-left: 0;
@@ -3622,9 +3636,12 @@ defineExpose({
   z-index: 6;
   pointer-events: none;
 }
-.locked-padlock-overlay .v-icon {
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+.locked-padlock-overlay .locked-padlock-icon {
+  color: #ff1100 !important;   /* vibrant red */
 }
+/* Only the ROW CONTENT goes grey. The padlock + presence avatar are siblings
+   of .compact-rundown-row (card-level overlays), so this filter never touches
+   them — they stay full colour. */
 .rundown-item-card.locked-by-other .compact-rundown-row {
   filter: grayscale(1) brightness(0.97);
 }
@@ -3634,14 +3651,6 @@ defineExpose({
 .rundown-item-card.locked-by-other .compact-rundown-row .duration-display,
 .rundown-item-card.locked-by-other .compact-rundown-row .content-char-count {
   color: #616161 !important;
-}
-.rundown-item-card.locked-by-other .compact-rundown-row .presence-stack {
-  /* grayscale is reversible on a descendant — restore the badge's colour. */
-  filter: grayscale(0) brightness(1.15);
-}
-.rundown-item-card.locked-by-other .compact-rundown-row .presence-stack .presence-avatar {
-  border-color: #ffd54f;            /* amber ring = "locked" cue */
-  box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.65), 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 .slug-text {
   font-weight: normal;
