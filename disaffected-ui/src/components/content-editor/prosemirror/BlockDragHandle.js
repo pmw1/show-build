@@ -142,6 +142,13 @@ const STYLE_TEXT = `
    (todo #39). */
 .ProseMirror .pm-shift-down { transform: translateY(${DRAG_SHIFT_PX / 2}px); }
 .ProseMirror .pm-shift-up   { transform: translateY(-${DRAG_SHIFT_PX / 2}px); }
+/* While dragging, every block EXCEPT the dragged one (and the flashing ones on
+   drop) dims to 75% so the field recedes and the drag/drop reads clearly. Returns
+   to full when the flash sequence ends (todo #46). Transition so it eases in/out. */
+.ProseMirror .pm-dim {
+  opacity: 0.75;
+  transition: opacity ${DRAG_ANIM_MS}ms ${DRAG_EASE};
+}
 /* FLIP helper: during the invert step we set an inline transform with NO
    transition so the block jumps to its old position, then clearing the inline
    transform animates (via .pm-drag-block's transition) the glide to its new spot. */
@@ -388,12 +395,24 @@ function buildDecorations(state, dragState) {
     // set imperatively on the freshly-rebuilt <p>, so paragraphs never flashed
     // (cue NodeViews kept their DOM, which is why only cues flashed). ProseMirror
     // re-applies the decoration class on every redraw, so the keyframe runs.
+    const isFlashing = dragState && dragState.flash &&
+      (b.index === dragState.flash.landed ||
+       b.index === dragState.flash.landed - 1 ||
+       b.index === dragState.flash.landed + 1);
     if (dragState && dragState.flash) {
       if (b.index === dragState.flash.landed) classes.push('pm-flash-drop');
       else if (b.index === dragState.flash.landed - 1 || b.index === dragState.flash.landed + 1) {
         classes.push('pm-flash-neighbor');
       }
     }
+
+    // Dim the field (todo #46): while DRAGGING, every block except the dragged one
+    // dims to 75%; during the post-drop FLASH, every block except the flashing
+    // ones (which return to full as they flash) stays dimmed until the sequence
+    // ends. The dim is cleared with the same meta dispatch that clears the flash.
+    const dimWhileDragging = dragState && dragState.active && b.index !== dragState.sourceIndex;
+    const dimWhileFlashing = dragState && dragState.flash && !isFlashing;
+    if (dimWhileDragging || dimWhileFlashing) classes.push('pm-dim');
 
     // The grab handle is NOT a separate widget (a widget at b.start renders
     // BETWEEN blocks and anchors to the editor root, so they all piled up at the
@@ -533,22 +552,26 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
     if (view.dom && view.dom.classList) view.dom.classList.remove('pm-dragging-active');
 
     const cur = blockDragHandleKey.getState(view.state);
-    // Clear the drag-preview state first.
-    setDrag({ active: false, sourceIndex: null, gapIndex: null });
+    const didMove = cur && cur.active && cur.gapIndex != null &&
+      cur.gapIndex !== sourceIndex && cur.gapIndex !== sourceIndex + 1;
 
-    if (cur && cur.active && cur.gapIndex != null) {
+    if (didMove) {
+      // Clear ONLY the displacement (gapIndex) but keep active=true so the field
+      // stays dimmed (no un-dim flicker) until the flash takes over the dim.
+      setDrag({ active: true, sourceIndex, gapIndex: sourceIndex });
       const moveTr = buildMoveTransaction(view.state, sourceIndex, cur.gapIndex);
       if (moveTr) {
         // FLIP settle: dispatch the move inside flipReorder so every block glides
         // from its old to new position instead of snapping (todo #39).
         flipReorder(view, () => view.dispatch(moveTr));
-        // Drop-confirmation flash (todo #46): set flash state in the plugin so the
-        // class is applied via DECORATION (survives the autosave re-render). Clear
-        // it after the animation finishes. Dispatched on a short delay so it lands
-        // after the move + its immediate redraws settle.
+        // Drop flash + field dim (todo #46): set flash AND clear active in ONE
+        // dispatch so the dim never lifts between drag-end and flash. The flash is
+        // a DECORATION (survives the autosave re-render). Cleared after the
+        // animation finishes — which also returns the dimmed blocks to full.
         const landedIndex = cur.gapIndex > sourceIndex ? cur.gapIndex - 1 : cur.gapIndex;
         setTimeout(() => {
-          const t1 = view.state.tr.setMeta(blockDragHandleKey, { flash: { landed: landedIndex } });
+          const t1 = view.state.tr.setMeta(blockDragHandleKey,
+            { active: false, sourceIndex: null, gapIndex: null, flash: { landed: landedIndex } });
           t1.setMeta('addToHistory', false);
           view.dispatch(t1);
           setTimeout(() => {
@@ -558,6 +581,9 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
           }, 1350); // a touch past the dropped block's 1.2s slow fade-out (#46)
         }, 120);
       }
+    } else {
+      // No move (dropped in place) — just clear the drag state.
+      setDrag({ active: false, sourceIndex: null, gapIndex: null });
     }
     view.focus();
   };
