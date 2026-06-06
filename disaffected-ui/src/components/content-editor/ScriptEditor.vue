@@ -142,6 +142,13 @@
         <svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" class="flag-note-icon"><path d="M5 21V4h11l-2 4 2 4H5z"/></svg>
         <span class="flag-note-title">Needs attention</span>
         <span v-if="flagPanel.user" class="flag-note-by">created by: {{ flagPanel.user }}</span>
+        <button
+          class="flag-note-close"
+          title="Close (keeps the flag — does not resolve)"
+          @mousedown.prevent="collapseFlagPanel"
+        >
+          <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
       </div>
       <textarea
         ref="flagNoteInput"
@@ -738,8 +745,13 @@ export default {
       const pos = ed.state.selection.from;
       const p = _paragraphFlaggedAt(pos);
       if (p && p.node.attrs.needsAttention) {
+        // If the user explicitly closed THIS block's panel, keep it collapsed
+        // until the caret moves to a different block.
+        if (flagPanelSuppressedPos.value === p.offset + 1) { flagPanel.value.open = false; return; }
+        flagPanelSuppressedPos.value = null;
         openFlagPanelForParagraph(p, false);
       } else {
+        flagPanelSuppressedPos.value = null;
         flagPanel.value.open = false;
       }
     }
@@ -776,10 +788,25 @@ export default {
       if (ed) ed.commands.setFlagNote(flagPanel.value.pos, val);
     }
 
+    // Close the panel WITHOUT resolving — collapses back to the flag badge. The
+    // block stays flagged. Suppress the focus-sync from immediately reopening it
+    // while the caret is still in this same flagged paragraph; cleared once the
+    // selection moves to a different block.
+    const flagPanelSuppressedPos = ref(null);
+    function collapseFlagPanel() {
+      flagPanelSuppressedPos.value = flagPanel.value.pos;
+      flagPanelInteracting.value = false;
+      flagPanel.value.open = false;
+      // return focus to the editor so typing continues normally
+      const ed = editor.value;
+      if (ed) nextTick(() => ed.view.focus());
+    }
+
     function resolveFlagPanel() {
       const ed = editor.value;
       if (ed) ed.commands.resolveNeedsAttention(flagPanel.value.pos);
       flagPanelInteracting.value = false;
+      flagPanelSuppressedPos.value = null;
       flagPanel.value.open = false;
     }
 
@@ -894,6 +921,7 @@ export default {
       onFlagPanelFocusOut,
       updateFlagPanelNote,
       resolveFlagPanel,
+      collapseFlagPanel,
     };
   },
 };
@@ -1232,6 +1260,21 @@ export default {
   margin-bottom: 6px;
 }
 .flag-note-icon { color: #e53935; }
+.flag-note-close {
+  margin-left: 6px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: #9e9e9e;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.flag-note-close:hover { color: #555; background: rgba(0, 0, 0, 0.06); }
 .flag-note-by {
   margin-left: auto;
   font-size: 11px;
