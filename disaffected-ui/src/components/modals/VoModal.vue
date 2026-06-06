@@ -43,7 +43,7 @@
   >
     <v-card ref="modalCardRef" class="vo-modal-card">
       <!-- Header -->
-      <v-toolbar density="compact" color="orange-darken-3" dark>
+      <v-toolbar density="compact" :color="cueTypeColor" dark>
         <v-toolbar-title class="text-white">
           <v-icon start>mdi-microphone-off</v-icon>
           VO Cue — Voice Over (Video, no audio required)
@@ -452,12 +452,17 @@ const props = defineProps({
   show: Boolean,
   episode: String,
   duplicateSlugs: { type: Array, default: () => [] },
-  cueType: { type: String, default: 'vo' }, // eslint-disable-line no-unused-vars
+  cueType: { type: String, default: 'vo' },
   prefillData: { type: Object, default: null },
 })
 const emit = defineEmits(['update:show', 'submit', 'submit-multiple'])
 
 const toast = useToast()
+
+// #39: header color from the cue color registry (Vuetify color NAME, which is
+// what v-toolbar's `color` prop expects), so the VO modal header matches the
+// toolbar/card/slash-menu instead of a hardcoded "orange-darken-3".
+const cueTypeColor = computed(() => getColorValue(props.cueType.toLowerCase()) || 'deep-orange')
 
 // ---------------------------------------------------------------------------
 // Refs (template + DOM)
