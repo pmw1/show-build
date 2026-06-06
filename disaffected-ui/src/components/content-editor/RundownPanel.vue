@@ -380,14 +380,14 @@
                         @click="handleItemSelect(item, $event)"
                         @dblclick="handleItemDoubleClick(item)"
                       >
-                        <!-- Locked-by-other overlays (todo #41): padlock + the
-                             editor's avatar. Both are siblings of (not inside)
-                             .compact-rundown-row so the row's grey filter never
-                             touches them — they stay full colour. -->
-                        <div v-if="isLockedByOther(item)" class="locked-padlock-leading" :title="`Locked — being edited by another user`">
-                          <v-icon class="locked-padlock-icon" size="20">mdi-lock</v-icon>
-                        </div>
-                        <div v-if="presentUsersFor(item).length > 0" class="presence-stack">
+                        <!-- Locked-by-other overlay (todo #41): padlock + the
+                             editor's name badge, grouped at the LEFT. Siblings of
+                             (not inside) .compact-rundown-row so the row's grey
+                             filter never touches them — they stay full colour. -->
+                        <div v-if="isLockedByOther(item)" class="locked-lockgroup">
+                          <div class="locked-padlock-frame" :title="`Locked — being edited by another user`">
+                            <v-icon class="locked-padlock-icon" size="18">mdi-lock</v-icon>
+                          </div>
                           <v-avatar
                             v-for="u in presentUsersFor(item)"
                             :key="u.id"
@@ -3620,26 +3620,38 @@ defineExpose({
    positioned so the enlarged (28px) avatar does NOT push the slug / char-count
    / duration cells out of alignment (todo #41). The row is position:relative
    when locked-by-other; the .rundown-item-card is the positioning context. */
-.presence-stack {
+/* Lock group: the red padlock followed immediately by the editor's name badge,
+   anchored at the LEFT edge of a locked row (todo #41). Card-level overlay so
+   the row's grey filter never desaturates it. */
+.locked-lockgroup {
   position: absolute;
   top: 50%;
-  /* Sit just LEFT of the reserved 90px duration/delete zone so the enlarged
-     avatar overlays without colliding with the duration or pushing grid cells. */
-  right: 96px;
+  left: 6px;
   transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
-  flex-shrink: 0;
-  z-index: 7;          /* above the padlock overlay (z-index 6) */
+  gap: 4px;
+  z-index: 7;
   pointer-events: none;
 }
-.presence-stack .presence-avatar {
-  margin-left: -8px;
-  border: 2px solid #ffd54f;   /* amber lock ring */
+/* Padlock framed in a bordered circle that matches the name badge. */
+.locked-padlock-frame {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 2px solid #ffd54f;   /* amber lock ring — same as the badge */
   box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.65), 0 1px 4px rgba(0, 0, 0, 0.4);
 }
-.presence-stack .presence-avatar:first-child {
-  margin-left: 0;
+.locked-padlock-frame .locked-padlock-icon {
+  color: #ff1100 !important;   /* vibrant red */
+}
+.locked-lockgroup .presence-avatar {
+  border: 2px solid #ffd54f;   /* amber lock ring */
+  box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.65), 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 .presence-initials {
   font-size: 12px;
@@ -3660,33 +3672,14 @@ defineExpose({
   position: relative;   /* anchor the padlock overlay */
 }
 
-/* Red padlock centered over the greyed locked row (todo #41). pointer-events
-   none so it never blocks the row's click/dblclick (take-over still works). */
-/* Padlock as the FIRST thing in a locked row: anchored to the left edge,
-   vertically centered. Card-level overlay (sibling of the greyed row) so it
-   stays vibrant red and is not desaturated by the row filter. */
-.locked-padlock-leading {
-  position: absolute;
-  top: 50%;
-  left: 4px;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 6;
-  pointer-events: none;
-}
-.locked-padlock-leading .locked-padlock-icon {
-  color: #ff1100 !important;   /* vibrant red */
-}
 /* Only the ROW CONTENT goes grey. The padlock + presence avatar are siblings
    of .compact-rundown-row (card-level overlays), so this filter never touches
    them — they stay full colour. */
 .rundown-item-card.locked-by-other .compact-rundown-row {
   filter: grayscale(1) brightness(0.97);
-  /* Make room at the left for the leading padlock so it reads as the first
-     element in the row rather than overlapping the index cell. */
-  padding-left: 26px;
+  /* Make room at the left for the leading padlock + name badge group so it reads
+     as the first thing in the row rather than overlapping the index cell. */
+  padding-left: 66px;
 }
 .rundown-item-card.locked-by-other .compact-rundown-row .index-number,
 .rundown-item-card.locked-by-other .compact-rundown-row .type-label,
