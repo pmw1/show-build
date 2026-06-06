@@ -31,6 +31,7 @@
         @update:cue-data="onCardUpdate"
         @update-meta="onUpdateMeta"
         @modify="onModify"
+        @edit="onEditCue('generic', cueData)"
         @edit-fsq="onEditCue('fsq', $event)"
         @edit-gfx="onEditCue('gfx', $event)"
         @delete="onDelete"

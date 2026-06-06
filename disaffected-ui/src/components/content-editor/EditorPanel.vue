@@ -5656,7 +5656,12 @@ function handlePmEditCue({ kind, cueData }) {
   } else if (kind === 'gfx') {
     handleEditGfx(cueData);
   } else {
-    console.warn('handlePmEditCue: unknown cue kind', kind);
+    // 'generic' = the cue card HEADER edit button (every cue type). Route through
+    // the same per-type dispatch the legacy editor uses (editCue emits the right
+    // edit-*-cue to ContentEditor, which owns the modals). #49 follow-up: this is
+    // what makes Edit work for SOT/VO/IMG/NOTE/RIF, not just FSQ/GFX. index is
+    // log-only in editCue, so null is fine.
+    editCue(null, cueData);
   }
 }
 
