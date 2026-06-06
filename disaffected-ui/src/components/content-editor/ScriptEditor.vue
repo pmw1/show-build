@@ -125,8 +125,10 @@
       <button class="rev-popup-btn cancel" title="Cancel (Esc)" @mousedown.prevent="cancelRevisionPopup">&#10007;</button>
     </div>
 
-    <!-- Needs-attention note panel: attached to the right of a flagged
-         paragraph. Type why it needs attention; Resolved clears the flag. -->
+    <!-- Needs-attention note panel: teleported to <body> + position:fixed so it
+         floats OVER the right sidebar and is never clipped by the editor's
+         overflow. Left edge ≈ the block's right edge; Resolved clears the flag. -->
+    <Teleport to="body">
     <div
       v-if="flagPanel.open"
       class="flag-note-panel"
@@ -153,6 +155,7 @@
         </button>
       </div>
     </div>
+    </Teleport>
   </div>
 </template>
 
@@ -691,19 +694,23 @@ export default {
     // starts where the text column ends and extends to the right (into the
     // sidebar zone), so it never overlaps the paragraph text. Vertically lined
     // up with the block top.
+    // The panel is TELEPORTED to <body> and positioned with VIEWPORT (fixed)
+    // coordinates, so it floats OVER the right sidebar and is never clipped by
+    // the editor's overflow or covered by sibling panels. Left edge ≈ the
+    // editor host's right edge; top lined up with the block.
+    const PANEL_W = 360;
     function openFlagPanelForParagraph(p, focusInput) {
       const ed = editor.value;
       if (!ed) return;
-      const rootEl = ed.view.dom.closest('.script-editor-root');
-      const rootRect = rootEl ? rootEl.getBoundingClientRect() : ed.view.dom.getBoundingClientRect();
+      const hostRect = ed.view.dom.getBoundingClientRect();
       const coords = ed.view.coordsAtPos(p.offset + 1);
       flagPanel.value.pos = p.offset + 1;
       flagPanel.value.note = p.node.attrs.flagNote || '';
       flagPanel.value.user = p.node.attrs.flagUser || '';
-      // Left edge at the editor's right edge (block right edge ≈ host right edge
-      // at full width); the panel spills into the sidebar to its right.
-      flagPanel.value.x = rootRect.width - 6;
-      flagPanel.value.y = coords.top - rootRect.top;
+      // Viewport coords. Left at the host's right edge; clamp so the panel never
+      // runs off the right of the screen.
+      flagPanel.value.x = Math.min(hostRect.right - 6, window.innerWidth - PANEL_W - 8);
+      flagPanel.value.y = coords.top;
       flagPanel.value.open = true;
       if (focusInput) nextTick(() => { flagNoteInput.value?.focus?.(); });
     }
@@ -1152,13 +1159,12 @@ export default {
 
 /* Flag note panel (attached to the right of a flagged paragraph). */
 .flag-note-panel {
-  position: absolute;
-  /* high so the panel isn't partially covered on the right (sidebar edge etc.) */
-  z-index: 60;
-  /* Compact note card. Its LEFT edge is locked to the editor's right edge (set
-     inline via left:), so it sits to the RIGHT of the text, spilling over the
-     sidebar — never overlapping the paragraph. No max-width clamp (it's meant to
-     extend past the editor column). */
+  /* Teleported to <body> with viewport (fixed) coords, so it floats OVER the
+     right sidebar and is never clipped by the editor's overflow. Very high
+     z-index to sit above everything. */
+  position: fixed;
+  z-index: 4000;
+  /* Compact note card; left edge ≈ the block's right edge (set inline via left). */
   width: 360px;
   background: #fff;
   border: 1px solid #e53935;
