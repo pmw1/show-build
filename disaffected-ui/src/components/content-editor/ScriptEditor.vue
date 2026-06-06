@@ -124,6 +124,34 @@
       <button class="rev-popup-btn ok" title="Commit (Enter)" @mousedown.prevent="commitRevisionPopup">&#10003;</button>
       <button class="rev-popup-btn cancel" title="Cancel (Esc)" @mousedown.prevent="cancelRevisionPopup">&#10007;</button>
     </div>
+
+    <!-- Needs-attention note panel: attached to the right of a flagged
+         paragraph. Type why it needs attention; Resolved clears the flag. -->
+    <div
+      v-if="flagPanel.open"
+      class="flag-note-panel"
+      :style="{ left: flagPanel.x + 'px', top: flagPanel.y + 'px' }"
+      @mousedown.stop
+    >
+      <div class="flag-note-header">
+        <svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" class="flag-note-icon"><path d="M5 21V4h11l-2 4 2 4H5z"/></svg>
+        <span class="flag-note-title">Needs attention</span>
+      </div>
+      <textarea
+        ref="flagNoteInput"
+        :value="flagPanel.note"
+        class="flag-note-textarea"
+        placeholder="Why does this need attention?"
+        rows="2"
+        @input="updateFlagPanelNote($event.target.value)"
+      ></textarea>
+      <div class="flag-note-actions">
+        <button class="flag-note-resolve" @mousedown.prevent="resolveFlagPanel">
+          <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+          Resolved
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -308,6 +336,9 @@ export default {
         // here so we can mark the selection and open the inline replacement
         // popup. See openRevisionPopup.
         onProposeRevision: (mode) => openRevisionPopup(mode),
+        // Needs-attention (legacy port): the flag button toggled the attr; this
+        // opens/closes the attached note panel for the paragraph at `pos`.
+        onFlagParagraph: (pos) => toggleFlagNotePanel(pos),
       });
 
       // Seed the line-number offset (continuous-across-show numbering) and the
@@ -633,6 +664,61 @@ export default {
       view.focus();
     }
 
+    // ── Needs-attention note panel (legacy port) ────────────────────────────
+    // The flag button (in the NeedsAttention plugin) toggles the paragraph's
+    // needsAttention attr, then calls onFlagParagraph(pos) -> here. We open a
+    // panel attached to the block's right edge with a note textarea + Resolved
+    // button when the block is (now) flagged; close it when it isn't.
+    const flagPanel = ref({ open: false, pos: 0, note: '', x: 0, y: 0 });
+
+    function _paragraphFlaggedAt(pos) {
+      const ed = editor.value;
+      if (!ed) return null;
+      const $p = ed.state.doc.resolve(Math.min(pos, ed.state.doc.content.size));
+      // pos is block-start+1 region; find the enclosing paragraph.
+      let found = null;
+      ed.state.doc.forEach((node, offset) => {
+        if (found || node.type.name !== 'paragraph') return;
+        if (pos >= offset && pos < offset + node.nodeSize) found = { node, offset };
+      });
+      void $p;
+      return found;
+    }
+
+    function toggleFlagNotePanel(pos) {
+      const ed = editor.value;
+      if (!ed) return;
+      const p = _paragraphFlaggedAt(pos);
+      if (!p || !p.node.attrs.needsAttention) {
+        // Was just unflagged → close any panel for it.
+        flagPanel.value.open = false;
+        return;
+      }
+      // Position to the right of the block.
+      const coords = ed.view.coordsAtPos(p.offset + 1);
+      const hostRect = ed.view.dom.getBoundingClientRect();
+      flagPanel.value.pos = p.offset + 1;
+      flagPanel.value.note = p.node.attrs.flagNote || '';
+      flagPanel.value.x = Math.min(coords.left - hostRect.left + 40, hostRect.width - 280);
+      flagPanel.value.y = coords.top - hostRect.top;
+      flagPanel.value.open = true;
+      nextTick(() => { flagNoteInput.value?.focus?.(); });
+    }
+
+    const flagNoteInput = ref(null);
+
+    function updateFlagPanelNote(val) {
+      flagPanel.value.note = val;
+      const ed = editor.value;
+      if (ed) ed.commands.setFlagNote(flagPanel.value.pos, val);
+    }
+
+    function resolveFlagPanel() {
+      const ed = editor.value;
+      if (ed) ed.commands.resolveNeedsAttention(flagPanel.value.pos);
+      flagPanel.value.open = false;
+    }
+
     // Modal state. modifyWithAi() (toolbar click) snapshots the selection
     // context and opens the modal; the modal component (host-rendered) collects
     // the instruction/preset, calls the LLM via the Prompt Override system, and
@@ -737,6 +823,11 @@ export default {
       revPopupInput,
       commitRevisionPopup,
       cancelRevisionPopup,
+      // Needs-attention note panel
+      flagPanel,
+      flagNoteInput,
+      updateFlagPanelNote,
+      resolveFlagPanel,
     };
   },
 };
@@ -878,7 +969,9 @@ export default {
    the proposed replacement (green), a user·time meta, and ✓/✗ buttons. */
 .script-editor-host :deep(rev.pm-revision) {
   text-decoration: line-through;
-  background-color: rgba(244, 67, 54, 0.15);
+  /* bolder red for the kill text */
+  background-color: rgba(229, 57, 53, 0.30);
+  text-decoration-color: #c62828;
   border-radius: 2px;
   padding: 0 1px;
 }
@@ -896,7 +989,8 @@ export default {
   font-family: var(--editor-script-font-family, monospace);
 }
 .script-editor-host :deep(rev-add) {
-  background-color: rgba(76, 175, 80, 0.22);
+  /* bolder green for the proposed add */
+  background-color: rgba(67, 160, 71, 0.32);
   color: #1b5e20;
   border-radius: 2px;
   padding: 0 0.25em;
@@ -921,19 +1015,112 @@ export default {
   justify-content: center;
 }
 .script-editor-host :deep(rev-btn[data-rev-action="accept"]) {
-  background-color: rgba(76, 175, 80, 0.3);
-  color: #2e7d32;
+  background-color: rgba(67, 160, 71, 0.45);
+  color: #1b5e20;
 }
 .script-editor-host :deep(rev-btn[data-rev-action="accept"]:hover) {
-  background-color: rgba(76, 175, 80, 0.55);
+  background-color: rgba(67, 160, 71, 0.75);
 }
 .script-editor-host :deep(rev-btn[data-rev-action="reject"]) {
-  background-color: rgba(244, 67, 54, 0.3);
-  color: #c62828;
+  background-color: rgba(229, 57, 53, 0.45);
+  color: #b71c1c;
 }
 .script-editor-host :deep(rev-btn[data-rev-action="reject"]:hover) {
-  background-color: rgba(244, 67, 54, 0.55);
+  background-color: rgba(229, 57, 53, 0.78);
 }
+
+/* ===== Needs-attention (legacy port) ===== */
+/* Red-tint background on a flagged paragraph (node decoration class). */
+.script-editor-host :deep(p.pm-needs-attention) {
+  background-color: rgba(229, 57, 53, 0.16);
+  box-shadow: inset 3px 0 0 #e53935;
+  border-radius: 2px;
+}
+/* Right-side hover control cluster (flag + delete). Hidden until block hover or
+   when flagged; anchored to the right edge of the paragraph box. */
+.script-editor-host :deep(na-controls) {
+  position: absolute;
+  right: 4px;
+  top: 2px;
+  display: inline-flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 3;
+}
+.script-editor-host :deep(.ProseMirror p:hover na-controls),
+.script-editor-host :deep(na-controls.na-flagged) {
+  opacity: 1;
+}
+.script-editor-host :deep(na-btn) {
+  cursor: pointer;
+  width: 1.5em;
+  height: 1.5em;
+  font-size: var(--editor-script-font-size, 16px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: #9e9e9e;
+  background: rgba(0, 0, 0, 0.04);
+}
+.script-editor-host :deep(na-btn.na-flag:hover) { color: #fb8c00; background: rgba(251, 140, 0, 0.14); }
+.script-editor-host :deep(na-btn.na-flag.is-active) { color: #fb8c00; }
+.script-editor-host :deep(na-btn.na-delete:hover) { color: #e53935; background: rgba(229, 57, 53, 0.14); }
+
+/* Flag note panel (attached to the right of a flagged paragraph). */
+.flag-note-panel {
+  position: absolute;
+  z-index: 40;
+  width: 260px;
+  background: #fff;
+  border: 1px solid #e53935;
+  border-left: 4px solid #e53935;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 8px;
+}
+.flag-note-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #c62828;
+  margin-bottom: 6px;
+}
+.flag-note-icon { color: #e53935; }
+.flag-note-textarea {
+  width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 6px;
+  font-size: 13px;
+  font-family: var(--editor-script-font-family, inherit);
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+.flag-note-textarea:focus { border-color: #e53935; }
+.flag-note-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+.flag-note-resolve {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1b5e20;
+  background: rgba(67, 160, 71, 0.28);
+}
+.flag-note-resolve:hover { background: rgba(67, 160, 71, 0.5); }
 
 /* ===== Bulleted paragraph =====
    A paragraph with the `bullet` attr round-trips as <p class="speaker bullet">.

@@ -25,6 +25,7 @@ import { BlockMultiSelect } from './BlockMultiSelect.js';
 import { LineNumbers } from './LineNumbers.js';
 import { CollapseSummary } from './CollapseSummary.js';
 import { SpeakerHeaders } from './SpeakerHeaders.js';
+import { NeedsAttention } from './NeedsAttention.js';
 
 /**
  * @param {object} [opts]
@@ -56,6 +57,10 @@ export function buildScriptExtensions(opts = {}) {
     // Speaker-name header above each speaker-run (top of doc / after a cue /
     // when the speaker changes). Decoration-only — never enters the doc/markdown.
     SpeakerHeaders,
+    // Needs-attention flag (port of the legacy system): hover flag + delete on
+    // paragraphs, red-tint background while flagged; the note panel is rendered
+    // by the host (ScriptEditor) via the onFlagParagraph bridge.
+    NeedsAttention,
     UndoRedo,
   ];
 }
