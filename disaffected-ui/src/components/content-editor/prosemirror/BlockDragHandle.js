@@ -137,9 +137,11 @@ const STYLE_TEXT = `
   opacity: 0.9;
 }
 /* Live displacement: the dropline indicator stays cast in place at the target
-   gap, and every block AT/BELOW it slides DOWN (transform) to open the space for
-   the "DROP HERE" block — the rows move out of the indicator's way (todo #39). */
-.ProseMirror .pm-shift-down { transform: translateY(${DRAG_SHIFT_PX}px); }
+   gap, and the gap opens EVENLY around it — blocks above slide up by half and
+   blocks at/below slide down by half, so whitespace is balanced top & bottom
+   (todo #39). */
+.ProseMirror .pm-shift-down { transform: translateY(${DRAG_SHIFT_PX / 2}px); }
+.ProseMirror .pm-shift-up   { transform: translateY(-${DRAG_SHIFT_PX / 2}px); }
 /* FLIP helper: during the invert step we set an inline transform with NO
    transition so the block jumps to its old position, then clearing the inline
    transform animates (via .pm-drag-block's transition) the glide to its new spot. */
@@ -348,18 +350,19 @@ function buildDecorations(state, dragState) {
       classes.push('pm-drag-source');
     }
 
-    // Displacement (todo #39): the dropline stays cast; every block AT/BELOW the
-    // gap gets pm-shift-down (transform: translateY) so the rows slide down out
-    // of the indicator's way. This is computed in the DECORATION class list (not
-    // toggled imperatively) so a decoration redraw doesn't strip it — ProseMirror
-    // updates the node decoration's class IN PLACE on the same DOM element, so the
-    // transform transition fires smoothly instead of popping. The dragged source
-    // itself never shifts.
+    // Displacement (todo #39): the dropline stays cast and the gap opens EVENLY
+    // around it — blocks ABOVE the gap slide up by half, blocks AT/BELOW slide
+    // down by half, so there's equal whitespace above and below the indicator.
+    // Computed in the DECORATION class list (not toggled imperatively) so a
+    // decoration redraw doesn't strip it — ProseMirror updates the class IN PLACE
+    // on the same DOM element, so the transform transition fires smoothly. The
+    // dragged source itself never shifts.
     if (dragState && dragState.active && dragState.gapIndex != null) {
       const gi = dragState.gapIndex;
       const noop = gi === dragState.sourceIndex || gi === dragState.sourceIndex + 1;
-      if (!noop && b.index >= gi && b.index !== dragState.sourceIndex) {
-        classes.push('pm-shift-down');
+      if (!noop && b.index !== dragState.sourceIndex) {
+        if (b.index >= gi) classes.push('pm-shift-down');
+        else classes.push('pm-shift-up');
       }
     }
 
@@ -419,7 +422,7 @@ function createGhost(node, sourceEl) {
   // clone is unavailable.
   if (sourceEl && sourceEl.cloneNode) {
     const clone = sourceEl.cloneNode(true);
-    clone.classList.remove('pm-grabbing', 'pm-shift-down', 'pm-flip-no-anim', 'pm-drag-source');
+    clone.classList.remove('pm-grabbing', 'pm-shift-down', 'pm-shift-up', 'pm-flip-no-anim', 'pm-drag-source');
     clone.style.margin = '0';
     clone.style.transform = '';
     clone.style.width = `${Math.round(sourceEl.getBoundingClientRect().width)}px`;
