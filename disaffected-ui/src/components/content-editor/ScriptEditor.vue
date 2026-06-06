@@ -593,31 +593,37 @@ export default {
      so the line number and the bullet itself do NOT move — only the text. */
   padding-left: 4em;
 }
-.script-editor-host :deep(.ProseMirror p.bullet)::before {
+/* IMPORTANT: the bullet uses ::AFTER, not ::before. Every script paragraph also
+   carries the `pm-drag-gutter` class, whose ::before is the drag grip (a grey
+   mdi-drag-vertical glyph with a hover background). An element has only ONE
+   ::before, so a bullet ::before COLLIDED with the grip — that's why the • was
+   grey at rest, turned blue/black + grew a background box on hover. ::after is
+   unused on these paragraphs, so the bullet owns it cleanly. */
+.script-editor-host :deep(.ProseMirror p.bullet)::after {
   content: "\2022"; /* • */
   position: absolute;
-  left: 0.2em; /* paragraph's natural left edge — NOT indented with the text */
+  /* Sit just RIGHT of the 34px drag gutter, before the indented text. Fixed
+     position — NOT indented with the text. */
+  left: 2.1em;
   top: 0;
   /* The marker box is exactly ONE text line tall (font-size × line-height of the
      paragraph) and centers the glyph within it, so the • lands on the vertical
-     center of the FIRST line regardless of the glyph's own size. Using a flex
-     box avoids the em-cascade pitfall of translateY offsets. */
+     center of the FIRST line regardless of the glyph's own size. */
   height: calc(var(--editor-script-font-size, 16px) * var(--editor-script-line-height, 1.5));
   display: flex;
   align-items: center;
   font-size: 1.7em; /* bigger glyph */
   line-height: 1;
   font-weight: bold;
-  /* Force black regardless of the paragraph's speaker text color, which the
-     pseudo-element would otherwise inherit. */
-  color: #000 !important;
+  color: #000 !important; /* always black, never inherit the speaker text color */
+  background: transparent !important; /* no box behind the glyph */
   pointer-events: none;
 }
 /* When the paragraph ALSO begins a speaker run, the header widget occupies the
    top of the box and the text starts below it — push the bullet down by the
    header's full height (--pm-speaker-header-h) so the • sits on the first line
    of TEXT, not on the speaker header. :has() reacts to the header child. */
-.script-editor-host :deep(.ProseMirror p.bullet:has(.pm-speaker-header))::before {
+.script-editor-host :deep(.ProseMirror p.bullet:has(.pm-speaker-header))::after {
   top: var(--pm-speaker-header-h, 32px);
 }
 
