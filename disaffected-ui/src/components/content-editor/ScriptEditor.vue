@@ -589,8 +589,9 @@ export default {
      unaffected; the bullet centers on the paragraph's own first text line. */
 .script-editor-host :deep(.ProseMirror p.bullet) {
   position: relative;
-  /* Indent only the TEXT (every line) to the right; the box stays put. */
-  padding-left: 2.4em;
+  /* Indent only the TEXT (every line) further to the right; the box stays put,
+     so the line number and the bullet itself do NOT move — only the text. */
+  padding-left: 4em;
 }
 .script-editor-host :deep(.ProseMirror p.bullet)::before {
   content: "\2022"; /* • */
@@ -607,7 +608,9 @@ export default {
   font-size: 1.7em; /* bigger glyph */
   line-height: 1;
   font-weight: bold;
-  color: #000; /* black */
+  /* Force black regardless of the paragraph's speaker text color, which the
+     pseudo-element would otherwise inherit. */
+  color: #000 !important;
   pointer-events: none;
 }
 /* When the paragraph ALSO begins a speaker run, the header widget occupies the
