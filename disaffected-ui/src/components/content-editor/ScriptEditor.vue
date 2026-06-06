@@ -602,17 +602,21 @@ export default {
 .script-editor-host :deep(.ProseMirror p.bullet)::after {
   content: "\2022"; /* • */
   position: absolute;
-  /* Sit just RIGHT of the 34px drag gutter, before the indented text. Fixed
-     position — NOT indented with the text. */
-  left: 2.1em;
+  /* Sit in the gap between the 34px drag gutter (~2.1em) and the indented text
+     (padding-left 4em). A FIXED-WIDTH box centered between them keeps the glyph
+     clear of the text no matter its size. Left edge a touch left of mid-gap so
+     it reads as attached to the line, not crowding the words. */
+  left: 2em;
+  width: 1.4em;
   top: 0;
   /* The marker box is exactly ONE text line tall (font-size × line-height of the
-     paragraph) and centers the glyph within it, so the • lands on the vertical
-     center of the FIRST line regardless of the glyph's own size. */
+     paragraph) so the glyph centers on the FIRST line of text, both vertically
+     (align-items:center) and horizontally within its own width (justify:center). */
   height: calc(var(--editor-script-font-size, 16px) * var(--editor-script-line-height, 1.5));
   display: flex;
   align-items: center;
-  font-size: 1.7em; /* bigger glyph */
+  justify-content: center;
+  font-size: 1.6em; /* bigger glyph */
   line-height: 1;
   font-weight: bold;
   color: #000 !important; /* always black, never inherit the speaker text color */
