@@ -602,11 +602,11 @@ export default {
 .script-editor-host :deep(.ProseMirror p.bullet)::after {
   content: "\2022"; /* • */
   position: absolute;
-  /* Sit in the gap between the 34px drag gutter (~2.1em) and the indented text
-     (padding-left 4em). A FIXED-WIDTH box centered between them keeps the glyph
-     clear of the text no matter its size. Left edge a touch left of mid-gap so
-     it reads as attached to the line, not crowding the words. */
-  left: 2em;
+  /* Sit roughly halfway into the text indent: the text is padding-left 4em, so
+     ~2em is the indent midpoint. Pulling the bullet back to ~1em puts it about
+     50% of the indent to the left of where it was — clear of the gutter grip
+     and comfortably left of the words. */
+  left: 1em;
   width: 1.4em;
   top: 0;
   /* The marker box is exactly ONE text line tall (font-size × line-height of the
