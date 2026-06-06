@@ -117,7 +117,7 @@
     </v-card>
 
     <!-- Create/Edit Dialog -->
-    <v-dialog v-model="dialog" max-width="1200px" persistent>
+    <v-dialog v-model="dialog" max-width="1200px" persistent class="prompt-edit-dialog">
       <v-card>
         <v-card-title>
           <span class="text-h5">{{ editMode ? 'Edit' : 'Create' }} Prompt Override</span>
@@ -942,18 +942,17 @@ onMounted(async () => {
   padding: 4px;
 }
 
-/* Fix textarea top line fading/clipping under the outlined label notch.
-   Give the first line clear space below the top border + label so its top edge
-   isn't clipped by the field's overflow. */
-.prompt-manager :deep(.v-textarea .v-field__input) {
-  padding-top: 18px !important;
-  min-height: 60px;
+/* The edit dialog teleports to <body>, OUTSIDE .prompt-manager, so target it by
+   its own class. Vuetify masks the top of the textarea content with a
+   linear-gradient (to hide text scrolling under the label notch) — that mask is
+   what made the first line look faded. Kill it so the text is fully opaque. */
+:deep(.prompt-edit-dialog .v-textarea .v-field__input) {
   -webkit-mask-image: none !important;
           mask-image: none !important;
+  padding-top: 14px !important;
+  min-height: 60px;
 }
-
-.prompt-manager :deep(.v-textarea textarea) {
-  padding-top: 4px !important;
+:deep(.prompt-edit-dialog .v-textarea textarea) {
   margin-top: 0 !important;
 }
 
