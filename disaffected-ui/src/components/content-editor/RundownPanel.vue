@@ -259,10 +259,12 @@
                 >
                   <div class="region-header-left">
                     <span class="region-name font-weight-bold">{{ region.name }}</span>
-                    <span class="region-duration-inline">: {{ calculateRegionDuration(region) }}</span>
                   </div>
 
                   <div class="region-header-right">
+                    <!-- Region duration right-aligned to line up with the item
+                         durations (todo #41 cleanup). -->
+                    <span class="region-duration-inline region-duration-right">{{ calculateRegionDuration(region) }}</span>
                     <v-menu>
                       <template v-slot:activator="{ props }">
                         <v-btn
@@ -465,23 +467,23 @@
                                     Request New AssetID
                                   </v-list-item-title>
                                 </v-list-item>
+                                <!-- Revision history moved here from the under-duration
+                                     display (todo #41 cleanup). -->
+                                <v-list-item @click.stop.prevent="openRollbackModal(item)">
+                                  <v-list-item-title>
+                                    <v-icon size="small" class="mr-2" color="primary">mdi-history</v-icon>
+                                    View Revisions<span v-if="historyStats[item.id]"> ({{ historyStats[item.id].count }})</span>
+                                  </v-list-item-title>
+                                </v-list-item>
                               </v-list>
                             </v-menu>
+                            <!-- Char count shown under the duration on the selected
+                                 item (replaced the old revision info here). -->
                             <span
                               v-if="getItemGlobalIndex(item) === selectedItemIndex"
-                              class="history-link-row"
-                            >
-                              <span v-if="historyStats[item.id]" class="history-stats">
-                                <span>{{ historyStats[item.id].count }} revisions</span>
-                                <span>oldest: {{ historyStats[item.id].oldest }}</span>
-                                <span>largest: {{ historyStats[item.id].largest }}</span>
-                              </span>
-                              <a
-                                href="#"
-                                class="history-link"
-                                @click.stop.prevent="openRollbackModal(item)"
-                              >[view revisions]</a>
-                            </span>
+                              class="selected-char-count"
+                              :title="`${getContentCharCount(item)} content characters`"
+                            >{{ getContentCharCount(item) }} chars</span>
                           </div>
                         </v-card>
                       </div>
@@ -3346,6 +3348,14 @@ defineExpose({
   margin-left: 4px; /* Small space after the colon */
   opacity: 0.8; /* Slightly transparent for lighter appearance */
 }
+/* When the region duration is right-aligned in the header, nudge it so it lines
+   up with the item durations below (which sit ~50px from the card's right
+   overhang). The header's right padding (1rem) + the ⋮ menu account for the
+   rest; this margin sits the text at the same x as the item durations. */
+.region-duration-inline.region-duration-right {
+  margin-left: 0;
+  margin-right: 18px;
+}
 
 /* Rundown item wrapper with solid region background color - ZERO spacing between items */
 .rundown-item-wrapper {
@@ -4987,17 +4997,20 @@ defineExpose({
   margin-top: 2px;
 }
 
-.history-link-row {
+/* Char count under the duration on the selected item (replaced the revision
+   info that used to live here). Same anchor spot as the old .history-link-row. */
+.selected-char-count {
   position: absolute;
   bottom: 2px;
   right: 27px;
   z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: inherit;
+  opacity: 0.85;
   text-align: right;
-  padding: 0;
+  white-space: nowrap;
+  pointer-events: none;
 }
 .history-stats {
   color: rgba(0, 0, 0, 0.7);
