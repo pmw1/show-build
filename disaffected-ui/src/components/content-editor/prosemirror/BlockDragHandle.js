@@ -109,7 +109,11 @@ const STYLE_TEXT = `
 }
 .ProseMirror .pm-drag-gutter:hover::before {
   opacity: 1;
-  background: rgba(33, 150, 243, 0.08);
+  /* No hover background: it tinted the left gutter a faint blue-grey on every
+     paragraph hover, which reads as an unwanted grey band — especially over a
+     bulleted paragraph's wide left indent. The icon darkening to DROPLINE below
+     is enough of a grab affordance; keep the zone the same white as the page. */
+  background: transparent;
   color: ${DROPLINE};
 }
 .ProseMirror .pm-drag-gutter.pm-grabbing::before {
