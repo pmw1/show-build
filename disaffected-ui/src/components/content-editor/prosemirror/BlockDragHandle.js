@@ -71,17 +71,31 @@ const DRAG_EASE = 'cubic-bezier(0.2, 0, 0, 1)';  // smooth, no overshoot
 const AUTOSCROLL_ZONE_PX = 70;     // distance from top/bottom edge that triggers scroll
 const AUTOSCROLL_MAX_PX = 16;      // max px scrolled per frame (at the very edge)
 
-// Find the scrollable container holding the editor (the .script-editor-host with
-// overflow-y:auto), falling back to the nearest scrollable ancestor of view.dom.
+// Find the element that actually SCROLLS the editor content. We walk up from
+// view.dom and return the nearest ancestor that is genuinely scrollable RIGHT
+// NOW (overflow auto/scroll AND scrollHeight > clientHeight). Matching by the
+// .script-editor-host class alone is unreliable: depending on the parent
+// height chain the host may not be the overflowing element (an ancestor flex
+// pane scrolls instead), so we test real scrollability rather than trust the
+// class. The host is still preferred when it IS the one overflowing.
+const MIN_OVERFLOW_PX = 24; // an element must be able to scroll at least this far to count
 function getScrollContainer(view) {
   let el = view.dom && view.dom.parentElement;
-  while (el) {
-    if (el.classList && el.classList.contains('script-editor-host')) return el;
+  let hostFallback = null;
+  while (el && el !== document.body && el !== document.documentElement) {
+    if (el.classList && el.classList.contains('script-editor-host')) hostFallback = el;
     const oy = getComputedStyle(el).overflowY;
-    if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) return el;
+    const scrollable = (oy === 'auto' || oy === 'scroll');
+    // Require MEANINGFUL overflow, not just a few pixels. The .script-editor-host
+    // often has only a handful of overflow px (its content sizes it) while the
+    // element that ACTUALLY scrolls is an ancestor pane — picking the host gave
+    // a scroller whose scrollTop maxes out at ~8px and never visibly moved.
+    if (scrollable && el.scrollHeight - el.clientHeight > MIN_OVERFLOW_PX) return el;
     el = el.parentElement;
   }
-  return null;
+  // Nothing meaningfully overflows yet — fall back to the host (so a later
+  // overflow still scrolls), then the document scroller as a last resort.
+  return hostFallback || document.scrollingElement || document.documentElement;
 }
 
 // CSS injected once per page. Kept inline (not a scoped .vue block) because this
@@ -547,6 +561,14 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
   // the rAF loop can scroll AND recompute the drop gap from the current pointer
   // even when the pointer is held still in an edge zone.
   const scroller = getScrollContainer(view);
+  // The edge-detection zone is anchored to the EDITOR's visible box (the host),
+  // which may differ from the element that actually scrolls (an ancestor pane).
+  // We detect "near edge" against the host's visible rect but scroll `scroller`.
+  let hostEl = view.dom && view.dom.parentElement;
+  while (hostEl && !(hostEl.classList && hostEl.classList.contains('script-editor-host'))) {
+    hostEl = hostEl.parentElement;
+  }
+  if (!hostEl) hostEl = scroller;
   let lastClientX = downEvent.clientX;
   let lastClientY = downEvent.clientY;
   let scrollRaf = null;
@@ -570,11 +592,22 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
   const stopAutoScroll = () => {
     if (scrollRaf != null) { cancelAnimationFrame(scrollRaf); scrollRaf = null; }
   };
+  // The trigger edges are the scroller's edges CLAMPED to the visible viewport.
+  // If the scroll container extends below the screen (its parent isn't height-
+  // constrained), rect.bottom sits off-screen and the cursor can never get
+  // within the zone of it — so we use the visible bottom (innerHeight) instead.
+  // Same for the top against 0. This is what made auto-scroll never fire.
+  const visibleEdges = () => {
+    const rect = (hostEl || scroller).getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    return { top: Math.max(rect.top, 0), bottom: Math.min(rect.bottom, vh) };
+  };
+
   const autoScrollTick = () => {
     if (!scroller) { scrollRaf = null; return; }
-    const rect = scroller.getBoundingClientRect();
-    const distTop = lastClientY - rect.top;
-    const distBottom = rect.bottom - lastClientY;
+    const edges = visibleEdges();
+    const distTop = lastClientY - edges.top;
+    const distBottom = edges.bottom - lastClientY;
     let dy = 0;
     if (distTop < AUTOSCROLL_ZONE_PX) {
       dy = -Math.ceil(AUTOSCROLL_MAX_PX * (1 - Math.max(0, distTop) / AUTOSCROLL_ZONE_PX));
@@ -595,9 +628,9 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
   };
   const maybeAutoScroll = () => {
     if (!scroller || scrollRaf != null) return;
-    const rect = scroller.getBoundingClientRect();
-    const inZone = (lastClientY - rect.top) < AUTOSCROLL_ZONE_PX ||
-                   (rect.bottom - lastClientY) < AUTOSCROLL_ZONE_PX;
+    const edges = visibleEdges();
+    const inZone = (lastClientY - edges.top) < AUTOSCROLL_ZONE_PX ||
+                   (edges.bottom - lastClientY) < AUTOSCROLL_ZONE_PX;
     if (inZone) scrollRaf = requestAnimationFrame(autoScrollTick);
   };
 
