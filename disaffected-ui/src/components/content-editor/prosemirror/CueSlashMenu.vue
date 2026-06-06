@@ -19,7 +19,7 @@
       @mousemove="selectedIndex = i"
       @click="pick(i)"
     >
-      <span class="cue-chip" :style="{ background: item.color }">{{ item.type }}</span>
+      <span class="cue-chip" :style="{ background: chipColor(item) }">{{ item.type }}</span>
       <span class="cue-name">{{ item.tooltip }}</span>
       <span class="cue-key">alt+{{ item.key }}</span>
     </button>
@@ -27,6 +27,8 @@
 </template>
 
 <script>
+import { getColorValue, resolveVuetifyColor } from '../../../utils/themeColorMap.js';
+
 export default {
   name: 'CueSlashMenu',
   props: {
@@ -42,6 +44,16 @@ export default {
     },
   },
   methods: {
+    // #39: the slash-menu chip color must come from the SAME color registry as
+    // the add-cue toolbar, the in-script cue card, and the insertion popup —
+    // not the static hex that used to live on CUE_ITEMS (which diverged from
+    // the registry, e.g. FSQ showed pale orange instead of lime). Fall back to
+    // any item.color, then grey, if the type can't resolve.
+    chipColor(item) {
+      const name = item?.type ? getColorValue(item.type.toLowerCase()) : null;
+      const resolved = name ? resolveVuetifyColor(name) : null;
+      return resolved || item?.color || '#9e9e9e';
+    },
     // Called by the extension's keydown handler (returns true if it consumed the key).
     onKeyDown(event) {
       if (event.key === 'ArrowUp') {
