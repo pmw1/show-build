@@ -67,6 +67,23 @@ const DRAG_SHIFT_PX = 64;          // how far blocks slide down to open the drop
 const DRAG_ANIM_MS = 200;          // displacement + FLIP-settle duration
 const DRAG_EASE = 'cubic-bezier(0.2, 0, 0, 1)';  // smooth, no overshoot
 
+// ── Auto-scroll while dragging near an edge (todo #48) ──────────────────────
+const AUTOSCROLL_ZONE_PX = 70;     // distance from top/bottom edge that triggers scroll
+const AUTOSCROLL_MAX_PX = 16;      // max px scrolled per frame (at the very edge)
+
+// Find the scrollable container holding the editor (the .script-editor-host with
+// overflow-y:auto), falling back to the nearest scrollable ancestor of view.dom.
+function getScrollContainer(view) {
+  let el = view.dom && view.dom.parentElement;
+  while (el) {
+    if (el.classList && el.classList.contains('script-editor-host')) return el;
+    const oy = getComputedStyle(el).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
 // CSS injected once per page. Kept inline (not a scoped .vue block) because this
 // plugin's DOM is created imperatively and lives inside the ProseMirror surface.
 const STYLE_ID = 'pm-block-drag-handle-styles';
@@ -526,9 +543,17 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
   // Seed the drag state; gap starts at the source's leading gap (a no-op spot).
   setDrag({ active: true, sourceIndex, gapIndex: sourceIndex });
 
-  const onMove = (moveEvent) => {
-    moveGhost(moveEvent.clientX, moveEvent.clientY); // ghost tracks the cursor
-    const gapIndex = nearestGap(view, moveEvent.clientY);
+  // Auto-scroll state (todo #48): the scroll container + the last pointer Y, so
+  // the rAF loop can scroll AND recompute the drop gap from the current pointer
+  // even when the pointer is held still in an edge zone.
+  const scroller = getScrollContainer(view);
+  let lastClientX = downEvent.clientX;
+  let lastClientY = downEvent.clientY;
+  let scrollRaf = null;
+
+  // Refresh the drop gap from the current pointer (used by onMove + scroll loop).
+  const refreshGap = () => {
+    const gapIndex = nearestGap(view, lastClientY);
     const cur = blockDragHandleKey.getState(view.state);
     if (!cur || cur.gapIndex !== gapIndex) {
       // setDrag updates the gapIndex → buildDecorations recomputes which blocks
@@ -536,6 +561,52 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
       // transform transition animates the slide (todo #39). No imperative DOM.
       setDrag({ active: true, sourceIndex, gapIndex });
     }
+  };
+
+  // Edge auto-scroll loop: while the pointer is within AUTOSCROLL_ZONE_PX of the
+  // container's top/bottom edge, scroll toward it each frame (speed ramps up the
+  // closer to the edge) and re-evaluate the drop gap, so the user can drop at a
+  // position that isn't currently on screen (todo #48).
+  const stopAutoScroll = () => {
+    if (scrollRaf != null) { cancelAnimationFrame(scrollRaf); scrollRaf = null; }
+  };
+  const autoScrollTick = () => {
+    if (!scroller) { scrollRaf = null; return; }
+    const rect = scroller.getBoundingClientRect();
+    const distTop = lastClientY - rect.top;
+    const distBottom = rect.bottom - lastClientY;
+    let dy = 0;
+    if (distTop < AUTOSCROLL_ZONE_PX) {
+      dy = -Math.ceil(AUTOSCROLL_MAX_PX * (1 - Math.max(0, distTop) / AUTOSCROLL_ZONE_PX));
+    } else if (distBottom < AUTOSCROLL_ZONE_PX) {
+      dy = Math.ceil(AUTOSCROLL_MAX_PX * (1 - Math.max(0, distBottom) / AUTOSCROLL_ZONE_PX));
+    }
+    if (dy !== 0) {
+      const before = scroller.scrollTop;
+      scroller.scrollTop += dy;
+      if (scroller.scrollTop !== before) {
+        moveGhost(lastClientX, lastClientY); // keep the ghost glued to the cursor
+        refreshGap();                        // drop target tracks while scrolling
+      }
+      scrollRaf = requestAnimationFrame(autoScrollTick);
+    } else {
+      scrollRaf = null; // left the edge zone — stop until re-entered
+    }
+  };
+  const maybeAutoScroll = () => {
+    if (!scroller || scrollRaf != null) return;
+    const rect = scroller.getBoundingClientRect();
+    const inZone = (lastClientY - rect.top) < AUTOSCROLL_ZONE_PX ||
+                   (rect.bottom - lastClientY) < AUTOSCROLL_ZONE_PX;
+    if (inZone) scrollRaf = requestAnimationFrame(autoScrollTick);
+  };
+
+  const onMove = (moveEvent) => {
+    lastClientX = moveEvent.clientX;
+    lastClientY = moveEvent.clientY;
+    moveGhost(moveEvent.clientX, moveEvent.clientY); // ghost tracks the cursor
+    refreshGap();
+    maybeAutoScroll(); // start the edge-scroll loop if near an edge
   };
 
   const onUp = () => {
@@ -548,6 +619,7 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
     window.removeEventListener('pointermove', onMove, true);
     window.removeEventListener('pointerup', onUp, true);
     window.removeEventListener('pointercancel', onUp, true);
+    stopAutoScroll(); // halt the edge auto-scroll loop (todo #48)
     removeGhost(); // detach the cursor ghost
     if (view.dom && view.dom.classList) view.dom.classList.remove('pm-dragging-active');
 
