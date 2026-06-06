@@ -315,7 +315,7 @@ export default {
         // Every transaction (incl. the multi-select plugin's meta-only txns)
         // refreshes the toolbar's selection summary. Cheap: just reads plugin
         // state. Kept separate from onUpdate (which only fires on doc changes).
-        onTransaction: () => refreshMultiSel(),
+        onTransaction: () => { refreshMultiSel(); syncFlagPanelToSelection(); },
         // Cue cards delete through here, NOT inside the NodeView: the NodeView
         // calls editor.options.onDeleteCue with the cue's data and a removeNode()
         // that drops that exact atom node. We forward it up to EditorPanel so it
@@ -686,37 +686,52 @@ export default {
       return found;
     }
 
-    // forceOpen: true when the block was just freshly flagged (always open the
-    // panel). When clicking the persistent flag on an already-flagged block, we
-    // TOGGLE: close the panel if it's already showing this same block.
-    function toggleFlagNotePanel(pos, forceOpen = false) {
+    // Open (expand) the note panel for a given flagged paragraph. The panel's
+    // LEFT edge is locked to the RIGHT edge of the paragraph block — i.e. it
+    // starts where the text column ends and extends to the right (into the
+    // sidebar zone), so it never overlaps the paragraph text. Vertically lined
+    // up with the block top.
+    function openFlagPanelForParagraph(p, focusInput) {
       const ed = editor.value;
       if (!ed) return;
-      const p = _paragraphFlaggedAt(pos);
-      if (!p || !p.node.attrs.needsAttention) {
-        flagPanel.value.open = false;
-        return;
-      }
-      // Toggle off if the panel is already open for this block (and not forced).
-      if (!forceOpen && flagPanel.value.open && flagPanel.value.pos === p.offset + 1) {
-        flagPanel.value.open = false;
-        return;
-      }
-      // Half-size panel (~390px), pushed OFF the right edge into the scroll
-      // padding so it overlaps the text as little as possible. Vertically lined
-      // up with the block top.
+      const rootEl = ed.view.dom.closest('.script-editor-root');
+      const rootRect = rootEl ? rootEl.getBoundingClientRect() : ed.view.dom.getBoundingClientRect();
       const coords = ed.view.coordsAtPos(p.offset + 1);
-      const hostRect = ed.view.dom.getBoundingClientRect();
-      const PANEL_W = Math.min(390, hostRect.width - 16);
       flagPanel.value.pos = p.offset + 1;
       flagPanel.value.note = p.node.attrs.flagNote || '';
       flagPanel.value.user = p.node.attrs.flagUser || '';
-      // Push to the far right, partly into the right padding (right edge ~ host
-      // right edge + a few px), so the panel sits to the right of the text.
-      flagPanel.value.x = Math.max(8, hostRect.width - PANEL_W + 8);
-      flagPanel.value.y = coords.top - hostRect.top;
+      // Left edge at the editor's right edge (block right edge ≈ host right edge
+      // at full width); the panel spills into the sidebar to its right.
+      flagPanel.value.x = rootRect.width - 6;
+      flagPanel.value.y = coords.top - rootRect.top;
       flagPanel.value.open = true;
-      nextTick(() => { flagNoteInput.value?.focus?.(); });
+      if (focusInput) nextTick(() => { flagNoteInput.value?.focus?.(); });
+    }
+
+    // FOCUS-DRIVEN: the panel is expanded only while the caret is inside a
+    // FLAGGED paragraph; otherwise it collapses to the persistent red flag.
+    // Called on every selection change (onSelectionUpdate) + after a fresh flag.
+    function syncFlagPanelToSelection() {
+      const ed = editor.value;
+      if (!ed) { flagPanel.value.open = false; return; }
+      const pos = ed.state.selection.from;
+      const p = _paragraphFlaggedAt(pos);
+      if (p && p.node.attrs.needsAttention) {
+        openFlagPanelForParagraph(p, false);
+      } else {
+        flagPanel.value.open = false;
+      }
+    }
+
+    // Called when the flag button is clicked. A FRESH flag opens the panel +
+    // focuses the note; clicking the flag on an already-flagged block just lets
+    // focus drive it (selection is already in/near the block).
+    function toggleFlagNotePanel(pos, freshlyFlagged = false) {
+      const ed = editor.value;
+      if (!ed) return;
+      const p = _paragraphFlaggedAt(pos);
+      if (!p || !p.node.attrs.needsAttention) { flagPanel.value.open = false; return; }
+      openFlagPanelForParagraph(p, freshlyFlagged);
     }
 
     const flagNoteInput = ref(null);
@@ -1132,9 +1147,11 @@ export default {
 .flag-note-panel {
   position: absolute;
   z-index: 40;
-  /* Half the previous (was 780) — compact note card pushed off to the right. */
-  width: 390px;
-  max-width: calc(100% - 16px);
+  /* Compact note card. Its LEFT edge is locked to the editor's right edge (set
+     inline via left:), so it sits to the RIGHT of the text, spilling over the
+     sidebar — never overlapping the paragraph. No max-width clamp (it's meant to
+     extend past the editor column). */
+  width: 360px;
   background: #fff;
   border: 1px solid #e53935;
   border-left: 4px solid #e53935;
