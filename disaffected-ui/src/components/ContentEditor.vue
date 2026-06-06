@@ -9425,6 +9425,28 @@ Try dropping an image or video file here!`
         }
       }
 
+      // ── Build the richer prompt context (per Kevin) ──────────────────────
+      // Expose to the segment-generator prompt: this segment's own slug, title,
+      // and current script body (so the model can continue/expand with context
+      // instead of writing blind), plus the OTHER rundown segments each with
+      // their title + description (show-wide awareness). All overridable via the
+      // Prompt Manager variables: {slug} {title} {currentScript} {otherSegments}.
+      const slug = targetItem.slug || '';
+      const title = targetItem.title || '';
+      const currentScript = (targetItem.script_content || '').trim();
+
+      // Other segments (everything except the target), title + description.
+      const otherList = this.rundownItems
+        .filter(item => (item.id || item.asset_id) !== targetItemId)
+        .map(item => {
+          const t = item.title || item.slug || 'Untitled';
+          const d = (item.description || '').trim();
+          return d ? `- ${t}: ${d}` : `- ${t}`;
+        });
+      const otherSegments = otherList.length
+        ? `\n\nOther segments in this episode:\n${otherList.join('\n')}`
+        : '';
+
       // Show loading notification with LLM generating color
       notifyUserStandard(`Generating ${paragraphCount}-paragraph ${segmentType}...`, NOTIFICATION_COLORS.GENERATING);
 
@@ -9455,14 +9477,22 @@ Try dropping an image or video file here!`
         }
 
         let prompt;
+        // Defaults match the prior hardcoded values; overridden below by the
+        // resolved prompt's settings (incl. any Prompt Manager override's
+        // temperature / max_tokens), so the override is actually honored.
+        let genTemperature = 0.8;
+        let genMaxTokens = 2000;
         try {
           const resolved = await getLLMPrompt(
             promptId,
-            { paragraphs: paragraphCount, duration, segmentType, upcomingSegments },
+            { paragraphs: paragraphCount, duration, segmentType, upcomingSegments,
+              slug, title, currentScript, otherSegments },
             { category: 'generate' }
           );
           prompt = resolved.prompt;
-          console.log(`📋 Using prompt ${promptId}${resolved.overridden ? ' (DB override)' : ' (default)'}`);
+          if (resolved.temperature != null) genTemperature = resolved.temperature;
+          if (resolved.maxTokens != null) genMaxTokens = resolved.maxTokens;
+          console.log(`📋 Using prompt ${promptId}${resolved.overridden ? ' (DB override)' : ' (default)'} — temp ${genTemperature}, max_tokens ${genMaxTokens}`);
         } catch (error) {
           console.warn(`Failed to resolve prompt ${promptId}, using inline fallback:`, error);
           prompt = `Write a ${duration}-minute podcast ${segmentType} with ${paragraphCount} paragraphs. DO NOT include any introductory text - start immediately with the content.`;
@@ -9478,8 +9508,8 @@ Try dropping an image or video file here!`
           async () => {
             return await smartCall(prompt, {
               taskType: 'content-expansion',
-              temperature: 0.8,
-              max_tokens: 2000
+              temperature: genTemperature,
+              max_tokens: genMaxTokens
             });
           },
           {

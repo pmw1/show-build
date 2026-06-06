@@ -509,16 +509,24 @@ const operationVariables = {
   'generate-segment-script': [
     { name: 'paragraphs', description: 'How many paragraphs to write (the Ctrl+Alt+Shift+N keypress number)', example: '3' },
     { name: 'duration', description: 'Target duration (minutes) from the rundown item', example: '5' },
-    { name: 'segmentType', description: 'The rundown item type', example: 'segment' }
+    { name: 'segmentType', description: 'The rundown item type', example: 'segment' },
+    { name: 'title', description: "This segment's title", example: 'The Manipulation Playbook' },
+    { name: 'slug', description: "This segment's slug", example: 'manipulation-playbook' },
+    { name: 'currentScript', description: "This segment's current script body (so the model continues/expands it)", example: 'When confronted, the narcissist...' },
+    { name: 'otherSegments', description: 'Auto-filled list of the OTHER segments in the episode, each with title + description', example: '\\n\\nOther segments in this episode:\\n- Cold Open: ...' }
   ],
   'generate-tease-script': [
     { name: 'paragraphs', description: 'How many paragraphs to write (the Ctrl+Alt+Shift+N keypress number)', example: '3' },
     { name: 'duration', description: 'Target duration (minutes)', example: '1' },
-    { name: 'upcomingSegments', description: 'Auto-filled list of the next ~3 segment titles to tease', example: '\\n\\nUpcoming segments to tease:\\n- ...' }
+    { name: 'title', description: "This tease's title", example: 'Coming Up' },
+    { name: 'upcomingSegments', description: 'Auto-filled list of the next ~3 segment titles to tease', example: '\\n\\nUpcoming segments to tease:\\n- ...' },
+    { name: 'otherSegments', description: 'Fallback list of OTHER segments (title + description) if no upcoming list', example: '\\n\\nOther segments in this episode:\\n- ...' }
   ],
   'generate-coldopen-script': [
     { name: 'paragraphs', description: 'How many paragraphs to write (the Ctrl+Alt+Shift+N keypress number)', example: '2' },
-    { name: 'duration', description: 'Target duration (minutes)', example: '1' }
+    { name: 'duration', description: 'Target duration (minutes)', example: '1' },
+    { name: 'title', description: "This cold open's title", example: 'The Setup' },
+    { name: 'otherSegments', description: 'Auto-filled list of OTHER segments in the episode (title + description)', example: '\\n\\nOther segments in this episode:\\n- ...' }
   ],
   'generate-ad-script': [
     { name: 'product', description: 'Product/service name', example: 'VPN Service' },

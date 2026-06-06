@@ -261,15 +261,20 @@ Output ONLY the slug words, nothing else. No quotes, no preamble, no explanation
     maxTokens: 2000,
     systemPrompt: 'You are a broadcast script writer. Write naturally and conversationally.',
     template: (params) => {
-      const { paragraphs = 3, duration = '3' } = params
+      const { paragraphs = 3, duration = '3', slug = '', title = '', currentScript = '', otherSegments = '' } = params
+      const titleLine = title ? `\nSegment title: ${title}` : ''
+      const slugLine = slug ? `\nSegment slug: ${slug}` : ''
+      const currentBlock = currentScript
+        ? `\n\nThis segment's current script (continue/expand it; do not repeat it verbatim):\n${currentScript}`
+        : ''
       return `RUNDOWN ITEM TYPE DEFINITIONS:
 - Cold Open: Opening hook before any intro/music. Grabs attention instantly. 30-90 seconds.
 - Tease: Preview of upcoming segments. Builds curiosity. Brief and energetic.
 - Segment: Main content blocks. In-depth discussion, analysis, storytelling. Conversational. 5-15 minutes.
 
-YOU ARE WRITING: SEGMENT
+YOU ARE WRITING: SEGMENT${titleLine}${slugLine}
 
-Write a ${duration}-minute podcast segment for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).
+Write a ${duration}-minute podcast segment for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).${currentBlock}${otherSegments}
 
 Write ${paragraphs} paragraphs.
 
@@ -299,12 +304,15 @@ Generate the segment now:`
     maxTokens: 2000,
     systemPrompt: 'You are a broadcast script writer. Write naturally and conversationally.',
     template: (params) => {
-      const { paragraphs = 3, duration = '1', upcomingSegments = '' } = params
-      return `YOU ARE WRITING: TEASE
+      const { paragraphs = 3, duration = '1', upcomingSegments = '', otherSegments = '', title = '' } = params
+      const titleLine = title ? ` (titled "${title}")` : ''
+      // Prefer the tease-specific upcoming list; fall back to the full other-segments list.
+      const context = upcomingSegments || otherSegments
+      return `YOU ARE WRITING: TEASE${titleLine}
 
 Write a ${duration}-minute podcast tease/preview for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).
 
-This tease should hook listeners and preview what's coming up in the show.${upcomingSegments}
+This tease should hook listeners and preview what's coming up in the show.${context}
 
 Write ${paragraphs} short, punchy paragraphs that build anticipation.
 
@@ -332,12 +340,13 @@ Generate the tease now:`
     maxTokens: 2000,
     systemPrompt: 'You are a broadcast script writer. Write naturally and conversationally.',
     template: (params) => {
-      const { paragraphs = 2, duration = '1' } = params
-      return `YOU ARE WRITING: COLD OPEN
+      const { paragraphs = 2, duration = '1', otherSegments = '', title = '' } = params
+      const titleLine = title ? ` (titled "${title}")` : ''
+      return `YOU ARE WRITING: COLD OPEN${titleLine}
 
 Write a ${duration}-minute cold open for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).
 
-A cold open should immediately grab attention with a compelling hook - a powerful question, shocking statement, or intriguing scenario.
+A cold open should immediately grab attention with a compelling hook - a powerful question, shocking statement, or intriguing scenario.${otherSegments}
 
 Write ${paragraphs} paragraphs.
 
@@ -552,6 +561,14 @@ export async function getLLMPrompt(promptId, params = {}, options = {}) {
         })
         result.prompt = customPrompt
       }
+
+      // Propagate the override's model parameters so callers actually honor the
+      // temperature / max_tokens / model the user set in the Prompt Manager.
+      // (== null check: 0 is a valid temperature, so only skip null/undefined.)
+      if (override.temperature != null) result.temperature = override.temperature
+      if (override.max_tokens != null) result.maxTokens = override.max_tokens
+      if (override.suggested_service) result.suggestedService = override.suggested_service
+      if (override.suggested_model) result.suggestedModel = override.suggested_model
 
       result.overridden = true
       result.overrideId = override.id
