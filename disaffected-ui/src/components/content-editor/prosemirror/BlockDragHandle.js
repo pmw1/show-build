@@ -154,17 +154,17 @@ const STYLE_TEXT = `
    Colours read on bare <p> (the old 0.15 alpha was invisible; cue cards masked it
    via their solid card bg): drop fill ~0.45 + dropline ring; neighbour ~0.225. */
 @keyframes pm-flash-drop {
-  /* Instant on, slow linear fade to nothing. */
-  0%   { background-color: var(--dropflash-color, rgba(33, 150, 243, 0.45));
-         box-shadow: 0 0 0 3px ${DROPLINE}, 0 0 14px ${DROPLINE}; }
-  100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+  /* Instant on, slow linear fade to nothing. Fill = the theme's --draglight-color
+     (as defined). NO ring/border (per Kevin). */
+  0%   { background-color: ${DRAGLIGHT}; }
+  100% { background-color: transparent; }
 }
 @keyframes pm-flash-neighbor {
   0%, 100% { background-color: transparent; }
-  50%      { background-color: var(--dropflash-color-half, rgba(33, 150, 243, 0.225)); }
+  50%      { background-color: ${DRAGLIGHT}; }
 }
 /* Paragraphs are full-width and padding-less; a flash bg butts right to the edge.
-   These give the flash a little inset breathing room so the fill + ring read. */
+   Round the corners a touch so the fill reads as a block, not a full-bleed bar. */
 .ProseMirror .pm-flash-drop,
 .ProseMirror .pm-flash-neighbor {
   border-radius: 4px;
