@@ -686,25 +686,34 @@ export default {
       return found;
     }
 
-    function toggleFlagNotePanel(pos) {
+    // forceOpen: true when the block was just freshly flagged (always open the
+    // panel). When clicking the persistent flag on an already-flagged block, we
+    // TOGGLE: close the panel if it's already showing this same block.
+    function toggleFlagNotePanel(pos, forceOpen = false) {
       const ed = editor.value;
       if (!ed) return;
       const p = _paragraphFlaggedAt(pos);
       if (!p || !p.node.attrs.needsAttention) {
-        // Was just unflagged → close any panel for it.
         flagPanel.value.open = false;
         return;
       }
-      // Pop the panel on the RIGHT side of the block: right-align its ~780px
-      // width to the editor's right edge, vertically lined up with the block
-      // top. Clamp left>=8 so it never runs off the left on a narrow editor.
+      // Toggle off if the panel is already open for this block (and not forced).
+      if (!forceOpen && flagPanel.value.open && flagPanel.value.pos === p.offset + 1) {
+        flagPanel.value.open = false;
+        return;
+      }
+      // Half-size panel (~390px), pushed OFF the right edge into the scroll
+      // padding so it overlaps the text as little as possible. Vertically lined
+      // up with the block top.
       const coords = ed.view.coordsAtPos(p.offset + 1);
       const hostRect = ed.view.dom.getBoundingClientRect();
-      const PANEL_W = Math.min(780, hostRect.width - 24);
+      const PANEL_W = Math.min(390, hostRect.width - 16);
       flagPanel.value.pos = p.offset + 1;
       flagPanel.value.note = p.node.attrs.flagNote || '';
       flagPanel.value.user = p.node.attrs.flagUser || '';
-      flagPanel.value.x = Math.max(8, hostRect.width - PANEL_W - 8);
+      // Push to the far right, partly into the right padding (right edge ~ host
+      // right edge + a few px), so the panel sits to the right of the text.
+      flagPanel.value.x = Math.max(8, hostRect.width - PANEL_W + 8);
       flagPanel.value.y = coords.top - hostRect.top;
       flagPanel.value.open = true;
       nextTick(() => { flagNoteInput.value?.focus?.(); });
@@ -1090,6 +1099,14 @@ export default {
 .script-editor-host :deep(na-controls.na-flagged) {
   opacity: 1;
 }
+/* Flagged + not hovered: show ONLY the persistent red flag (the note collapses
+   to this flag). The delete button reappears on paragraph hover. */
+.script-editor-host :deep(na-controls.na-flagged .na-delete) {
+  display: none;
+}
+.script-editor-host :deep(.ProseMirror p:hover na-controls.na-flagged .na-delete) {
+  display: inline-flex;
+}
 .script-editor-host :deep(na-btn) {
   cursor: pointer;
   /* ~3x the prior size; flag + delete both larger and clear of the text. */
@@ -1108,16 +1125,16 @@ export default {
   height: 1.7em;
 }
 .script-editor-host :deep(na-btn.na-flag:hover) { color: #fb8c00; background: rgba(251, 140, 0, 0.14); }
-.script-editor-host :deep(na-btn.na-flag.is-active) { color: #fb8c00; }
+.script-editor-host :deep(na-btn.na-flag.is-active) { color: #e53935; }
 .script-editor-host :deep(na-btn.na-delete:hover) { color: #e53935; background: rgba(229, 57, 53, 0.14); }
 
 /* Flag note panel (attached to the right of a flagged paragraph). */
 .flag-note-panel {
   position: absolute;
   z-index: 40;
-  /* ~3x the prior width; capped so it never overruns the editor column. */
-  width: 780px;
-  max-width: calc(100% - 24px);
+  /* Half the previous (was 780) — compact note card pushed off to the right. */
+  width: 390px;
+  max-width: calc(100% - 16px);
   background: #fff;
   border: 1px solid #e53935;
   border-left: 4px solid #e53935;

@@ -182,9 +182,15 @@ export const NeedsAttention = Extension.create({
               if (Number.isNaN(pos)) return false;
               const editor = ext.editor;
               if (action === 'flag') {
-                editor.commands.toggleNeedsAttention(pos);
+                // If NOT yet flagged, flag it (stamps user) and open the panel.
+                // If already flagged, the flag is the persistent indicator — a
+                // click just TOGGLES the note panel (never unflags; unflagging
+                // is done via the panel's "Resolved" button).
+                const p = paragraphAt(view.state.doc, pos);
+                const wasFlagged = p && p.node.attrs.needsAttention;
+                if (!wasFlagged) editor.commands.toggleNeedsAttention(pos);
                 const fn = editor.options.onFlagParagraph;
-                if (typeof fn === 'function') fn(pos);
+                if (typeof fn === 'function') fn(pos, !wasFlagged);
               } else if (action === 'delete') {
                 animateDeleteAt(view, pos);
               }
