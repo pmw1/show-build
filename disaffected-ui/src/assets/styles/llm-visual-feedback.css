@@ -49,11 +49,21 @@
   border-radius: 0 !important;
 }
 
-.llm-analyzing.llm-scope-item {
-  border: 7px solid var(--llm-analyzing) !important;
+/* #47: rundown ROW (item scope) while busy — throbbing purple BACKGROUND, not a
+   border. The 7px border clipped to only the left/top edges inside the rundown's
+   overflow container. Background pulses purple<->deeper purple; white text. */
+.llm-analyzing.llm-scope-item,
+.llm-generating.llm-scope-item {
+  border: none !important;
   border-radius: 0 !important;
-  margin: 7px !important;
-  animation: throb 1.5s ease-in-out infinite !important;
+  margin: 0 !important;
+  transition: none !important;
+  color: #fff !important;
+  animation: llm-bg-throb 1.6s ease-in-out infinite !important;
+}
+.llm-analyzing.llm-scope-item *,
+.llm-generating.llm-scope-item * {
+  color: #fff !important;
 }
 
 .llm-analyzing.llm-scope-asset {
@@ -107,12 +117,8 @@
   border-radius: 0 !important;
 }
 
-.llm-generating.llm-scope-item {
-  border: 7px solid var(--llm-generating) !important;
-  border-radius: 0 !important;
-  margin: 7px !important;
-  animation: throb 1.5s ease-in-out infinite !important;
-}
+/* .llm-generating.llm-scope-item is handled above, merged with analyzing
+   (#47: background throb, no border). */
 
 .llm-generating.llm-scope-asset {
   border: 5px dashed var(--llm-generating) !important;
@@ -370,6 +376,16 @@
   }
   50% {
     box-shadow: 0 0 20px 5px rgba(156, 39, 176, 0.4);
+  }
+}
+
+/* #47: whole-row background pulse for a busy rundown item (purple <-> deeper). */
+@keyframes llm-bg-throb {
+  0%, 100% {
+    background-color: #9C27B0; /* purple */
+  }
+  50% {
+    background-color: #5E1378; /* deeper purple */
   }
 }
 

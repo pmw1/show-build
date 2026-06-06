@@ -3934,33 +3934,16 @@ defineExpose({
    left/top edges inside the overflow container). Pulses between purple and a
    deeper purple so it reads clearly as "busy". No border, no box-shadow, so
    nothing can clip. Slow ~2s loop until the operation completes. */
-/* Throb the row while the LLM works. The base inline background-color + the
-   .rundown-item-card `transition: background-color` fought the keyframes and
-   froze it on one purple (the "turns purple but never pulses" bug). Fixes:
-   (1) kill the transition here so the animation isn't smoothed into a hold,
-   (2) animate an INSET box-shadow too — nothing else sets it, so the pulse is
-   visible even if the background is contested. */
+/* #47: the rundown row's LLM-busy treatment (throbbing purple background, no
+   border) is owned by the GLOBAL stylesheet assets/styles/llm-visual-feedback.css
+   (.llm-analyzing/.llm-generating.llm-scope-item, applied via getVisualClass).
+   That file's rules are !important and were the real driver — earlier attempts
+   here were overridden by them. The legacy `generating-item` class (driven by
+   generatingItemIndex) just kills the transition so any background change isn't
+   damped; the global animation does the rest. */
 .generating-item.rundown-item-card,
 .generating-item {
   transition: none !important;
-  animation: llm-bg-throb 1.6s ease-in-out infinite !important;
-}
-
-@keyframes llm-bg-throb {
-  0%, 100% {
-    background-color: #9C27B0; /* purple */
-    box-shadow: inset 0 0 0 9999px rgba(156, 39, 176, 0); /* no overlay */
-  }
-  50% {
-    background-color: #6A1B9A; /* deeper purple */
-    box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, 0.28); /* darken whole row */
-  }
-}
-
-/* Keep the row's text readable over the purple throb regardless of theme. */
-.generating-item,
-.generating-item * {
-  color: #ffffff !important;
 }
 
 .editing-item {
