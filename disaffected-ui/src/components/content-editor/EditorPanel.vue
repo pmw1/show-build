@@ -58,7 +58,7 @@
     </div>
 
     <!-- Segment Locked Overlay -->
-    <div v-if="isSegmentLocked" class="segment-locked-overlay">
+    <div v-if="isSegmentLocked && !lockOverlayDismissed" class="segment-locked-overlay" @click.self="dismissLockOverlay">
       <div class="locked-content">
         <v-icon size="48" color="warning">mdi-lock</v-icon>
         <div class="locked-title">Segment Locked</div>
@@ -81,6 +81,15 @@
         <div class="locked-time mt-1" style="opacity:0.7;">
           The current editor will be locked out.
         </div>
+        <!-- Cancel: dismiss the overlay (view read-only). Also dismissible via
+             ESC or clicking the backdrop (todo #41). -->
+        <v-btn
+          variant="text"
+          size="small"
+          class="mt-3"
+          prepend-icon="mdi-close"
+          @click="dismissLockOverlay"
+        >Cancel</v-btn>
       </div>
     </div>
 
@@ -1986,6 +1995,18 @@ const deletingCueIndex = ref(null)
 const deletingCueMedia = ref([])            // linked file URLs for the cue being deleted
 const mediaDeleteErrors = ref([])           // [{ path, reason }] surfaced in the warning modal
 const lastMediaDisposition = ref(null)      // 'delete' | 'pool' — what to retry
+// Segment-locked overlay dismissal (todo #41): Cancel / ESC / backdrop-click
+// hides the overlay so the user can view the segment read-only without taking
+// over. Reset whenever the open item changes so a different locked segment
+// re-shows the overlay.
+const lockOverlayDismissed = ref(false)
+function dismissLockOverlay() {
+  lockOverlayDismissed.value = true
+}
+watch(() => props.item?.asset_id || props.item?.id, () => {
+  lockOverlayDismissed.value = false
+})
+
 const restorableCue = ref(null)             // { removedRegion, removeStart, joinerLen }
 const selectedCueIndex = ref(null)
 const selectedSegmentIndex = ref(null)
@@ -7497,6 +7518,15 @@ function handleTypingKeydown(event) {
 }
 
 function handleGlobalKeydown(event) {
+  // ESC dismisses the "Segment Locked" overlay (todo #41) — highest priority so
+  // a locked-out user can always back out without taking over.
+  if (event.key === 'Escape' && props.isSegmentLocked && !lockOverlayDismissed.value) {
+    event.preventDefault();
+    event.stopPropagation();
+    dismissLockOverlay();
+    return;
+  }
+
   // Debug: trace any ctrl+alt+shift combo so we can see what reaches this handler
   if (event.ctrlKey && event.altKey && event.shiftKey) {
     console.log('🎹 ctrl+alt+shift+', { key: event.key, code: event.code });
