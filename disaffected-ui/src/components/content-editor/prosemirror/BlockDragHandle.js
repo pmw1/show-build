@@ -146,7 +146,7 @@ const STYLE_TEXT = `
    drop) dims to 75% so the field recedes and the drag/drop reads clearly. Returns
    to full when the flash sequence ends (todo #46). Transition so it eases in/out. */
 .ProseMirror .pm-dim {
-  opacity: 0.75;
+  opacity: 0.65;
   transition: opacity ${DRAG_ANIM_MS}ms ${DRAG_EASE};
 }
 /* FLIP helper: during the invert step we set an inline transform with NO
