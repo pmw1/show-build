@@ -66,7 +66,27 @@ export const schema = new Schema({
       // parser. The NodeView (Phase 2) owns their rendering.
     },
   },
-  marks: {},
+  marks: {
+    // Revision proposal (#51). A span of text proposed to be cut or replaced.
+    // attrs { user, ts, replacement }: replacement '' = pure cut/kill proposal,
+    // non-empty = replace the marked (kill) text with `replacement`. MUST match
+    // the TipTap RevisionMark (prosemirror/RevisionMark.js) so the editor schema
+    // and this round-trip schema agree. Unresolved revisions round-trip through
+    // markdown as <rev user ts>kill|add</rev> (markdown.js serialize/parse).
+    revision: {
+      attrs: {
+        user: { default: '' },
+        ts: { default: '' },
+        replacement: { default: '' },
+      },
+      inclusive: false,
+      parseDOM: [{ tag: 'rev' }],
+      toDOM(mark) {
+        const { user, ts, replacement } = mark.attrs;
+        return ['rev', { class: 'pm-revision', 'data-user': user, 'data-ts': ts, 'data-replacement': replacement }, 0];
+      },
+    },
+  },
 });
 
 /** Canonical speaker list (from CueParser.getSpeakerOptions). */

@@ -48,27 +48,11 @@ const P_RE = /<p(?:\s+class="([^"]*)")?([^>]*)>([\s\S]*?)<\/p>/g;
 
 const MODIFIERS = new Set(['bullet']);
 
-/**
- * Strip unresolved revision markup from paragraph text, keeping the ORIGINAL
- * (reject-on-save semantics — identical to useContentSanitizer.stripRevisionMarkup).
- * `<rev ...>original|replacement</rev>` -> `original` (left of pipe);
- * `<rev ...>kill</rev>` (no pipe) -> `kill` (kept). Used on parse so saved content
- * never carries proposal chrome; live proposals live as ProseMirror revision marks.
- */
-function stripRevisionMarkup(text) {
-  if (!text || !text.includes('<rev')) return text;
-  let r = text.replace(/<rev\s+[^>]*>([\s\S]*?)<\/rev>/gi, (_m, inner) => {
-    const pipe = inner.indexOf('|');
-    return pipe === -1 ? inner : inner.slice(0, pipe);
-  });
-  r = r.replace(/<rev-actions>[\s\S]*?<\/rev-actions>/gi, '');
-  r = r.replace(/<rev-meta[^>]*>[\s\S]*?<\/rev-meta>/gi, '');
-  r = r.replace(/<rev-btn[^>]*>[\s\S]*?<\/rev-btn>/gi, '');
-  r = r.replace(/<rev-add[^>]*>[\s\S]*?<\/rev-add>/gi, '');
-  r = r.replace(/<rev-kill[^>]*>([\s\S]*?)<\/rev-kill>/gi, '$1');
-  r = r.replace(/<rev-block[^>]*>([\s\S]*?)<\/rev-block>/gi, '$1');
-  return r;
-}
+// NOTE (#51): unresolved revision proposals are NO LONGER stripped on parse —
+// they round-trip as `revision` marks (see parseParagraphInline /
+// serializeParagraphInline below) so an open proposal survives save/reload until
+// the user accepts or rejects it. The legacy strip-on-save behavior still lives
+// in useContentSanitizer.stripRevisionMarkup for the legacy contenteditable path.
 
 // ---------------------------------------------------------------------------
 // Frontmatter (out-of-band)
@@ -102,12 +86,51 @@ export function splitFrontmatter(content) {
 // markdown -> doc
 // ---------------------------------------------------------------------------
 
+// Parse paragraph inner text into inline nodes, turning <rev user ts>kill|add</rev>
+// back into text carrying the `revision` mark (#51) so unresolved proposals
+// survive a save/reload round-trip. Plain text outside <rev> stays unmarked.
+// A cut-only proposal (no pipe) marks the kill text with replacement ''. A
+// pure addition ('|add', empty kill) yields a zero-length kill -> we mark the
+// add text itself as the proposal so it's still visible/resolvable.
+const REV_RE = /<rev\s+user="([^"]*)"\s+ts="([^"]*)">([\s\S]*?)<\/rev>/g;
+
+function parseParagraphInline(text) {
+  if (!text) return [];
+  if (!text.includes('<rev')) return [schema.text(text)];
+  const nodes = [];
+  let last = 0;
+  let m;
+  REV_RE.lastIndex = 0;
+  while ((m = REV_RE.exec(text)) !== null) {
+    if (m.index > last) {
+      const plain = text.slice(last, m.index);
+      if (plain) nodes.push(schema.text(plain));
+    }
+    const [, user, ts, inner] = m;
+    const pipe = inner.indexOf('|');
+    const kill = pipe === -1 ? inner : inner.slice(0, pipe);
+    const replacement = pipe === -1 ? '' : inner.slice(pipe + 1);
+    const mark = schema.marks.revision.create({ user, ts, replacement });
+    // Marked visible text = the kill text (struck through in the UI). For a pure
+    // addition (empty kill) mark the replacement text so it shows as an add.
+    const visible = kill || replacement;
+    if (visible) nodes.push(schema.text(visible, [mark]));
+    last = REV_RE.lastIndex;
+  }
+  if (last < text.length) {
+    const tail = text.slice(last);
+    if (tail) nodes.push(schema.text(tail));
+  }
+  return nodes;
+}
+
 function paragraphNode(text, attrs = {}) {
   const a = { speaker: 'josh', bullet: false, needsAttention: false, flagNote: '', ...attrs };
-  // Unresolved revision proposals are rejected on parse (keep original text);
-  // live proposals are re-created as ProseMirror revision marks in the editor.
-  const clean = stripRevisionMarkup(text);
-  return schema.node('paragraph', a, clean ? [schema.text(clean)] : []);
+  // Unresolved revision proposals round-trip as revision marks (#51): the <rev>
+  // tags are parsed back into marked text rather than stripped, so an open
+  // proposal survives save/reload until the user accepts or rejects it.
+  const inline = parseParagraphInline(text);
+  return schema.node('paragraph', a, inline);
 }
 
 function parseCueBlock(block, collapsed = false) {
@@ -193,12 +216,51 @@ export function markdownToDoc(raw) {
 // doc -> markdown
 // ---------------------------------------------------------------------------
 
+// Serialize a paragraph's inline content, emitting <rev> for any text span that
+// carries the `revision` mark so UNRESOLVED proposals persist (#51). Adjacent
+// text nodes sharing the same revision mark are coalesced into one <rev>.
+// Format: <rev user ts>kill|add</rev>  (add omitted -> cut-only proposal).
+function serializeParagraphInline(node) {
+  let out = '';
+  let pendingRev = null; // { user, ts, replacement, kill }
+
+  const flushRev = () => {
+    if (!pendingRev) return;
+    const { user, ts, replacement, kill } = pendingRev;
+    const u = String(user || '').replace(/"/g, '&quot;');
+    const t = String(ts || '').replace(/"/g, '&quot;');
+    const inner = replacement ? `${kill}|${replacement}` : kill;
+    out += `<rev user="${u}" ts="${t}">${inner}</rev>`;
+    pendingRev = null;
+  };
+
+  node.forEach((child) => {
+    if (!child.isText) { flushRev(); return; }
+    const revMark = child.marks.find((m) => m.type.name === 'revision');
+    if (revMark) {
+      const { user, ts, replacement } = revMark.attrs;
+      // Coalesce only when the SAME proposal (same attrs) continues.
+      if (pendingRev && pendingRev.user === user && pendingRev.ts === ts && pendingRev.replacement === replacement) {
+        pendingRev.kill += child.text;
+      } else {
+        flushRev();
+        pendingRev = { user, ts, replacement, kill: child.text };
+      }
+    } else {
+      flushRev();
+      out += child.text;
+    }
+  });
+  flushRev();
+  return out;
+}
+
 function serializeParagraph(node) {
   const { speaker, bullet, needsAttention, flagNote } = node.attrs;
   const cls = bullet ? `${speaker || 'josh'} bullet` : speaker || 'josh';
   const na = needsAttention ? ' data-needs-attention="true"' : '';
   const fn = flagNote ? ` data-flag-note="${String(flagNote).replace(/"/g, '&quot;')}"` : '';
-  return `<p class="${cls}"${na}${fn}>${node.textContent}</p>`;
+  return `<p class="${cls}"${na}${fn}>${serializeParagraphInline(node)}</p>`;
 }
 
 function serializeCue(node) {
