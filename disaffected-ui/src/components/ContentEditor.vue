@@ -773,6 +773,7 @@ import { getItemTypesForDropdown } from '../config/itemTypes';
 import { notifyUserStandard, NOTIFICATION_COLORS } from '../composables/useStandardNotification';
 import { useLLM } from '../composables/useLLM';
 import { useLLMState } from '../composables/useLLMState';
+import { getLLMPrompt } from '../composables/useLLMPrompts';
 import { useSOTProcessing } from '../composables/useSOTProcessing';
 import { useRequireEpisode } from '../composables/useRequireEpisode';
 import { useSegmentLock } from '../composables/useSegmentLock';
@@ -9439,42 +9440,33 @@ Try dropping an image or video file here!`
 
         // Target item already captured at function start (lines 4212-4213)
 
-        // Fetch prompt template from settings based on segment type
-        let promptName;
+        // Resolve the prompt through the unified Prompt Override system
+        // (useLLMPrompts -> prompt_overrides table, category 'generate'). The
+        // operation key maps from the segment type; getLLMPrompt returns the
+        // DB override if one exists, else the default template defined in
+        // useLLMPrompts.js. The keypress number is the {paragraphs} param.
+        let promptId;
         if (segmentType === 'tease') {
-          promptName = 'Segment Generator (Tease)';
+          promptId = 'generate-tease-script';
         } else if (segmentType === 'coldopen') {
-          promptName = 'Segment Generator (Cold Open)';
+          promptId = 'generate-coldopen-script';
         } else {
-          promptName = 'Segment Generator (Standard)';
+          promptId = 'generate-segment-script';
         }
 
-        // Get LLM routing settings from database
-        let template = null;
+        let prompt;
         try {
-          const response = await this.$axios.get('/settings/llm_routing');
-          const prompts = response.data?.value?.prompts || [];
-          const promptConfig = prompts.find(p => p.name === promptName && p.enabled);
-
-          if (promptConfig) {
-            template = promptConfig.template;
-            console.log(`📋 Using prompt template: ${promptName}`);
-          }
+          const resolved = await getLLMPrompt(
+            promptId,
+            { paragraphs: paragraphCount, duration, segmentType, upcomingSegments },
+            { category: 'generate' }
+          );
+          prompt = resolved.prompt;
+          console.log(`📋 Using prompt ${promptId}${resolved.overridden ? ' (DB override)' : ' (default)'}`);
         } catch (error) {
-          console.warn('Failed to load prompt from settings, using fallback:', error);
+          console.warn(`Failed to resolve prompt ${promptId}, using inline fallback:`, error);
+          prompt = `Write a ${duration}-minute podcast ${segmentType} with ${paragraphCount} paragraphs. DO NOT include any introductory text - start immediately with the content.`;
         }
-
-        // Fallback to basic template if not found in settings
-        if (!template) {
-          console.warn(`⚠️ Prompt "${promptName}" not found in settings, using fallback template`);
-          template = 'Write a {duration}-minute podcast {segmentType} with {paragraphs} paragraphs. DO NOT include any introductory text - start immediately with the content.';
-        }
-
-        const prompt = template
-          .replace('{duration}', duration)
-          .replace('{paragraphs}', paragraphCount)
-          .replace('{upcomingSegments}', upcomingSegments)
-          .replace('{segmentType}', segmentType);
 
         console.log('🎯 Calling smartCall with taskType: content-expansion');
 

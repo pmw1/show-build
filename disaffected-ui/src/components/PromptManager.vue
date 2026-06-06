@@ -503,13 +503,22 @@ const operationVariables = {
     { name: 'long_slug', description: 'The existing too-long slug (only in shorten mode)', example: 'the-very-long-overly-wordy-slug' }
   ],
   // Generate operations
+  // NOTE: generate-segment-script / -tease-script / -coldopen-script power the
+  // Ctrl+Alt+Shift+[1-9] in-segment generation (ContentEditor.generateTestSegment
+  // via useLLMPrompts). {paragraphs} is the keypress number.
   'generate-segment-script': [
-    { name: 'title', description: 'Segment title', example: 'The Rise of AI' },
-    { name: 'topic', description: 'Main topic or subject', example: 'Artificial Intelligence' },
-    { name: 'duration', description: 'Target duration', example: '5:00' },
-    { name: 'tone', description: 'Desired tone', example: 'casual, formal, humorous' },
-    { name: 'audience', description: 'Target audience', example: 'developers, general public' },
-    { name: 'context', description: 'Additional background', example: 'Follow-up to episode 243' }
+    { name: 'paragraphs', description: 'How many paragraphs to write (the Ctrl+Alt+Shift+N keypress number)', example: '3' },
+    { name: 'duration', description: 'Target duration (minutes) from the rundown item', example: '5' },
+    { name: 'segmentType', description: 'The rundown item type', example: 'segment' }
+  ],
+  'generate-tease-script': [
+    { name: 'paragraphs', description: 'How many paragraphs to write (the Ctrl+Alt+Shift+N keypress number)', example: '3' },
+    { name: 'duration', description: 'Target duration (minutes)', example: '1' },
+    { name: 'upcomingSegments', description: 'Auto-filled list of the next ~3 segment titles to tease', example: '\\n\\nUpcoming segments to tease:\\n- ...' }
+  ],
+  'generate-coldopen-script': [
+    { name: 'paragraphs', description: 'How many paragraphs to write (the Ctrl+Alt+Shift+N keypress number)', example: '2' },
+    { name: 'duration', description: 'Target duration (minutes)', example: '1' }
   ],
   'generate-ad-script': [
     { name: 'product', description: 'Product/service name', example: 'VPN Service' },

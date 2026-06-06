@@ -245,6 +245,120 @@ Output ONLY the slug words, nothing else. No quotes, no preamble, no explanation
   },
 
   // ========================================
+  // Segment / Script Generation Prompts
+  // ========================================
+  // These power the Ctrl+Alt+Shift+[1-9] "generate N paragraphs into the
+  // current segment" feature (ContentEditor.generateTestSegment). The keypress
+  // number is the {paragraphs} param. Editable + overridable via the Prompt
+  // Manager (category 'generate'); the templates below are the default fallback.
+  // Variables: paragraphs, duration, segmentType, upcomingSegments.
+
+  'generate-segment-script': {
+    version: '1.0',
+    description: 'Generates a standard podcast segment of N paragraphs for the current rundown item (Ctrl+Alt+Shift+N).',
+    lastModified: '2026-06-06',
+    temperature: 0.7,
+    maxTokens: 2000,
+    systemPrompt: 'You are a broadcast script writer. Write naturally and conversationally.',
+    template: (params) => {
+      const { paragraphs = 3, duration = '3' } = params
+      return `RUNDOWN ITEM TYPE DEFINITIONS:
+- Cold Open: Opening hook before any intro/music. Grabs attention instantly. 30-90 seconds.
+- Tease: Preview of upcoming segments. Builds curiosity. Brief and energetic.
+- Segment: Main content blocks. In-depth discussion, analysis, storytelling. Conversational. 5-15 minutes.
+
+YOU ARE WRITING: SEGMENT
+
+Write a ${duration}-minute podcast segment for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).
+
+Write ${paragraphs} paragraphs.
+
+Style requirements:
+- Speak directly to podcast listeners in a conversational, engaging tone
+- Use real psychological concepts but fictional case examples
+- Include specific manipulation tactics (gaslighting, love-bombing, triangulation, DARVO, hoovering)
+- Reference clinical patterns while remaining accessible
+- Maintain journalistic credibility and empathy for victims
+- DO NOT use real names or identify real cases
+
+CRITICAL FORMATTING:
+- Separate each paragraph with TWO newlines (blank line between paragraphs)
+- Plain paragraph text, ready to paste into script. No titles, no metadata.
+
+DO NOT include any introductory text like "Here is the podcast segment" - start IMMEDIATELY with the first paragraph of actual content.
+
+Generate the segment now:`
+    }
+  },
+
+  'generate-tease-script': {
+    version: '1.0',
+    description: 'Generates a tease/preview of N paragraphs that previews upcoming segments (Ctrl+Alt+Shift+N on a tease).',
+    lastModified: '2026-06-06',
+    temperature: 0.7,
+    maxTokens: 2000,
+    systemPrompt: 'You are a broadcast script writer. Write naturally and conversationally.',
+    template: (params) => {
+      const { paragraphs = 3, duration = '1', upcomingSegments = '' } = params
+      return `YOU ARE WRITING: TEASE
+
+Write a ${duration}-minute podcast tease/preview for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).
+
+This tease should hook listeners and preview what's coming up in the show.${upcomingSegments}
+
+Write ${paragraphs} short, punchy paragraphs that build anticipation.
+
+Style requirements:
+- Create urgency and intrigue
+- Tease topics without spoiling details
+- Use vivid, compelling language
+- Keep it brief and energetic
+
+CRITICAL FORMATTING:
+- Separate each paragraph with TWO newlines (blank line between paragraphs)
+- Plain paragraph text, ready to paste into script. No titles, no metadata.
+
+DO NOT include any introductory text like "Here is the tease" - start IMMEDIATELY with the first paragraph of actual content.
+
+Generate the tease now:`
+    }
+  },
+
+  'generate-coldopen-script': {
+    version: '1.0',
+    description: 'Generates a cold-open hook of N paragraphs for the current rundown item (Ctrl+Alt+Shift+N on a cold open).',
+    lastModified: '2026-06-06',
+    temperature: 0.8,
+    maxTokens: 2000,
+    systemPrompt: 'You are a broadcast script writer. Write naturally and conversationally.',
+    template: (params) => {
+      const { paragraphs = 2, duration = '1' } = params
+      return `YOU ARE WRITING: COLD OPEN
+
+Write a ${duration}-minute cold open for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).
+
+A cold open should immediately grab attention with a compelling hook - a powerful question, shocking statement, or intriguing scenario.
+
+Write ${paragraphs} paragraphs.
+
+Style requirements:
+- Start with maximum impact - hook listeners instantly
+- Create immediate tension or curiosity
+- Use vivid, cinematic language
+- Set the tone for the episode
+- Don't explain everything - leave them wanting more
+
+CRITICAL FORMATTING:
+- Separate each paragraph with TWO newlines (blank line between paragraphs)
+- Plain paragraph text, ready to paste into script. No titles, no metadata.
+
+DO NOT include any introductory text - start IMMEDIATELY with the hook.
+
+Generate the cold open now:`
+    }
+  },
+
+  // ========================================
   // Analysis & Enhancement Prompts
   // ========================================
 
