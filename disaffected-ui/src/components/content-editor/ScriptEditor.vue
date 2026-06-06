@@ -1076,9 +1076,10 @@ export default {
 }
 .script-editor-host :deep(p.pm-del-dying) {
   border-radius: 4px;
-  /* Red bg flash 3x (0.6s) AND fade the whole block (incl. text) out over 500ms
-     starting just after the flashing begins; holds faded until JS deletes it. */
-  animation: pm-del-red-flash 0.2s ease-in-out 3, pm-del-text-fade 0.5s ease-in 0.1s 1 forwards !important;
+  /* Sequence: 3 red bg flashes first (0.2s x 3 = 0.6s), THEN the block fades out
+     over 1s (delay 0.6s so the fade only starts once the flashing ends; 2x the
+     prior fade). Holds faded until JS deletes it. */
+  animation: pm-del-red-flash 0.2s ease-in-out 3, pm-del-text-fade 1s ease-in 0.6s 1 forwards !important;
 }
 .script-editor-host :deep(p.pm-del-neighbor) {
   border-radius: 4px;

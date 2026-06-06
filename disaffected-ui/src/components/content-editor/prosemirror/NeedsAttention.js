@@ -227,9 +227,11 @@ export const NeedsAttention = Extension.create({
 // delete tr; step 4 marks the neighbours (by their post-delete indices) for the
 // blue flash, cleared after it finishes. All flash dispatches are addToHistory:
 // false so only the delete itself is one undo step.
-const DEL_RED_MS = 600;   // 3 flashes
-const DEL_FADE_MS = 500;  // text fade
-const DEL_BLUE_MS = 400;  // neighbour double-flash
+// Sequence (per Kevin): 3 red flashes FIRST, THEN the fade (no overlap), so the
+// delete fires after both. Fade is 2x its prior length.
+const DEL_RED_MS = 600;    // 3 flashes (0.2s x 3) — must match the CSS
+const DEL_FADE_MS = 1000;  // text fade, starts AFTER the flashes (CSS delay 0.6s)
+const DEL_BLUE_MS = 400;   // neighbour double-flash
 
 function topLevelIndexAtPos(doc, pos) {
   let idx = -1;
@@ -277,7 +279,8 @@ function animateDeleteAt(view, pos) {
       clear.setMeta('addToHistory', false);
       view.dispatch(clear);
     }, DEL_BLUE_MS + 60);
-  }, Math.max(DEL_RED_MS, DEL_FADE_MS) + 20);
+    // flashes THEN fade run sequentially, so wait for both before deleting.
+  }, DEL_RED_MS + DEL_FADE_MS + 20);
 }
 
 /** Build the right-side hover control cluster (flag + delete) for a paragraph. */
