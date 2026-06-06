@@ -9,17 +9,16 @@ import json
 import sys
 from database import SessionLocal
 from sqlalchemy import text
+from services.cue_extractor import CUE_BLOCK_RE
 
 
 def extract_fsq_cues(script_content):
     """Extract all FSQ cue blocks from script content."""
     quotes = []
 
-    # Pattern to match FSQ cue blocks
-    # Matches: <!-- Begin Cue --> ... [Type: FSQ] ... <!-- End Cue -->
-    cue_pattern = r'<!-- Begin Cue -->(.*?)<!-- End Cue -->'
-
-    cue_matches = re.finditer(cue_pattern, script_content, re.DOTALL)
+    # Match FSQ cue blocks. CUE_BLOCK_RE matches both expanded and collapsed
+    # cues (group 1 = cue body); the FSQ filter happens below.
+    cue_matches = CUE_BLOCK_RE.finditer(script_content)
 
     for match in cue_matches:
         cue_block = match.group(1)

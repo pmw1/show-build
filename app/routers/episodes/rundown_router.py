@@ -1059,10 +1059,9 @@ async def save_rundown_items(
                 total_duration_seconds += _parse_dur(ri.duration)
             # 2. Embedded cue durations from script_content
             if ri.script_content:
-                cue_blocks = re_mod.findall(
-                    r'<!-- Begin Cue -->(.*?)<!-- End Cue -->',
-                    ri.script_content, re_mod.DOTALL
-                )
+                from services.cue_extractor import CUE_BLOCK_RE
+                # Matches expanded + collapsed cues (group 1 = cue body).
+                cue_blocks = CUE_BLOCK_RE.findall(ri.script_content)
                 for cue_block in cue_blocks:
                     dur_match = re_mod.search(r'\[Duration:\s*([^\]]+)\]', cue_block, re_mod.IGNORECASE)
                     if dur_match:

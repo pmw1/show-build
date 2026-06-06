@@ -12,6 +12,7 @@ from database import get_db
 from sqlalchemy.orm import Session
 
 from ._shared import logger
+from services.cue_extractor import CUE_BLOCK_RE
 
 router = APIRouter()
 
@@ -78,8 +79,8 @@ async def gather_media_for_show(
             RundownItem.rundown_id == rundown.id
         ).order_by(RundownItem.order_in_rundown).all()
 
-        # Cue block patterns
-        cue_pattern = re.compile(r'<!-- Begin Cue -->([\s\S]*?)<!-- End Cue -->', re.IGNORECASE)
+        # Cue block patterns — CUE_BLOCK_RE matches expanded + collapsed cues.
+        cue_pattern = CUE_BLOCK_RE
         # Match both "MediaUrl" and "Media Url" (with optional space before colon)
         mediaurl_pattern = re.compile(r'\[Media\s*Url:\s*([^\]]+)\]', re.IGNORECASE)
         enumerator_pattern = re.compile(r'\[Enumerator:\s*([^\]]+)\]', re.IGNORECASE)

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from enum import Enum
 from auth.utils import get_current_user_or_key
 from services.host_script_generator import generate_host_script, ScriptPreset
+from services.cue_extractor import CUE_BLOCK_RE
 from pathlib import Path
 from datetime import datetime
 from database import SessionLocal
@@ -238,7 +239,7 @@ async def generate_media_list_from_db(
         # Extract media cues from script content
         media_items = []
         cue_types = ['IMG', 'GFX', 'SOT', 'VO', 'NAT', 'PKG', 'BUMP', 'STING', 'FSQ', 'RIF', 'DIR']
-        cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL)
+        cue_pattern = CUE_BLOCK_RE  # matches expanded + collapsed cues
 
         for item in items:
             if not item.script_content:

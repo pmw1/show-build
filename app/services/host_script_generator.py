@@ -25,6 +25,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 from database import SessionLocal
 from models_v2 import Episode, Rundown, RundownItem, Season, Show, SOTProcessingJob
+from services.cue_extractor import CUE_BLOCK_RE
 
 logger = logging.getLogger(__name__)
 
@@ -378,7 +379,7 @@ def _collect_media_resources(
     host_base = Path("/mnt/sync/disaffected/episodes")
 
     # Pattern to find cue blocks
-    cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL | re.IGNORECASE)
+    cue_pattern = CUE_BLOCK_RE  # matches expanded + collapsed cues
 
     # Patterns for media URLs - handle both "Media Url" (with space) and "MediaUrl" (no space)
     media_patterns = [
@@ -489,7 +490,7 @@ def _build_transcription_cache(items: List[RundownItem], db) -> Dict[str, str]:
         if not item.script_content:
             continue
         # Find all SOT cues and extract Asset IDs
-        for cue in re.findall(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', item.script_content, re.DOTALL):
+        for cue in CUE_BLOCK_RE.findall(item.script_content):
             if '[Type: SOT]' in cue:
                 asset_id = _extract_field(cue, r'Asset\s*Id')
                 if asset_id:
@@ -719,7 +720,7 @@ def _process_content_markdown(
     parts = []
 
     # Pattern for cue blocks
-    cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL | re.IGNORECASE)
+    cue_pattern = CUE_BLOCK_RE  # matches expanded + collapsed cues
 
     # Split by cue blocks and process
     last_end = 0
@@ -1455,7 +1456,7 @@ def _process_content(
     current_speaker = last_speaker
 
     # Pattern for cue blocks
-    cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL | re.IGNORECASE)
+    cue_pattern = CUE_BLOCK_RE  # matches expanded + collapsed cues
 
     # Split by cue blocks and process
     last_end = 0

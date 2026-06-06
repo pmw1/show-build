@@ -1302,7 +1302,7 @@ async def reprocess_sot_by_asset_id(
         if rundown_item.script_content:
             # First, find the specific cue block for this AssetID
             cue_pattern = re.compile(
-                r'<!-- Begin Cue -->.*?\[AssetID: ' + re.escape(asset_id) + r'\].*?<!-- End Cue -->',
+                r'<!-- Begin Cue(?: collapsed)? -->.*?\[AssetID: ' + re.escape(asset_id) + r'\].*?<!-- End Cue -->',
                 re.DOTALL
             )
             cue_match = cue_pattern.search(rundown_item.script_content)

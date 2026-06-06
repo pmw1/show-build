@@ -443,8 +443,8 @@ class DurationEstimator:
                 i += 1
                 continue
             
-            # Check for cue block start
-            if '<!-- Begin Cue -->' in line:
+            # Check for cue block start (expanded or collapsed marker)
+            if '<!-- Begin Cue -->' in line or '<!-- Begin Cue collapsed -->' in line:
                 # Extract cue block
                 cue_lines = [line]
                 i += 1
@@ -647,8 +647,10 @@ class DurationEstimator:
                 i += 1
                 continue
             
-            # Handle cue blocks - update FSQ durations
-            if '<!-- Begin Cue -->' in line:
+            # Handle cue blocks - update FSQ durations (expanded or collapsed).
+            # The original Begin line is carried through verbatim in cue_lines,
+            # so the collapsed marker is preserved.
+            if '<!-- Begin Cue -->' in line or '<!-- Begin Cue collapsed -->' in line:
                 cue_start = i
                 cue_lines = [line]
                 i += 1

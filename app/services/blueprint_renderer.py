@@ -17,6 +17,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from database import SessionLocal
 from models_v2 import Episode, Rundown, RundownItem, Season, Show, SOTProcessingJob
+from services.cue_extractor import CUE_BLOCK_RE
 
 logger = logging.getLogger(__name__)
 
@@ -301,7 +302,7 @@ class BlueprintRenderer:
         last_speaker = None
 
         # Pattern for cue blocks
-        cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL | re.IGNORECASE)
+        cue_pattern = CUE_BLOCK_RE  # matches expanded + collapsed cues
 
         last_end = 0
         for match in cue_pattern.finditer(content):
@@ -433,7 +434,7 @@ class BlueprintRenderer:
         for item in items:
             if not item.script_content:
                 continue
-            for cue in re.findall(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', item.script_content, re.DOTALL):
+            for cue in CUE_BLOCK_RE.findall(item.script_content):
                 if '[Type: SOT]' in cue:
                     asset_match = re.search(r'\[Asset\s*Id:\s*([^\]]+)\]', cue, re.IGNORECASE)
                     if asset_match:

@@ -63,8 +63,10 @@ def find_sot_cue_blocks(script_content: str) -> list:
         return []
 
     cue_blocks = []
+    # Matches expanded + collapsed cues; the whole block (incl. its original
+    # Begin marker) is captured and field-edited in place, preserving the marker.
     cue_pattern = re.compile(
-        r'(<!-- Begin Cue -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
+        r'(<!-- Begin Cue(?: collapsed)? -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
         re.DOTALL | re.IGNORECASE
     )
 

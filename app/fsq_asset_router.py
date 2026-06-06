@@ -563,7 +563,7 @@ async def regenerate_all_fsq_assets(
         # Parse FSQ cue blocks from script content
         fsq_cues = []
         fsq_pattern = re.compile(
-            r'<!-- Begin Cue -->.*?'
+            r'<!-- Begin Cue(?: collapsed)? -->.*?'
             r'\[Type:\s*FSQ\].*?'
             r'<!-- End Cue -->',
             re.DOTALL | re.IGNORECASE

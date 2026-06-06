@@ -1030,9 +1030,12 @@ def _replace_sot_cue_asset_id(episode: str, old_asset_id: str, new_asset_id: str
                 if not item.script_content:
                     continue
 
-                # Look for SOT cue block with matching AssetID (case-insensitive)
+                # Look for SOT cue block with matching AssetID (case-insensitive).
+                # Matches expanded + collapsed cues; the whole block (incl. its
+                # original Begin marker) is captured and field-edited in place,
+                # so the collapsed marker is preserved.
                 cue_pattern = re.compile(
-                    r'(<!-- Begin Cue -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
+                    r'(<!-- Begin Cue(?: collapsed)? -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
                     re.DOTALL | re.IGNORECASE
                 )
                 asset_pattern = re.compile(r'\[Asset[Ii][Dd]:\s*' + re.escape(old_asset_id) + r'\s*\]', re.IGNORECASE)
@@ -1103,7 +1106,7 @@ def _update_sot_cue_block(episode: str, slug: str, asset_id: str, updates: dict)
                 # Look for SOT cue block with matching AssetID (case-insensitive for field names)
                 # The cue block contains [Type: SOT] and [Asset Id: xxx] or [AssetID: xxx] in any order
                 cue_pattern = re.compile(
-                    r'(<!-- Begin Cue -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
+                    r'(<!-- Begin Cue(?: collapsed)? -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
                     re.DOTALL | re.IGNORECASE
                 )
                 # Find cue blocks and check if they contain our asset_id
@@ -1598,7 +1601,7 @@ def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
             # Look for parent SOT cue block - more flexible pattern
             # Try exact match first
             cue_pattern = re.compile(
-                r'(<!-- Begin Cue -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
+                r'(<!-- Begin Cue(?: collapsed)? -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
                 re.DOTALL
             )
 
@@ -1607,7 +1610,7 @@ def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
             # Fallback: try searching just for AssetID in any cue block
             if not match:
                 fallback_pattern = re.compile(
-                    r'(<!-- Begin Cue -->.*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
+                    r'(<!-- Begin Cue(?: collapsed)? -->.*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
                     re.DOTALL
                 )
                 match = fallback_pattern.search(item.script_content)
@@ -1882,22 +1885,25 @@ def _update_cue_block_with_result(episode, asset_id, result):
                 if not item.script_content:
                     continue
 
-                # Look for the SOT cue block with matching AssetID
+                # Look for the SOT cue block with matching AssetID (expanded or
+                # collapsed). Capture the marker suffix so a collapsed cue is
+                # rebuilt collapsed (the new_cue below is built from scratch).
                 cue_pattern = re.compile(
-                    r'(<!-- Begin Cue -->.*?\[AssetID: ' + re.escape(asset_id) + r'\].*?<!-- End Cue -->)',
+                    r'(<!-- Begin Cue( collapsed)? -->.*?\[AssetID: ' + re.escape(asset_id) + r'\].*?<!-- End Cue -->)',
                     re.DOTALL
                 )
 
                 match = cue_pattern.search(item.script_content)
                 if match:
                     old_cue = match.group(1)
+                    marker_suffix = match.group(2) or ''
 
                     # Get transcription and outcue with fallbacks
                     transcription = result.get('transcription', '')
                     outcue = result.get('outcue', '')
 
-                    # Build updated cue block
-                    new_cue = f"""<!-- Begin Cue -->
+                    # Build updated cue block (preserve the original marker)
+                    new_cue = f"""<!-- Begin Cue{marker_suffix} -->
 [Type: SOT]
 [AssetID: {asset_id}]
 [Slug: {result.get('slug', '')}]
