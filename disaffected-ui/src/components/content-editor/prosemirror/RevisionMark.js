@@ -197,6 +197,7 @@ export const RevisionMark = Mark.create({
   // (green), a user·time meta, and ✓/✗ buttons. Clicking dispatches the
   // accept/reject command at the run's position.
   addProseMirrorPlugins() {
+    const ext = this; // capture the extension so handlers can reach editor.options
     return [
       new Plugin({
         key: revisionPluginKey,
@@ -245,6 +246,14 @@ export const RevisionMark = Mark.create({
               const range = revisionRangeAt(state.doc, pos);
               if (!range) return true;
               const { from, to, mark } = range;
+              // DIFF: no doc mutation — hand original + proposed up to the host to
+              // open the diff modal.
+              if (action === 'diff') {
+                const original = state.doc.textBetween(from, to, '\n', '\n');
+                const cb = ext.editor?.options?.onShowRevisionDiff;
+                if (typeof cb === 'function') cb({ original, proposed: mark.attrs.replacement || '' });
+                return true;
+              }
               const tr = state.tr;
               let caret = from; // where to leave the caret after the edit
               if (action === 'accept') {
@@ -288,17 +297,29 @@ function buildRevChrome(mark, runFrom) {
   const label = [mark.attrs.user || 'unknown', relativeTime(mark.attrs.ts)].filter(Boolean).join(' · ');
   meta.textContent = label;
   wrap.appendChild(meta);
+  // Diff button — opens a modal showing the word-level diff of original vs
+  // proposed. Only meaningful for a replacement (a pure cut has nothing to diff).
+  // Labeled action buttons (icon + word). Diff only for a replacement.
+  if (repl) {
+    const diff = document.createElement('rev-btn');
+    diff.setAttribute('data-rev-action', 'diff');
+    diff.setAttribute('data-rev-pos', String(runFrom));
+    diff.setAttribute('title', 'View diff (original vs proposed)');
+    diff.classList.add('rev-btn-diff');
+    diff.innerHTML = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M8 11h6M11 8v6"/></svg><span>Diff</span>';
+    wrap.appendChild(diff);
+  }
   const accept = document.createElement('rev-btn');
   accept.setAttribute('data-rev-action', 'accept');
   accept.setAttribute('data-rev-pos', String(runFrom));
   accept.setAttribute('title', 'Accept revision');
-  accept.innerHTML = '&#10003;';
+  accept.innerHTML = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg><span>Accept</span>';
   wrap.appendChild(accept);
   const reject = document.createElement('rev-btn');
   reject.setAttribute('data-rev-action', 'reject');
   reject.setAttribute('data-rev-pos', String(runFrom));
   reject.setAttribute('title', 'Reject revision');
-  reject.innerHTML = '&#10007;';
+  reject.innerHTML = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span>Reject</span>';
   wrap.appendChild(reject);
   return wrap;
 }

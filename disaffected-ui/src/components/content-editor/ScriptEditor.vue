@@ -166,6 +166,39 @@
       </div>
     </div>
     </Teleport>
+
+    <!-- Revision diff modal: word-level original-vs-proposed diff. -->
+    <Teleport to="body">
+      <div v-if="revDiff.open" class="rev-diff-overlay" @mousedown.self="closeRevisionDiff">
+        <div class="rev-diff-modal">
+          <div class="rev-diff-header">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M8 11h6M11 8v6"/></svg>
+            <span>Proposed change</span>
+            <button class="rev-diff-close" title="Close" @click="closeRevisionDiff">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+          <div class="rev-diff-cols">
+            <div class="rev-diff-col">
+              <div class="rev-diff-label">Original</div>
+              <div class="rev-diff-text">{{ revDiff.original || '(empty)' }}</div>
+            </div>
+            <div class="rev-diff-col">
+              <div class="rev-diff-label">Proposed</div>
+              <div class="rev-diff-text">{{ revDiff.proposed || '(empty — this is a cut)' }}</div>
+            </div>
+          </div>
+          <div class="rev-diff-label">Diff</div>
+          <div class="rev-diff-merged">
+            <span
+              v-for="(part, i) in revDiff.parts"
+              :key="i"
+              :class="{ 'diff-add': part.added, 'diff-del': part.removed }"
+            >{{ part.value }}</span>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -177,6 +210,7 @@ import { lineNumbersPluginKey } from './prosemirror/LineNumbers.js';
 import { readMultiSelection } from './prosemirror/BlockMultiSelect.js';
 import { markdownToDoc, docToMarkdown, assertNoLoss } from '@/utils/prosemirror/markdown.js';
 import ModifyWithAiModal from './modals/ModifyWithAiModal.vue';
+import { computeDiff } from '@/utils/scriptCompare';
 
 const SAVE_DEBOUNCE_MS = 1500;
 
@@ -353,6 +387,8 @@ export default {
         // Needs-attention (legacy port): the flag button toggled the attr; this
         // opens/closes the attached note panel for the paragraph at `pos`.
         onFlagParagraph: (pos) => toggleFlagNotePanel(pos),
+        // Revision diff button: { original, proposed } -> open the diff modal.
+        onShowRevisionDiff: (payload) => openRevisionDiff(payload),
       });
 
       // Seed the line-number offset (continuous-across-show numbering) and the
@@ -816,6 +852,25 @@ export default {
       flagPanel.value.open = false;
     }
 
+    // ── Revision diff modal ─────────────────────────────────────────────────
+    // The "Diff" button on a revision proposal opens this, showing the word-level
+    // diff (computeDiff -> diff lib) of the ORIGINAL vs the PROPOSED text.
+    const revDiff = ref({ open: false, original: '', proposed: '', parts: [] });
+    function openRevisionDiff({ original, proposed }) {
+      let parts = [];
+      try {
+        // computeDiff(a, b) -> array of { value, added, removed }. We diff
+        // original -> proposed: removed = in original only (red), added = in
+        // proposed only (green), neither = unchanged.
+        parts = computeDiff(original || '', proposed || '');
+      } catch (e) {
+        console.warn('revision diff compute failed:', e);
+        parts = [{ value: proposed || '', added: true }];
+      }
+      revDiff.value = { open: true, original: original || '', proposed: proposed || '', parts };
+    }
+    function closeRevisionDiff() { revDiff.value.open = false; }
+
     // Modal state. modifyWithAi() (toolbar click) snapshots the selection
     // context and opens the modal; the modal component (host-rendered) collects
     // the instruction/preset, calls the LLM via the Prompt Override system, and
@@ -961,6 +1016,9 @@ export default {
       updateFlagPanelNote,
       resolveFlagPanel,
       collapseFlagPanel,
+      // Revision diff modal
+      revDiff,
+      closeRevisionDiff,
     };
   },
 };
@@ -1138,19 +1196,26 @@ export default {
   color: #888;
   font-style: italic;
 }
+/* Labeled action pills (icon + word) — larger + spelled out per request. */
 .script-editor-host :deep(rev-btn) {
   cursor: pointer;
   border: none;
-  border-radius: 50%;
-  width: 1.4em;
-  height: 1.4em;
-  font-size: 0.8em;
-  line-height: 1.4em;
-  text-align: center;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 0.3em;
+  padding: 0.25em 0.6em;
+  font-size: 0.82em;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
 }
+.script-editor-host :deep(rev-btn svg) { flex: 0 0 auto; }
+.script-editor-host :deep(rev-btn-diff) {
+  background: rgba(33, 150, 243, 0.18);
+  color: #1565c0;
+}
+.script-editor-host :deep(rev-btn-diff:hover) { background: rgba(33, 150, 243, 0.34); }
 .script-editor-host :deep(rev-btn[data-rev-action="accept"]) {
   background-color: rgba(67, 160, 71, 0.45);
   color: #1b5e20;
@@ -1352,6 +1417,69 @@ export default {
   background: rgba(67, 160, 71, 0.28);
 }
 .flag-note-resolve:hover { background: rgba(67, 160, 71, 0.5); }
+
+/* Revision diff modal */
+.rev-diff-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rev-diff-modal {
+  width: min(720px, 92vw);
+  max-height: 80vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  padding: 16px;
+}
+.rev-diff-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: #1565c0;
+  margin-bottom: 12px;
+}
+.rev-diff-close {
+  margin-left: auto;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: #888;
+  width: 24px; height: 24px;
+  border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.rev-diff-close:hover { background: rgba(0,0,0,0.06); color: #333; }
+.rev-diff-cols { display: flex; gap: 12px; margin-bottom: 12px; }
+.rev-diff-col { flex: 1 1 0; min-width: 0; }
+.rev-diff-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: #999; margin-bottom: 4px;
+}
+.rev-diff-text {
+  font-family: var(--editor-script-font-family, monospace);
+  font-size: 13px; line-height: 1.5;
+  background: #f6f6f8; border: 1px solid #eee; border-radius: 4px;
+  padding: 8px; white-space: pre-wrap; word-break: break-word;
+}
+.rev-diff-merged {
+  font-family: var(--editor-script-font-family, monospace);
+  font-size: 14px; line-height: 1.6;
+  background: #fafafa; border: 1px solid #eee; border-radius: 4px;
+  padding: 10px; white-space: pre-wrap; word-break: break-word;
+}
+.rev-diff-merged .diff-add {
+  background: rgba(67, 160, 71, 0.28); color: #1b5e20; border-radius: 2px;
+}
+.rev-diff-merged .diff-del {
+  background: rgba(229, 57, 53, 0.25); color: #b71c1c; text-decoration: line-through; border-radius: 2px;
+}
 
 /* ===== Bulleted paragraph =====
    A paragraph with the `bullet` attr round-trips as <p class="speaker bullet">.
