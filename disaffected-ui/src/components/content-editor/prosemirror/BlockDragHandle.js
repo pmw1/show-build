@@ -344,13 +344,23 @@ function buildDecorations(state, dragState) {
     const classes = ['pm-drag-block'];
     if (b.type !== 'cue') classes.push('pm-drag-gutter');
 
-    // NOTE: the displacement class (pm-shift-down) is NOT applied here. Doing it
-    // via the node decoration re-renders the element on every gap change, killing
-    // the CSS transition (no stable from->to on the same element). Instead we
-    // toggle it on the PERSISTENT block DOM in applyDisplacement() (called from
-    // onMove), so the same element animates the transform smoothly.
     if (dragState && dragState.active && b.index === dragState.sourceIndex) {
       classes.push('pm-drag-source');
+    }
+
+    // Displacement (todo #39): the dropline stays cast; every block AT/BELOW the
+    // gap gets pm-shift-down (transform: translateY) so the rows slide down out
+    // of the indicator's way. This is computed in the DECORATION class list (not
+    // toggled imperatively) so a decoration redraw doesn't strip it — ProseMirror
+    // updates the node decoration's class IN PLACE on the same DOM element, so the
+    // transform transition fires smoothly instead of popping. The dragged source
+    // itself never shifts.
+    if (dragState && dragState.active && dragState.gapIndex != null) {
+      const gi = dragState.gapIndex;
+      const noop = gi === dragState.sourceIndex || gi === dragState.sourceIndex + 1;
+      if (!noop && b.index >= gi && b.index !== dragState.sourceIndex) {
+        classes.push('pm-shift-down');
+      }
     }
 
     // The grab handle is NOT a separate widget (a widget at b.start renders
@@ -470,10 +480,10 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
     const gapIndex = nearestGap(view, moveEvent.clientY);
     const cur = blockDragHandleKey.getState(view.state);
     if (!cur || cur.gapIndex !== gapIndex) {
+      // setDrag updates the gapIndex → buildDecorations recomputes which blocks
+      // carry pm-shift-down → ProseMirror updates the class in place → the
+      // transform transition animates the slide (todo #39). No imperative DOM.
       setDrag({ active: true, sourceIndex, gapIndex });
-      // Animate the displacement on the persistent block DOM (after the decoration
-      // redraw settles, so nodeDOM resolves the current elements).
-      requestAnimationFrame(() => applyDisplacement(view, gapIndex, sourceIndex));
     }
   };
 
@@ -488,7 +498,6 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
     window.removeEventListener('pointerup', onUp, true);
     window.removeEventListener('pointercancel', onUp, true);
     removeGhost(); // detach the cursor ghost
-    applyDisplacement(view, null, sourceIndex); // clear displacement classes
     if (view.dom && view.dom.classList) view.dom.classList.remove('pm-dragging-active');
 
     const cur = blockDragHandleKey.getState(view.state);
@@ -532,25 +541,6 @@ function nearestGap(view, clientY) {
     if (clientY < mid) return i; // pointer is above this block's middle -> gap before it
   }
   return blocks.length; // below everything -> trailing gap
-}
-
-// Toggle the displacement on the PERSISTENT block DOM elements (not via node
-// decorations, which re-render and kill the CSS transition). The dropline stays
-// cast in place; every block AT/BELOW the gap gets pm-shift-down (translateY) so
-// the rows slide DOWN out of the indicator's way, opening the drop space. Same
-// element gains/loses the class, so the transform animates smoothly (GPU, no
-// reflow). Pass gapIndex=null to clear all displacement (drag end). (todo #39)
-function applyDisplacement(view, gapIndex, sourceIndex) {
-  const blocks = topLevelBlocks(view.state.doc);
-  const noop = gapIndex == null || gapIndex === sourceIndex || gapIndex === sourceIndex + 1;
-  for (let i = 0; i < blocks.length; i += 1) {
-    const dom = view.nodeDOM(blocks[i].start);
-    const el = dom && dom.nodeType === 1 ? dom : (dom && dom.parentElement);
-    if (!el || !el.classList) continue;
-    // Shift down every block at/below the gap (except the dragged source itself).
-    const shift = !noop && i >= gapIndex && i !== sourceIndex;
-    el.classList.toggle('pm-shift-down', shift);
-  }
 }
 
 // Drop-confirmation flash: the moved block flashes the dropline color 3x; the
