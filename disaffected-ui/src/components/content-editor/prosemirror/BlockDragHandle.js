@@ -57,6 +57,41 @@ export const blockDragHandleKey = new PluginKey('blockDragHandle');
 // mounts a single ScriptEditor instance.
 let editorView = null;
 
+// FLIP tween for the "INSERT HERE" drop bar: when the gap moves to a new spot,
+// the widget is a reused DOM node that PM repositions in document flow (a pop).
+// We remember its last screen Y and, on each view update, animate it from the
+// old position to the new one with a fast translateY tween so it glides between
+// drop spots instead of popping (per Kevin: ~75ms). Module-scoped so it persists
+// across decoration redraws; reset when the drag ends (no widget present).
+let lastDropGapY = null;
+const DROP_GAP_TWEEN_MS = 150;
+
+// The drop bar is ONE persistent DOM node we own and reuse across every
+// decoration redraw (passed into Decoration.widget by reference). Reusing the
+// exact same element — rather than letting buildDecorations mint a fresh <div>
+// each time — is what makes the FLIP tween reliable: PM moves THIS node between
+// gap slots, so the inline transform we set survives and animates.
+let dropGapEl = null;
+function getDropGapEl() {
+  if (!dropGapEl) {
+    // OUTER anchor: zero layout height so inserting/moving the bar between gaps
+    // does NOT reflow the document (the reflow was the "pop" — the visible box is
+    // 52px and shoving it between slots snapped all surrounding text instantly).
+    // The visible box is an absolutely-positioned INNER child, so it overlays the
+    // gap without taking space. Only the block transforms open the actual gap.
+    dropGapEl = document.createElement('div');
+    dropGapEl.className = 'pm-drop-gap-anchor';
+    const box = document.createElement('div');
+    box.className = 'pm-drop-gap';
+    const label = document.createElement('span');
+    label.className = 'pm-drop-gap-label';
+    label.textContent = 'INSERT HERE';
+    box.appendChild(label);
+    dropGapEl.appendChild(box);
+  }
+  return dropGapEl;
+}
+
 const DROPLINE = 'var(--dropline-color, rgb(33, 150, 243))';
 const DRAGLIGHT = 'var(--draglight-color, rgba(33, 150, 243, 0.15))';
 
@@ -66,6 +101,20 @@ const DRAGLIGHT = 'var(--draglight-color, rgba(33, 150, 243, 0.15))';
 const DRAG_SHIFT_PX = 64;          // how far blocks slide down to open the drop space
 const DRAG_ANIM_MS = 200;          // displacement + FLIP-settle duration
 const DRAG_EASE = 'cubic-bezier(0.2, 0, 0, 1)';  // smooth, no overshoot
+
+// Staggered-ripple displacement: as the drop bar sweeps from one gap to the
+// next, the blocks it crosses displace IN SEQUENCE (a wave that follows the
+// bar) rather than all at once. Each block's transition-delay = its index
+// distance from where the bar CAME FROM × STAGGER_MS, so the block nearest the
+// bar's origin moves first and the ripple propagates toward the new gap.
+// eslint-disable-next-line no-unused-vars
+const STAGGER_MS = 35;             // per-block delay step in the ripple (re-enabled once base anim works)
+// eslint-disable-next-line no-unused-vars
+const STAGGER_MAX_MS = 220;        // cap so a long jump doesn't lag too far behind
+// Previous gap index, tracked across redraws so we know which way the bar moved
+// and where the ripple should originate. Reset on drag start/end.
+// eslint-disable-next-line no-unused-vars
+let prevGapIndex = null;
 
 // ── Auto-scroll while dragging near an edge (todo #48) ──────────────────────
 const AUTOSCROLL_ZONE_PX = 70;     // distance from top/bottom edge that triggers scroll
@@ -107,7 +156,15 @@ const STYLE_TEXT = `
    layout reflow, unlike the old margin animation), so it stays smooth (todo #39). */
 .ProseMirror .pm-drag-block {
   position: relative;
-  transition: transform ${DRAG_ANIM_MS}ms ${DRAG_EASE};
+  /* ONE combined transition on the base class covers BOTH animated properties
+     (transform for displacement, opacity for the dim). Per ProseMirror best
+     practice (PM patches decoration classes in place, so transitions fire): a
+     feature class must NEVER re-declare the transition shorthand — doing so REPLACES this
+     shorthand and silently drops the other property, and which class wins varies
+     by direction/state (that was the up-vs-down asymmetry). Feature classes set
+     only VALUES (.pm-shift-* → transform, .pm-dim → opacity). */
+  transition: transform ${DRAG_ANIM_MS}ms ${DRAG_EASE},
+              opacity ${DRAG_ANIM_MS}ms ${DRAG_EASE};
 }
 /* Only pay the compositing cost while a drag is live. */
 .ProseMirror.pm-dragging-active .pm-drag-block {
@@ -160,12 +217,30 @@ const STYLE_TEXT = `
   opacity: 1;
   color: ${DROPLINE};
 }
-/* The dragged source block: draglight highlight + drop-shadow glow. */
+/* The dragged source block keeps its FULL original footprint while the drag is
+   live — a solid grey block exactly the size the paragraph was — with its text
+   blanked out. The content has visibly "lifted" (it's on the cursor ghost) but
+   the placeholder holds the same space, and because it's a normal participant
+   in the displacement (pm-shift-up / pm-shift-down), the grey block slides
+   around with the rest as the drop gap moves, as if it were still text in
+   place. No green, no glow. */
 .ProseMirror .pm-drag-source {
-  background: ${DRAGLIGHT};
-  box-shadow: 0 0 0 2px ${DROPLINE}, 0 0 12px ${DROPLINE};
-  border-radius: 4px;
-  opacity: 0.9;
+  /* Opaque-ish grey fill + its own stacking layer so neighbouring text can't
+     bleed visually over the placeholder if a transform shift momentarily
+     overlaps it. .pm-drag-block is already position:relative; lift it above. */
+  background: #e0e0e0;
+  border-radius: 3px;
+  z-index: 2;
+}
+/* Blank the text (color:transparent, not display:none) so the block keeps its
+   exact original height/footprint — only the visible text disappears. */
+.ProseMirror .pm-drag-source,
+.ProseMirror .pm-drag-source * {
+  color: transparent !important;
+}
+/* Hide the gutter grip glyph on the grey placeholder so nothing pokes through. */
+.ProseMirror .pm-drag-source.pm-drag-gutter::before {
+  opacity: 0 !important;
 }
 /* Live displacement: the dropline indicator stays cast in place at the target
    gap, and the gap opens EVENLY around it — blocks above slide up by half and
@@ -177,8 +252,10 @@ const STYLE_TEXT = `
    drop) dims to 75% so the field recedes and the drag/drop reads clearly. Returns
    to full when the flash sequence ends (todo #46). Transition so it eases in/out. */
 .ProseMirror .pm-dim {
+  /* VALUE ONLY — no transition shorthand here. The base .pm-drag-block owns the combined
+     transform+opacity transition; re-declaring it on this feature class would
+     replace the shorthand and drop the transform transition (the original pop). */
   opacity: 0.65;
-  transition: opacity ${DRAG_ANIM_MS}ms ${DRAG_EASE};
 }
 /* FLIP helper: during the invert step we set an inline transform with NO
    transition so the block jumps to its old position, then clearing the inline
@@ -224,23 +301,43 @@ const STYLE_TEXT = `
    using the theme's dropline + draglight colors. Sits in the opened gap. */
 /* The "DROP HERE" block at the target gap (mirrors the legacy .ghost-segment),
    theme-colored. Fades + grows in when it appears at a new gap. */
+/* Fade-in animates OPACITY ONLY — it must NOT touch transform, because the FLIP
+   tween in view().update() drives the bar's transform to glide it between gaps.
+   A CSS animation's transform keyframe overrides inline transform, so a scaleY
+   track here would silently veto the tween (this is exactly why the bar appeared
+   to pop and never moved). */
 @keyframes pm-drop-gap-in {
-  from { opacity: 0; transform: scaleY(0.5); }
-  to   { opacity: 1; transform: scaleY(1); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
-.pm-drop-gap {
-  position: relative;
+/* OUTER anchor: takes NO vertical layout space, so moving the bar between gaps
+   never reflows the document (kills the pop). position:relative makes it the
+   containing block for the absolutely-positioned visible box. */
+.pm-drop-gap-anchor {
   display: block;
+  position: relative;
+  height: 0;
+}
+/* INNER visible box: absolutely positioned, so it overlays the gap without
+   pushing any text. Centred on the anchor line (top:50% + translateY(-50%));
+   full editor width via left/right 0. */
+.pm-drop-gap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
   height: 52px;
-  margin: 6px 0;
   box-sizing: border-box;
   background: ${DRAGLIGHT};
   border: 3px dashed ${DROPLINE};
   border-radius: 6px;
   box-shadow: 0 0 12px ${DROPLINE};
+  transform: translateY(-50%);
   transform-origin: center;
-  /* Fade-in fires ONCE (first-appear); repositioning the cast indicator to a new
-     gap reuses the same element, so it no longer re-flashes on every move (#39). */
+  pointer-events: none;
+  z-index: 6;
+  /* Fade-in fires ONCE (first-appear). Opacity-only so it leaves transform
+     free for the FLIP gap-to-gap tween. */
   animation: pm-drop-gap-in 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 /* Cursor-attached drag ghost — a floating chip showing what's being dragged.
@@ -254,12 +351,16 @@ const STYLE_TEXT = `
   max-height: 280px;
   overflow: hidden;
   padding: 8px 12px;
-  background: var(--v-theme-surface, #fff);
+  /* Solid green background, fully opaque (per Kevin) — the ghost reads as a
+     filled green card glued to the cursor, no see-through. Use DROPLINE (the
+     saturated, OPAQUE green) not DRAGLIGHT, which is a 15%-alpha tint and would
+     render nearly transparent. */
+  background: ${DROPLINE};
   border: 2px solid ${DROPLINE};
   border-radius: 8px;
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.3);
   pointer-events: none;
-  opacity: 0.92;
+  opacity: 1;
   will-change: transform;
 }
 /* The cloned full block inside the ghost — non-interactive, fades at the bottom
@@ -271,6 +372,13 @@ const STYLE_TEXT = `
 }
 .pm-drag-ghost-clone * {
   pointer-events: none !important;
+}
+/* The ghost is just a preview of the dragged TEXT — strip the chrome that got
+   deep-cloned with the block: the line-number gutter widget and the speaker
+   header (per Kevin, neither belongs in the cursor ghost). */
+.pm-drag-ghost-clone .pm-line-number,
+.pm-drag-ghost-clone .pm-speaker-header {
+  display: none !important;
 }
 .pm-drag-ghost-label {
   display: block;
@@ -285,9 +393,11 @@ const STYLE_TEXT = `
 .pm-drop-gap-label {
   position: absolute;
   top: 50%;
-  left: 14px;
-  transform: translateY(-50%);
+  /* Centered horizontally in the drop bar (per Kevin), not left-aligned. */
+  left: 50%;
+  transform: translate(-50%, -50%);
   max-width: calc(100% - 28px);
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -295,9 +405,9 @@ const STYLE_TEXT = `
      Falls back to the plain dropline color where color-mix isn't supported. */
   color: ${DROPLINE};
   color: color-mix(in srgb, ${DROPLINE} 65%, black);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
   pointer-events: none;
 }
 `;
@@ -407,15 +517,14 @@ function buildDecorations(state, dragState) {
     // Displacement (todo #39): the dropline stays cast and the gap opens EVENLY
     // around it — blocks ABOVE the gap slide up by half, blocks AT/BELOW slide
     // down by half, so there's equal whitespace above and below the indicator.
-    // Computed in the DECORATION class list (not toggled imperatively) so a
-    // decoration redraw doesn't strip it — ProseMirror updates the class IN PLACE
-    // on the same DOM element, so the transform transition fires smoothly. The
-    // dragged source itself never shifts.
+    // Applied as a decoration CLASS (survives PM's in-place patch; the transition
+    // fires). This is the original symmetric scheme that was in place when the
+    // glide was confirmed working in both directions.
     if (dragState && dragState.active && dragState.gapIndex != null) {
-      const gi = dragState.gapIndex;
-      const noop = gi === dragState.sourceIndex || gi === dragState.sourceIndex + 1;
-      if (!noop && b.index !== dragState.sourceIndex) {
-        if (b.index >= gi) classes.push('pm-shift-down');
+      const gi2 = dragState.gapIndex;
+      const noop2 = gi2 === dragState.sourceIndex || gi2 === dragState.sourceIndex + 1;
+      if (!noop2) {
+        if (b.index >= gi2) classes.push('pm-shift-down');
         else classes.push('pm-shift-up');
       }
     }
@@ -451,6 +560,14 @@ function buildDecorations(state, dragState) {
     // .pm-drag-block class opens a 34px left gutter and draws the grip via a
     // ::before pseudo-element that nests inside EACH block (paragraph AND cue).
     // Drag-start is detected by a pointerdown in that gutter region (handleDOMEvents).
+    // NOTE: the staggered-ripple transition-delay is applied IMPERATIVELY in
+    // view().update() (see applyStaggerDelays), NOT as a decoration style attr.
+    // Putting a per-redraw-changing `style` on the node decoration made PM treat
+    // the decoration as different each gap move and REBUILD the <p> DOM — a fresh
+    // element starts already at its shifted transform with no prior value, so the
+    // CSS transition had nothing to animate FROM and the blocks popped. Keeping
+    // only the (stable) class list on the decoration lets PM update it IN PLACE,
+    // so the transform transition fires; the delay is layered on after render.
     decos.push(
       Decoration.node(b.start, b.end, { class: classes.join(' ') }, { blockIndex: b.index })
     );
@@ -464,18 +581,10 @@ function buildDecorations(state, dragState) {
     const gapPos = gi >= blocks.length ? state.doc.content.size : blocks[gi].start;
     const noop = gi === dragState.sourceIndex || gi === dragState.sourceIndex + 1;
     if (!noop) {
-      const sourceNode = (dragState.sourceIndex != null && dragState.sourceIndex < state.doc.childCount)
-        ? state.doc.child(dragState.sourceIndex)
-        : null;
-      const box = document.createElement('div');
-      box.className = 'pm-drop-gap';
-      const label = document.createElement('span');
-      label.className = 'pm-drop-gap-label';
-      label.textContent = dragLabel(sourceNode);
-      box.appendChild(label);
-      // Stable key (NOT gap-indexed) so ProseMirror REUSES the same widget DOM
-      // when the gap moves — it repositions instead of destroy+recreate, so the
-      // fade-in fires once on first appear rather than re-flashing each move (#39).
+      // Reuse the ONE persistent drop-bar node (see getDropGapEl). Stable key so
+      // ProseMirror repositions this exact element between gaps rather than
+      // destroy+recreate — required for the FLIP tween in view().update().
+      const box = getDropGapEl();
       decos.push(Decoration.widget(gapPos, box, { side: -1, key: 'pm-drop-gap' }));
     }
   }
@@ -779,7 +888,24 @@ export const BlockDragHandle = Extension.create({
           },
           apply(tr, value) {
             const meta = tr.getMeta(blockDragHandleKey);
-            if (meta) return { ...value, ...meta };
+            if (meta) {
+              const next = { ...value, ...meta };
+              // Track the PREVIOUS gap index for the staggered-ripple displacement
+              // (buildDecorations reads prevGapIndex to know where the bar came
+              // from). Capture the old gap right before the new one takes effect.
+              if (Object.prototype.hasOwnProperty.call(meta, 'gapIndex')) {
+                prevGapIndex = value.gapIndex != null ? value.gapIndex : null;
+              }
+              // Reset the ripple origin when a drag starts or ends so the first
+              // displacement of a new drag opens without a stale stagger.
+              if (Object.prototype.hasOwnProperty.call(meta, 'active') && !meta.active) {
+                prevGapIndex = null;
+              }
+              if (meta.active === true && value.active !== true) {
+                prevGapIndex = null;
+              }
+              return next;
+            }
             return value;
           },
         },
@@ -848,8 +974,42 @@ export const BlockDragHandle = Extension.create({
           // state) can call view.nodeDOM for rect-based gap detection.
           editorView = view;
           return {
+            update() {
+              // FLIP-tween the "INSERT HERE" drop bar so it FLIES from its old gap
+              // slot to the new one (gliding over the intervening text) instead of
+              // popping. PM reuses the one persistent node (getDropGapEl) and moves
+              // it between gap slots; we animate that move:
+              //   1. Clear any transform FIRST, then measure the bar's true LAYOUT
+              //      position (so a mid-flight tween doesn't corrupt the reading).
+              //   2. delta = oldLayoutY − newLayoutY = how far it just jumped.
+              //   3. INVERT: snap it back by `delta` with no transition.
+              //   4. PLAY: next frame, transition transform→0 over the tween time,
+              //      so it slides across the full distance to its real slot.
+              // FLIP the ANCHOR (the zero-height in-flow element that actually
+              // relocates between gaps). The visible .pm-drop-gap box is absolute
+              // and centred on the anchor, so it follows; we must NOT tween the box
+              // (its transform is reserved for the translateY(-50%) centring).
+              const gapEl = view.dom.querySelector('.pm-drop-gap-anchor');
+              if (!gapEl) { lastDropGapY = null; return; }
+              // Measure via offsetTop (transform-immune) so reading doesn't stomp
+              // an in-flight tween. The anchor moves in flow as the gap changes;
+              // its delta between frames is the distance the bar should glide.
+              const newY = gapEl.offsetTop;
+              if (lastDropGapY != null && Math.abs(newY - lastDropGapY) > 0.5) {
+                const delta = lastDropGapY - newY; // invert offset (old − new)
+                gapEl.style.transition = 'none';
+                gapEl.style.transform = `translateY(${delta}px)`;
+                // Force a reflow so the inverted transform paints before we turn the
+                // transition on — otherwise both writes coalesce and nothing tweens.
+                void gapEl.offsetHeight;
+                gapEl.style.transition = `transform ${DROP_GAP_TWEEN_MS}ms ${DRAG_EASE}`;
+                gapEl.style.transform = 'translateY(0)';
+              }
+              lastDropGapY = newY;
+            },
             destroy() {
               if (editorView === view) editorView = null;
+              lastDropGapY = null;
             },
           };
         },
