@@ -37,6 +37,16 @@ function currentUser() {
   catch { return 'unknown'; }
 }
 
+/** True if the paragraph contains any (unresolved) revision-marked text. */
+function hasRevisionMark(paragraph) {
+  let found = false;
+  paragraph.forEach((child) => {
+    if (found || !child.isText) return;
+    if (child.marks.some((m) => m.type.name === 'revision')) found = true;
+  });
+  return found;
+}
+
 /** Find the top-level paragraph block whose start is `pos` (or contains pos). */
 function paragraphAt(doc, pos) {
   let result = null;
@@ -150,8 +160,12 @@ export const NeedsAttention = Extension.create({
               if (node.type.name !== 'paragraph') { blockIndex += 1; return; }
               blockIndex += 1;
               const idx = blockIndex;
-              // Red-tint background while flagged.
-              if (node.attrs.needsAttention) {
+              // Red-tint background when the paragraph needs attention — either
+              // explicitly flagged, OR it contains an UNRESOLVED revision
+              // proposal (an open revision auto-qualifies the block; the tint
+              // clears the moment the revision is accepted/rejected since this is
+              // computed live, no attr write).
+              if (node.attrs.needsAttention || hasRevisionMark(node)) {
                 decos.push(Decoration.node(offset, offset + node.nodeSize, { class: 'pm-needs-attention' }));
               }
               // Delete-flash classes (#delete-anim).
