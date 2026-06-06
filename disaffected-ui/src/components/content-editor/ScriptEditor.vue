@@ -104,11 +104,31 @@
       :ctx="aiModifyContext"
       @apply="applyAiModification"
     />
+
+    <!-- Revision proposal popup (#51): Alt+/ revise, Alt+. add. Type the
+         replacement (blank = pure cut), Enter commits, Esc cancels. -->
+    <div
+      v-if="revPopup.open"
+      class="rev-popup"
+      :style="{ left: revPopup.x + 'px', top: revPopup.y + 'px' }"
+    >
+      <span class="rev-popup-label">{{ revPopup.mode === 'add' ? 'Add' : 'Replace with' }}</span>
+      <input
+        ref="revPopupInput"
+        v-model="revPopup.text"
+        class="rev-popup-input"
+        :placeholder="revPopup.mode === 'add' ? 'text to insert…' : 'replacement (blank = cut)…'"
+        @keydown.enter.prevent="commitRevisionPopup"
+        @keydown.esc.prevent="cancelRevisionPopup"
+      />
+      <button class="rev-popup-btn ok" title="Commit (Enter)" @mousedown.prevent="commitRevisionPopup">&#10003;</button>
+      <button class="rev-popup-btn cancel" title="Cancel (Esc)" @mousedown.prevent="cancelRevisionPopup">&#10007;</button>
+    </div>
   </div>
 </template>
 
 <script>
-import { ref, shallowRef, onMounted, onBeforeUnmount, watch } from 'vue';
+import { ref, shallowRef, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import { Editor, EditorContent } from '@tiptap/vue-3';
 import { buildScriptExtensions } from './prosemirror/extensions.js';
 import { lineNumbersPluginKey } from './prosemirror/LineNumbers.js';
@@ -284,6 +304,10 @@ export default {
         onEditCue: (payload) => {
           emit('edit-cue', payload);
         },
+        // Revision proposals (#51): Alt+/ (revise/cut) and Alt+. (add) hand off
+        // here so we can mark the selection and open the inline replacement
+        // popup. See openRevisionPopup.
+        onProposeRevision: (mode) => openRevisionPopup(mode),
       });
 
       // Seed the line-number offset (continuous-across-show numbering) and the
@@ -515,6 +539,100 @@ export default {
       return out.join(', ');
     }
 
+    // ── Revision proposals (#51): inline popup ──────────────────────────────
+    // Alt+/ (revise/cut) marks the selection as a revision immediately (so it
+    // strikes through), then opens a small popup at the selection to type a
+    // replacement. Enter commits the replacement (setRevisionReplacement); Esc
+    // cancels and removes the just-added mark (revert to a clean selection).
+    // Alt+. (add) inserts a zero-width insertion proposal at the caret and opens
+    // the same popup; the typed text becomes the addition.
+    function _revUser() {
+      try { return JSON.parse(localStorage.getItem('user-data') || '{}').username || 'unknown'; }
+      catch { return 'unknown'; }
+    }
+    const revPopup = ref({ open: false, mode: 'revise', text: '', x: 0, y: 0, markFrom: 0, markTo: 0 });
+
+    function openRevisionPopup(mode) {
+      const ed = editor.value;
+      if (!ed) return;
+      const { state, view } = ed;
+      const { from, to, empty } = state.selection;
+      const user = _revUser();
+      const ts = new Date().toISOString();
+
+      if (mode === 'revise') {
+        if (empty) {
+          if (window.notifyUserStandard) window.notifyUserStandard('Select text to propose a revision', '#ff9800', 1800);
+          return;
+        }
+        // Mark the selection as a cut proposal now (strikethrough shows instantly).
+        const tr = state.tr.addMark(from, to, state.schema.marks.revision.create({ user, ts, replacement: '' }));
+        tr.setMeta('addToHistory', true);
+        view.dispatch(tr);
+        revPopup.value.markFrom = from;
+        revPopup.value.markTo = to;
+      } else {
+        // Addition: insert a single placeholder char marked as a proposal so the
+        // range exists to attach the replacement to; the popup text replaces it.
+        const at = to;
+        const tr = state.tr.insertText('​', at); // zero-width
+        tr.addMark(at, at + 1, state.schema.marks.revision.create({ user, ts, replacement: '' }));
+        tr.setMeta('addToHistory', true);
+        view.dispatch(tr);
+        revPopup.value.markFrom = at;
+        revPopup.value.markTo = at + 1;
+      }
+
+      // Position the popup near the selection end.
+      const coords = view.coordsAtPos(revPopup.value.markTo);
+      const hostRect = view.dom.getBoundingClientRect();
+      revPopup.value.x = coords.left - hostRect.left;
+      revPopup.value.y = coords.bottom - hostRect.top + 4;
+      revPopup.value.mode = mode;
+      revPopup.value.text = '';
+      revPopup.value.open = true;
+      nextTick(() => { revPopupInput.value?.focus?.(); });
+    }
+
+    const revPopupInput = ref(null);
+
+    function commitRevisionPopup() {
+      const ed = editor.value;
+      if (!ed || !revPopup.value.open) return;
+      const text = (revPopup.value.text || '').trim();
+      const { markFrom } = revPopup.value;
+      if (text) {
+        // Set the replacement on the proposal covering the marked range.
+        ed.commands.setRevisionReplacement(markFrom + 1, text);
+      }
+      // For an addition with no text, drop the placeholder entirely (cancel).
+      if (revPopup.value.mode === 'add' && !text) {
+        cancelRevisionPopup();
+        return;
+      }
+      revPopup.value.open = false;
+      ed.view.focus();
+    }
+
+    function cancelRevisionPopup() {
+      const ed = editor.value;
+      if (!ed || !revPopup.value.open) { revPopup.value.open = false; return; }
+      const { state, view } = ed;
+      const { markFrom, markTo, mode } = revPopup.value;
+      const tr = state.tr;
+      if (mode === 'add') {
+        // Remove the inserted placeholder char entirely.
+        tr.delete(markFrom, markTo);
+      } else {
+        // Revise: just drop the proposal mark, keep the original text.
+        tr.removeMark(markFrom, markTo, state.schema.marks.revision);
+      }
+      tr.setMeta('addToHistory', true);
+      view.dispatch(tr);
+      revPopup.value.open = false;
+      view.focus();
+    }
+
     // Modal state. modifyWithAi() (toolbar click) snapshots the selection
     // context and opens the modal; the modal component (host-rendered) collects
     // the instruction/preset, calls the LLM via the Prompt Override system, and
@@ -614,6 +732,11 @@ export default {
       aiModifyOpen,
       aiModifyContext,
       applyAiModification,
+      // Revision proposal popup
+      revPopup,
+      revPopupInput,
+      commitRevisionPopup,
+      cancelRevisionPopup,
     };
   },
 };
@@ -624,7 +747,55 @@ export default {
   height: 100%;
   display: flex;
   flex-direction: column;
+  position: relative; /* anchor for the revision popup (#51) */
 }
+
+/* Revision proposal popup (#51) */
+.rev-popup {
+  position: absolute;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid #7e57c2;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  padding: 4px 6px;
+  max-width: 420px;
+}
+.rev-popup-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #7e57c2;
+  white-space: nowrap;
+}
+.rev-popup-input {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 13px;
+  min-width: 220px;
+  outline: none;
+}
+.rev-popup-input:focus {
+  border-color: #7e57c2;
+}
+.rev-popup-btn {
+  cursor: pointer;
+  border: none;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.rev-popup-btn.ok { background: rgba(76, 175, 80, 0.3); color: #2e7d32; }
+.rev-popup-btn.ok:hover { background: rgba(76, 175, 80, 0.55); }
+.rev-popup-btn.cancel { background: rgba(244, 67, 54, 0.3); color: #c62828; }
+.rev-popup-btn.cancel:hover { background: rgba(244, 67, 54, 0.55); }
 .script-editor-host {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -695,10 +866,62 @@ export default {
      size / line spacing settings do nothing. */
   font-size: var(--editor-script-font-size, 16px);
   line-height: var(--editor-script-line-height, 1.5);
+  font-family: var(--editor-script-font-family, monospace);
 }
+/* ===== Revision proposals (#51) — ports the legacy <rev-block> look =====
+   The marked (kill) text is struck through red; the inline chrome after it shows
+   the proposed replacement (green), a user·time meta, and ✓/✗ buttons. */
 .script-editor-host :deep(rev.pm-revision) {
-  background: rgba(126, 87, 194, 0.18);
-  border-bottom: 1px dashed #7e57c2;
+  text-decoration: line-through;
+  background-color: rgba(244, 67, 54, 0.15);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.script-editor-host :deep(rev-actions) {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 4px;
+  vertical-align: middle;
+  user-select: none;
+}
+.script-editor-host :deep(rev-add) {
+  background-color: rgba(76, 175, 80, 0.22);
+  color: #1b5e20;
+  border-radius: 2px;
+  padding: 0 3px;
+}
+.script-editor-host :deep(rev-meta) {
+  font-size: 10px;
+  color: #888;
+  font-style: italic;
+}
+.script-editor-host :deep(rev-btn) {
+  cursor: pointer;
+  border: none;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.script-editor-host :deep(rev-btn[data-rev-action="accept"]) {
+  background-color: rgba(76, 175, 80, 0.3);
+  color: #2e7d32;
+}
+.script-editor-host :deep(rev-btn[data-rev-action="accept"]:hover) {
+  background-color: rgba(76, 175, 80, 0.55);
+}
+.script-editor-host :deep(rev-btn[data-rev-action="reject"]) {
+  background-color: rgba(244, 67, 54, 0.3);
+  color: #c62828;
+}
+.script-editor-host :deep(rev-btn[data-rev-action="reject"]:hover) {
+  background-color: rgba(244, 67, 54, 0.55);
 }
 
 /* ===== Bulleted paragraph =====
