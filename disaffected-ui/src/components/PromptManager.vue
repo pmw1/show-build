@@ -173,6 +173,7 @@
                       hint="Leave empty to use default system prompt"
                       rows="6"
                       auto-grow
+                      variant="outlined"
                     ></v-textarea>
                   </v-col>
                 </v-row>
@@ -185,6 +186,7 @@
                       hint="Use {{variable}} syntax for template variables. See available variables →"
                       rows="8"
                       auto-grow
+                      variant="outlined"
                     ></v-textarea>
                   </v-col>
                 </v-row>
@@ -197,6 +199,7 @@
                       hint="Optional notes about this override"
                       rows="3"
                       auto-grow
+                      variant="outlined"
                     ></v-textarea>
                   </v-col>
                 </v-row>
