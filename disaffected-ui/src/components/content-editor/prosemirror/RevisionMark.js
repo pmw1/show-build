@@ -21,7 +21,7 @@
  */
 
 import { Mark, mergeAttributes } from '@tiptap/core';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 
 export const revisionPluginKey = new PluginKey('revisionChrome');
@@ -136,7 +136,7 @@ export const RevisionMark = Mark.create({
             tr.addMark(from, to, state.schema.marks.revision.create({
               user: mark.attrs.user, ts: mark.attrs.ts, replacement,
             }));
-            dispatch(tr.scrollIntoView());
+            dispatch(tr); // no scrollIntoView — would jump the view to the doc end
           }
           return true;
         },
@@ -154,7 +154,7 @@ export const RevisionMark = Mark.create({
             if (repl) tr.replaceWith(from, to, state.schema.text(repl));
             else tr.delete(from, to);
             tr.setMeta('addToHistory', true);
-            dispatch(tr.scrollIntoView());
+            dispatch(tr); // no scrollIntoView — would jump the view to the doc end
           }
           return true;
         },
@@ -169,7 +169,7 @@ export const RevisionMark = Mark.create({
             const tr = state.tr;
             tr.removeMark(from, to, state.schema.marks.revision);
             tr.setMeta('addToHistory', true);
-            dispatch(tr.scrollIntoView());
+            dispatch(tr); // no scrollIntoView — would jump the view to the doc end
           }
           return true;
         },
@@ -246,16 +246,25 @@ export const RevisionMark = Mark.create({
               if (!range) return true;
               const { from, to, mark } = range;
               const tr = state.tr;
+              let caret = from; // where to leave the caret after the edit
               if (action === 'accept') {
                 const repl = mark.attrs.replacement || '';
-                if (repl) tr.replaceWith(from, to, state.schema.text(repl));
-                else tr.delete(from, to);
+                if (repl) { tr.replaceWith(from, to, state.schema.text(repl)); caret = from + repl.length; }
+                else { tr.delete(from, to); caret = from; }
               } else {
                 tr.removeMark(from, to, state.schema.marks.revision);
+                caret = to;
               }
+              // Put the caret at the edit site (NOT the doc end) and do NOT
+              // scrollIntoView — forcing scroll after an unset selection was
+              // jumping the view to the bottom of the script (bug). Clamp the
+              // caret to the new doc size.
+              try {
+                const safe = Math.min(caret, tr.doc.content.size);
+                tr.setSelection(TextSelection.near(tr.doc.resolve(safe)));
+              } catch (_e) { /* leave default mapped selection */ }
               tr.setMeta('addToHistory', true);
-              view.dispatch(tr.scrollIntoView());
-              view.focus();
+              view.dispatch(tr);
               return true;
             },
           },
