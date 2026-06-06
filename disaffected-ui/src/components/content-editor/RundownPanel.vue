@@ -3934,16 +3934,26 @@ defineExpose({
    left/top edges inside the overflow container). Pulses between purple and a
    deeper purple so it reads clearly as "busy". No border, no box-shadow, so
    nothing can clip. Slow ~2s loop until the operation completes. */
+/* Throb the row while the LLM works. The base inline background-color + the
+   .rundown-item-card `transition: background-color` fought the keyframes and
+   froze it on one purple (the "turns purple but never pulses" bug). Fixes:
+   (1) kill the transition here so the animation isn't smoothed into a hold,
+   (2) animate an INSET box-shadow too — nothing else sets it, so the pulse is
+   visible even if the background is contested. */
+.generating-item.rundown-item-card,
 .generating-item {
-  animation: llm-bg-throb 2s ease-in-out infinite !important;
+  transition: none !important;
+  animation: llm-bg-throb 1.6s ease-in-out infinite !important;
 }
 
 @keyframes llm-bg-throb {
   0%, 100% {
     background-color: #9C27B0; /* purple */
+    box-shadow: inset 0 0 0 9999px rgba(156, 39, 176, 0); /* no overlay */
   }
   50% {
     background-color: #6A1B9A; /* deeper purple */
+    box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, 0.28); /* darken whole row */
   }
 }
 

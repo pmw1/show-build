@@ -555,14 +555,13 @@ export function useLLMState() {
 
     // #47: the rundown ROW (item scope) uses a throbbing BACKGROUND, not a
     // border — a 7px border clipped to only the left/top edges inside the
-    // rundown's overflow container. The .generating-item CSS class drives the
-    // keyframes (llm-bg-throb); here we just signal "busy" without re-adding a
-    // border. Other scopes keep their border treatment.
+    // rundown's overflow container. The .generating-item CSS class owns the
+    // background ENTIRELY via the llm-bg-throb keyframes; returning a static
+    // inline backgroundColor here would paint over the animation (inline style
+    // on the same element vs the keyframe), so we return NOTHING for item scope
+    // and let the CSS class animate. Other scopes keep their border treatment.
     if (scope === 'item') {
-      return {
-        backgroundColor: color,
-        borderRadius: visual.borderRadius
-      }
+      return null
     }
 
     return {
