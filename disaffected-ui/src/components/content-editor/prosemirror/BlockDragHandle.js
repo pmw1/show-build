@@ -155,8 +155,11 @@ const STYLE_TEXT = `
              box-shadow: 0 0 0 3px ${DROPLINE}, 0 0 14px ${DROPLINE}; }
 }
 @keyframes pm-flash-neighbor {
+  /* Half the strength of the dropped block's flash (todo #46): the drop flash
+     tints with the full --draglight (≈0.15 alpha); neighbours echo it at ~half
+     that (≈0.075) so they read as a lighter pulse. */
   0%, 100% { background-color: transparent; }
-  50%      { background-color: ${DRAGLIGHT}; }
+  50%      { background-color: var(--draglight-color-half, rgba(33, 150, 243, 0.075)); }
 }
 .ProseMirror .pm-flash-drop {
   border-radius: 4px;
@@ -511,12 +514,16 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
       const moveTr = buildMoveTransaction(view.state, sourceIndex, cur.gapIndex);
       if (moveTr) {
         // FLIP settle: dispatch the move inside flipReorder so every block glides
-        // from its old to new position instead of snapping (todo #39). The glide
-        // itself confirms the drop, so the old heavy moved-block flash is dropped;
-        // a subtle neighbor flash is kept for a touch of landing feedback.
+        // from its old to new position instead of snapping (todo #39).
         flipReorder(view, () => view.dispatch(moveTr));
+        // Drop-confirmation flash (todo #46): the dropped block flashes 3x fast in
+        // the drag colour; its new neighbours flash 2x slower at half opacity.
+        // Fired after a short delay so the moved block's FRESH DOM (from the insert
+        // + the redraw that clears pm-drag-source) exists, then re-queried at flash
+        // time — flashing too early lets that redraw wipe the class. The flash
+        // (bg + box-shadow) coexists with the FLIP glide (transform).
         const landedIndex = cur.gapIndex > sourceIndex ? cur.gapIndex - 1 : cur.gapIndex;
-        setTimeout(() => flashNeighbors(view, landedIndex), 90);
+        setTimeout(() => flashDrop(view, landedIndex), 90);
       }
     }
     view.focus();
@@ -606,17 +613,19 @@ function flipReorder(view, commitFn) {
 
 // Lighter landing feedback used with the FLIP settle (todo #39): the moved block
 // glides (no flash needed), only its new neighbors get a subtle tint pulse.
-function flashNeighbors(view, landedIndex) {
+function flashDrop(view, landedIndex) {
+  const moved = blockElAt(view, landedIndex);
   const above = blockElAt(view, landedIndex - 1);
   const below = blockElAt(view, landedIndex + 1);
   const fire = (el, cls, ms) => {
     if (!el || !el.classList) return;
     el.classList.remove(cls);
-    void el.offsetWidth;
+    void el.offsetWidth; // force reflow so re-adding restarts the animation
     el.classList.add(cls);
     setTimeout(() => el.classList.remove(cls), ms);
   };
-  fire(above, 'pm-flash-neighbor', 520);
+  fire(moved, 'pm-flash-drop', 700);      // 3x ~0.2s each — the dropped block
+  fire(above, 'pm-flash-neighbor', 520);  // 2x ~0.24s each — half-opacity neighbours
   fire(below, 'pm-flash-neighbor', 520);
 }
 
