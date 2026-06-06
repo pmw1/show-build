@@ -4709,10 +4709,13 @@ Try dropping an image or video file here!`
       if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
         const prevAssetId = this.rundownItems[this.selectedItemIndex].asset_id;
         if (prevAssetId) {
-          // Release segment lock (fire-and-forget; the SSE 'released' event
-          // propagates to other users on its own).
-          if (this.segmentLockState && this.segmentLockState.currentAssetId.value === prevAssetId) {
-            Promise.resolve(this.segmentLockState.releaseLock())
+          // Release the PREVIOUS segment's lock explicitly (fire-and-forget).
+          // Pass prevAssetId so we always release the segment we're leaving,
+          // even if currentAssetId has already been overwritten by a concurrent
+          // acquire — the old guard skipped the release in that race and left a
+          // stale lock that greyed the row on other users until TTL (todo #41).
+          if (this.segmentLockState) {
+            Promise.resolve(this.segmentLockState.releaseLock(prevAssetId))
               .catch(err => console.warn('Failed to release segment lock:', err));
           }
           // Unregister active edit (fire-and-forget).

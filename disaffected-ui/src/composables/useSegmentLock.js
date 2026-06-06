@@ -175,9 +175,14 @@ export function useSegmentLock() {
   }
 
   /**
-   * Release the current lock
+   * Release a lock. Pass an explicit assetId to release THAT segment regardless
+   * of current composable state (todo #41 — prevents stale locks when the
+   * tracked currentAssetId has already moved on). With no arg, releases the
+   * currently-held lock.
    */
-  const releaseLock = async () => {
+  const releaseLock = async (assetId = null) => {
+    const target = assetId || currentAssetId.value
+
     if (LOCKING_DISABLED) {
       currentAssetId.value = null
       return { success: true }
@@ -186,22 +191,24 @@ export function useSegmentLock() {
     // Stop heartbeat first
     stopHeartbeat()
 
-    if (!currentAssetId.value) {
+    if (!target) {
       return { success: true, message: 'No lock to release' }
     }
 
     try {
-      const response = await axios.post(`/api/locks/${currentAssetId.value}/release`)
+      const response = await axios.post(`/api/locks/${target}/release`)
 
-      // Reset state
-      currentAssetId.value = null
-      isLocked.value = false
-      isMyLock.value = false
-      lockInfo.value = {
-        lockedBy: '',
-        lockedById: null,
-        lockedAt: null,
-        expiresAt: null
+      // Only clear reactive state if we released the lock we were tracking.
+      if (target === currentAssetId.value) {
+        currentAssetId.value = null
+        isLocked.value = false
+        isMyLock.value = false
+        lockInfo.value = {
+          lockedBy: '',
+          lockedById: null,
+          lockedAt: null,
+          expiresAt: null
+        }
       }
 
       error.value = null
@@ -210,10 +217,12 @@ export function useSegmentLock() {
       console.error('[SegmentLock] Failed to release lock:', err)
       error.value = err.message
 
-      // Even if release fails, clear local state
-      currentAssetId.value = null
-      isLocked.value = false
-      isMyLock.value = false
+      if (target === currentAssetId.value) {
+        // Even if release fails, clear local state
+        currentAssetId.value = null
+        isLocked.value = false
+        isMyLock.value = false
+      }
 
       return { success: false, error: err.message }
     }

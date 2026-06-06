@@ -18,9 +18,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/locks", tags=["segment-locks"])
 
-# Lock TTL settings
-LOCK_TTL_SECONDS = 60  # Lock expires after 60 seconds without heartbeat
-HEARTBEAT_EXTENSION_SECONDS = 60  # Heartbeat extends lock by 60 seconds
+# Lock TTL settings. The client heartbeats every 15s (HEARTBEAT_INTERVAL_MS in
+# useSegmentLock.js), so a 30s TTL keeps a live editor's lock alive (2 missed
+# beats of slack) while ensuring an ABANDONED lock (tab closed without a clean
+# release) auto-clears within ~30s instead of lingering a full minute and
+# greying the row on other users (todo #41). cleanup_expired_locks runs on every
+# lock query incl. the /active poll, so expiry is enforced promptly.
+LOCK_TTL_SECONDS = 30  # Lock expires after 30 seconds without heartbeat
+HEARTBEAT_EXTENSION_SECONDS = 30  # Heartbeat extends lock by 30 seconds
 
 
 def get_user_display_name(user: User) -> str:
