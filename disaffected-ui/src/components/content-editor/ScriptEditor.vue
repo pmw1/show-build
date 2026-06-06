@@ -573,6 +573,50 @@ export default {
   border-bottom: 1px dashed #7e57c2;
 }
 
+/* ===== Bulleted paragraph =====
+   A paragraph with the `bullet` attr round-trips as <p class="speaker bullet">.
+   Render a • glyph before the first line and indent the text — ports the legacy
+   .paragraph-bullet visual. The marker is drawn via ::before so it doesn't enter
+   the editable text. */
+.script-editor-host :deep(.ProseMirror p.bullet) {
+  position: relative;
+  padding-left: 1.6em;
+}
+.script-editor-host :deep(.ProseMirror p.bullet)::before {
+  content: "\2022"; /* • */
+  position: absolute;
+  left: 0.25em;
+  top: 0;
+  font-size: 1.4em;
+  line-height: var(--editor-script-line-height, 1.5);
+  font-weight: bold;
+  color: rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+/* ===== Speaker header =====
+   A non-editable widget injected (by the SpeakerHeaders plugin) above each
+   paragraph that begins a new speaker run — top of doc / after a cue / when the
+   speaker changes. Ports the legacy .speaker-header / .speaker-name visual:
+   small uppercase name with a speaker-colored bottom border. */
+.script-editor-host :deep(.pm-speaker-header) {
+  display: flex;
+  align-items: center;
+  padding: 4px 2px;
+  margin-top: 8px;
+  margin-bottom: 2px;
+  border-bottom: 2px solid;
+  user-select: none;
+}
+.script-editor-host :deep(.pm-speaker-name) {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-family: 'Helvetica Light', 'Helvetica', sans-serif;
+  font-weight: 600;
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
 /* ===== Per-paragraph line numbers ===== */
 /* The number is a widget decoration injected at each paragraph start. By
    default it's hidden; the gutter only appears when the Settings toggle is on

@@ -24,6 +24,7 @@ import { BlockDragHandle } from './BlockDragHandle.js';
 import { BlockMultiSelect } from './BlockMultiSelect.js';
 import { LineNumbers } from './LineNumbers.js';
 import { CollapseSummary } from './CollapseSummary.js';
+import { SpeakerHeaders } from './SpeakerHeaders.js';
 
 /**
  * @param {object} [opts]
@@ -52,6 +53,9 @@ export function buildScriptExtensions(opts = {}) {
     LineNumbers,
     // Collapsed-paragraph summaries (first5 … last3), only when collapse on.
     CollapseSummary,
+    // Speaker-name header above each speaker-run (top of doc / after a cue /
+    // when the speaker changes). Decoration-only — never enters the doc/markdown.
+    SpeakerHeaders,
     UndoRedo,
   ];
 }
