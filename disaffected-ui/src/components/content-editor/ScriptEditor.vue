@@ -873,21 +873,31 @@ export default {
       // Build the ranges to mark, descending by position so earlier ranges stay
       // valid as we add marks (addMark doesn't shift positions, but processing
       // descending is safe regardless).
+      // Diff each returned line against the original. The LLM is told to return
+      // a line VERBATIM when no change is needed; a no-diff line means "this is
+      // fine" — we make NO proposal for it. Lines that differ become proposals.
       const targets = [];
+      let unchangedCount = 0;
+      const normalize = (s) => (s || '').trim();
       for (const ln of lineNos) {
         const range = ctx.lineToRange[ln];
         if (!range) continue; // line wasn't in the selection
         const current = state.doc.textBetween(range.from, range.to, '\n', '\n');
         const next = rewrites[ln];
-        if (next === current) continue; // unchanged — no proposal
+        // No diff (ignoring incidental leading/trailing whitespace) => fine, skip.
+        if (normalize(next) === normalize(current)) { unchangedCount += 1; continue; }
         targets.push({ from: range.from, to: range.to, replacement: next });
       }
       if (!targets.length) {
-        if (window.notifyUserStandard) window.notifyUserStandard('AI made no changes to the selected lines.', '#7e57c2', 3000);
+        // The LLM returned everything verbatim — nothing to change. Positive ack.
+        if (window.notifyUserStandard) {
+          window.notifyUserStandard('✓ No changes suggested — the selected text looks good.', '#43a047', 3500);
+        }
         aiModifyOpen.value = false; aiModifyContext.value = null;
         return false;
       }
       targets.sort((a, b) => b.from - a.from);
+      void unchangedCount;
 
       const tr = state.tr;
       for (const t of targets) {

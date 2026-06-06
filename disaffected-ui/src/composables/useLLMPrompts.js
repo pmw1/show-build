@@ -405,9 +405,50 @@ number in square brackets, exactly like the input numbering:
 Rules:
 - Output ONLY the selected lines (the ones listed above), each on its own line, prefixed with [number].
 - Keep the SAME line numbers as the input — do not renumber, add, or drop lines.
+- A line may already be correct/fine for the instruction. If a line needs NO
+  change, return it EXACTLY as it is now (verbatim). Do NOT invent changes just
+  to have something to return — an unchanged line is a valid, expected answer.
 - No commentary, no preamble, no blank lines between entries, no code fences.
 - If a selected line should become empty, output its number with empty text (e.g. "[14] ").`
     }
+  },
+
+  // ── Modify-with-AI quick actions ──────────────────────────────────────────
+  // Each quick-action button (Check grammar / spelling / Shorten / ...) is its
+  // own overridable operation here: its template returns the INSTRUCTION STRING
+  // (no params) that the modal feeds into modify-blocks as {instruction}. So an
+  // admin can view/override exactly what each button tells the LLM, in the
+  // Prompt Manager (category 'modify'). Each instruction explicitly PERMITS
+  // "leave it unchanged if it's already fine" so the LLM doesn't force edits.
+  'modify-grammar': {
+    version: '1.0', description: 'Quick action: fix grammar/punctuation only.',
+    lastModified: '2026-06-06', temperature: 0.3, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Fix grammar and punctuation in the selected lines WITHOUT changing the meaning or voice. If a line is already grammatically correct, leave it exactly as-is — do not rephrase or "improve" lines that are already fine.',
+  },
+  'modify-spelling': {
+    version: '1.0', description: 'Quick action: correct spelling only.',
+    lastModified: '2026-06-06', temperature: 0.2, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Correct ONLY spelling mistakes in the selected lines. Do not change wording, grammar, tone, or meaning. If a line has no misspellings, return it exactly as-is.',
+  },
+  'modify-shorten': {
+    version: '1.0', description: 'Quick action: shorten/tighten.',
+    lastModified: '2026-06-06', temperature: 0.5, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Shorten and tighten the selected lines while preserving their meaning and voice. If a line is already as concise as it can be, leave it unchanged.',
+  },
+  'modify-expand': {
+    version: '1.0', description: 'Quick action: expand/elaborate.',
+    lastModified: '2026-06-06', temperature: 0.7, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Expand and elaborate on the selected lines, adding detail while keeping the same voice. If a line is already sufficiently detailed, leave it unchanged.',
+  },
+  'modify-tone': {
+    version: '1.0', description: 'Quick action: more conversational broadcast tone.',
+    lastModified: '2026-06-06', temperature: 0.6, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Rewrite the selected lines in a more conversational, engaging broadcast tone. If a line already reads well in that tone, leave it unchanged.',
+  },
+  'modify-stub': {
+    version: '1.0', description: 'Quick action: replace with a placeholder stub/outline.',
+    lastModified: '2026-06-06', temperature: 0.5, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Replace the selected lines with a brief placeholder stub/outline — a short skeleton of what this section should cover — for the writer to fill in later.',
   },
 
   // ========================================

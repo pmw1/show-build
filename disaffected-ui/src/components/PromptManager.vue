@@ -561,8 +561,17 @@ const operationVariables = {
     { name: 'instruction', description: "The user's instruction / chosen quick-action (what to do to the selected lines)", example: 'Fix grammar without changing meaning' },
     { name: 'selectedText', description: 'The selected lines to modify, each prefixed with its line number', example: '12: When confronted, the narcissist...' },
     { name: 'selectedLineNumbers', description: 'Compact range of the selected line numbers', example: '12-14, 17' },
-    { name: 'fullSegment', description: 'The ENTIRE script, line-numbered, for context (the model returns the whole thing reworked)', example: '1: ...\\n2: ...' }
+    { name: 'fullSegment', description: 'The ENTIRE script, line-numbered, for context', example: '1: ...\\n2: ...' }
   ],
+  // Quick-action instruction prompts (Modify-with-AI buttons). Each returns just
+  // an instruction string — no variables — which is fed into modify-blocks as
+  // {instruction}. Override to change what a button tells the LLM.
+  'modify-grammar': [],
+  'modify-spelling': [],
+  'modify-shorten': [],
+  'modify-expand': [],
+  'modify-tone': [],
+  'modify-stub': [],
 
   // Analyze operations
   'analyze-script-tone': [

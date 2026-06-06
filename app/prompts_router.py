@@ -384,8 +384,15 @@ async def get_available_operations(
             "compose-segment-transition"
         ],
         "modify": [
-            # Multi-select "Modify with AI": modify selected lines, return whole script.
-            "modify-blocks"
+            # Multi-select "Modify with AI": modify selected lines -> revision proposals.
+            "modify-blocks",
+            # Quick-action instruction prompts for the Modify-with-AI buttons.
+            "modify-grammar",
+            "modify-spelling",
+            "modify-shorten",
+            "modify-expand",
+            "modify-tone",
+            "modify-stub"
         ]
     }
 

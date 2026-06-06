@@ -44,7 +44,7 @@
                 color="purple"
                 class="ma-1"
                 :disabled="running"
-                @click="run(p.instruction)"
+                @click="runPreset(p)"
               >
                 <v-icon start size="small">{{ p.icon }}</v-icon>{{ p.label }}
               </v-btn>
@@ -100,13 +100,16 @@ const emit = defineEmits(['update:show', 'apply', 'cancel'])
 const instruction = ref('')
 const running = ref(false)
 
+// Each preset maps to an overridable Prompt Manager operation (category
+// 'modify') whose template returns the instruction string. The `instruction`
+// here is only an inline fallback if that op can't be resolved.
 const presets = [
-  { key: 'spelling', label: 'Check spelling', icon: 'mdi-alphabetical', instruction: 'Correct ONLY spelling mistakes in the selected lines. Do not change wording, grammar, tone, or meaning.' },
-  { key: 'grammar', label: 'Check grammar', icon: 'mdi-spellcheck', instruction: 'Fix grammar and punctuation in the selected lines without changing the meaning or voice.' },
-  { key: 'shorten', label: 'Shorten', icon: 'mdi-arrow-collapse-vertical', instruction: 'Shorten and tighten the selected lines while preserving their meaning and voice.' },
-  { key: 'expand', label: 'Expand', icon: 'mdi-arrow-expand-vertical', instruction: 'Expand and elaborate on the selected lines, adding detail while keeping the same voice.' },
-  { key: 'tone', label: 'Change tone', icon: 'mdi-tune-vertical', instruction: 'Rewrite the selected lines in a more conversational, engaging broadcast tone.' },
-  { key: 'stub', label: 'Insert stub', icon: 'mdi-text-box-outline', instruction: 'Replace the selected lines with a brief placeholder stub/outline (a short skeleton of what this section should cover) for the writer to fill in later.' },
+  { key: 'spelling', op: 'modify-spelling', label: 'Check spelling', icon: 'mdi-alphabetical', instruction: 'Correct ONLY spelling mistakes in the selected lines. Do not change wording, grammar, tone, or meaning. If a line has no misspellings, return it exactly as-is.' },
+  { key: 'grammar', op: 'modify-grammar', label: 'Check grammar', icon: 'mdi-spellcheck', instruction: 'Fix grammar and punctuation in the selected lines without changing the meaning or voice. If a line is already correct, leave it as-is.' },
+  { key: 'shorten', op: 'modify-shorten', label: 'Shorten', icon: 'mdi-arrow-collapse-vertical', instruction: 'Shorten and tighten the selected lines while preserving their meaning and voice. If already concise, leave unchanged.' },
+  { key: 'expand', op: 'modify-expand', label: 'Expand', icon: 'mdi-arrow-expand-vertical', instruction: 'Expand and elaborate on the selected lines, keeping the same voice. If already detailed, leave unchanged.' },
+  { key: 'tone', op: 'modify-tone', label: 'Change tone', icon: 'mdi-tune-vertical', instruction: 'Rewrite the selected lines in a more conversational, engaging broadcast tone. If already in that tone, leave unchanged.' },
+  { key: 'stub', op: 'modify-stub', label: 'Insert stub', icon: 'mdi-text-box-outline', instruction: 'Replace the selected lines with a brief placeholder stub/outline for the writer to fill in later.' },
 ]
 
 // Reset instruction when the modal opens for a fresh selection.
@@ -119,6 +122,21 @@ registerModalEsc(() => props.show && !running.value, () => cancel(), 'ModifyWith
 function cancel() {
   emit('update:show', false)
   emit('cancel')
+}
+
+// A quick-action button: resolve its instruction from the (overridable) Prompt
+// Manager op (category 'modify'), falling back to the inline preset string, then
+// run with that instruction.
+async function runPreset(p) {
+  if (running.value || !props.ctx) return
+  let instruction = p.instruction
+  try {
+    const resolved = await getLLMPrompt(p.op, {}, { category: 'modify' })
+    if (resolved && resolved.prompt) instruction = resolved.prompt
+  } catch (e) {
+    console.warn(`quick-action ${p.op} resolve failed, using inline instruction:`, e)
+  }
+  run(instruction)
 }
 
 async function run(text) {
