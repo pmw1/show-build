@@ -924,7 +924,11 @@ export default {
 .script-editor-host {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 12px 16px;
+  /* Extra RIGHT padding creates a gutter for the per-paragraph hover controls
+     (flag/delete) + the needs-attention flag. overflow-y:auto clips the x-axis,
+     so the controls must live INSIDE this padding to be fully visible — they
+     can't sit past the host edge. */
+  padding: 12px 3.2em 12px 16px;
 }
 
 /* ===== Multi-selection toolbar ===== */
@@ -1098,9 +1102,10 @@ export default {
    when flagged; anchored to the right edge of the paragraph box. */
 .script-editor-host :deep(na-controls) {
   position: absolute;
-  /* pushed further off to the right (clear of the text), vertically centered to
-     the whole paragraph block, with the flag + delete stacked tightly. */
-  right: -2.2em;
+  /* Sit in the host's right gutter (created by its right padding) — clear of
+     the text but INSIDE the clip boundary so they're never cut off. Negative
+     right pulls into that padding without crossing the host edge. */
+  right: -2.6em;
   top: 50%;
   transform: translateY(-50%);
   display: inline-flex;
