@@ -1595,7 +1595,12 @@ function itemHasNeedsAttention(item) {
   const hasParagraphFlag = scriptContent.includes('data-needs-attention="true"')
   // Check for cue flags (NeedsAttention: true or NeedsAttention:true)
   const hasCueFlag = /NeedsAttention:\s*true/i.test(scriptContent)
-  const result = hasParagraphFlag || hasCueFlag
+  // An UNRESOLVED revision proposal also qualifies the item as needs-attention
+  // (mirrors the editor rule). Unresolved revisions persist in the script as
+  // <rev user ts>kill|add</rev>; match "<rev " (space) so the legacy <rev-block>
+  // chrome tags don't false-positive.
+  const hasUnresolvedRevision = /<rev\s/i.test(scriptContent)
+  const result = hasParagraphFlag || hasCueFlag || hasUnresolvedRevision
   return result
 }
 
