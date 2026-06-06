@@ -1109,7 +1109,8 @@ export default {
   gap: 0.05em;
   opacity: 0;
   transition: opacity 0.12s ease;
-  z-index: 3;
+  /* high so the controls aren't covered by neighboring blocks / sidebar edge */
+  z-index: 60;
 }
 .script-editor-host :deep(.ProseMirror p:hover na-controls),
 .script-editor-host :deep(na-controls.na-flagged) {
@@ -1125,9 +1126,9 @@ export default {
 }
 .script-editor-host :deep(na-btn) {
   cursor: pointer;
-  /* ~3x the prior size; flag + delete both larger and clear of the text. */
-  width: 2.6em;
-  height: 2.6em;
+  /* hover flag/delete buttons (20% smaller than the prior 2.6em). */
+  width: 2.08em;
+  height: 2.08em;
   font-size: var(--editor-script-font-size, 16px);
   display: inline-flex;
   align-items: center;
@@ -1137,8 +1138,8 @@ export default {
   background: rgba(0, 0, 0, 0.04);
 }
 .script-editor-host :deep(na-btn svg) {
-  width: 1.7em;
-  height: 1.7em;
+  width: 1.36em;
+  height: 1.36em;
 }
 .script-editor-host :deep(na-btn.na-flag:hover) { color: #fb8c00; background: rgba(251, 140, 0, 0.14); }
 .script-editor-host :deep(na-btn.na-flag.is-active) { color: #e53935; }
@@ -1147,7 +1148,8 @@ export default {
 /* Flag note panel (attached to the right of a flagged paragraph). */
 .flag-note-panel {
   position: absolute;
-  z-index: 40;
+  /* high so the panel isn't partially covered on the right (sidebar edge etc.) */
+  z-index: 60;
   /* Compact note card. Its LEFT edge is locked to the editor's right edge (set
      inline via left:), so it sits to the RIGHT of the text, spilling over the
      sidebar — never overlapping the paragraph. No max-width clamp (it's meant to
