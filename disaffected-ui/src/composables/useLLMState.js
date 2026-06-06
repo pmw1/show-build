@@ -553,6 +553,18 @@ export function useLLMState() {
     const visual = scopeVisuals[scope] || scopeVisuals.item
     const color = stateColors[op.state] || stateColors[STATE.ANALYZING]
 
+    // #47: the rundown ROW (item scope) uses a throbbing BACKGROUND, not a
+    // border — a 7px border clipped to only the left/top edges inside the
+    // rundown's overflow container. The .generating-item CSS class drives the
+    // keyframes (llm-bg-throb); here we just signal "busy" without re-adding a
+    // border. Other scopes keep their border treatment.
+    if (scope === 'item') {
+      return {
+        backgroundColor: color,
+        borderRadius: visual.borderRadius
+      }
+    }
+
     return {
       border: `${visual.borderWidth} ${visual.borderStyle} ${color}`,
       borderRadius: visual.borderRadius,

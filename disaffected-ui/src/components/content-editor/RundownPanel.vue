@@ -3929,21 +3929,28 @@ defineExpose({
   margin-right: 5px;
 }
 
-/* Generating item - purple throbbing border */
+/* Generating item (#47) — the WHOLE ROW background slowly throbs purple while
+   the LLM is working, instead of a 7px border (which clipped to only the
+   left/top edges inside the overflow container). Pulses between purple and a
+   deeper purple so it reads clearly as "busy". No border, no box-shadow, so
+   nothing can clip. Slow ~2s loop until the operation completes. */
 .generating-item {
-  border: 7px solid #9C27B0 !important; /* Purple border */
-  animation: throb 1.5s ease-in-out infinite !important;
+  animation: llm-bg-throb 2s ease-in-out infinite !important;
 }
 
-@keyframes throb {
+@keyframes llm-bg-throb {
   0%, 100% {
-    border-color: #9C27B0;
-    box-shadow: 0 0 0 0 rgba(156, 39, 176, 0.7);
+    background-color: #9C27B0; /* purple */
   }
   50% {
-    border-color: #BA68C8;
-    box-shadow: 0 0 20px 5px rgba(156, 39, 176, 0.4);
+    background-color: #6A1B9A; /* deeper purple */
   }
+}
+
+/* Keep the row's text readable over the purple throb regardless of theme. */
+.generating-item,
+.generating-item * {
+  color: #ffffff !important;
 }
 
 .editing-item {
