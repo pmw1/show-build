@@ -743,19 +743,11 @@
                   </div>
 
                   <!-- NORMAL MODE: Full cue card display -->
+                  <!-- #49: single shell for every cue type — PlaceholderCueCard
+                       routes IMG to ImageCueContent internally (no separate image
+                       card). @modify carries the IMG crop/enhance tools. -->
                   <template v-else>
-                  <ImageCueCard
-                    v-if="segment.data.isImageType"
-                    :cue-data="segment.data"
-                    :selected="selectedCueIndex === index"
-                    :order-number="extractOrderFromSlug(segment.data.slug)"
-                    @select="selectCue(index)"
-                    @edit="editCue(index, segment.data)"
-                    @delete="deleteCue(index)"
-                    @update-meta="handleMetaUpdate"
-                  />
                   <PlaceholderCueCard
-                    v-else
                     :cue-data="segment.data"
                     :selected="selectedCueIndex === index"
                     :order-number="extractOrderFromSlug(segment.data.slug)"
@@ -765,7 +757,8 @@
                     @delete="deleteCue(index)"
                     @reupload-sot-cue="handleReuploadSotCue"
                     @status-changed="handleSotStatusChange"
-                    @update-meta="handleCueFieldUpdate"
+                    @update-meta="handleCueMetaEvent"
+                    @modify="handleCueModify"
                     @edit-fsq="handleEditFsq"
                     @edit-gfx="handleEditGfx"
                     @relocate="handleRelocateCue(index)"
@@ -1492,7 +1485,6 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, onUnmounted, nextTick
 import { getColorValue, resolveVuetifyColor, loadColorsFromDatabase } from '../../utils/themeColorMap.js'
 import draggable from 'vuedraggable'
 import DeleteImgCueModal from './modals/DeleteImgCueModal.vue'
-import ImageCueCard from './cards/ImageCueCard.vue'
 import PlaceholderCueCard from './cards/PlaceholderCueCard.vue'
 import SpeakerSelectorModal from './modals/SpeakerSelectorModal.vue'
 import DeleteCueWithMediaModal from './modals/DeleteCueWithMediaModal.vue'
@@ -5678,6 +5670,25 @@ function handleSotStatusChange({ status, assetId }) {
     console.log('✅ SOT job completed - requesting content refresh');
     emit('sot-job-complete', { assetId });
   }
+}
+
+// #49: the single CueCard shell forwards `update-meta` for BOTH shapes — the
+// single-field { assetId, field, value } from FSQ/GFX/SOT, and the multi-field
+// { cueData, metadata } from the IMG meta-edit panel (ImageCueContent). Dispatch
+// to the right legacy handler by shape so neither regresses.
+function handleCueMetaEvent(payload) {
+  if (payload && payload.metadata) {
+    handleMetaUpdate(payload);
+  } else {
+    handleCueFieldUpdate(payload);
+  }
+}
+
+// IMG modify tools (crop/enhance/resize/comfyui) emitted { action, cueData }.
+// This was unwired (no-op) in the legacy ImageCueCard path; keep that behavior
+// but log so it's discoverable when the tools get built out.
+function handleCueModify(payload) {
+  console.log('🖼️ Cue modify requested (not yet wired):', payload);
 }
 
 function handleMetaUpdate({ cueData, metadata }) {

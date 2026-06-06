@@ -17,25 +17,20 @@
     :data-cue-type="node.attrs.cueType"
   >
     <!-- contenteditable=false: the cue is an atom; its internals are not PM-editable -->
+    <!-- #49: ONE shell for every cue type. PlaceholderCueCard makes the
+         per-type display decision internally (FSQ/SOT/GFX/IMG/... content
+         children). The image card is no longer a separate top-level component
+         (routing IMG/GFX here also restores GfxCueContent for GFX, which the
+         old image-cue-card branch had been shadowing). -->
     <div contenteditable="false">
-      <image-cue-card
-        v-if="isImageType"
-        :cue-data="cueData"
-        :collapsed="node.attrs.collapsed"
-        :readonly="!editor.isEditable"
-        @toggle-collapsed="onToggleCollapsed"
-        @update:cue-data="onCardUpdate"
-        @update-meta="onUpdateMeta"
-        @delete="onDelete"
-      />
       <placeholder-cue-card
-        v-else
         :cue-data="cueData"
         :collapsed="node.attrs.collapsed"
         :readonly="!editor.isEditable"
         @toggle-collapsed="onToggleCollapsed"
         @update:cue-data="onCardUpdate"
         @update-meta="onUpdateMeta"
+        @modify="onModify"
         @edit-fsq="onEditCue('fsq', $event)"
         @edit-gfx="onEditCue('gfx', $event)"
         @delete="onDelete"
@@ -47,7 +42,6 @@
 <script>
 import { NodeViewWrapper, nodeViewProps } from '@tiptap/vue-3';
 import { CueParser } from '@/utils/cueParser.js';
-import ImageCueCard from '@/components/content-editor/cards/ImageCueCard.vue';
 import PlaceholderCueCard from '@/components/content-editor/cards/PlaceholderCueCard.vue';
 
 // Re-derive the parsed-cue object (camelCased keys, as parseCueBlock produces)
@@ -72,7 +66,7 @@ function fieldsToParsedCue(fields, imgTag, cueType) {
 
 export default {
   name: 'CueNodeView',
-  components: { NodeViewWrapper, ImageCueCard, PlaceholderCueCard },
+  components: { NodeViewWrapper, PlaceholderCueCard },
   props: nodeViewProps,
   computed: {
     cueData() {
@@ -115,20 +109,42 @@ export default {
       this.updateAttributes({ collapsed: !this.node.attrs.collapsed });
     },
     onUpdateMeta(payload) {
-      if (!payload || !payload.field) return;
-      const { field, value } = payload;
+      if (!payload) return;
+      // Two shapes flow through here:
+      //  (a) single-field { field, value } — FSQ/GFX/SOT children + style sliders.
+      //  (b) multi-field { metadata: {...} } — the IMG meta-edit panel
+      //      (ImageCueContent) saves description/credit/caption/duration/tags
+      //      together. Normalize both into per-field writes.
+      const entries = payload.metadata
+        ? Object.entries(payload.metadata)
+        : (payload.field ? [[payload.field, payload.value]] : []);
+      if (!entries.length) return;
+
       const fields = { ...this.node.attrs.fields };
-      const existingLabel = Object.keys(fields).find(
-        (l) => CueParser.toCamelCase(l) === field
-      );
       // Canonical labels for fields the rest of the codebase writes a specific
       // way (formatFieldForDisplay would emit "Media Url"; the codebase uses
       // "MediaURL"). Both round-trip to the same camelCase key, but keep the
       // markdown consistent.
       const canonicalLabels = { mediaUrl: 'MediaURL' };
-      const label = existingLabel || canonicalLabels[field] || CueParser.formatFieldForDisplay(field);
-      fields[label] = value == null ? '' : String(value);
+      for (const [field, value] of entries) {
+        const existingLabel = Object.keys(fields).find(
+          (l) => CueParser.toCamelCase(l) === field
+        );
+        const label = existingLabel || canonicalLabels[field] || CueParser.formatFieldForDisplay(field);
+        fields[label] = value == null ? '' : String(value);
+      }
       this.updateAttributes({ fields });
+    },
+    // IMG modify tools (crop / enhance / resize / comfyui) bubble up from
+    // ImageCueContent. Bridge to EditorPanel the same way edit/delete do, so it
+    // can open the relevant tool/modal. No-op (logged) if no bridge is wired.
+    onModify(payload) {
+      const fn = this.editor?.options?.onModifyCue;
+      if (typeof fn === 'function') {
+        fn(payload);
+      } else {
+        console.warn('[CueNodeView] onModifyCue bridge not wired; modify ignored', payload);
+      }
     },
     // Edit (FSQ / GFX) is handled by EditorPanel, which owns the modals.
     // Same bridge pattern as onDelete: hand the cue's data up via an editor

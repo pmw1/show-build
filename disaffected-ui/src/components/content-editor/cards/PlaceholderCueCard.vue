@@ -205,6 +205,16 @@
         </div>
       </div>
 
+      <!-- IMG Display - Delegated to ImageCueContent (#49: folded in from the
+           former standalone ImageCueCard so every cue renders through this shell). -->
+      <ImageCueContent
+        v-else-if="cueData.type === 'IMG'"
+        :cue-data="cueData"
+        :readonly="readonly"
+        @modify="$emit('modify', $event)"
+        @update-meta="handleChildUpdateMeta"
+      />
+
       <!-- Generic Placeholder Display for other cue types -->
       <div v-else class="placeholder-container">
         <div class="placeholder-icon-section">
@@ -223,8 +233,8 @@
         </div>
       </div>
 
-      <!-- Cue Information (hidden for FSQ) -->
-      <div v-if="cueData.type !== 'FSQ'" class="cue-info">
+      <!-- Cue Information (hidden for FSQ and IMG — those render their own body) -->
+      <div v-if="cueData.type !== 'FSQ' && cueData.type !== 'IMG'" class="cue-info">
         <div v-if="cueData.description" class="cue-description">
           <v-icon size="small" class="info-icon">mdi-text</v-icon>
           <span class="description-text">{{ cueData.description }}</span>
@@ -561,6 +571,7 @@ import { useSOTProcessing } from '../../../composables/useSOTProcessing.js';
 import FsqCueContent from './cue-types/FsqCueContent.vue'; // eslint-disable-line no-unused-vars
 import SotCueContent from './cue-types/SotCueContent.vue'; // eslint-disable-line no-unused-vars
 import GfxCueContent from './cue-types/GfxCueContent.vue'; // eslint-disable-line no-unused-vars
+import ImageCueContent from './cue-types/ImageCueContent.vue'; // eslint-disable-line no-unused-vars
 import { FSQ_DEFAULTS, FSQ_PNG_SCALE, FSQ_PNG_ATTRIBUTION_SCALE } from '../../../utils/fsqLayout.js';
 
 const props = defineProps({
@@ -596,7 +607,7 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq', 'apply-all-gfx', 'status-changed', 'toggle-collapsed']);
+const emit = defineEmits(['select', 'edit', 'delete', 'update-meta', 'modify', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq', 'apply-all-gfx', 'status-changed', 'toggle-collapsed']);
 
 const route = useRoute();
 const { getJobByAssetId, retryFailedJob, reprocessJob } = useSOTProcessing();

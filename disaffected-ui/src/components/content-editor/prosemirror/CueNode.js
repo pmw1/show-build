@@ -9,9 +9,8 @@
  *   - imgTag  : raw embedded <img> tag, kept distinct from the mediaUrl field
  *
  * Rendering is delegated to CueNodeView.vue via VueNodeViewRenderer, which
- * dispatches on cueType to the existing card components (PlaceholderCueCard /
- * ImageCueCard / cue-types/*). The cards are reused as-is — Phase 2 wraps, it
- * does not rewrite them.
+ * renders the single CueCard shell (PlaceholderCueCard); the shell dispatches on
+ * cueType to its per-type content children (cue-types/Fsq|Sot|Gfx|ImageCueContent).
  *
  * NOTE: the SAVE format is owned by src/utils/prosemirror/markdown.js. This node
  * has no DOM parse rule because cues are produced only by that markdown parser;
