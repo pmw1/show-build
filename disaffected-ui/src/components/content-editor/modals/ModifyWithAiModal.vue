@@ -156,8 +156,10 @@ async function run(text) {
       running.value = false
       return
     }
+    // Host applies + closes on success; on a refused apply (wipe guard) it stays
+    // open and notifies. Either way clear running so the modal is usable again.
     emit('apply', out)
-    // host closes the modal after applying
+    running.value = false
   } catch (err) {
     console.error('Modify with AI failed:', err)
     if (window.notifyUserStandard) window.notifyUserStandard('Modify with AI failed', '#f44336', 3000)

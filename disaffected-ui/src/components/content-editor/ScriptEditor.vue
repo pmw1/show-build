@@ -542,21 +542,43 @@ export default {
     // `newMarkdown` is the full reworked script returned by the LLM.
     function applyAiModification(newMarkdown) {
       const ed = editor.value;
-      if (!ed || typeof newMarkdown !== 'string' || !newMarkdown.trim()) return;
+      if (!ed || typeof newMarkdown !== 'string' || !newMarkdown.trim()) return false;
       const { state, view } = ed;
 
       // Parse the returned markdown into a PM doc (same path as load/reload), so
-      // speaker/cue/bullet attrs round-trip. Replace the whole doc content in a
-      // single tr — NOT setContent (which clears undo history). This keeps it
-      // undoable and emits onUpdate (autosave + version snapshot).
+      // speaker/cue/bullet attrs round-trip.
       const parsed = markdownToDoc(newMarkdown);
-      const newDoc = parsed.doc; // a full doc node
+      const newDoc = parsed.doc;
+
+      // ── WIPE GUARD (data-loss protection) ────────────────────────────────
+      // The AI is asked to return the WHOLE script with only the selected lines
+      // changed. If it instead returns only the selected snippet (or empties
+      // out), a naive whole-doc replace would WIPE the segment. Refuse to apply
+      // when the result is implausibly short vs the current script. The caller
+      // surfaces this so the user can retry; the script is left untouched.
+      const oldLen = state.doc.textContent.trim().length;
+      const newLen = (newDoc.textContent || '').trim().length;
+      const newBlocks = newDoc.childCount;
+      const tooShort = oldLen > 200 && newLen < oldLen * 0.5;
+      const empty = newLen === 0 || newBlocks === 0;
+      if (empty || tooShort) {
+        console.warn('[applyAiModification] REFUSED — result too short, likely the AI returned only the selection (oldLen', oldLen, 'newLen', newLen, ')');
+        if (window.notifyUserStandard) {
+          window.notifyUserStandard('AI returned only part of the script — not applied (your text is unchanged). Try again.', '#f44336', 5000);
+        }
+        return false;
+      }
+
+      // Replace the whole doc content in a single tr — NOT setContent (which
+      // clears undo history). Keeps it undoable and emits onUpdate (autosave +
+      // version snapshot).
       const tr = state.tr.replaceWith(0, state.doc.content.size, newDoc.content);
-      tr.setMeta('addToHistory', true); // ensure it's a discrete undo step
+      tr.setMeta('addToHistory', true); // discrete undo step
       view.dispatch(tr);
       view.focus();
       aiModifyOpen.value = false;
       aiModifyContext.value = null;
+      return true;
     }
 
     // Parent reach-in contract (mirrors EditorPanel).
