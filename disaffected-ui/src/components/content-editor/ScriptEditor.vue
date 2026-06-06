@@ -25,9 +25,12 @@
       'script-editor--line-numbers': showLineNumbers,
     }"
   >
-    <!-- Multi-selection toolbar — floats at the top of the editor when one or
-         more blocks are Ctrl/Shift-click selected (BlockMultiSelect plugin).
+    <!-- Multi-selection toolbar — a transient popup shown only while a multi-
+         selection is active (BlockMultiSelect plugin). Teleported to <body> and
+         position:fixed so it anchors to the VIEWPORT (top third) and can't be
+         scrolled out of view or clipped by an ancestor's transform/overflow.
          Mirrors the legacy contenteditable editor's multi-select actions. -->
+    <Teleport to="body">
     <div v-if="multiSel.count > 0" class="pm-multiselect-toolbar">
       <div class="pm-ms-count">
         <span class="pm-ms-count-num">{{ multiSel.count }}</span>
@@ -85,6 +88,7 @@
         >Cancel</v-btn>
       </div>
     </div>
+    </Teleport>
 
     <!-- EditorContent (not a raw element mount): this is what forwards the
          host app's plugin context (Vuetify) into the cue NodeViews, so the
@@ -500,18 +504,33 @@ export default {
 }
 
 /* ===== Multi-selection toolbar ===== */
+/* Rendered as a FIXED overlay (relative to the viewport, not the scrolling
+   editor host) so it can never scroll out of view, and pinned to the top third
+   of the screen with a high z-index so it floats above the editor and other
+   chrome. It's a transient popup — appears only while a multi-selection is
+   active — so a floating card look (rounded + shadow) reads better than an
+   attached bar. The .pm-multiselect-toolbar lives at the editor root but
+   position:fixed lifts it out of the flex flow. */
 .pm-multiselect-toolbar {
-  flex: 0 0 auto;
+  position: fixed;
+  top: 22vh; /* top third of the viewport */
+  left: 50%;
+  transform: translateX(-50%);
+  /* Above all editor content, but BELOW Vuetify's dialog stack (v-overlay
+     starts ~2400 and increments per open dialog). This keeps the
+     SpeakerSelectorModal — launched from the toolbar's "Change speaker" — on
+     top of the toolbar instead of being covered by it. */
+  z-index: 2000;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 12px;
-  background: var(--draglight-color, rgba(33, 150, 243, 0.12));
-  border-bottom: 2px solid var(--dropline-color, rgb(33, 150, 243));
-  position: sticky;
-  top: 0;
-  z-index: 20;
+  gap: 8px;
+  max-width: min(92vw, 720px);
+  padding: 12px 16px;
+  background: #ffffff;
+  border: 2px solid var(--dropline-color, rgb(33, 150, 243));
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 .pm-ms-count {
   display: flex;
@@ -531,6 +550,7 @@ export default {
 .pm-ms-actions {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   flex-wrap: wrap;
 }
