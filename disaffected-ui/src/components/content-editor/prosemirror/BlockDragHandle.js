@@ -146,20 +146,20 @@ const STYLE_TEXT = `
    transition so the block jumps to its old position, then clearing the inline
    transform animates (via .pm-drag-block's transition) the glide to its new spot. */
 .ProseMirror .pm-flip-no-anim { transition: none !important; }
-/* Drop-confirmation flash. Moved block: 3 rapid full-dropline pulses. Neighbors:
-   2 lighter pulses. Theme-colored via --dropline-color (+ --draglight-color for
-   the lighter neighbor tint). */
-/* The dropped block flashes a clearly-visible drag-colour fill + ring (todo #46).
-   The previous 0.15-alpha tint was imperceptible on a bare <p> (cue cards showed
-   it only because of their solid card bg). Use a strong fill (~0.45) so it reads
-   on plain paragraphs too. */
+/* Drop-confirmation flash (todo #46). Pattern (per Kevin):
+   - NEIGHBOURS (above/below the dropped block) pulse 3x FAST.
+   - The DROPPED block snaps ON once, then SLOWLY fades out over a duration equal
+     to (the neighbours' 3 fast pulses) x 2 — i.e. it lingers/glows down while the
+     neighbours strobe and for the same length again after.
+   Colours read on bare <p> (the old 0.15 alpha was invisible; cue cards masked it
+   via their solid card bg): drop fill ~0.45 + dropline ring; neighbour ~0.225. */
 @keyframes pm-flash-drop {
-  0%, 100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
-  50%      { background-color: var(--dropflash-color, rgba(33, 150, 243, 0.45));
-             box-shadow: 0 0 0 3px ${DROPLINE}, 0 0 14px ${DROPLINE}; }
+  /* Instant on, slow linear fade to nothing. */
+  0%   { background-color: var(--dropflash-color, rgba(33, 150, 243, 0.45));
+         box-shadow: 0 0 0 3px ${DROPLINE}, 0 0 14px ${DROPLINE}; }
+  100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
 }
 @keyframes pm-flash-neighbor {
-  /* Half the strength of the dropped block's flash: ~0.225 fill, no ring. */
   0%, 100% { background-color: transparent; }
   50%      { background-color: var(--dropflash-color-half, rgba(33, 150, 243, 0.225)); }
 }
@@ -169,11 +169,14 @@ const STYLE_TEXT = `
 .ProseMirror .pm-flash-neighbor {
   border-radius: 4px;
 }
-.ProseMirror .pm-flash-drop {
-  animation: pm-flash-drop 0.2s ease-in-out 3 !important;
-}
+/* Neighbour fast pulse: 0.2s x 3 = 0.6s. Dropped-block fade: that x 2 = 1.2s, run
+   once with an ease-out so it fades fast then lingers. Keep these two in sync —
+   if you change the neighbour pulse, the drop fade = (pulse * 3) * 2. */
 .ProseMirror .pm-flash-neighbor {
-  animation: pm-flash-neighbor 0.24s ease-in-out 2 !important;
+  animation: pm-flash-neighbor 0.2s ease-in-out 3 !important;
+}
+.ProseMirror .pm-flash-drop {
+  animation: pm-flash-drop 1.2s ease-out 1 !important;
 }
 /* The drop target — a "DROP HERE" block (mirrors the legacy .ghost-segment),
    using the theme's dropline + draglight colors. Sits in the opened gap. */
@@ -548,7 +551,7 @@ function startDrag(view, sourceIndex, blockEl, downEvent) {
             const t2 = view.state.tr.setMeta(blockDragHandleKey, { flash: null });
             t2.setMeta('addToHistory', false);
             view.dispatch(t2);
-          }, 750); // a touch past the 3x ~0.2s drop animation
+          }, 1350); // a touch past the dropped block's 1.2s slow fade-out (#46)
         }, 120);
       }
     }
