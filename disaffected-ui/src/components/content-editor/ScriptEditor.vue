@@ -1040,10 +1040,14 @@ export default {
    when flagged; anchored to the right edge of the paragraph box. */
 .script-editor-host :deep(na-controls) {
   position: absolute;
-  right: 4px;
-  top: 2px;
+  /* pushed off to the right, clear of the text, and vertically centered to the
+     whole paragraph block (not pinned to the top). */
+  right: -0.6em;
+  top: 50%;
+  transform: translateY(-50%);
   display: inline-flex;
-  gap: 4px;
+  align-items: center;
+  gap: 0.5em;
   opacity: 0;
   transition: opacity 0.12s ease;
   z-index: 3;
@@ -1054,15 +1058,20 @@ export default {
 }
 .script-editor-host :deep(na-btn) {
   cursor: pointer;
-  width: 1.5em;
-  height: 1.5em;
+  /* ~3x the prior size; flag + delete both larger and clear of the text. */
+  width: 2.6em;
+  height: 2.6em;
   font-size: var(--editor-script-font-size, 16px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: 6px;
   color: #9e9e9e;
   background: rgba(0, 0, 0, 0.04);
+}
+.script-editor-host :deep(na-btn svg) {
+  width: 1.7em;
+  height: 1.7em;
 }
 .script-editor-host :deep(na-btn.na-flag:hover) { color: #fb8c00; background: rgba(251, 140, 0, 0.14); }
 .script-editor-host :deep(na-btn.na-flag.is-active) { color: #fb8c00; }
