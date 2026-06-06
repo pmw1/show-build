@@ -3,7 +3,7 @@
     <v-card>
       <v-card-title class="text-h5 text-center pa-6">
         <v-icon size="large" class="mb-2" color="primary">mdi-account-key</v-icon>
-        <div>Login to Show Builder</div>
+        <div>Login to Show Build</div>
         <v-btn
           icon="mdi-close"
           variant="text"

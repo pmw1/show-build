@@ -85,7 +85,12 @@ function buildDecorations(doc) {
   doc.forEach((node, offset) => {
     if (node.type.name === 'paragraph') {
       const speaker = node.attrs.speaker || 'josh';
-      const showHeader = prevType === null || prevType === 'cue' || speaker !== prevSpeaker;
+      // #43: never render a speaker header above an EMPTY paragraph — an empty
+      // segment shouldn't show a dangling header. Decorations recompute on every
+      // doc change, so the header appears the instant the user types a character.
+      const isEmpty = node.content.size === 0;
+      const showHeader =
+        !isEmpty && (prevType === null || prevType === 'cue' || speaker !== prevSpeaker);
       if (showHeader) {
         // side:-1 puts the widget BEFORE the paragraph content; key ties it to
         // the speaker so PM reuses/replaces the right widget on redraw.
@@ -96,6 +101,11 @@ function buildDecorations(doc) {
           })
         );
       }
+      // #43: an empty paragraph is transparent to run-tracking — don't advance
+      // prevSpeaker/prevType, so the NEXT non-empty paragraph is still treated
+      // as the start of a speaker run and gets its header (even if same speaker
+      // as before the empty line).
+      if (isEmpty) return;
       prevSpeaker = speaker;
     }
     prevType = node.type.name;

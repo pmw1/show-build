@@ -2,7 +2,7 @@
   <div class="login-page">
     <!-- Center icon -->
     <div class="login-content">
-      <img src="/show-build-logo-medium.png" alt="Show Builder" class="login-icon" :class="{ 'login-icon-raised': showForm }" />
+      <img src="/show-build-logo-medium.png" alt="Show Build" class="login-icon" :class="{ 'login-icon-raised': showForm }" />
 
       <!-- Login form overlaid on lower half -->
       <div class="login-form-area">

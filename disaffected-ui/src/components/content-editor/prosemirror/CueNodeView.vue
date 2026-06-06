@@ -179,7 +179,13 @@ export default {
 <style scoped>
 .pm-cue-nodeview {
   display: block;
-  margin: 4px 0;
+  /* #42: more breathing room above/below each cue, and a small left indent so
+     the cue block's left edge lines up with the body paragraph TEXT instead of
+     sitting flush at the editor edge. The line-number gutter (when on) is a
+     shared padding-left on .ProseMirror, so it shifts cues and paragraphs
+     together — this margin is the extra nudge to match the paragraph text. */
+  margin: 14px 0;
+  margin-left: 0.25em;
 }
 .pm-cue-selected {
   outline: 2px solid var(--v-theme-primary, #1976d2);

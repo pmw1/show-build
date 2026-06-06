@@ -12,7 +12,7 @@
       ></v-app-bar-nav-icon>
 
       <v-app-bar-title class="text-primary font-weight-bold app-title-compact" style="margin-right: 0.25em;">
-        Show Builder
+        Show Build
       </v-app-bar-title>
 
       <!-- Status Clock (Today's Date) -->

@@ -556,6 +556,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { getColorValue, resolveVuetifyColor, getReadableTextColor } from '../../../utils/themeColorMap.js';
+import { formatTimecode } from '../../../utils/timecode.js';
 import { useSOTProcessing } from '../../../composables/useSOTProcessing.js';
 import FsqCueContent from './cue-types/FsqCueContent.vue'; // eslint-disable-line no-unused-vars
 import SotCueContent from './cue-types/SotCueContent.vue'; // eslint-disable-line no-unused-vars
@@ -842,33 +843,33 @@ const isJobCompleted = computed(() => {
 const displayDuration = computed(() => {
   const stalePlaceholders = ['calculating', 'processing', 'queued', 'pending', ''];
 
+  // Resolve the raw duration value (a seconds decimal from analysis, or an
+  // already-formatted timecode string from cueData), then format it ONCE below
+  // so every display point (SOT body row, footer, header) shows hh:mm:ss:ff.
+  let raw = null;
+
   // If job is completed, prefer jobStatus data
   if (isJobCompleted.value) {
-    // Try post_analysis duration first
-    if (jobStatus.value?.post_analysis?.duration) {
-      return jobStatus.value.post_analysis.duration;
-    }
-    // Try video_specs duration
-    if (jobStatus.value?.video_specs?.duration) {
-      return jobStatus.value.video_specs.duration;
-    }
+    raw = jobStatus.value?.post_analysis?.duration ?? jobStatus.value?.video_specs?.duration ?? null;
   }
 
   // Check cueData, but filter out placeholder values
-  const cueDuration = props.cueData?.duration?.toLowerCase?.() || props.cueData?.duration;
-  if (cueDuration && !stalePlaceholders.includes(cueDuration?.toLowerCase?.())) {
-    return props.cueData.duration;
+  if (raw == null) {
+    const cueDuration = props.cueData?.duration?.toLowerCase?.() || props.cueData?.duration;
+    if (cueDuration && !stalePlaceholders.includes(cueDuration?.toLowerCase?.())) {
+      raw = props.cueData.duration;
+    }
   }
 
   // Fallback to jobStatus even if not completed
-  if (jobStatus.value?.post_analysis?.duration) {
-    return jobStatus.value.post_analysis.duration;
-  }
-  if (jobStatus.value?.video_specs?.duration) {
-    return jobStatus.value.video_specs.duration;
+  if (raw == null) {
+    raw = jobStatus.value?.post_analysis?.duration ?? jobStatus.value?.video_specs?.duration ?? null;
   }
 
-  return null;
+  if (raw == null) return null;
+  // formatTimecode passes through existing "00:00:05:00" strings and converts a
+  // raw seconds decimal (e.g. 12.34) to hh:mm:ss:ff; returns null if unusable.
+  return formatTimecode(raw) ?? raw;
 });
 
 /**
