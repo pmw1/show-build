@@ -134,6 +134,9 @@
       class="flag-note-panel"
       :style="{ left: flagPanel.x + 'px', top: flagPanel.y + 'px' }"
       @mousedown.stop
+      @pointerdown="flagPanelInteracting = true"
+      @focusin="flagPanelInteracting = true"
+      @focusout="onFlagPanelFocusOut"
     >
       <div class="flag-note-header">
         <svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" class="flag-note-icon"><path d="M5 21V4h11l-2 4 2 4H5z"/></svg>
@@ -721,6 +724,17 @@ export default {
     function syncFlagPanelToSelection() {
       const ed = editor.value;
       if (!ed) { flagPanel.value.open = false; return; }
+      // Don't collapse while the user is interacting with the panel itself
+      // (typing the note). When focus is inside the teleported panel the editor
+      // blurs + may fire a selection tx — without this guard the panel would
+      // close the instant you click its textarea. Belt-and-suspenders: an
+      // explicit interacting flag (set on pointerdown/focusin) AND an
+      // activeElement check (the flag may lag a tick on the first pointerdown).
+      if (flagPanel.value.open) {
+        if (flagPanelInteracting.value) return;
+        const ae = document.activeElement;
+        if (ae && ae.closest && ae.closest('.flag-note-panel')) return;
+      }
       const pos = ed.state.selection.from;
       const p = _paragraphFlaggedAt(pos);
       if (p && p.node.attrs.needsAttention) {
@@ -742,6 +756,19 @@ export default {
     }
 
     const flagNoteInput = ref(null);
+    // True while focus is within the panel (typing the note) — keeps the
+    // focus-driven sync from collapsing it out from under the user.
+    const flagPanelInteracting = ref(false);
+
+    function onFlagPanelFocusOut(e) {
+      // Only stop interacting when focus actually LEAVES the panel (not when
+      // moving between the textarea and a button inside it).
+      const next = e.relatedTarget;
+      if (next && next.closest && next.closest('.flag-note-panel')) return;
+      flagPanelInteracting.value = false;
+      // Focus left the panel → let the selection decide if it should collapse.
+      nextTick(() => syncFlagPanelToSelection());
+    }
 
     function updateFlagPanelNote(val) {
       flagPanel.value.note = val;
@@ -752,6 +779,7 @@ export default {
     function resolveFlagPanel() {
       const ed = editor.value;
       if (ed) ed.commands.resolveNeedsAttention(flagPanel.value.pos);
+      flagPanelInteracting.value = false;
       flagPanel.value.open = false;
     }
 
@@ -862,6 +890,8 @@ export default {
       // Needs-attention note panel
       flagPanel,
       flagNoteInput,
+      flagPanelInteracting,
+      onFlagPanelFocusOut,
       updateFlagPanelNote,
       resolveFlagPanel,
     };
