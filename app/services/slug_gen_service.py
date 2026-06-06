@@ -283,7 +283,7 @@ def sweep_segments_for_slug_generation():
             FROM rundown_items ri
             JOIN rundowns r ON r.id = ri.rundown_id
             JOIN episodes e ON e.id = r.episode_id
-            WHERE e.status IN ('draft', 'production')
+            WHERE e.status = 'production'
               AND COALESCE(e.auto_generate_enabled, TRUE) = TRUE
               AND ri.item_type IN ('segment', 'interview', 'coldopen', 'close')
               AND LENGTH(COALESCE(ri.script_content, '')) >= 100
