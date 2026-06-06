@@ -72,7 +72,22 @@
               {{ item.duration || '00:00:00' }}
             </span>
           </div>
-          <v-text-field :placeholder="slugPlaceholder" :model-value="item.slug || ''" @update:model-value="$emit('update-segment-field', { field: 'slug', value: $event })" variant="underlined" density="compact" hide-details class="sidebar-field mb-1" :color="segmentTypeColor" />
+          <v-text-field :placeholder="slugPlaceholder" :model-value="item.slug || ''" @update:model-value="$emit('update-segment-field', { field: 'slug', value: $event })" variant="underlined" density="compact" hide-details class="sidebar-field mb-1" :color="segmentTypeColor">
+            <template v-slot:append-inner>
+              <v-btn
+                icon
+                size="x-small"
+                variant="text"
+                color="purple"
+                :loading="generatingSlug"
+                :disabled="generatingSlug"
+                @click="generateSlug"
+                title="Generate a short broadcast slug from the title + script with AI"
+              >
+                <v-icon size="small">mdi-auto-fix</v-icon>
+              </v-btn>
+            </template>
+          </v-text-field>
           <v-text-field :placeholder="titlePlaceholder" :model-value="item.title || ''" @update:model-value="$emit('update-segment-field', { field: 'title', value: $event })" variant="underlined" density="compact" hide-details class="sidebar-field mb-1" :color="segmentTypeColor" />
           <div class="description-wrapper">
                       <textarea
@@ -897,6 +912,31 @@ async function regenerateDescription() {
     console.error('Regeneration failed:', error)
   } finally {
     regenerating.value = false
+  }
+}
+
+// LLM slug generation (todo: slug-gen feature). Generates a short broadcast
+// slug from the title + script body; if the current slug is 5+ words the
+// backend includes it and shortens it. The result is emitted as a field update
+// so it persists through the normal path.
+const generatingSlug = ref(false)
+async function generateSlug() {
+  if (!props.item || !(props.item.asset_id || props.item.id)) return
+  const assetId = props.item.asset_id || props.item.id
+  generatingSlug.value = true
+  try {
+    const response = await $axios.post(`/episodes/generate-slug`, { asset_id: assetId })
+    if (response.data && response.data.slug) {
+      emit('update-segment-field', { field: 'slug', value: response.data.slug })
+    }
+  } catch (error) {
+    console.error('Slug generation failed:', error)
+    if (window.notifyUserStandard) {
+      const msg = error.response?.data?.detail || 'Slug generation failed'
+      window.notifyUserStandard(msg, '#F44336', 4000)
+    }
+  } finally {
+    generatingSlug.value = false
   }
 }
 

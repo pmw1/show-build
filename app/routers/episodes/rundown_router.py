@@ -47,6 +47,55 @@ async def regenerate_description(
         raise HTTPException(status_code=500, detail=f"Regeneration failed: {str(e)}")
 
 
+@router.post("/generate-slug")
+async def generate_slug_endpoint(
+    payload: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Generate a short broadcast slug (2-4 words) for a segment from its title +
+    script body. If the existing slug is 5+ words it is included so the model
+    shortens it. Runs inline so the caller gets the new slug back directly.
+    """
+    asset_id = payload.get('asset_id')
+    if not asset_id:
+        raise HTTPException(status_code=400, detail="asset_id is required")
+    try:
+        from services.slug_gen_service import _generate_slug_core
+        from database import SessionLocal
+        _db = SessionLocal()
+        try:
+            slug = _generate_slug_core(_db, asset_id)
+        finally:
+            _db.close()
+        return {"slug": slug}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Slug generation failed for {asset_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Slug generation failed: {str(e)}")
+
+
+@router.post("/regenerate-slug")
+async def regenerate_slug_endpoint(
+    payload: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Regenerate a segment slug with user feedback, using the full slug history."""
+    asset_id = payload.get('asset_id')
+    previous_slug = payload.get('previous_slug', '')
+    feedback = payload.get('feedback', '')
+    if not asset_id:
+        raise HTTPException(status_code=400, detail="asset_id is required")
+    try:
+        from services.slug_gen_service import regenerate_slug
+        return regenerate_slug(asset_id, previous_slug, feedback)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Slug regeneration failed for {asset_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Slug regeneration failed: {str(e)}")
+
+
 @router.post("/rundown/{episode_number}/reorder")
 async def reorder_rundown(
     episode_number: str,

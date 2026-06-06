@@ -491,6 +491,14 @@ const defaultPromptData = ref({
 
 // Variable definitions by operation
 const operationVariables = {
+  // Slug generation
+  'slug-generator': [
+    { name: 'show_name', description: 'Show name', example: 'Disaffected' },
+    { name: 'segment_title', description: 'The segment title', example: 'Charlie Kirk Shooting' },
+    { name: 'segment_content', description: 'The segment script body', example: 'When confronted...' },
+    { name: 'has_long_slug', description: 'True when the current slug is 5+ words (shorten mode)', example: 'true / false' },
+    { name: 'long_slug', description: 'The existing too-long slug (only in shorten mode)', example: 'the-very-long-overly-wordy-slug' }
+  ],
   // Generate operations
   'generate-segment-script': [
     { name: 'title', description: 'Segment title', example: 'The Rise of AI' },
@@ -746,6 +754,10 @@ const getCategoryColor = (category) => {
 
 // Operation metadata for tooltips
 const operationMetadata = {
+  'slug-generator': {
+    title: 'Segment Slug Generator',
+    description: 'Generates a short broadcast slug (2-4 words, prefer 2-3) for a rundown segment from its title + script body. If the current slug is 5+ words, the prompt includes it and asks for a shorter replacement. Used by the slug Generate button and the background slug sweep.'
+  },
   'inventory-match-file-to-slot': {
     title: 'File to Slot Matcher',
     description: 'Determines if a specific file matches an expected episode file slot (e.g., episode_info, rundown_json). Called when validating individual files against canonical expectations.'

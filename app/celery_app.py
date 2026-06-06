@@ -82,6 +82,7 @@ celery_app.conf.update(
             "services.asset_processing.*": {"queue": "assets"},  # Default for other asset tasks
             "services.ffmpeg_tasks.*": {"queue": "media"},
             "services.auto_description_service.*": {"queue": "llm_content"},
+            "services.slug_gen_service.*": {"queue": "llm_content"},
             "services.phase2_enrichment_service.*": {"queue": "llm_content"},
             # Autoscrub sweep is lightweight (regex + DB); route to the general
             # 'assets' queue, which the worker fleet consumes.
@@ -163,6 +164,11 @@ celery_app.conf.update(
         'episode-desc-sweep-every-120s': {
             'task': 'services.auto_description_service.sweep_episodes_for_auto_generation',
             'schedule': 120.0,
+        },
+        # Slug auto-generation: fill empty slugs / shorten >=5-word slugs.
+        'slug-sweep-every-90s': {
+            'task': 'services.slug_gen_service.sweep_segments_for_slug_generation',
+            'schedule': 90.0,
         },
         # Autoscrub: normalize idle rundown items (>2min since last edit). The
         # task itself reads autoscrub_enabled from interface settings each run,

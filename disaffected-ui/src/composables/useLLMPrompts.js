@@ -209,28 +209,38 @@ Return ONLY the title:`
   },
 
   'slug-generator': {
-    version: '1.0',
-    description: 'Generates URL-safe slugs from titles or content',
-    lastModified: '2025-10-09',
-    temperature: 0.1,
-    maxTokens: 50,
-    systemPrompt: 'You are a slug generator. Create lowercase, hyphenated identifiers.',
+    version: '2.0',
+    description: 'Generates a short broadcast slug (2-4 words) for a segment from its title + script body. If the current slug is 5+ words it is included so the model shortens it.',
+    lastModified: '2026-06-06',
+    temperature: 0.3,
+    maxTokens: 500,
+    systemPrompt: '',
 
+    // Mirrors the backend default in app/services/slug_gen_service.py
+    // (DEFAULT_SLUG_PROMPT). Keep them in sync. Variables: show_name,
+    // segment_title, segment_content, has_long_slug (bool), long_slug.
     template: (params) => {
-      const { text, maxLength = 50 } = params
+      const showName = params.show_name || 'Disaffected'
+      const title = params.segment_title || ''
+      const content = params.segment_content || ''
+      const longBlock = params.has_long_slug
+        ? `The current slug is too long for broadcast: "${params.long_slug || ''}"\nGenerate a SHORTER replacement.\n`
+        : ''
+      return `You are naming a broadcast segment with a short slug for a rundown.
 
-      return `Generate a URL-safe slug from this text.
+Show: ${showName}
+Segment title: ${title}
+${longBlock}Segment content:
+${content}
 
-Rules:
-- Lowercase only
-- Hyphens for spaces
-- No special characters
-- Maximum ${maxLength} characters
-- No leading/trailing hyphens
+Write a slug that:
+- is 2 to 4 words MAX (prefer 2 or 3 words),
+- captures the core topic of the segment,
+- is broadcast-friendly and easy to say,
+- contains no punctuation other than spaces between words.
 
-Text: "${text}"
-
-Return ONLY the slug:`
+Output ONLY the slug words, nothing else. No quotes, no preamble, no explanation.
+/no_think`
     }
   },
 

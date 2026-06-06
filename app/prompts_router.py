@@ -353,6 +353,7 @@ async def get_available_operations(
             "generate-tease-script",
             "generate-episode-description",
             "generate-segment-title",
+            "slug-generator",
             "generate-social-media-post"
         ],
         "analyze": [

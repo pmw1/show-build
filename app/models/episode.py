@@ -287,6 +287,7 @@ class RundownItem(Base):
     description_gen_history = Column(JSON, nullable=True, default=list)  # [{role:'llm'|'user', text:str, ts:str}, ...] — full regen conversation
     auto_description_enabled = Column(Boolean, default=True, nullable=False, server_default="true")  # Per-segment opt-in/out for auto-description sweeper
     description_model = Column(String(100), nullable=True)  # LLM model name used to generate the description
+    slug_gen_history = Column(JSON, nullable=True, default=list)  # [{role:'llm'|'user', text:str, ts:str}, ...] — LLM slug generation conversation
 
     # Relationships
     rundown = relationship("Rundown", back_populates="rundown_items")
