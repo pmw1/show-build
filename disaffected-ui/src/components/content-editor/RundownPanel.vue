@@ -384,7 +384,7 @@
                              editor's avatar. Both are siblings of (not inside)
                              .compact-rundown-row so the row's grey filter never
                              touches them — they stay full colour. -->
-                        <div v-if="isLockedByOther(item)" class="locked-padlock-overlay" :title="`Locked — being edited by another user`">
+                        <div v-if="isLockedByOther(item)" class="locked-padlock-leading" :title="`Locked — being edited by another user`">
                           <v-icon class="locked-padlock-icon" size="20">mdi-lock</v-icon>
                         </div>
                         <div v-if="presentUsersFor(item).length > 0" class="presence-stack">
@@ -3624,19 +3624,21 @@ defineExpose({
 
 /* Red padlock centered over the greyed locked row (todo #41). pointer-events
    none so it never blocks the row's click/dblclick (take-over still works). */
-.locked-padlock-overlay {
+/* Padlock as the FIRST thing in a locked row: anchored to the left edge,
+   vertically centered. Card-level overlay (sibling of the greyed row) so it
+   stays vibrant red and is not desaturated by the row filter. */
+.locked-padlock-leading {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 50%;
+  left: 4px;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 6;
   pointer-events: none;
 }
-.locked-padlock-overlay .locked-padlock-icon {
+.locked-padlock-leading .locked-padlock-icon {
   color: #ff1100 !important;   /* vibrant red */
 }
 /* Only the ROW CONTENT goes grey. The padlock + presence avatar are siblings
@@ -3644,6 +3646,9 @@ defineExpose({
    them — they stay full colour. */
 .rundown-item-card.locked-by-other .compact-rundown-row {
   filter: grayscale(1) brightness(0.97);
+  /* Make room at the left for the leading padlock so it reads as the first
+     element in the row rather than overlapping the index cell. */
+  padding-left: 26px;
 }
 .rundown-item-card.locked-by-other .compact-rundown-row .index-number,
 .rundown-item-card.locked-by-other .compact-rundown-row .type-label,
