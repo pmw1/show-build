@@ -1034,6 +1034,34 @@ export default {
   background-color: rgba(229, 57, 53, 0.78);
 }
 
+/* ===== Delete animation (per Kevin) =====
+   pm-del-dying: 3 rapid RED background flashes + the text fades out over 500ms,
+   then JS deletes the block. pm-del-neighbor: the two now-adjacent neighbours
+   flash BLUE twice (on/off/on/off) and resolve. */
+@keyframes pm-del-red-flash {
+  0%, 100% { background-color: transparent; }
+  50%      { background-color: rgba(229, 57, 53, 0.55); }
+}
+@keyframes pm-del-text-fade {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes pm-del-blue-flash {
+  0%, 50%, 100% { background-color: transparent; }
+  25%, 75%      { background-color: rgba(33, 150, 243, 0.45); }
+}
+.script-editor-host :deep(p.pm-del-dying) {
+  border-radius: 4px;
+  /* Red bg flash 3x (0.6s) AND fade the whole block (incl. text) out over 500ms
+     starting just after the flashing begins; holds faded until JS deletes it. */
+  animation: pm-del-red-flash 0.2s ease-in-out 3, pm-del-text-fade 0.5s ease-in 0.1s 1 forwards !important;
+}
+.script-editor-host :deep(p.pm-del-neighbor) {
+  border-radius: 4px;
+  /* two on/off cycles across 400ms = on,off,on,off then resolve. */
+  animation: pm-del-blue-flash 0.4s ease-in-out 1 !important;
+}
+
 /* ===== Needs-attention (legacy port) ===== */
 /* Red-tint background on a flagged paragraph (node decoration class). */
 .script-editor-host :deep(p.pm-needs-attention) {

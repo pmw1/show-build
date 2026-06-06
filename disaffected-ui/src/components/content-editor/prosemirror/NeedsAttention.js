@@ -125,17 +125,42 @@ export const NeedsAttention = Extension.create({
     return [
       new Plugin({
         key: needsAttentionKey,
+        // Plugin state holds the delete-flash descriptor so it survives redraws
+        // and drives node-decoration classes (the only reliable way to animate a
+        // PM block — imperative styles get wiped on re-render). Shapes:
+        //   { phase: 'dying', index }            — block being deleted (red flash + fade)
+        //   { phase: 'neighbors', indices: [] }  — post-delete blue flash on neighbors
+        state: {
+          init: () => ({ flash: null }),
+          apply(tr, prev) {
+            const meta = tr.getMeta(needsAttentionKey);
+            if (meta && 'flash' in meta) return { flash: meta.flash };
+            // Map indices through doc changes isn't needed — flashes are short
+            // and keyed to fresh dispatches; just carry forward.
+            return prev;
+          },
+        },
         props: {
           decorations: (state) => {
             const decos = [];
+            const ps = needsAttentionKey.getState(state);
+            const flash = ps && ps.flash;
+            let blockIndex = -1;
             state.doc.forEach((node, offset) => {
-              if (node.type.name !== 'paragraph') return;
+              if (node.type.name !== 'paragraph') { blockIndex += 1; return; }
+              blockIndex += 1;
+              const idx = blockIndex;
               // Red-tint background while flagged.
               if (node.attrs.needsAttention) {
                 decos.push(Decoration.node(offset, offset + node.nodeSize, { class: 'pm-needs-attention' }));
               }
-              // Right-side hover controls (flag + delete). The block is made
-              // position:relative by the drag gutter; we anchor at block start.
+              // Delete-flash classes (#delete-anim).
+              if (flash && flash.phase === 'dying' && flash.index === idx) {
+                decos.push(Decoration.node(offset, offset + node.nodeSize, { class: 'pm-del-dying' }));
+              } else if (flash && flash.phase === 'neighbors' && flash.indices.includes(idx)) {
+                decos.push(Decoration.node(offset, offset + node.nodeSize, { class: 'pm-del-neighbor' }));
+              }
+              // Right-side hover controls (flag + delete).
               decos.push(
                 Decoration.widget(offset + 1, () => buildControls(node, offset), {
                   side: -1,
@@ -157,12 +182,11 @@ export const NeedsAttention = Extension.create({
               if (Number.isNaN(pos)) return false;
               const editor = ext.editor;
               if (action === 'flag') {
-                // Toggle, then ask the host to open/close the note panel.
                 editor.commands.toggleNeedsAttention(pos);
                 const fn = editor.options.onFlagParagraph;
                 if (typeof fn === 'function') fn(pos);
               } else if (action === 'delete') {
-                editor.commands.deleteBlockAt(pos);
+                animateDeleteAt(view, pos);
               }
               return true;
             },
@@ -172,6 +196,69 @@ export const NeedsAttention = Extension.create({
     ];
   },
 });
+
+// Choreographed delete (per Kevin):
+//   1. 3 rapid RED flashes of the paragraph background (~600ms),
+//   2. text FADES out over 500ms (overlaps the tail),
+//   3. delete the block + collapse the gap,
+//   4. the two now-adjacent neighbours flash BLUE twice (on/off/on/off ~400ms),
+//   5. resolve to normal.
+// Steps 1-2 run while the node still exists (class via decoration). Then one real
+// delete tr; step 4 marks the neighbours (by their post-delete indices) for the
+// blue flash, cleared after it finishes. All flash dispatches are addToHistory:
+// false so only the delete itself is one undo step.
+const DEL_RED_MS = 600;   // 3 flashes
+const DEL_FADE_MS = 500;  // text fade
+const DEL_BLUE_MS = 400;  // neighbour double-flash
+
+function topLevelIndexAtPos(doc, pos) {
+  let idx = -1;
+  let found = -1;
+  doc.forEach((node, offset) => {
+    idx += 1;
+    if (found === -1 && pos >= offset && pos < offset + node.nodeSize) found = idx;
+  });
+  return found;
+}
+
+function animateDeleteAt(view, pos) {
+  const startIdx = topLevelIndexAtPos(view.state.doc, pos);
+  if (startIdx < 0) return;
+
+  // Phase 1+2: red flash + fade (decoration class on the dying block).
+  const t1 = view.state.tr.setMeta(needsAttentionKey, { flash: { phase: 'dying', index: startIdx } });
+  t1.setMeta('addToHistory', false);
+  view.dispatch(t1);
+
+  setTimeout(() => {
+    // Resolve the dying block's live range NOW (indices may have shifted if the
+    // user edited during the animation — recompute from the same index).
+    const doc = view.state.doc;
+    let from = null; let to = null; let i = -1;
+    doc.forEach((node, offset) => { i += 1; if (i === startIdx) { from = offset; to = offset + node.nodeSize; } });
+    if (from == null) { // block gone already — just clear
+      const c = view.state.tr.setMeta(needsAttentionKey, { flash: null }); c.setMeta('addToHistory', false); view.dispatch(c);
+      return;
+    }
+    // Phase 3: the real delete (one undo step) + mark neighbours for blue flash.
+    const del = view.state.tr.delete(from, to);
+    del.setMeta('addToHistory', true);
+    // After deletion the block that WAS at startIdx+1 shifts down to startIdx;
+    // its neighbours are startIdx-1 and startIdx (the formerly-next block).
+    const neighbours = [];
+    if (startIdx - 1 >= 0) neighbours.push(startIdx - 1);
+    neighbours.push(startIdx); // formerly startIdx+1, now adjacent
+    del.setMeta(needsAttentionKey, { flash: { phase: 'neighbors', indices: neighbours } });
+    view.dispatch(del.scrollIntoView());
+
+    // Phase 4->5: clear the blue flash after it runs.
+    setTimeout(() => {
+      const clear = view.state.tr.setMeta(needsAttentionKey, { flash: null });
+      clear.setMeta('addToHistory', false);
+      view.dispatch(clear);
+    }, DEL_BLUE_MS + 60);
+  }, Math.max(DEL_RED_MS, DEL_FADE_MS) + 20);
+}
 
 /** Build the right-side hover control cluster (flag + delete) for a paragraph. */
 function buildControls(node, pos) {
