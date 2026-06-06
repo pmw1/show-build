@@ -368,6 +368,40 @@ Generate the cold open now:`
   },
 
   // ========================================
+  // Multi-select "Modify with AI" Prompt
+  // ========================================
+  // Powers the multi-select toolbar's Modify with AI. The whole script is sent
+  // as context (line-numbered) but only the SELECTED lines are modified per the
+  // user's instruction/quick-action; the model returns the FULL reworked script
+  // which replaces the current one (one undo step). Editable/overridable via the
+  // Prompt Manager (category 'modify'). Variables: fullSegment, selectedText,
+  // selectedLineNumbers, instruction.
+  'modify-blocks': {
+    version: '1.0',
+    description: 'Modify the selected lines of a script per an instruction, returning the whole reworked script. Powers multi-select Modify with AI.',
+    lastModified: '2026-06-06',
+    temperature: 0.5,
+    maxTokens: 4000,
+    systemPrompt: 'You are a careful broadcast script editor. You make ONLY the requested change to the specified lines and return the entire script otherwise unchanged.',
+    template: (params) => {
+      const { fullSegment = '', selectedText = '', selectedLineNumbers = '', instruction = '' } = params
+      return `You are editing a broadcast script. Below is the FULL script with line numbers (for context), then the SELECTED lines to modify, then the instruction.
+
+Modify ONLY the selected lines per the instruction. Leave every other line EXACTLY as written. Then return the ENTIRE script (all lines, in order) with only those changes applied.
+
+INSTRUCTION: ${instruction}
+
+FULL SCRIPT (line-numbered, for context only — do not output the numbers):
+${fullSegment}
+
+SELECTED LINES TO MODIFY (lines ${selectedLineNumbers}):
+${selectedText}
+
+Return the COMPLETE rewritten script as plain text, with paragraphs separated by a blank line. Do NOT include line numbers, do NOT add any preamble or commentary, and do NOT wrap the output in code fences.`
+    }
+  },
+
+  // ========================================
   // Analysis & Enhancement Prompts
   // ========================================
 

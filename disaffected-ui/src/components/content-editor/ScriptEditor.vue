@@ -95,6 +95,15 @@
          cards' <v-card>/<v-btn> render. A manual `new Editor({element})` mount
          bypasses that forwarding and the cue cards come up blank. -->
     <editor-content :editor="editor" class="script-editor-host" />
+
+    <!-- Modify with AI (multi-select): line-numbered selection + instruction;
+         AI reworks the selected lines in the context of the whole script and
+         returns the full piece, which replaces the script in one undo step. -->
+    <ModifyWithAiModal
+      v-model:show="aiModifyOpen"
+      :ctx="aiModifyContext"
+      @apply="applyAiModification"
+    />
   </div>
 </template>
 
@@ -105,12 +114,13 @@ import { buildScriptExtensions } from './prosemirror/extensions.js';
 import { lineNumbersPluginKey } from './prosemirror/LineNumbers.js';
 import { readMultiSelection } from './prosemirror/BlockMultiSelect.js';
 import { markdownToDoc, docToMarkdown, assertNoLoss } from '@/utils/prosemirror/markdown.js';
+import ModifyWithAiModal from './modals/ModifyWithAiModal.vue';
 
 const SAVE_DEBOUNCE_MS = 1500;
 
 export default {
   name: 'ScriptEditor',
-  components: { EditorContent },
+  components: { EditorContent, ModifyWithAiModal },
   props: {
     scriptContent: { type: String, default: '' },
     // When false, the editor renders the script with full Script-Mode styling
@@ -447,14 +457,106 @@ export default {
     // bulk-modify endpoint exists, wire it here (read the selection via
     // readMultiSelection, send block content + a prompt, apply the result in one
     // transaction so UndoRedo covers it).
-    function modifyWithAi() {
-      const sel = readMultiSelection(editor.value);
-      if (!sel.count) return;
-      // eslint-disable-next-line no-console
-      console.log('[modifyWithAi stub] selected block indices:', sel.indices);
-      if (window.notifyUserStandard) {
-        window.notifyUserStandard(`AI bulk-modify coming soon (${sel.count} block${sel.count > 1 ? 's' : ''} selected)`, '#7e57c2', 3000);
+    // ── Modify with AI ──────────────────────────────────────────────────────
+    // Build the line-numbered context for the AI-modify prompt. Line numbers
+    // match the on-screen gutter exactly: only TOP-LEVEL paragraphs are numbered
+    // (cues skipped), continuous across the show via lineNumberOffset (so the
+    // first paragraph of this item = offset + 1). Mirrors LineNumbers.js.
+    // Returns { fullSegment, selectedText, selectedLineNumbers, indices } where
+    // the two text blobs are line-number-prefixed ("12: ...") and
+    // selectedLineNumbers is a compact range string ("12-14, 17").
+    function buildModifySelectionContext() {
+      const ed = editor.value;
+      if (!ed || !ed.state) return null;
+      const sel = readMultiSelection(ed);
+      if (!sel.count) return null;
+
+      const offset = ed.storage?.lineNumbers?.offset || 0;
+      const selectedSet = new Set(sel.indices);
+      const fullLines = [];
+      const selLines = [];
+      const selNums = [];
+      let lineNo = offset; // running paragraph line number (pre-increment below)
+
+      ed.state.doc.forEach((node, _pos, blockIndex) => {
+        if (node.type.name !== 'paragraph') return; // cues are not line-numbered
+        lineNo += 1;
+        const text = (node.textContent || '');
+        const numbered = `${lineNo}: ${text}`;
+        fullLines.push(numbered);
+        if (selectedSet.has(blockIndex)) {
+          selLines.push(numbered);
+          selNums.push(lineNo);
+        }
+      });
+
+      return {
+        indices: sel.indices,
+        count: sel.count,
+        fullSegment: fullLines.join('\n'),
+        selectedText: selLines.join('\n'),
+        selectedLineNumbers: compactRanges(selNums),
+      };
+    }
+
+    // [12,13,14,17] -> "12-14, 17"
+    function compactRanges(nums) {
+      if (!nums.length) return '';
+      const sorted = [...nums].sort((a, b) => a - b);
+      const out = [];
+      let start = sorted[0];
+      let prev = sorted[0];
+      for (let i = 1; i <= sorted.length; i++) {
+        const n = sorted[i];
+        if (n === prev + 1) { prev = n; continue; }
+        out.push(start === prev ? `${start}` : `${start}-${prev}`);
+        start = prev = n;
       }
+      return out.join(', ');
+    }
+
+    // Modal state. modifyWithAi() (toolbar click) snapshots the selection
+    // context and opens the modal; the modal component (host-rendered) collects
+    // the instruction/preset, calls the LLM via the Prompt Override system, and
+    // calls applyAiModification() with the rewritten passage.
+    const aiModifyOpen = ref(false);
+    const aiModifyContext = ref(null);
+
+    function modifyWithAi() {
+      const ctx = buildModifySelectionContext();
+      if (!ctx) {
+        if (window.notifyUserStandard) {
+          window.notifyUserStandard('Select one or more paragraphs first', '#7e57c2', 2500);
+        }
+        return;
+      }
+      aiModifyContext.value = ctx;
+      aiModifyOpen.value = true;
+    }
+
+    // Replace the ENTIRE script with the AI's reworked version (the AI returns
+    // the whole piece as markdown, with only the selected blocks changed). Done
+    // as ONE ProseMirror transaction over the whole doc so it is a single
+    // UNDO step (Ctrl+Z reverts the whole rewrite) and flows into the normal
+    // autosave + version-history pipeline (onUpdate -> update:scriptContent).
+    // `newMarkdown` is the full reworked script returned by the LLM.
+    function applyAiModification(newMarkdown) {
+      const ed = editor.value;
+      if (!ed || typeof newMarkdown !== 'string' || !newMarkdown.trim()) return;
+      const { state, view } = ed;
+
+      // Parse the returned markdown into a PM doc (same path as load/reload), so
+      // speaker/cue/bullet attrs round-trip. Replace the whole doc content in a
+      // single tr — NOT setContent (which clears undo history). This keeps it
+      // undoable and emits onUpdate (autosave + version snapshot).
+      const parsed = markdownToDoc(newMarkdown);
+      const newDoc = parsed.doc; // a full doc node
+      const tr = state.tr.replaceWith(0, state.doc.content.size, newDoc.content);
+      tr.setMeta('addToHistory', true); // ensure it's a discrete undo step
+      view.dispatch(tr);
+      view.focus();
+      aiModifyOpen.value = false;
+      aiModifyContext.value = null;
     }
 
     // Parent reach-in contract (mirrors EditorPanel).
@@ -486,6 +588,10 @@ export default {
       changeSpeakerOnSelection,
       modifyWithAi,
       clearMultiSelection,
+      // Modify-with-AI modal state + apply hook (modal is host-rendered)
+      aiModifyOpen,
+      aiModifyContext,
+      applyAiModification,
     };
   },
 };

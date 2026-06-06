@@ -553,6 +553,17 @@ const operationVariables = {
     { name: 'duration', description: 'Episode duration', example: '45 minutes' }
   ],
 
+  // Modify operations
+  // modify-blocks powers the multi-select "Modify with AI": the whole script is
+  // sent as line-numbered context, only the selected lines are modified per the
+  // instruction, and the model returns the full reworked script.
+  'modify-blocks': [
+    { name: 'instruction', description: "The user's instruction / chosen quick-action (what to do to the selected lines)", example: 'Fix grammar without changing meaning' },
+    { name: 'selectedText', description: 'The selected lines to modify, each prefixed with its line number', example: '12: When confronted, the narcissist...' },
+    { name: 'selectedLineNumbers', description: 'Compact range of the selected line numbers', example: '12-14, 17' },
+    { name: 'fullSegment', description: 'The ENTIRE script, line-numbered, for context (the model returns the whole thing reworked)', example: '1: ...\\n2: ...' }
+  ],
+
   // Analyze operations
   'analyze-script-tone': [
     { name: 'script', description: 'Script content to analyze', example: 'Full script text...' },

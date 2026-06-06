@@ -382,6 +382,10 @@ async def get_available_operations(
             "compose-show-notes",
             "compose-newsletter",
             "compose-segment-transition"
+        ],
+        "modify": [
+            # Multi-select "Modify with AI": modify selected lines, return whole script.
+            "modify-blocks"
         ]
     }
 
