@@ -575,20 +575,27 @@ export default {
 
 /* ===== Bulleted paragraph =====
    A paragraph with the `bullet` attr round-trips as <p class="speaker bullet">.
-   Render a • glyph before the first line and indent the text — ports the legacy
-   .paragraph-bullet visual. The marker is drawn via ::before so it doesn't enter
-   the editable text. */
+   Render a • glyph and indent the TEXT — ports the legacy .paragraph-bullet
+   visual. The marker is drawn via ::before so it doesn't enter the editable text.
+
+   IMPORTANT layout rules:
+   - Use padding-left (NOT margin-left) so the paragraph BOX doesn't move. The
+     line-number widget anchors to the paragraph box edge (left: -3.2em), so
+     moving the box would drag the number right — the number must stay in the
+     gutter, un-indented.
+   - The bullet itself sits at the paragraph's natural left edge (left: 0,
+     inside the padding), so the BULLET is NOT indented — only the text shifts.
+   - The speaker header is a separate widget ABOVE the paragraph and is
+     unaffected; the bullet centers on the paragraph's own first text line. */
 .script-editor-host :deep(.ProseMirror p.bullet) {
   position: relative;
-  /* Indent the WHOLE paragraph to the right (every line, not just the first),
-     and reserve room for the marker on the left of that indent. */
-  margin-left: 2.4em;
-  padding-left: 1.4em;
+  /* Indent only the TEXT (every line) to the right; the box stays put. */
+  padding-left: 2.4em;
 }
 .script-editor-host :deep(.ProseMirror p.bullet)::before {
   content: "\2022"; /* • */
   position: absolute;
-  left: 0;
+  left: 0.2em; /* paragraph's natural left edge — NOT indented with the text */
   top: 0;
   /* The marker box is exactly ONE text line tall (font-size × line-height of the
      paragraph) and centers the glyph within it, so the • lands on the vertical
@@ -603,18 +610,36 @@ export default {
   color: #000; /* black */
   pointer-events: none;
 }
+/* When the paragraph ALSO begins a speaker run, the header widget occupies the
+   top of the box and the text starts below it — push the bullet down by the
+   header's full height (--pm-speaker-header-h) so the • sits on the first line
+   of TEXT, not on the speaker header. :has() reacts to the header child. */
+.script-editor-host :deep(.ProseMirror p.bullet:has(.pm-speaker-header))::before {
+  top: var(--pm-speaker-header-h, 32px);
+}
 
 /* ===== Speaker header =====
    A non-editable widget injected (by the SpeakerHeaders plugin) above each
    paragraph that begins a new speaker run — top of doc / after a cue / when the
    speaker changes. Ports the legacy .speaker-header / .speaker-name visual:
-   small uppercase name with a speaker-colored bottom border. */
+   small uppercase name with a speaker-colored bottom border.
+
+   The header's TOTAL vertical footprint is pinned to --pm-speaker-header-h so a
+   bulleted paragraph that also starts a speaker run can offset its • by exactly
+   that amount (see the p.bullet:has(.pm-speaker-header) rule above). Keep the
+   box geometry below summing to this value:
+     margin-top(8) + height(28, incl. padding + border) + margin-bottom(4) = 40. */
+.script-editor-host :deep(.ProseMirror) {
+  --pm-speaker-header-h: 40px;
+}
 .script-editor-host :deep(.pm-speaker-header) {
   display: flex;
   align-items: center;
-  padding: 4px 2px;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 2px 2px;
   margin-top: 8px;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   border-bottom: 2px solid;
   user-select: none;
 }
@@ -625,6 +650,13 @@ export default {
   font-weight: 600;
   font-size: 0.95rem;
   line-height: 1.2;
+}
+/* The speaker header widget is rendered INSIDE the <p>, so a bulleted
+   paragraph's padding-left would otherwise indent the header too. Pull it back
+   to the paragraph's true left edge so the header is unaffected by the bullet
+   indent (and the • only marks the first line of TEXT, not the header). */
+.script-editor-host :deep(.ProseMirror p.bullet .pm-speaker-header) {
+  margin-left: -2.4em;
 }
 
 /* ===== Per-paragraph line numbers ===== */
