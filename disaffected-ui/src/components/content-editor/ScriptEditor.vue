@@ -1098,15 +1098,15 @@ export default {
    when flagged; anchored to the right edge of the paragraph box. */
 .script-editor-host :deep(na-controls) {
   position: absolute;
-  /* pushed off to the right, clear of the text, and vertically centered to the
-     whole paragraph block (not pinned to the top). */
-  right: -0.6em;
+  /* pushed further off to the right (clear of the text), vertically centered to
+     the whole paragraph block, with the flag + delete stacked tightly. */
+  right: -2.2em;
   top: 50%;
   transform: translateY(-50%);
   display: inline-flex;
   flex-direction: column; /* flag atop delete */
   align-items: center;
-  gap: 0.35em;
+  gap: 0.05em;
   opacity: 0;
   transition: opacity 0.12s ease;
   z-index: 3;
