@@ -1175,12 +1175,6 @@ const showRegions = ref(_userPrefs.get('rundown.showRegions', true))
 // ──────────────────────────────────────────────────────────────────
 const _messagesApi = useMessages()
 
-function _currentMe() {
-  try {
-    const me = JSON.parse(localStorage.getItem('user-data') || '{}')
-    return { id: me?.id ?? null, username: me?.username ?? null }
-  } catch { return { id: null, username: null } }
-}
 
 // ──────────────────────────────────────────────────────────────────
 // Near-instant lock state (todo #41). Source of truth = the server
@@ -1191,14 +1185,10 @@ function _currentMe() {
 //   (only holds locks owned by OTHER users; my own lock is excluded.)
 // ──────────────────────────────────────────────────────────────────
 const lockedByOther = ref(new Map())
-let _lockEventSource = null
+let _lockPollTimer = null
+const LOCK_POLL_MS = 4000  // poll /active every 4s (cheap query; no streaming)
 
-function _isMine(holderUserId) {
-  const { id: myId } = _currentMe()
-  return myId != null && String(holderUserId) === String(myId)
-}
-
-async function _seedActiveLocks() {
+async function _refreshActiveLocks() {
   try {
     const token = localStorage.getItem('auth-token')
     const res = await fetch('/api/locks/active', {
@@ -1213,53 +1203,20 @@ async function _seedActiveLocks() {
           { holder_user_id: l.holder_user_id, holder_username: l.holder_username })
       }
     }
-    lockedByOther.value = m
+    lockedByOther.value = m  // new ref so Vue reacts
   } catch (e) {
-    console.warn('[locks] seed /active failed:', e)
-  }
-}
-
-function _applyLockEvent(evt) {
-  const itemId = evt?.rundown_item_asset_id != null ? String(evt.rundown_item_asset_id) : null
-  if (!itemId) return
-  const next = new Map(lockedByOther.value)  // new ref so Vue reacts
-  if (evt.action === 'released') {
-    next.delete(itemId)
-  } else {
-    // acquired / taken_over
-    if (_isMine(evt.holder_user_id)) {
-      next.delete(itemId)  // my own lock never greys my row
-    } else {
-      next.set(itemId, { holder_user_id: evt.holder_user_id, holder_username: evt.holder_username })
-    }
-  }
-  lockedByOther.value = next
-}
-
-function _connectLockEvents() {
-  try {
-    if (_lockEventSource) { _lockEventSource.close(); _lockEventSource = null }
-    const token = localStorage.getItem('auth-token') || ''
-    // EventSource can't set headers — token goes via query param.
-    _lockEventSource = new EventSource(`/api/locks/events?token=${encodeURIComponent(token)}`)
-    _lockEventSource.addEventListener('lock', (e) => {
-      try { _applyLockEvent(JSON.parse(e.data)) } catch (err) { console.warn('[locks] bad event', err) }
-    })
-    _lockEventSource.onerror = () => {
-      // EventSource auto-reconnects; on reconnect, re-seed to catch missed events.
-      _seedActiveLocks()
-    }
-  } catch (e) {
-    console.warn('[locks] EventSource connect failed:', e)
+    console.warn('[locks] /active poll failed:', e)
   }
 }
 
 onMounted(() => {
-  _seedActiveLocks()
-  _connectLockEvents()
+  _refreshActiveLocks()
+  _lockPollTimer = setInterval(() => {
+    if (!document.hidden) _refreshActiveLocks()
+  }, LOCK_POLL_MS)
 })
 onUnmounted(() => {
-  if (_lockEventSource) { _lockEventSource.close(); _lockEventSource = null }
+  if (_lockPollTimer) { clearInterval(_lockPollTimer); _lockPollTimer = null }
 })
 
 // Users present on this item, for the avatar. Prefer the authoritative lock

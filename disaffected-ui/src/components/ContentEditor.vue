@@ -4702,28 +4702,24 @@ Try dropping an image or video file here!`
         this.lastCapturedSnapshot = null;
       }
 
-      // Unregister previous active edit and release lock
+      // Unregister previous active edit and release lock. FIRE-AND-FORGET — these
+      // are background presence/lock bookkeeping and must NOT block the item
+      // switch on network round-trips (awaiting them made switching very slow
+      // once locking was enabled — todo #41).
       if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
         const prevAssetId = this.rundownItems[this.selectedItemIndex].asset_id;
         if (prevAssetId) {
-          // Release segment lock first
+          // Release segment lock (fire-and-forget; the SSE 'released' event
+          // propagates to other users on its own).
           if (this.segmentLockState && this.segmentLockState.currentAssetId.value === prevAssetId) {
-            try {
-              await this.segmentLockState.releaseLock();
-              console.log('🔓 Released segment lock for', prevAssetId);
-            } catch (err) {
-              console.warn('Failed to release segment lock:', err);
-            }
+            Promise.resolve(this.segmentLockState.releaseLock())
+              .catch(err => console.warn('Failed to release segment lock:', err));
           }
-          // Unregister active edit
-          try {
-            await axios.post('/api/housekeeping/active-edit/unregister',
-              { asset_id: prevAssetId },
-              { headers: this.getAuthHeaders() }
-            );
-          } catch (err) {
-            console.warn('Failed to unregister active edit:', err);
-          }
+          // Unregister active edit (fire-and-forget).
+          axios.post('/api/housekeeping/active-edit/unregister',
+            { asset_id: prevAssetId },
+            { headers: this.getAuthHeaders() }
+          ).catch(err => console.warn('Failed to unregister active edit:', err));
         }
       }
 
@@ -4791,28 +4787,24 @@ Try dropping an image or video file here!`
         // Fetch version history for undo functionality
         this.fetchVersionHistory();
 
-        // Register new active edit
+        // Register new active edit + acquire segment lock. FIRE-AND-FORGET so the
+        // item switch is instant; the lock/presence state updates reactively when
+        // these resolve (todo #41). acquireLock updates segmentLockState refs on
+        // its own, which drives the editor's locked overlay.
         const newAssetId = itemToLoad.asset_id;
         if (newAssetId) {
-          try {
-            await axios.post('/api/housekeeping/active-edit/register',
-              { asset_id: newAssetId },
-              { headers: this.getAuthHeaders() }
-            );
-            console.log('✅ Registered active edit for', newAssetId);
-          } catch (err) {
-            console.warn('Failed to register active edit:', err);
-          }
+          axios.post('/api/housekeeping/active-edit/register',
+            { asset_id: newAssetId },
+            { headers: this.getAuthHeaders() }
+          ).catch(err => console.warn('Failed to register active edit:', err));
 
-          // Try to acquire segment lock
           if (this.segmentLockState) {
-            const lockResult = await this.segmentLockState.acquireLock(newAssetId);
-            if (lockResult.success) {
-              console.log('🔒 Acquired segment lock for', newAssetId);
-            } else if (lockResult.locked) {
-              console.log('🔒 Segment locked by:', lockResult.lockedBy);
-              // Lock info is automatically updated in segmentLockState
-            }
+            Promise.resolve(this.segmentLockState.acquireLock(newAssetId))
+              .then(lockResult => {
+                if (lockResult?.success) console.log('🔒 Acquired segment lock for', newAssetId);
+                else if (lockResult?.locked) console.log('🔒 Segment locked by:', lockResult.lockedBy);
+              })
+              .catch(err => console.warn('acquireLock failed:', err));
           }
         }
       } else {
