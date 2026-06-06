@@ -377,27 +377,36 @@ Generate the cold open now:`
   // Prompt Manager (category 'modify'). Variables: fullSegment, selectedText,
   // selectedLineNumbers, instruction.
   'modify-blocks': {
-    version: '1.0',
-    description: 'Modify the selected lines of a script per an instruction, returning the whole reworked script. Powers multi-select Modify with AI.',
+    version: '2.0',
+    description: 'Rewrite ONLY the selected lines of a script per an instruction, returned per-line (keyed by line number) so each becomes a revision proposal. Powers multi-select Modify with AI.',
     lastModified: '2026-06-06',
     temperature: 0.5,
     maxTokens: 4000,
-    systemPrompt: 'You are a careful broadcast script editor. You make ONLY the requested change to the specified lines and return the entire script otherwise unchanged.',
+    systemPrompt: 'You are a careful broadcast script editor. You rewrite ONLY the specified lines per the instruction and return each rewritten line keyed by its line number.',
     template: (params) => {
       const { fullSegment = '', selectedText = '', selectedLineNumbers = '', instruction = '' } = params
-      return `You are editing a broadcast script. Below is the FULL script with line numbers (for context), then the SELECTED lines to modify, then the instruction.
+      return `You are editing a broadcast script. Below is the FULL script with line numbers (for context only), then the SELECTED lines to rewrite, then the instruction.
 
-Modify ONLY the selected lines per the instruction. Leave every other line EXACTLY as written. Then return the ENTIRE script (all lines, in order) with only those changes applied.
+Rewrite ONLY the selected lines per the instruction. Use the full script for context but DO NOT change or output any non-selected line.
 
 INSTRUCTION: ${instruction}
 
-FULL SCRIPT (line-numbered, for context only — do not output the numbers):
+FULL SCRIPT (line-numbered, for context only):
 ${fullSegment}
 
-SELECTED LINES TO MODIFY (lines ${selectedLineNumbers}):
+SELECTED LINES TO REWRITE (lines ${selectedLineNumbers}):
 ${selectedText}
 
-Return the COMPLETE rewritten script as plain text, with paragraphs separated by a blank line. Do NOT include line numbers, do NOT add any preamble or commentary, and do NOT wrap the output in code fences.`
+OUTPUT FORMAT — return ONE line per selected line, each prefixed with its line
+number in square brackets, exactly like the input numbering:
+[12] the rewritten text for line 12
+[13] the rewritten text for line 13
+
+Rules:
+- Output ONLY the selected lines (the ones listed above), each on its own line, prefixed with [number].
+- Keep the SAME line numbers as the input — do not renumber, add, or drop lines.
+- No commentary, no preamble, no blank lines between entries, no code fences.
+- If a selected line should become empty, output its number with empty text (e.g. "[14] ").`
     }
   },
 

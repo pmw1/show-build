@@ -545,9 +545,12 @@ export default {
       const fullLines = [];
       const selLines = [];
       const selNums = [];
+      // line number -> the selected paragraph's text range { from, to } at build
+      // time, so applyAiModification can target the right block per returned line.
+      const lineToRange = {};
       let lineNo = offset; // running paragraph line number (pre-increment below)
 
-      ed.state.doc.forEach((node, _pos, blockIndex) => {
+      ed.state.doc.forEach((node, pos, blockIndex) => {
         if (node.type.name !== 'paragraph') return; // cues are not line-numbered
         lineNo += 1;
         const text = (node.textContent || '');
@@ -556,6 +559,8 @@ export default {
         if (selectedSet.has(blockIndex)) {
           selLines.push(numbered);
           selNums.push(lineNo);
+          // paragraph text content spans (pos+1 .. pos+1+contentSize)
+          lineToRange[lineNo] = { from: pos + 1, to: pos + node.nodeSize - 1 };
         }
       });
 
@@ -565,6 +570,7 @@ export default {
         fullSegment: fullLines.join('\n'),
         selectedText: selLines.join('\n'),
         selectedLineNumbers: compactRanges(selNums),
+        lineToRange,
       };
     }
 
@@ -835,44 +841,67 @@ export default {
     // UNDO step (Ctrl+Z reverts the whole rewrite) and flows into the normal
     // autosave + version-history pipeline (onUpdate -> update:scriptContent).
     // `newMarkdown` is the full reworked script returned by the LLM.
-    function applyAiModification(newMarkdown) {
+    // Apply the AI result as REVISION PROPOSALS, one per selected line, so the
+    // user accepts/rejects each with the ✓/✗ system. `aiResult` is the model's
+    // per-line output ("[12] rewritten text" lines). For each line whose rewrite
+    // DIFFERS from the current text, we mark that block's text as a revision with
+    // the rewrite as the replacement (the original stays visible, struck). Lines
+    // that are unchanged or unparseable are skipped. One transaction (one undo
+    // step). Non-sequential selections are fine — each line maps via lineToRange.
+    function applyAiModification(aiResult) {
       const ed = editor.value;
-      if (!ed || typeof newMarkdown !== 'string' || !newMarkdown.trim()) return false;
+      const ctx = aiModifyContext.value;
+      if (!ed || !ctx || typeof aiResult !== 'string' || !aiResult.trim()) return false;
       const { state, view } = ed;
 
-      // Parse the returned markdown into a PM doc (same path as load/reload), so
-      // speaker/cue/bullet attrs round-trip.
-      const parsed = markdownToDoc(newMarkdown);
-      const newDoc = parsed.doc;
-
-      // ── WIPE GUARD (data-loss protection) ────────────────────────────────
-      // The AI is asked to return the WHOLE script with only the selected lines
-      // changed. If it instead returns only the selected snippet (or empties
-      // out), a naive whole-doc replace would WIPE the segment. Refuse to apply
-      // when the result is implausibly short vs the current script. The caller
-      // surfaces this so the user can retry; the script is left untouched.
-      const oldLen = state.doc.textContent.trim().length;
-      const newLen = (newDoc.textContent || '').trim().length;
-      const newBlocks = newDoc.childCount;
-      const tooShort = oldLen > 200 && newLen < oldLen * 0.5;
-      const empty = newLen === 0 || newBlocks === 0;
-      if (empty || tooShort) {
-        console.warn('[applyAiModification] REFUSED — result too short, likely the AI returned only the selection (oldLen', oldLen, 'newLen', newLen, ')');
-        if (window.notifyUserStandard) {
-          window.notifyUserStandard('AI returned only part of the script — not applied (your text is unchanged). Try again.', '#f44336', 5000);
-        }
+      // Parse "[N] text" lines -> { lineNo: text }. Tolerant of leading spaces.
+      const rewrites = {};
+      for (const raw of aiResult.split('\n')) {
+        const m = raw.match(/^\s*\[(\d+)\]\s?(.*)$/);
+        if (m) rewrites[parseInt(m[1], 10)] = m[2];
+      }
+      const lineNos = Object.keys(rewrites).map(Number);
+      if (!lineNos.length) {
+        if (window.notifyUserStandard) window.notifyUserStandard('AI returned no recognizable line edits — nothing applied.', '#f44336', 4000);
         return false;
       }
 
-      // Replace the whole doc content in a single tr — NOT setContent (which
-      // clears undo history). Keeps it undoable and emits onUpdate (autosave +
-      // version snapshot).
-      const tr = state.tr.replaceWith(0, state.doc.content.size, newDoc.content);
-      tr.setMeta('addToHistory', true); // discrete undo step
+      const user = _revUser();
+      const ts = new Date().toISOString();
+      const revType = state.schema.marks.revision;
+
+      // Build the ranges to mark, descending by position so earlier ranges stay
+      // valid as we add marks (addMark doesn't shift positions, but processing
+      // descending is safe regardless).
+      const targets = [];
+      for (const ln of lineNos) {
+        const range = ctx.lineToRange[ln];
+        if (!range) continue; // line wasn't in the selection
+        const current = state.doc.textBetween(range.from, range.to, '\n', '\n');
+        const next = rewrites[ln];
+        if (next === current) continue; // unchanged — no proposal
+        targets.push({ from: range.from, to: range.to, replacement: next });
+      }
+      if (!targets.length) {
+        if (window.notifyUserStandard) window.notifyUserStandard('AI made no changes to the selected lines.', '#7e57c2', 3000);
+        aiModifyOpen.value = false; aiModifyContext.value = null;
+        return false;
+      }
+      targets.sort((a, b) => b.from - a.from);
+
+      const tr = state.tr;
+      for (const t of targets) {
+        // Empty replacement on a non-empty line = a CUT proposal (replacement '').
+        tr.addMark(t.from, t.to, revType.create({ user, ts, replacement: t.replacement || '' }));
+      }
+      tr.setMeta('addToHistory', true);
       view.dispatch(tr);
       view.focus();
       aiModifyOpen.value = false;
       aiModifyContext.value = null;
+      if (window.notifyUserStandard) {
+        window.notifyUserStandard(`AI proposed ${targets.length} revision${targets.length > 1 ? 's' : ''} — review with ✓ / ✗`, '#7e57c2', 4000);
+      }
       return true;
     }
 
