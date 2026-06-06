@@ -2538,8 +2538,11 @@ defineExpose({
 }
 
 .placeholder-cue-card {
-  max-width: 75%;
-  width: 75%;
+  /* Full-width cue: fill the available editor column so the card matches the
+     paragraph width. The old 75% cap was a legacy (contenteditable-era) value
+     that left the card at ~60-70% of the script area. */
+  max-width: 100%;
+  width: 100%;
   /* Margins removed - alignment now controlled by parent .cue-segment flex container */
   transition: all 0.2s ease;
 }

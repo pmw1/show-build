@@ -600,8 +600,11 @@ function lightenColor(color, percent) {
 }
 
 .image-cue-card {
-  max-width: 75%;
-  width: 75%;
+  /* Full-width IMG cue: fill the editor column so it matches the paragraph
+     width (and the other cue cards). The old 75% cap was a legacy
+     contenteditable-era value. */
+  max-width: 100%;
+  width: 100%;
   /* Margins removed - alignment now controlled by parent .cue-segment flex container */
 }
 
