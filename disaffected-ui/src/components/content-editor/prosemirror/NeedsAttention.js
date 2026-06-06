@@ -31,6 +31,12 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 
 export const needsAttentionKey = new PluginKey('needsAttention');
 
+/** The current username (for "created by"), from localStorage user-data. */
+function currentUser() {
+  try { return JSON.parse(localStorage.getItem('user-data') || '{}').username || 'unknown'; }
+  catch { return 'unknown'; }
+}
+
 /** Find the top-level paragraph block whose start is `pos` (or contains pos). */
 function paragraphAt(doc, pos) {
   let result = null;
@@ -58,7 +64,9 @@ export const NeedsAttention = Extension.create({
             const tr = state.tr.setNodeMarkup(p.from, undefined, {
               ...p.node.attrs,
               needsAttention: next,
+              // Stamp who flagged it on set; clear note + user on unflag.
               flagNote: next ? p.node.attrs.flagNote : '',
+              flagUser: next ? (p.node.attrs.flagUser || currentUser()) : '',
             });
             tr.setMeta('addToHistory', true);
             dispatch(tr);
@@ -89,6 +97,7 @@ export const NeedsAttention = Extension.create({
               ...p.node.attrs,
               needsAttention: false,
               flagNote: '',
+              flagUser: '',
             });
             tr.setMeta('addToHistory', true);
             dispatch(tr);

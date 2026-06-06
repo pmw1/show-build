@@ -136,6 +136,7 @@
       <div class="flag-note-header">
         <svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" class="flag-note-icon"><path d="M5 21V4h11l-2 4 2 4H5z"/></svg>
         <span class="flag-note-title">Needs attention</span>
+        <span v-if="flagPanel.user" class="flag-note-by">created by: {{ flagPanel.user }}</span>
       </div>
       <textarea
         ref="flagNoteInput"
@@ -669,7 +670,7 @@ export default {
     // needsAttention attr, then calls onFlagParagraph(pos) -> here. We open a
     // panel attached to the block's right edge with a note textarea + Resolved
     // button when the block is (now) flagged; close it when it isn't.
-    const flagPanel = ref({ open: false, pos: 0, note: '', x: 0, y: 0 });
+    const flagPanel = ref({ open: false, pos: 0, note: '', user: '', x: 0, y: 0 });
 
     function _paragraphFlaggedAt(pos) {
       const ed = editor.value;
@@ -694,12 +695,16 @@ export default {
         flagPanel.value.open = false;
         return;
       }
-      // Position to the right of the block.
+      // Pop the panel on the RIGHT side of the block: right-align its ~780px
+      // width to the editor's right edge, vertically lined up with the block
+      // top. Clamp left>=8 so it never runs off the left on a narrow editor.
       const coords = ed.view.coordsAtPos(p.offset + 1);
       const hostRect = ed.view.dom.getBoundingClientRect();
+      const PANEL_W = Math.min(780, hostRect.width - 24);
       flagPanel.value.pos = p.offset + 1;
       flagPanel.value.note = p.node.attrs.flagNote || '';
-      flagPanel.value.x = Math.min(coords.left - hostRect.left + 40, hostRect.width - 280);
+      flagPanel.value.user = p.node.attrs.flagUser || '';
+      flagPanel.value.x = Math.max(8, hostRect.width - PANEL_W - 8);
       flagPanel.value.y = coords.top - hostRect.top;
       flagPanel.value.open = true;
       nextTick(() => { flagNoteInput.value?.focus?.(); });
@@ -1046,8 +1051,9 @@ export default {
   top: 50%;
   transform: translateY(-50%);
   display: inline-flex;
+  flex-direction: column; /* flag atop delete */
   align-items: center;
-  gap: 0.5em;
+  gap: 0.35em;
   opacity: 0;
   transition: opacity 0.12s ease;
   z-index: 3;
@@ -1081,13 +1087,15 @@ export default {
 .flag-note-panel {
   position: absolute;
   z-index: 40;
-  width: 260px;
+  /* ~3x the prior width; capped so it never overruns the editor column. */
+  width: 780px;
+  max-width: calc(100% - 24px);
   background: #fff;
   border: 1px solid #e53935;
   border-left: 4px solid #e53935;
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  padding: 8px;
+  padding: 12px;
 }
 .flag-note-header {
   display: flex;
@@ -1099,6 +1107,13 @@ export default {
   margin-bottom: 6px;
 }
 .flag-note-icon { color: #e53935; }
+.flag-note-by {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  font-style: italic;
+  color: #888;
+}
 .flag-note-textarea {
   width: 100%;
   border: 1px solid #ddd;

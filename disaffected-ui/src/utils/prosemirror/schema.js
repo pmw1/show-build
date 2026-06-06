@@ -33,14 +33,16 @@ export const schema = new Schema({
         bullet: { default: false },
         needsAttention: { default: false },
         flagNote: { default: '' },
+        flagUser: { default: '' },
       },
       parseDOM: [{ tag: 'p' }],
       toDOM(node) {
-        const { speaker, bullet, needsAttention, flagNote } = node.attrs;
+        const { speaker, bullet, needsAttention, flagNote, flagUser } = node.attrs;
         const cls = bullet ? `${speaker} bullet` : speaker;
         const attrs = { class: cls };
         if (needsAttention) attrs['data-needs-attention'] = 'true';
         if (flagNote) attrs['data-flag-note'] = flagNote;
+        if (flagUser) attrs['data-flag-user'] = flagUser;
         return ['p', attrs, 0];
       },
     },

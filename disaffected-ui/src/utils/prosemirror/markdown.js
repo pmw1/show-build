@@ -125,7 +125,7 @@ function parseParagraphInline(text) {
 }
 
 function paragraphNode(text, attrs = {}) {
-  const a = { speaker: 'josh', bullet: false, needsAttention: false, flagNote: '', ...attrs };
+  const a = { speaker: 'josh', bullet: false, needsAttention: false, flagNote: '', flagUser: '', ...attrs };
   // Unresolved revision proposals round-trip as revision marks (#51): the <rev>
   // tags are parsed back into marked text rather than stripped, so an open
   // proposal survives save/reload until the user accepts or rejects it.
@@ -166,12 +166,13 @@ function emitTextRegion(text, blocks) {
     const attrs = m[2] || '';
     const needsAttention = /data-needs-attention=["']true["']/.test(attrs);
     const flagNote = (attrs.match(/data-flag-note="([^"]*)"/) || [])[1] || '';
+    const flagUser = (attrs.match(/data-flag-user="([^"]*)"/) || [])[1] || '';
     const inner = m[3].trim();
     if (inner) {
       // A single <p> may itself contain blank-line-separated paragraphs.
       const parts = inner.split(/\n\s*\n/).filter((p) => p.trim());
       for (const part of parts.length ? parts : [inner]) {
-        blocks.push(paragraphNode(part.trim(), { speaker, bullet, needsAttention, flagNote }));
+        blocks.push(paragraphNode(part.trim(), { speaker, bullet, needsAttention, flagNote, flagUser }));
       }
     }
     last = P_RE.lastIndex;
@@ -256,11 +257,12 @@ function serializeParagraphInline(node) {
 }
 
 function serializeParagraph(node) {
-  const { speaker, bullet, needsAttention, flagNote } = node.attrs;
+  const { speaker, bullet, needsAttention, flagNote, flagUser } = node.attrs;
   const cls = bullet ? `${speaker || 'josh'} bullet` : speaker || 'josh';
   const na = needsAttention ? ' data-needs-attention="true"' : '';
   const fn = flagNote ? ` data-flag-note="${String(flagNote).replace(/"/g, '&quot;')}"` : '';
-  return `<p class="${cls}"${na}${fn}>${serializeParagraphInline(node)}</p>`;
+  const fu = flagUser ? ` data-flag-user="${String(flagUser).replace(/"/g, '&quot;')}"` : '';
+  return `<p class="${cls}"${na}${fn}${fu}>${serializeParagraphInline(node)}</p>`;
 }
 
 function serializeCue(node) {
