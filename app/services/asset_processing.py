@@ -548,10 +548,17 @@ def generate_gfx_png(
         # Title-body gap scales with the same spacing slider but a bit
         # larger so the title still feels separated from the body.
         title_body_gap = int(scaled_font_size * (ls_pct + 20) / 100) if title_lines else 0
+        # Height of a blank line (empty paragraph) — an empty string measures to
+        # zero height, so fall back to the font's natural line height so user
+        # blank lines render as real vertical space.
+        _empty_bbox = draw.textbbox((0, 0), 'Ag', font=body_font)
+        empty_line_h = _empty_bbox[3] - _empty_bbox[1]
+
         body_block_h = 0
         for line in body_lines:
             bbox = draw.textbbox((0, 0), line, font=body_font)
-            body_block_h += (bbox[3] - bbox[1]) + line_gap
+            lh = (bbox[3] - bbox[1]) if line else empty_line_h
+            body_block_h += lh + line_gap
         total_block_h = title_block_h + title_body_gap + body_block_h
 
         # Clamp vertical_offset to [-40, 40] so callers can't shove text
@@ -585,7 +592,9 @@ def generate_gfx_png(
         for line in body_lines:
             bbox = draw.textbbox((0, 0), line, font=body_font)
             line_width = bbox[2] - bbox[0]
-            line_height = bbox[3] - bbox[1]
+            # Blank lines have zero measured height — advance by the font's
+            # natural line height so they show as real empty lines.
+            line_height = (bbox[3] - bbox[1]) if line else empty_line_h
 
             if text_align == 'center':
                 x = (width - line_width) // 2
@@ -725,7 +734,14 @@ def convert_thumbnail_to_png(self, source_path: str, episode_id: str):
 
 def _wrap_text(text: str, font, max_width: int, draw) -> list:
     """
-    Wrap text to fit within max_width.
+    Wrap text to fit within max_width, RESPECTING explicit line breaks.
+
+    The input may contain hard line breaks as real newlines ('\\n') or as the
+    two-character escape sequence ('\\\\n') — the editor stores them escaped and
+    only some call paths un-escape before reaching here. We normalize both, then
+    split on hard breaks FIRST and word-wrap each paragraph independently, so a
+    user's deliberate line returns are preserved in the rendered PNG instead of
+    being collapsed by str.split().
 
     Args:
         text: Text to wrap
@@ -734,25 +750,36 @@ def _wrap_text(text: str, font, max_width: int, draw) -> list:
         draw: ImageDraw object for measuring
 
     Returns:
-        List of wrapped lines
+        List of wrapped lines (including blank lines for empty paragraphs)
     """
-    words = text.split()
+    if not text:
+        return ['']
+
+    # Normalize escaped newlines and carriage returns to real '\n'.
+    normalized = text.replace('\\n', '\n').replace('\r\n', '\n').replace('\r', '\n')
+
     lines = []
-    current_line = []
+    for paragraph in normalized.split('\n'):
+        # Preserve intentional blank lines (empty paragraph = one blank line).
+        words = paragraph.split()
+        if not words:
+            lines.append('')
+            continue
 
-    for word in words:
-        test_line = ' '.join(current_line + [word])
-        bbox = draw.textbbox((0, 0), test_line, font=font)
-        line_width = bbox[2] - bbox[0]
+        current_line = []
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            line_width = bbox[2] - bbox[0]
 
-        if line_width <= max_width:
-            current_line.append(word)
-        else:
-            if current_line:
-                lines.append(' '.join(current_line))
-            current_line = [word]
+            if line_width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                current_line = [word]
 
-    if current_line:
-        lines.append(' '.join(current_line))
+        if current_line:
+            lines.append(' '.join(current_line))
 
     return lines if lines else ['']

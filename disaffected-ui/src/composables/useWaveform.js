@@ -14,6 +14,10 @@ export function useWaveform() {
   const analysisProgress = ref(0)
   const audioContext = ref(null)
   const sourceNode = ref(null)
+  // True when the last extraction found the file has NO audio track (vs a
+  // genuine decode error). Lets callers offer "convert to VO" instead of
+  // surfacing a scary EncodingError.
+  const hasNoAudio = ref(false)
 
   /**
    * Extract waveform data from video element
@@ -29,6 +33,7 @@ export function useWaveform() {
 
     isAnalyzing.value = true
     analysisProgress.value = 0
+    hasNoAudio.value = false
 
     try {
       // Create Audio Context if not exists
@@ -44,8 +49,30 @@ export function useWaveform() {
 
       // Decode audio data
       console.log('[Waveform] Decoding audio...')
-      const audioBuffer = await audioContext.value.decodeAudioData(arrayBuffer)
+      let audioBuffer
+      try {
+        audioBuffer = await audioContext.value.decodeAudioData(arrayBuffer)
+      } catch (decodeErr) {
+        // decodeAudioData throws an EncodingError when the file has no audio
+        // track (nothing to decode). Treat that as "no audio" rather than a
+        // hard failure — callers can offer to convert the clip to a VO.
+        console.warn('[Waveform] decodeAudioData failed — treating as no audio track')
+        hasNoAudio.value = true
+        waveformData.value = []
+        analysisProgress.value = 0
+        isAnalyzing.value = false
+        return []
+      }
       analysisProgress.value = 60
+
+      // A decoded buffer with zero channels also means no usable audio.
+      if (!audioBuffer || audioBuffer.numberOfChannels === 0) {
+        hasNoAudio.value = true
+        waveformData.value = []
+        analysisProgress.value = 0
+        isAnalyzing.value = false
+        return []
+      }
 
       // Get audio channel data (use first channel for mono/stereo)
       const channelData = audioBuffer.getChannelData(0)
@@ -131,6 +158,7 @@ export function useWaveform() {
     waveformData,
     isAnalyzing,
     analysisProgress,
+    hasNoAudio,
 
     // Methods
     extractWaveform,
