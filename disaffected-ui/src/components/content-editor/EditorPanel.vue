@@ -1498,6 +1498,7 @@ import { useContentSanitizer } from '../../composables/useContentSanitizer.js'
 import { useCollapseMode } from '../../composables/useCollapseMode.js'
 import { useEditorPaste } from '../../composables/useEditorPaste.js'
 import { useScriptCore } from '../../composables/useScriptCore.js'
+import { useFeatureFlags } from '../../composables/useFeatureFlags.js'
 // Migration: the TipTap/ProseMirror editor that replaces ONLY the contenteditable
 // script surface (the toolbar / mode toggles / cue-insert chrome around it stays).
 import ScriptEditor from './ScriptEditor.vue'
@@ -1942,10 +1943,14 @@ const { parseGoogleDocsPaste, cleanGoogleDocsNode, parseGenericPaste } = useEdit
 
 const { enabled: legacyCueConvertEnabled } = useLegacyCueConvertEnabled()
 
-// The ProseMirror ScriptEditor is now the only script surface; the legacy
-// contenteditable draggable list is retired. Kept as a const ref (always true)
-// so the v-if/guards downstream still read cleanly without churn.
-const useProseMirrorEditor = ref(true)
+// The ProseMirror ScriptEditor is the default script surface. The legacy
+// contenteditable draggable list is retained behind a v-else as a live
+// kill-switch: if the new editor misbehaves in production, set
+//   localStorage.setItem('ff:useProseMirrorEditor','false')  (then reload)
+// in the affected browser to fall back to the legacy editor — no redeploy.
+// Default is ON (useFeatureFlags KNOWN_FLAGS.useProseMirrorEditor === true).
+const _ff = useFeatureFlags()
+const useProseMirrorEditor = ref(_ff.isEnabled('useProseMirrorEditor'))
 const scriptEditorRef = ref(null)
 
 const core = useScriptCore(props, emit, sanitizer)

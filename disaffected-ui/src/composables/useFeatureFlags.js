@@ -46,11 +46,12 @@ export function useFeatureFlags() {
     }
   };
 
-  // The ProseMirror/TipTap ScriptEditor is now the ONLY script editor — the
-  // legacy contenteditable surface is retired. This is no longer flag-gated:
-  // it is always on, regardless of any stale `ff:useProseMirrorEditor` value a
-  // browser may still have in localStorage from the migration period.
-  const useProseMirrorEditor = ref(true);
+  // The ProseMirror/TipTap ScriptEditor is the default script editor (KNOWN_FLAGS
+  // default = true). It remains a kill-switch: a browser can fall back to the
+  // legacy contenteditable surface with
+  //   localStorage.setItem('ff:useProseMirrorEditor','false')  (then reload).
+  // This ref reflects the resolved flag (default ON, localStorage can override).
+  const useProseMirrorEditor = ref(read('useProseMirrorEditor'));
 
   return { isEnabled, setFlag, useProseMirrorEditor };
 }

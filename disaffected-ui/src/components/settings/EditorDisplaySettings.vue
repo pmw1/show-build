@@ -86,7 +86,9 @@ import OverridableDot from '@/components/OverridableDot.vue'
 const display = useEditorDisplayPrefs()
 const prefs = useUserPrefs()
 
-const knobs = computed(() => display.listKnobs())
+// Select-type knobs (e.g. font family) are rendered by TypesettingSettings, not
+// here — this panel only handles sliders / density toggles.
+const knobs = computed(() => display.listKnobs().filter(k => !k.options))
 const valueFor = computed(() => display.valueFor.value)
 
 function hasOverride(key) {

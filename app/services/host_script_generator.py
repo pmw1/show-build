@@ -16,7 +16,9 @@ Each block has clear START/END headers for easy navigation.
 """
 import re
 import html
+import base64
 import logging
+import mimetypes
 import shutil
 import subprocess
 from datetime import datetime
@@ -25,7 +27,6 @@ from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 from database import SessionLocal
 from models_v2 import Episode, Rundown, RundownItem, Season, Show, SOTProcessingJob
-from services.cue_extractor import CUE_BLOCK_RE
 
 logger = logging.getLogger(__name__)
 
@@ -374,12 +375,13 @@ def _collect_media_resources(
     url_mapping = {}
     cue_counter = 0
 
-    # Base paths for media files
+    # Base paths for media files. The container mount (/home/episodes) is the
+    # authoritative one in production; the host path is a dev fallback.
     container_base = Path("/home/episodes")
     host_base = Path("/mnt/sync/disaffected/episodes")
 
     # Pattern to find cue blocks
-    cue_pattern = CUE_BLOCK_RE  # matches expanded + collapsed cues
+    cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL | re.IGNORECASE)
 
     # Patterns for media URLs - handle both "Media Url" (with space) and "MediaUrl" (no space)
     media_patterns = [
@@ -408,24 +410,87 @@ def _collect_media_resources(
                     if not original_url or original_url in url_mapping:
                         continue
 
-                    # Skip blob and http URLs
+                    # Skip blob and http URLs. blob: URLs are transient browser
+                    # handles that were mistakenly persisted into script_content
+                    # and can never resolve server-side — that's an UPSTREAM data
+                    # problem. Leave them unmapped so the formatter renders a
+                    # visible "missing" placeholder instead of a silent blank.
                     if original_url.startswith(('http://', 'https://', 'blob:')):
+                        logger.warning(
+                            f"GFX/SOT cue references a non-asset URL ({original_url[:60]}); "
+                            f"skipping — image must live under episodes/{episode_number}/assets/"
+                        )
                         continue
 
-                    # Find and copy the file
+                    # Resolve the file strictly under the episode's assets/ tree.
                     source_path = _find_media_file(original_url, episode_number, container_base, host_base)
 
                     if source_path and source_path.exists():
-                        dest_filename = source_path.name
-                        dest_path = resources_path / dest_filename
-                        try:
-                            if not dest_path.exists():
-                                shutil.copy2(source_path, dest_path)
-                            url_mapping[original_url] = f"resources/{dest_filename}"
-                        except Exception as e:
-                            logger.warning(f"Failed to copy {source_path}: {e}")
+                        # Embed as a base64 data URI so the HTML is fully
+                        # self-contained (images render no matter where the file
+                        # is opened) and the PDF needs no path resolution.
+                        data_uri = _file_to_data_uri(source_path)
+                        if data_uri:
+                            url_mapping[original_url] = data_uri
+                        else:
+                            logger.warning(f"Failed to embed {source_path}")
+                    else:
+                        logger.warning(
+                            f"Image not found under assets/ for URL '{original_url}' "
+                            f"(episode {episode_number}) — upstream: asset missing from "
+                            f"episodes/{episode_number}/assets/"
+                        )
 
     return url_mapping
+
+
+def _file_to_data_uri(path: Path) -> Optional[str]:
+    """Read an image file and return a base64 data: URI, or None on failure.
+
+    Detects the actual format by reading file magic bytes. AVIF and other
+    formats not supported by wkhtmltopdf are converted to JPEG via Pillow.
+    """
+    try:
+        with open(path, 'rb') as fh:
+            raw = fh.read()
+
+        # Detect actual format from magic bytes, not extension
+        # JPEG: FF D8 FF
+        # PNG:  89 50 4E 47
+        # GIF:  47 49 46 38
+        # WebP: 52 49 46 46 ... 57 45 42 50
+        # AVIF/HEIF/ISO-BMFF: 00 00 00 xx 66 74 79 70
+        is_jpeg = raw[:3] == b'\xff\xd8\xff'
+        is_png  = raw[:4] == b'\x89PNG'
+        is_gif  = raw[:4] in (b'GIF8', b'GIF9')
+        is_webp = raw[:4] == b'RIFF' and raw[8:12] == b'WEBP'
+        is_bmff = raw[4:8] == b'ftyp'  # AVIF, HEIF, etc.
+
+        if is_jpeg:
+            return f"data:image/jpeg;base64,{base64.b64encode(raw).decode('ascii')}"
+        elif is_png:
+            return f"data:image/png;base64,{base64.b64encode(raw).decode('ascii')}"
+        elif is_gif:
+            return f"data:image/gif;base64,{base64.b64encode(raw).decode('ascii')}"
+        else:
+            # AVIF, WebP, HEIC, or unknown — convert to JPEG via Pillow
+            try:
+                import io
+                from PIL import Image
+                img = Image.open(io.BytesIO(raw))
+                buf = io.BytesIO()
+                img.convert('RGB').save(buf, format='JPEG', quality=88)
+                encoded = base64.b64encode(buf.getvalue()).decode('ascii')
+                logger.info(f"Converted {path.name} ({img.format}) → JPEG for embedding")
+                return f"data:image/jpeg;base64,{encoded}"
+            except Exception as conv_err:
+                logger.warning(f"Format conversion failed for {path}: {conv_err}; embedding raw")
+                mime, _ = mimetypes.guess_type(str(path))
+                mime = mime or 'image/jpeg'
+                return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+    except Exception as e:
+        logger.warning(f"_file_to_data_uri({path}) failed: {e}")
+        return None
 
 
 def _find_media_file(
@@ -434,44 +499,55 @@ def _find_media_file(
     container_base: Path,
     host_base: Path
 ) -> Optional[Path]:
-    """Find a media file from a URL."""
-    url = url.strip()
+    """
+    Resolve a media URL to a file STRICTLY under the episode's assets/ tree.
 
-    # Handle /episodes/... paths
-    if url.startswith('/episodes/'):
-        url = url[1:]
-
-    # Absolute path
-    if url.startswith('/'):
-        path = Path(url)
-        if path.exists():
-            return path
+    Canonical contract: every usable image for an episode lives under
+    episodes/{ep}/assets/{images,video,graphics,quotes,thumbnails,audio}/. If
+    a referenced image isn't there, the problem is upstream (bad/blob URL or a
+    missing asset) — this function returns None and the caller renders a
+    visible placeholder rather than silently resolving from somewhere else.
+    """
+    url = (url or '').strip()
+    if not url:
         return None
 
-    # Relative path starting with episodes/
-    if url.startswith('episodes/'):
-        for base in [container_base.parent, host_base.parent]:
-            path = base / url
-            if path.exists():
-                return path
-
-    # Relative path with assets/
-    if url.startswith(('../assets/', 'assets/')):
-        clean_url = url.replace('../', '')
-        for base in [container_base, host_base]:
-            path = base / episode_number / clean_url
-            if path.exists():
-                return path
-
-    # Just a filename - search common locations
+    # The only thing we trust from the URL is the basename. Whatever path form
+    # the cue stored (/episodes/0257/assets/..., ../assets/..., bare filename),
+    # we re-anchor it under THIS episode's assets/ tree and search by filename.
     filename = Path(url).name
-    search_dirs = ['assets/images', 'assets/video', 'assets/graphics', 'assets/quotes', 'assets/thumbnails']
+    if not filename:
+        return None
+
+    # All asset subdirs, with thumbnails/images/quotes/graphics first since
+    # those are what scripts reference most. We search every subdir so a
+    # thumbnail stored under assets/thumbnails resolves even if the URL said
+    # something else.
+    search_dirs = [
+        'assets/thumbnails',
+        'assets/images',
+        'assets/quotes',
+        'assets/graphics',
+        'assets/video',
+        'assets/audio',
+    ]
 
     for base in [container_base, host_base]:
+        ep_assets = base / episode_number / 'assets'
+        # Fast path: the exact subdir the URL implied, if any.
         for subdir in search_dirs:
             candidate = base / episode_number / subdir / filename
             if candidate.exists():
                 return candidate
+        # Fallback: any match by filename anywhere under assets/ (one rglob),
+        # in case a future subdir is added. Still confined to assets/.
+        if ep_assets.is_dir():
+            try:
+                for match in ep_assets.rglob(filename):
+                    if match.is_file():
+                        return match
+            except Exception:
+                pass
 
     return None
 
@@ -490,7 +566,7 @@ def _build_transcription_cache(items: List[RundownItem], db) -> Dict[str, str]:
         if not item.script_content:
             continue
         # Find all SOT cues and extract Asset IDs
-        for cue in CUE_BLOCK_RE.findall(item.script_content):
+        for cue in re.findall(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', item.script_content, re.DOTALL):
             if '[Type: SOT]' in cue:
                 asset_id = _extract_field(cue, r'Asset\s*Id')
                 if asset_id:
@@ -720,7 +796,7 @@ def _process_content_markdown(
     parts = []
 
     # Pattern for cue blocks
-    cue_pattern = CUE_BLOCK_RE  # matches expanded + collapsed cues
+    cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL | re.IGNORECASE)
 
     # Split by cue blocks and process
     last_end = 0
@@ -1044,8 +1120,7 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
         }}
 
         .segment-tease .script-content {{
-            font-style: italic;
-            color: #555;
+            color: #444;
         }}
 
         /* Script Content */
@@ -1141,26 +1216,36 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
         .cue-sot .cue-label {{ color: #f57c00; }}
 
         .sot-content {{
-            display: flex;
-            align-items: flex-start;
-            gap: 0.2in;
-            justify-content: space-between;
+            overflow: hidden;
         }}
 
         .sot-thumbnail {{
-            max-width: 280px;
-            max-height: 280px;
+            float: left;
+            max-width: 220px;
+            max-height: 220px;
             width: auto;
             height: auto;
             object-fit: contain;
             border: 1px solid #ddd;
             border-radius: 4px;
-            order: 2;
-            flex-shrink: 0;
-            margin-left: auto;
+            margin-right: 0.2in;
+            margin-bottom: 0.1in;
         }}
 
-        .sot-info {{ flex: 1; order: 1; }}
+        .sot-thumbnail-missing {{
+            float: left;
+            margin-right: 0.2in;
+            margin-bottom: 0.1in;
+            padding: 0.2in 0.3in;
+            background: #f4f4f4;
+            border: 1px dashed #bbb;
+            border-radius: 4px;
+            color: #999;
+            font-size: 11pt;
+            font-style: italic;
+        }}
+
+        .sot-info {{ overflow: hidden; }}
         .sot-slug {{ font-weight: bold; font-size: 19pt; }}
         .sot-duration {{ font-size: 17pt; color: #666; }}
         .sot-outcue {{ font-size: 19pt; color: #d84315; font-weight: bold; margin-top: 0.05in; }}
@@ -1170,23 +1255,40 @@ def _get_css(preset: ScriptPreset, episode_number: str) -> str:
         .cue-img, .cue-gfx {{
             background: #f5f5f5;
             border: 1px solid #ddd;
-            text-align: center;
+            overflow: hidden;
         }}
 
-        .cue-img .cue-label, .cue-gfx .cue-label {{ color: #666; }}
+        .cue-img .cue-label, .cue-gfx .cue-label {{ color: #666; clear: both; }}
 
         .cue-img img, .cue-gfx img {{
-            max-width: 50%;
-            width: 50%;
+            float: left;
+            max-width: 220px;
+            max-height: 220px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
             border: 1px solid #ccc;
             border-radius: 4px;
+            margin-right: 0.2in;
+            margin-bottom: 0.1in;
+        }}
+
+        .cue-img-body, .cue-gfx-body {{
+            overflow: hidden;
         }}
 
         .img-caption {{
             font-size: 17pt;
             color: #666;
+            margin-top: 0.05in;
+        }}
+
+        .img-script-text {{
+            font-size: 19pt;
+            color: #222;
             margin-top: 0.1in;
-            font-style: italic;
+            line-height: 1.5;
+            white-space: pre-wrap;
         }}
 
         /* Cue markers for RIF, VOX, etc. */
@@ -1407,10 +1509,16 @@ def _process_segment(
 
     item_type = (item.item_type or 'segment').lower()
 
-    # Tease items render as subtle end-of-segment dividers, not full segment headers
+    # Tease items get a header like other segments, but with TEASE label
     if item_type == 'tease':
         parts = ['<div class="segment segment-tease">']
-        parts.append('<div class="segment-end-divider">— END SEGMENT —</div>')
+        slug = item.slug or 'tease'
+        duration = item.duration or ''
+        tease_header = f'<div class="segment-header">TEASE: {html.escape(slug)}'
+        if duration:
+            tease_header += f'<span class="segment-duration">{html.escape(duration)}</span>'
+        tease_header += '</div>'
+        parts.append(tease_header)
     else:
         parts = ['<div class="segment">']
 
@@ -1456,7 +1564,7 @@ def _process_content(
     current_speaker = last_speaker
 
     # Pattern for cue blocks
-    cue_pattern = CUE_BLOCK_RE  # matches expanded + collapsed cues
+    cue_pattern = re.compile(r'<!-- Begin Cue -->(.*?)<!-- End Cue -->', re.DOTALL | re.IGNORECASE)
 
     # Split by cue blocks and process
     last_end = 0
@@ -1667,11 +1775,12 @@ def _format_sot(cue_content: str, slug: str, url_mapping: Dict[str, str], transc
     original_thumb = _extract_field(cue_content, r'Thumbnail\s*[Uu]rl') or _extract_field(cue_content, 'ThumbnailURL')
     thumbnail_url = ''
     if original_thumb:
-        # Use local copy if available, otherwise use original URL (wkhtmltopdf can fetch HTTP)
-        thumbnail_url = url_mapping.get(original_thumb, original_thumb)
-        # Skip blob URLs as they won't work
-        if thumbnail_url.startswith('blob:'):
-            thumbnail_url = ''
+        # Only use the embedded (base64) version. If the thumbnail didn't
+        # resolve under assets/, leave it empty so we render a labeled
+        # placeholder rather than a broken <img> pointing at an unreachable path.
+        mapped = url_mapping.get(original_thumb, '')
+        if mapped.startswith('data:'):
+            thumbnail_url = mapped
 
     # Get transcription - first check cue block, then transcription cache by Asset ID
     transcription = _extract_field(cue_content, 'Transcription')
@@ -1698,7 +1807,10 @@ def _format_sot(cue_content: str, slug: str, url_mapping: Dict[str, str], transc
     ]
 
     if thumbnail_url:
-        parts.append(f'<img class="sot-thumbnail" src="{html.escape(thumbnail_url)}" alt="thumbnail">')
+        parts.append(f'<img class="sot-thumbnail" src="{thumbnail_url}" alt="thumbnail">')
+    elif original_thumb:
+        # Referenced a thumbnail but it isn't under assets/ — make the gap visible.
+        parts.append('<div class="sot-thumbnail-missing">[thumbnail missing from assets/]</div>')
 
     parts.append('<div class="sot-info">')
     parts.append(f'<div class="sot-slug">{html.escape(slug)}</div>')
@@ -1726,24 +1838,36 @@ def _format_img(cue_content: str, slug: str, cue_type: str, url_mapping: Dict[st
             original_url = img_match.group(1)
             media_url = url_mapping.get(original_url, '')
 
+    # Only trust embedded (base64) sources — anything else won't render reliably.
+    if not media_url.startswith('data:'):
+        media_url = ''
+
     description = _extract_field(cue_content, 'Description')
+    script_text = _extract_field(cue_content, r'Script\s*Text')
+    include_script = _extract_field(cue_content, r'Include\s*Script\s*Text').lower() in ('yes', 'true', '1')
 
     css_class = 'cue-gfx' if cue_type == 'GFX' else 'cue-img'
+    body_class = 'cue-img-body' if cue_type != 'GFX' else 'cue-gfx-body'
 
-    parts = [
-        f'<div class="cue-block {css_class}">',
-        f'<div class="cue-label">{cue_type}: {html.escape(slug)}</div>',
-    ]
+    parts = [f'<div class="cue-block {css_class}">']
 
     if media_url:
-        parts.append(f'<img src="{html.escape(media_url)}" alt="{html.escape(slug)}">')
+        parts.append(f'<img src="{media_url}" alt="{html.escape(slug)}">')
     else:
-        parts.append(f'<div style="padding:0.5in; background:#eee; color:#888;">[{cue_type}: {html.escape(slug)}]</div>')
+        parts.append(f'<div style="float:left; padding:0.3in 0.4in; background:#eee; color:#888; margin-right:0.2in;">[{cue_type}: {html.escape(slug)} — missing]</div>')
+
+    parts.append(f'<div class="{body_class}">')
+    parts.append(f'<div class="cue-label">{cue_type}: {html.escape(slug)}</div>')
 
     if description:
         parts.append(f'<div class="img-caption">{html.escape(description)}</div>')
 
-    parts.append('</div>')
+    if include_script and script_text:
+        parts.append(f'<div class="img-script-text">{html.escape(script_text)}</div>')
+
+    parts.append('</div>')  # body
+    parts.append('<div style="clear:both;"></div>')
+    parts.append('</div>')  # cue-block
 
     return '\n'.join(parts)
 

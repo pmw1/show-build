@@ -64,6 +64,9 @@ secret.key
 *.pem
 app/storage/encryption.key
 app/app/storage/encryption.key
+# Runtime secret stores — must never be committed (real keys/credentials).
+app/storage/api_keys.json
+app/storage/users.json
 disaffected-ui/ssl/
 
 # Database dumps and backups

@@ -456,7 +456,7 @@
     />
 
     <!-- Pre-Generation Blocker Modal: unresolved revisions and/or needs-attention items -->
-    <v-dialog v-model="showRevisionBlockerModal" max-width="620" persistent>
+    <v-dialog v-model="showRevisionBlockerModal" max-width="860" persistent>
       <v-card class="revision-blocker-card">
         <v-card-title class="revision-blocker-header d-flex align-center">
           <v-icon color="amber" class="me-2">mdi-alert-circle</v-icon>
@@ -10477,6 +10477,11 @@ Try dropping an image or video file here!`
 .revision-blocker-actions {
   padding: 12px 20px !important;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+  /* Up to four buttons (Cancel + Reject/Accept Revisions + Continue Anyway).
+     Allow wrapping with row-gap so nothing clips on a narrow viewport; the
+     dialog max-width is sized to fit them on one row at normal widths. */
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 
 /* Read-only version preview (todo #35): render the version with Script-Mode

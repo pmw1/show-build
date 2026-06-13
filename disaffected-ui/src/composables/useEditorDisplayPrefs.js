@@ -19,6 +19,12 @@ import { useUserPrefs } from './useUserPrefs'
 // Adding a new knob is two lines: append here + reference the CSS var
 // from the appropriate component stylesheet.
 const KNOBS = [
+  { key: 'editor.display.scriptFontFamily',   cssVar: '--editor-script-font-family',   fallback: 'monospace', unit: '', min: null, max: null, step: null,
+    options: [
+      { title: 'Monospace', value: 'monospace' },
+      { title: 'Sans Serif', value: 'sans-serif' },
+      { title: 'Serif', value: 'serif' },
+    ] },
   { key: 'editor.display.scriptFontSize',     cssVar: '--editor-script-font-size',     fallback: 16, unit: 'px',  min: 12, max: 24, step: 1 },
   { key: 'editor.display.scriptLineHeight',   cssVar: '--editor-script-line-height',   fallback: 1.5, unit: '',   min: 1.2, max: 2.0, step: 0.05 },
   { key: 'editor.display.cueBlockFontSize',   cssVar: '--editor-cue-font-size',        fallback: 13, unit: 'px',  min: 10, max: 18, step: 1 },
@@ -28,9 +34,67 @@ const KNOBS = [
   { key: 'editor.display.rundownItemFontSize', cssVar: '--editor-rundown-font-size',   fallback: 13, unit: 'px',  min: 11, max: 16, step: 1 },
 ]
 
+// ── Special characters ───────────────────────────────────────────────────────
+// Preset glyphs are a fixed code constant (common typographic/broadcast marks).
+// The user's own pinned favorites live under a single user-pref key as an array
+// of single-character strings, so they travel with the account like the knobs.
+const CHAR_PRESETS = [
+  { char: '—', name: 'Em dash' },
+  { char: '–', name: 'En dash' },
+  { char: '“', name: 'Left double quote' },
+  { char: '”', name: 'Right double quote' },
+  { char: '‘', name: 'Left single quote' },
+  { char: '’', name: 'Right single quote / apostrophe' },
+  { char: '…', name: 'Ellipsis' },
+  { char: '•', name: 'Bullet' },
+  { char: '©', name: 'Copyright' },
+  { char: '®', name: 'Registered' },
+  { char: '™', name: 'Trademark' },
+  { char: '°', name: 'Degree' },
+  { char: '×', name: 'Multiplication' },
+  { char: '½', name: 'One half' },
+  { char: '¼', name: 'One quarter' },
+  { char: '¾', name: 'Three quarters' },
+  { char: '€', name: 'Euro' },
+  { char: '£', name: 'Pound' },
+  { char: '¢', name: 'Cent' },
+  { char: '§', name: 'Section' },
+  { char: '¶', name: 'Pilcrow' },
+  { char: '†', name: 'Dagger' },
+  { char: '‡', name: 'Double dagger' },
+  { char: '→', name: 'Right arrow' },
+]
+const CHAR_FAVORITES_KEY = 'editor.display.charFavorites'
+
+function listCharPresets() {
+  return CHAR_PRESETS.map(c => ({ ...c }))
+}
+
+const charFavorites = computed(() => {
+  const v = useUserPrefs().get(CHAR_FAVORITES_KEY, [])
+  return Array.isArray(v) ? v : []
+})
+
+async function addCharFavorite(char) {
+  if (!char) return
+  const cur = charFavorites.value
+  if (cur.includes(char)) return
+  return useUserPrefs().set(CHAR_FAVORITES_KEY, [...cur, char])
+}
+
+async function removeCharFavorite(char) {
+  const cur = charFavorites.value
+  if (!cur.includes(char)) return
+  return useUserPrefs().set(CHAR_FAVORITES_KEY, cur.filter(c => c !== char))
+}
+
 function _format(knob, value) {
   if (knob.densityToPad) {
     return knob.densityToPad[value] || knob.densityToPad[knob.fallback]
+  }
+  // Select-type knob (e.g. font family): emit the chosen value verbatim, no unit.
+  if (knob.options) {
+    return String(value || knob.fallback)
   }
   if (value == null) return `${knob.fallback}${knob.unit}`
   return `${value}${knob.unit}`
@@ -92,5 +156,10 @@ export function useEditorDisplayPrefs() {
     valueFor,
     setKnob,
     resetKnob,
+    // Special characters
+    listCharPresets,
+    charFavorites,
+    addCharFavorite,
+    removeCharFavorite,
   }
 }
