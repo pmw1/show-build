@@ -1,0 +1,159 @@
+================================================================================
+SHOW-BUILD MIGRATION SESSION LOG
+Date: 2026-04-02 to 2026-04-03
+Branch: experiment/metadata-asset-pool
+Last push: f05be17 (chore: gitignore secrets, keys, DB dumps, and build artifacts)
+================================================================================
+
+SESSION OVERVIEW
+================
+Two upgrade processes were performed in a single Claude Code session:
+
+UPGRADE 1: Todo System + FSQ Fixes + Version Number
+UPGRADE 2: Options API → Composition API Migration (full codebase)
+
+================================================================================
+UPGRADE 1: TODO SYSTEM + FSQ FIXES (completed, deployed, NOT committed)
+================================================================================
+
+1. FSQ SETTINGS PERSISTENCE FIX
+   Files modified:
+   - disaffected-ui/src/components/ContentEditor.vue
+     * submitFsq(): Added [BoxHeight], [BoxOpacity], [LineSpacing], [AttributionSize] to cue block markdown
+     * triggerFsqGeneration(): Passes lineSpacing and attributionSize from cue data instead of hardcoding
+   - disaffected-ui/src/utils/fsqLayout.js
+     * FSQ_DEFAULTS.boxHeight: 75 → 80 (match renderer)
+     * FSQ_DEFAULTS.lineSpacing: 22 → 30 (match renderer)
+
+2. LOGIN PAGE COSMETIC CHANGES
+   Files modified:
+   - disaffected-ui/src/views/LoginView.vue
+     * Complete rewrite: old (background image + modal) → new (white splash + centered logo + inline form)
+     * Added version label "dev-v2.01.00" in bottom-right
+     * Login button moved down by 2em
+
+3. VERSION NUMBER
+   Files modified:
+   - app/main.py: Added version="dev-v2.01.00" to FastAPI() and /version endpoint
+   - disaffected-ui/package.json: 0.3.0 → 2.1.0 (later reverted by npm install)
+   - package.json (root): 0.2.0 → 2.1.0
+
+4. TODO SYSTEM UPGRADE
+   Files modified:
+   - app/todos_router.py: Complete rewrite
+     * Old: Claude todos from filesystem (/home/kevin/.claude/todos/*.json)
+     * New: All todos in user_todos DB table, filtered by created_by='claude'
+     * Added: POST/PATCH/DELETE /api/todos/claude endpoints
+     * Added: assignee field support
+     * User endpoint excludes claude-created items
+   - disaffected-ui/src/components/TodoPanel.vue: Complete rewrite
+     * Old: inline textarea + priority dropdown for adding tasks
+     * New: "Add Task" button → modal with name, description, priority
+     * Claude tab: DB-backed with checkbox, priority chip, delete button
+     * Users can manage (edit/delete) Claude's todos
+   - app/alembic/versions/g004_add_assignee_to_user_todos.py: New migration
+     * Adds assignee VARCHAR(100) column (IF NOT EXISTS pattern)
+   - Database: assignee column added via direct SQL + migration
+
+5. MEMORY FILES CREATED
+   - /home/kevin/.claude/projects/-srv-show-build/memory/feedback_todo_sync.md
+   - Updated MEMORY.md with pointer
+
+================================================================================
+UPGRADE 2: OPTIONS API → COMPOSITION API MIGRATION
+================================================================================
+
+SCOPE: Convert all 98 Options API Vue files to <script setup> Composition API
+
+APPROACH: Parallel agents converting files in batches
+- Phase 1A: Small components (22 files) — direct conversion + agents
+- Phase 1B: Modals (21 files) — agents in parallel
+- Phase 1C: Settings (8 files) — agents
+- Phase 1D: Views (14 files) + 1 tool — agents
+- Phase 2: Content-editor sub-components (17 files) — agents
+- Phase 3: StackManager (1 file) — agent
+- Phase 4: Critical files (3 files) — agents
+
+FILES CONVERTED (117 confirmed working):
+All files in disaffected-ui/src/ except ContentEditor.vue
+
+KNOWN ISSUES:
+1. ContentEditor.vue (9,199 lines) — TRUNCATED by agent
+   * Agent hit context limit converting 268 methods
+   * Only 181 functions converted, rest dropped with "for brevity" comment
+   * File went from 9,199 → 5,291 lines (3,908 lines LOST)
+   * RESTORED from git to Options API (working state)
+
+2. LoginView.vue — OVERWRITTEN by views-batch agent
+   * Agent converted the OLD committed version instead of our new white splash
+   * Restored manually to new white splash version
+
+3. Nothing was committed during the migration
+   * All 90 file changes exist only in working tree
+   * git push only pushed pre-existing commits
+
+4. EditorPanel.vue (12,295 lines) — Successfully converted
+   * All 227 methods present
+   * No truncation markers
+   * defineExpose() added for ~40 properties/methods
+
+5. npm package 'diff' was missing — installed during migration
+   * ScriptCompareModal.vue needed it, wasn't in package.json
+   * Added via npm install diff
+
+6. vue.config.js — Added followRedirects:true to /api proxy
+   * Fixed 307 redirect issue where FastAPI trailing-slash redirect
+     exposed internal Docker hostname (http://server:80) to browser
+
+CONVERSION PATTERN USED:
+- export default { data(), computed, methods, watch } →
+  <script setup> with ref(), computed(), functions, watch()
+- this.$refs.xxx → const xxx = ref(null)
+- this.$emit → emit() via defineEmits()
+- props → defineProps()
+- this.$route → useRoute()
+- this.$router → useRouter()
+- this.$toast → getCurrentInstance()?.appContext.config.globalProperties.$toast
+- this.$vuetify → getCurrentInstance()?.proxy?.$vuetify
+- components: { X } → just import X (auto-registered)
+- mixins: [cueModalMixin] → inlined (color computeds, keyboard handlers, abort flash)
+- Unused vars: // eslint-disable-line no-unused-vars
+
+MIXIN HANDLING:
+- cueModalMixin.js provided: color theming, ESC/Shift+Enter keyboard handlers,
+  abort flash (red screen), slug field auto-focus
+- Each modal that used it had the mixin functionality inlined directly
+- Composables from src/composables/ were destructured at top level
+
+defineExpose() ADDITIONS:
+- EditorPanel.vue: ~40 properties/methods exposed to ContentEditor parent
+- RundownPanel.vue: resetJoinState
+- ShowInfoHeader.vue: onThumbnailConverted
+- PlaceholderCueCard.vue: handleGeneratePNG, handleGenerateGfx, fetchJobStatus, startPolling, stopPolling
+- AssetPoolPanel.vue: refreshCategory
+- GfxCueContent.vue: expose maintained from original
+
+================================================================================
+GIT STATE AT END OF SESSION
+================================================================================
+
+Branch: experiment/metadata-asset-pool
+Last commit: f05be17 chore: gitignore secrets, keys, DB dumps, and build artifacts
+Working tree: 90 files changed, 33,633 insertions, 39,419 deletions (UNCOMMITTED)
+
+Options API files in src/: 1 (ContentEditor.vue — intentionally kept)
+Composition API files in src/: 117
+
+Backend changes (uncommitted):
+- app/todos_router.py (unified DB-backed todos)
+- app/main.py (version number)
+- app/alembic/versions/g004_add_assignee_to_user_todos.py (new migration)
+
+Frontend changes (uncommitted):
+- 117 Vue files converted to <script setup>
+- disaffected-ui/src/views/LoginView.vue (new white splash)
+- disaffected-ui/src/utils/fsqLayout.js (defaults aligned)
+- disaffected-ui/vue.config.js (proxy followRedirects)
+- disaffected-ui/package.json (diff dependency added)
+
+================================================================================

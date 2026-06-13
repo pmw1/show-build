@@ -47,17 +47,151 @@ services:
       - JWT_ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=2880
       - MEDIA_ROOT=/home
-      - REDIS_URL=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
+      # Dev Redis index /1 — isolates dev jobs from live (which uses /0) on the
+      # SAME shared Redis. HARDCODED (no ${REDIS_URL:-} fallback) so a REDIS_URL
+      # exported in the host env for the live stack can't leak /0 into dev.
+      - REDIS_URL=redis://:showbuild2025@192.168.51.223:6379/1
     volumes:
-      - ./app:/app
-      - ./app/storage:/app/storage
-      - ./tools/blueprints:/tools/blueprints:ro
+      # Dev backend runs the MIGRATION BRANCH code from the worktree, NOT live's
+      # /srv/show-build/app. This isolates backend edits from live: live mounts
+      # main's app/, dev mounts feat/script-editor-tiptap's app/. They reconcile
+      # via git merge, never by editing a shared directory.
+      - /home/kevin/show-build-migration/app:/app
+      - /home/kevin/show-build-migration/app/storage:/app/storage
+      - /home/kevin/show-build-migration/tools/blueprints:/tools/blueprints:ro
       - ${EPISODES_PATH:-/data/sync/disaffected/episodes}:/home/episodes
       - ${REPO_PATH:-/data/sync/disaffected/repo}:/home/repo
       - ${MEDIA_ASSETS_PATH:-/data/sync/media_assets}:/home/media_assets
+      # Unbound media pool — relocated under media_assets/pool (episodes/, ads/,
+      # repo/, whiteboard/). Cue-released media + whiteboard media live here.
+      # /api/episodes/{ep}/cue-assets/move-to-pool writes to /home/pool/episodes/{ep}.
+      - ${POOL_PATH:-/data/sync/media_assets/pool}:/home/pool
+      # SOT uploads write to /shared_media/preproc/working — same mount the live
+      # `server` has. Without it the dev backend 500s on POST /api/sot/upload/background
+      # with "Permission denied: '/shared_media'".
+      - ${SHARED_MEDIA_PATH:-/data/sync/shared_media}:/shared_media
     networks:
       - video-post
     # Self-heal: if a worker deadlocks/crashes, the container comes back on its own.
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Dev Celery worker — the piece that makes SOT/media processing work in dev.
+  #
+  # WHY THIS EXISTS: the live worker (prefect-assets_worker) is wired to the live
+  # `showbuild` DB. A dev SOT job enqueued by the dev backend would otherwise be
+  # grabbed by the live worker, which can't find the cue (it's in showbuild_dev)
+  # and stalls forever. This worker is bound to showbuild_dev + Redis /1, so it
+  # ONLY processes dev jobs and the live worker ONLY processes live jobs.
+  #
+  # It mirrors the live worker's image, command, and mount layout EXACTLY, with
+  # three deliberate differences: the worktree app/ (branch code), the dev DB,
+  # and Redis index /1. Mounts /data/sync + /data/process the same way the live
+  # worker does, so all ffmpeg_tasks paths (MEDIA_ROOT=/mnt/sync/disaffected,
+  # /mnt/process) resolve identically.
+  # ---------------------------------------------------------------------------
+  # ── NEW multi-flavor worker (2026-06-04) ──────────────────────────────────
+  # Dev cutover from the old monolith (celery-workers-celery-worker:latest) to
+  # the worker-media-gpu flavor image. GPU-first ffmpeg (app/services/ffmpeg_accel.py)
+  # uses nvenc with CPU failover. Pinned to the DEV broker (/1) + showbuild_dev so
+  # it only consumes dev jobs. The OLD monolith service is preserved commented-out
+  # below for instant rollback.
+  #
+  # MEDIA TREE (critical): the dev backend writes to host /data/sync (NOT the NFS
+  # /mnt/sync from .210 — that's a DIFFERENT tree). So we bind /data/sync->/mnt/sync
+  # exactly like the monolith did; MEDIA_ROOT=/mnt/sync/disaffected then resolves to
+  # the dev tree. The worker-entrypoint sees /mnt/sync already bind-present and uses
+  # it as-is (NFS_REQUIRED=false stops it trying to self-mount .210).
+  assets-worker-dev:
+    image: 192.168.51.206:3000/kevin/worker-media-gpu:latest
+    container_name: show-build-assets-worker-dev
+    user: "1000:1001"
+    runtime: nvidia
+    environment:
+      - TZ=America/New_York
+      - MEDIA_ROOT=/mnt/sync/disaffected
+      - DATABASE_URL=postgresql://showbuild:showbuild@192.168.51.238:5433/showbuild_dev
+      # Dev Redis index /1 — matches the dev backend; isolates from live's /0.
+      - REDIS_URL=redis://:showbuild2025@192.168.51.223:6379/1
+      - LLM_STATE_API_KEY=
+      # Both cards (RTX 3060 + RTX 5090) visible; nvenc failover picks one.
+      - NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
+      - NVIDIA_VISIBLE_DEVICES=all
+      # The /mnt/sync bind below is already present (host /data/sync); do NOT let
+      # the entrypoint attempt an in-container NFS self-mount.
+      - NFS_REQUIRED=false
+    volumes:
+      # Branch code from the worktree — same isolation as the dev backend.
+      - /home/kevin/show-build-migration/app:/app
+      # Dev media tree: host /data/sync (what the dev backend writes to) presented
+      # as /mnt/sync so ffmpeg_tasks paths resolve identically to the old monolith.
+      - /data/sync:/mnt/sync
+      - /data/process:/mnt/process
+    # Consume the `fsq` queue too: in dev there is no separate Kairo worker on
+    # this broker (Redis /1), so FSQ generate/regenerate tasks — which the
+    # celery_app router hard-pins to the `fsq` queue — would otherwise have no
+    # consumer and hang. This worker (media-gpu image) has Pillow + render_fsq_png.
+    # Unique hostname so this worker and the live one coexist on the broker.
+    command: >
+      celery -A celery_app worker
+      -Q media,assets_high,assets,assets_low,ffmpeg,fsq
+      --hostname=assets_worker@prefect-dev
+      --concurrency=4 --prefetch-multiplier=1 --max-tasks-per-child=50
+    networks:
+      - celery-workers
+    restart: unless-stopped
+
+  # ── OLD monolith (rollback) ───────────────────────────────────────────────
+  # To roll back: comment out assets-worker-dev above, uncomment this, and
+  # `docker compose -f docker-compose.dev.yml up -d assets-worker-dev`.
+  # assets-worker-dev:
+  #   image: celery-workers-celery-worker:latest
+  #   container_name: show-build-assets-worker-dev
+  #   user: "1000:1001"
+  #   environment:
+  #     - TZ=America/New_York
+  #     - MEDIA_ROOT=/mnt/sync/disaffected
+  #     - DATABASE_URL=postgresql://showbuild:showbuild@192.168.51.238:5433/showbuild_dev
+  #     - REDIS_URL=redis://:showbuild2025@192.168.51.223:6379/1
+  #     - LLM_STATE_API_KEY=
+  #     - NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
+  #     - NVIDIA_VISIBLE_DEVICES=all
+  #   volumes:
+  #     - /home/kevin/show-build-migration/app:/app
+  #     - /data/sync:/mnt/sync
+  #     - /data/process:/mnt/process
+  #   command: >
+  #     celery -A celery_app worker
+  #     -Q media,assets_high,assets,assets_low,ffmpeg
+  #     --hostname=assets_worker@prefect-dev
+  #     --concurrency=4 --prefetch-multiplier=1 --max-tasks-per-child=50
+  #   networks:
+  #     - celery-workers
+  #   restart: unless-stopped
+
+  # ── Dev Celery beat ──────────────────────────────────────────────────────
+  # Drives periodic tasks (Autoscrub idle-item sweep, etc.) on the DEV broker
+  # (Redis /1) + DEV db. The live beat runs on Redis /0 and cannot reach the
+  # dev worker, so dev needs its own. Beat only schedules — no GPU/media mounts.
+  celery-beat-dev:
+    image: 192.168.51.206:3000/kevin/worker-media-gpu:latest
+    container_name: show-build-celery-beat-dev
+    user: "1000:1001"
+    environment:
+      - TZ=America/New_York
+      - DATABASE_URL=postgresql://showbuild:showbuild@192.168.51.238:5433/showbuild_dev
+      # Dev Redis index /1 — matches the dev backend + dev worker.
+      - REDIS_URL=redis://:showbuild2025@192.168.51.223:6379/1
+      - PYTHONUNBUFFERED=1
+      - NFS_REQUIRED=false
+    volumes:
+      - /home/kevin/show-build-migration/app:/app
+    command: >
+      celery -A celery_app beat
+      --loglevel=info
+      --schedule=/tmp/celerybeat-schedule-dev
+    networks:
+      - celery-workers
     restart: unless-stopped
 
 networks:
@@ -65,3 +199,8 @@ networks:
   video-post:
     external: true
     name: show-build_video-post
+  # The live celery workers' network — the dev worker joins it so it resolves
+  # the broker/DB exactly as the live worker does. External; never managed here.
+  celery-workers:
+    external: true
+    name: celery-workers_default

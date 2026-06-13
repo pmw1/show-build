@@ -1,0 +1,38 @@
+# Packaged form — for show-build's compose to pull the router in alongside its
+# own services. Add to /srv/show-build/docker-compose.yml under the top level:
+#
+#   include:
+#     - llm-router/docker-compose.include.yml
+#
+# This variant joins show-build's `video-post` network so in-cluster services
+# can reach the router at http://llm-router:11500, AND publishes 11500 on the
+# host/LAN. Keys come from show-build's root .env (same ${VAR} substitution).
+services:
+  llm-router:
+    build:
+      context: ./llm-router
+    container_name: llm-router
+    user: "1000:1001"
+    ports:
+      - "0.0.0.0:11500:11500"
+    volumes:
+      - ./llm-router:/config
+    environment:
+      - TZ=America/New_York
+      - LOG_LEVEL=INFO
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - LLM_STATE_API_KEY=${LLM_STATE_API_KEY:-}
+    networks:
+      - video-post
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:11500/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

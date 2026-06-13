@@ -225,13 +225,29 @@ async def get_notifications(
     db: Session = Depends(get_db)
 ):
     """
-    Get recent LLM notifications for current user
+    Get recent LLM notifications for current user.
+
+    NOTE: the LLMNotification model here expects columns (user_id, title,
+    priority, ...) that the real llm_notifications table (migration g009) does
+    NOT have — it has asset_id/type/seen/etc. So this query raises
+    UndefinedColumn -> 500. Until the model/table mismatch is resolved (todo #30),
+    fail gracefully with an empty list instead of 500ing on every dashboard load.
+    The working notification path is /api/llm-notifications/unseen (misc_router).
     """
-    notifications = db.query(LLMNotification).filter(
-        LLMNotification.user_id == current_user['id']
-    ).order_by(
-        LLMNotification.timestamp.desc()
-    ).limit(limit).all()
+    try:
+        notifications = db.query(LLMNotification).filter(
+            LLMNotification.user_id == current_user['id']
+        ).order_by(
+            LLMNotification.timestamp.desc()
+        ).limit(limit).all()
+    except Exception as e:
+        from sqlalchemy import text as _sql_text  # noqa: F401
+        db.rollback()
+        import logging
+        logging.getLogger(__name__).warning(
+            "llm/notifications query failed (model/table mismatch, todo #30): %s", e
+        )
+        return {"notifications": []}
 
     # Convert to dict format expected by frontend
     notifications_data = []

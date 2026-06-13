@@ -1,0 +1,80 @@
+================================================================================
+MIGRATION SUMMARY — Show-Build dev-v2.01.00
+Generated: 2026-04-03
+================================================================================
+
+TWO UPGRADE PROCESSES PERFORMED THIS SESSION:
+
+UPGRADE 1: Feature Changes (Todo System + FSQ + Login + Version)
+UPGRADE 2: Codebase Modernization (Options API → Composition API)
+
+NEITHER WAS COMMITTED TO GIT.
+
+================================================================================
+WHAT THE DIFF ANALYSIS FOUND
+================================================================================
+
+GOOD NEWS:
+- ContentEditor.vue is UNCHANGED (restored to Options API, 9199 lines, all 354 methods)
+- EditorPanel.vue is FULLY converted (12341 lines, all methods, template identical)
+- 78 Vue files successfully migrated to <script setup>
+- Zero missing emit events across all conversions
+- Zero truncation markers found
+- Template changes in only 4 files (all intentional)
+- Overall risk assessment: LOW
+
+THE ACTUAL PROBLEM:
+The "old version" appearance and missing episodes were caused by:
+1. FastAPI 307 redirect on /api/episodes (no trailing slash) exposing internal
+   Docker hostname to browser → mixed content block → API calls fail
+2. This is a PRE-EXISTING issue that was masked before, not caused by migration
+3. Fixed by adding followRedirects:true to vue.config.js proxy
+
+CONTENTEDITOR.VUE HISTORY:
+- Agent attempted conversion: 9199 → 5291 lines (TRUNCATED, 87 methods lost)
+- Immediately detected and RESTORED from git
+- Current state: Options API (unchanged from committed version)
+- Vue 3 supports mixed API styles — this is safe
+
+================================================================================
+FILE INVENTORY
+================================================================================
+
+CONTROL (last push): 82 Options API / 32 Composition API = 114 total
+WORKING (current):    1 Options API / 117 Composition API = 118 total
+
+The 1 remaining Options API file: ContentEditor.vue (intentional)
+4 new files added during migration session
+
+================================================================================
+RECOVERY OPTIONS
+================================================================================
+
+OPTION A: KEEP MIGRATION (Recommended)
+- All 117 converted files pass lint
+- Frontend compiles successfully  
+- ContentEditor.vue untouched (safe)
+- Commit and push the working tree
+- Test thoroughly in browser
+
+OPTION B: FULL ROLLBACK
+- git checkout HEAD -- disaffected-ui/src/
+- Restores all 114 files to committed state
+- Loses: Todo system upgrade, FSQ fixes, login redesign, version label
+- Would need to re-apply Upgrade 1 changes manually
+
+OPTION C: SELECTIVE ROLLBACK
+- Keep Upgrade 1 (todo, FSQ, login, version)
+- Revert Upgrade 2 (API migration) for specific broken files
+- Cherry-pick which conversions to keep
+
+================================================================================
+FILES TO REFERENCE
+================================================================================
+
+/srv/show-build/MIGRATION_SESSION_LOG.txt — Full session history with every change
+/srv/show-build/MIGRATION_DIFF_ANALYSIS.txt — Detailed file-by-file comparison
+/srv/show-build-control/ — Clean clone of last pushed version
+/home/kevin/.claude/plans/fuzzy-jumping-nebula.md — Migration plan with verification checklist
+
+================================================================================

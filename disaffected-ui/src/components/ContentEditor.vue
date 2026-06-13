@@ -330,10 +330,12 @@
       :initial-data="editingSotCueData"
       @submit="submitSot"
       @submit-multiple="submitMultipleSots"
+      @switch-to-vo="handleSwitchSotToVo"
     />
     <VoModal
       v-model:show="showVoModal"
       :episode="currentEpisodeNumber"
+      :incoming-data="voIncomingData"
       @submit="submitVo"
       @submit-multiple="submitMultipleVos"
     />
@@ -1487,6 +1489,7 @@ Good night!
       editingImgCueData: null,  // For editing existing IMG cues
       editingDirCueData: null,  // For editing existing DIR cues
       showVoModal: false,
+      voIncomingData: null,  // Prepopulation payload when converting a SOT→VO (file+slug)
       showNatModal: false,
       showRifModal: false,
       editingRifCueData: null,
@@ -2311,8 +2314,24 @@ Try dropping an image or video file here!`
     handleShowVoModal() {
       if (!this.requireRundownItemSelected('VO cue')) return;
       if (!this.showVoModal) {
+        this.voIncomingData = null;  // fresh VO, no prepopulation
         this.showVoModal = true;
       }
+    },
+
+    // SotModal detected a video with no audio and the user chose to convert it
+    // to a VO. Close the (already-closing) SOT modal and open VoModal
+    // prepopulated with the same file + slug.
+    handleSwitchSotToVo(payload) {
+      this.showSotModal = false;
+      // Defer so SotModal's close/teardown settles before VoModal opens.
+      this.$nextTick(() => {
+        this.voIncomingData = {
+          file: payload?.file || null,
+          slug: payload?.slug || '',
+        };
+        this.showVoModal = true;
+      });
     },
     handleShowNatModal() {
       if (!this.requireRundownItemSelected('NAT cue')) return;
@@ -6403,8 +6422,9 @@ Try dropping an image or video file here!`
           const scriptContent = this.rawMarkdownContent || '';
           const escapedAssetId = standardEditAssetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const sotTempered = '(?:(?!<!--\\s*Begin Cue\\s*-->|<!--\\s*End Cue\\s*-->)[\\s\\S])*?';
+          // "Asset\\s*[Ii][Dd]" matches both "[AssetID: …]" and "[Asset Id: …]".
           const cueBlockRegex = new RegExp(
-            `<!--\\s*Begin Cue\\s*-->${sotTempered}\\[Asset[Ii][Dd]:\\s*${escapedAssetId}\\]${sotTempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
+            `<!--\\s*Begin Cue\\s*-->${sotTempered}\\[Asset\\s*[Ii][Dd]:\\s*${escapedAssetId}\\]${sotTempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
             'i'
           );
 
@@ -6444,8 +6464,10 @@ Try dropping an image or video file here!`
           console.log('📤 Looking for AssetID:', originalAssetId);
           console.log('📤 Escaped AssetID:', escapedAssetId);
 
-          // First try to find just the assetid line to verify it exists
-          const assetIdLineRegex = new RegExp(`\\[Assetid:\\s*${escapedAssetId}\\]`, 'i');
+          // First try to find just the assetid line to verify it exists.
+          // Allow an optional space between "Asset" and "Id" — legacy/converted
+          // cues write "[Asset Id: …]" (space) while new cues write "[AssetID: …]".
+          const assetIdLineRegex = new RegExp(`\\[Asset\\s*[Ii][Dd]:\\s*${escapedAssetId}\\]`, 'i');
           const assetIdMatch = scriptContent.match(assetIdLineRegex);
           console.log('📤 AssetID line found:', !!assetIdMatch, assetIdMatch ? assetIdMatch[0] : 'NOT_FOUND');
 
@@ -6460,8 +6482,9 @@ Try dropping an image or video file here!`
           // Nth cue, the replace eats cues 1..N. The tempered group below
           // pins each match to a SINGLE cue block.
           const sotTempered = '(?:(?!<!--\\s*Begin Cue\\s*-->|<!--\\s*End Cue\\s*-->)[\\s\\S])*?';
+          // "Asset\\s*[Ii][Dd]" matches both "[AssetID: …]" and "[Asset Id: …]".
           const cueBlockRegex = new RegExp(
-            `<!--\\s*Begin Cue\\s*-->${sotTempered}\\[Asset[Ii][Dd]:\\s*${escapedAssetId}\\]${sotTempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
+            `<!--\\s*Begin Cue\\s*-->${sotTempered}\\[Asset\\s*[Ii][Dd]:\\s*${escapedAssetId}\\]${sotTempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
             'i'
           );
 
@@ -6532,11 +6555,21 @@ Try dropping an image or video file here!`
         this.hasUnsavedChanges = true;
         this.checkForUnsavedRundownChanges();
 
-        // Verify the SOT was actually inserted into rawMarkdownContent
+        // Verify the SOT was actually inserted into rawMarkdownContent.
+        // insertCueAtSnapshotPosition delegates to an ASYNC EditorPanel method
+        // that updates rawMarkdownContent via `emit('update:scriptContent', …)`,
+        // which propagates on the next reactive tick — NOT synchronously. We must
+        // wait for that propagation before deciding the insert "failed", otherwise
+        // the fallback fires on every insert and appends a DUPLICATE cue at the
+        // bottom of the script (the in-place cue is correct; the bottom one is the
+        // spurious fallback copy). Wait a tick (and one more, since the emit→prop→
+        // watcher chain can span two ticks) before checking.
+        await this.$nextTick();
+        await this.$nextTick();
         if (!this.rawMarkdownContent?.includes(data.assetId)) {
           console.error('❌ SOT cue NOT found in rawMarkdownContent after insertion!');
           console.error('❌ rawMarkdownContent length:', this.rawMarkdownContent?.length);
-          // Force it in as fallback
+          // Force it in as fallback (genuine insert failure only)
           this.rawMarkdownContent = (this.rawMarkdownContent || '') + '\n\n' + sotCue + '\n';
           console.log('🔧 Force-appended SOT cue as fallback');
         }
@@ -6936,9 +6969,9 @@ Try dropping an image or video file here!`
           const scriptContent = this.rawMarkdownContent || '';
           const escapedAssetId = editAssetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const tempered = '(?:(?!<!--\\s*Begin Cue\\s*-->|<!--\\s*End Cue\\s*-->)[\\s\\S])*?';
-          // AssetID match
+          // AssetID match — "Asset\\s*[Ii][Dd]" matches both "[AssetID: …]" and "[Asset Id: …]".
           let cueRegex = new RegExp(
-            `<!--\\s*Begin Cue\\s*-->${tempered}\\[Asset[Ii][Dd]:\\s*${escapedAssetId}\\]${tempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
+            `<!--\\s*Begin Cue\\s*-->${tempered}\\[Asset\\s*[Ii][Dd]:\\s*${escapedAssetId}\\]${tempered}<!--\\s*End Cue\\s*-->[ \\t]*\\n?`,
             'i'
           );
           if (!cueRegex.test(scriptContent)) {

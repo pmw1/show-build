@@ -14,6 +14,7 @@ from .history_router import router as history_router
 from .thumbnails_router import router as thumbnails_router
 from .cues_router import router as cues_router
 from .media_router import router as media_router
+from .cue_assets_router import router as cue_assets_router
 
 # Re-export shared utilities for backward compatibility
 from ._shared import create_content_version, create_episode_directory, create_info_file
@@ -29,3 +30,4 @@ router.include_router(history_router)
 router.include_router(thumbnails_router)
 router.include_router(cues_router)
 router.include_router(media_router)
+router.include_router(cue_assets_router)

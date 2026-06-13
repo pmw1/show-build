@@ -1,0 +1,175 @@
+services:
+  server:
+    build:
+      context: .
+      no_cache: true
+    container_name: show-build-server
+    user: "1000:1001"  # Run as kevin:disaffected to match file ownership
+    ports:
+      - "0.0.0.0:8888:80"
+    volumes:
+      - ./app:/app
+      - ./app/storage:/app/storage
+      - ./tools/blueprints:/tools/blueprints:ro  # Blueprint templates for document generation
+      - ${LOGS_PATH:-/data/sync/disaffected/logs}:/home/logs
+      - ${SHARED_MEDIA_PATH:-/data/sync/shared_media}:/shared_media
+      - ${EPISODES_PATH:-/data/sync/disaffected/episodes}:/home/episodes
+      - ${REPO_PATH:-/data/sync/disaffected/repo}:/home/repo
+      - ${MEDIA_ASSETS_PATH:-/data/sync/media_assets}:/home/media_assets
+      - ${POOL_PATH:-/data/sync/disaffected/pool}:/home/pool  # unbound media pool (cue-released assets), episode-foldered for provenance
+      - ${ASTERISK_PATH:-/mnt/asterisk/recordings}:/asterisk/recordings:ro
+      - /home/kevin/.claude/todos:/home/kevin/.claude/todos:ro
+    networks:
+      - video-post
+    environment:
+      - TZ=America/New_York
+      - MODULE_NAME=main
+      - VARIABLE_NAME=app
+      - WEB_CONCURRENCY=4
+      - TIMEOUT=300
+      - GRACEFUL_TIMEOUT=300
+      - FORWARDED_ALLOW_IPS=*
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-ea7GZD3mQy3EZYD4YZsFmr/9JwBgZFCaWyznnjhOyow=}
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=2880
+      - MEDIA_ROOT=/home
+      - REDIS_URL=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
+      - LLM_STATE_API_KEY=${LLM_STATE_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      # - mqtt-broker  # Removed 2026-01-01 - MQTT archived (see app/backup/mqtt_archived_2026-01-01/)
+      - postgres
+
+  postgres:
+    image: postgres:13
+    container_name: show-build-postgres
+    environment:
+      POSTGRES_DB: showbuild
+      POSTGRES_USER: showbuild
+      POSTGRES_PASSWORD: showbuild
+    ports:
+      - "0.0.0.0:5433:5432"  # Map to 5433 externally to avoid conflicts
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - video-post
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U showbuild -d showbuild"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./disaffected-ui
+      target: development
+      no_cache: true
+    container_name: show-build-frontend
+    ports:
+      - "0.0.0.0:8091:8080"  # HTTPS Vue dev server runs on 8080
+    volumes:
+      - ./disaffected-ui/src:/app/src  # Mount source for hot reload
+      - ./disaffected-ui/public:/app/public
+      - ./disaffected-ui/package.json:/app/package.json
+      - ./disaffected-ui/package-lock.json:/app/package-lock.json
+      - ./disaffected-ui/vue.config.js:/app/vue.config.js
+      - ./disaffected-ui/ssl:/app/ssl  # Mount SSL certificates
+    networks:
+      - video-post
+    depends_on:
+      - server
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=development
+      - VUE_APP_API_URL=http://localhost:8888
+    healthcheck:
+      test: ["CMD", "sh", "-c", "ps aux | grep -q '[n]ode.*vue-cli-service'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # mqtt-broker service removed 2026-01-01 - archived in app/backup/mqtt_archived_2026-01-01/
+  # All async task processing now handled by Celery + Redis (see app/celery_app.py)
+
+  llm-content-worker:
+    build:
+      context: .
+    container_name: show-build-llm-content-worker
+    user: "1000:1001"
+    command: >
+      celery -A celery_app worker
+      -Q llm_content
+      --hostname=llm-content-worker@prefect
+      --concurrency=1
+      --max-tasks-per-child=10
+      --loglevel=info
+    volumes:
+      - ./app:/app
+      - ./app/storage:/app/storage
+      - ${EPISODES_PATH:-/data/sync/disaffected/episodes}:/home/episodes
+      - ${REPO_PATH:-/data/sync/disaffected/repo}:/home/repo
+      - ${POOL_PATH:-/data/sync/disaffected/pool}:/home/pool  # unbound media pool (cue-released assets)
+    networks:
+      - video-post
+    environment:
+      - TZ=America/New_York
+      - REDIS_URL=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  celery-beat:
+    build:
+      context: .
+    container_name: show-build-celery-beat
+    user: "1000:1001"
+    command: >
+      celery -A celery_app beat
+      --loglevel=info
+      --schedule=/tmp/celerybeat-schedule
+    volumes:
+      - ./app:/app
+    networks:
+      - video-post
+    environment:
+      - TZ=America/New_York
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  sot-trace:
+    build:
+      context: ./tools/sot-trace
+    container_name: show-build-sot-trace
+    command: ["sot-trace", "daemon"]
+    networks:
+      - video-post
+    environment:
+      - TZ=America/New_York
+      - PYTHONUNBUFFERED=1
+      - SOT_TRACE_DSN=host=show-build-postgres port=5432 dbname=showbuild user=showbuild password=showbuild
+      - SOT_TRACE_BROKER=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
+      - SOT_TRACE_FS_ROOT=/shared_media/preproc/working
+      - SOT_TRACE_DATA_DIR=/var/log/sot-trace
+    volumes:
+      - ${SHARED_MEDIA_PATH:-/data/sync/shared_media}:/shared_media:ro
+      - ./tools/sot-trace/data:/var/log/sot-trace
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+
+networks:
+  video-post:

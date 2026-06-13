@@ -12,7 +12,10 @@
       ></v-app-bar-nav-icon>
 
       <v-app-bar-title class="text-primary font-weight-bold app-title-compact" style="margin-right: 0.25em;">
-        Show Builder
+        <div class="d-flex flex-column" style="line-height: 1;">
+          <span>Show Fucker</span>
+          <span class="app-version-label">v.1.0.2</span>
+        </div>
       </v-app-bar-title>
 
       <!-- Status Clock (Today's Date) -->
@@ -1027,6 +1030,15 @@ onMounted(async () => {
 .app-title-compact {
   min-width: 150px !important;
   max-width: 200px !important;
+}
+
+/* Small version label under the app title */
+.app-version-label {
+  font-size: 0.65rem;
+  font-weight: 400;
+  opacity: 0.6;
+  letter-spacing: 0.02em;
+  margin-top: 2px;
 }
 
 /* User info section - add spacing below status indicators */

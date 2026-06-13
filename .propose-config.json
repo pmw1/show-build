@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "proposals_file": "docs/proposals.md",
+  "spec_files": [
+    "CLAUDE.md",
+    "docs/EDITOR_PANEL_ARCHITECTURE.md",
+    "docs/SAVE_RELOAD_SPEC.md",
+    "docs/ARCHITECTURE_DECISIONS.md",
+    "docs/EPISODE_DATA_ARCHITECTURE.md"
+  ],
+  "milestone_file": "ACTIVE_WORK_QUEUE.md",
+  "edge_out_file": "docs/future-development.md",
+  "locked_principles_hint": "look for 'principles', 'Critical Design Rule', 'Save Ownership', 'Do NOT' sections in spec_files and CLAUDE.md",
+  "next_proposal_id": 2
+}

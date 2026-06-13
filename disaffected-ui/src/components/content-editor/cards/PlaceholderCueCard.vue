@@ -156,6 +156,7 @@
         ref="gfxContentRef"
         :cue-data="cueData"
         :has-gfx-asset="hasGfxAsset"
+        :gfx-dirty="gfxDirty"
         :generating-gfx="generatingGfx"
         :gfx-generation-status="gfxGenerationStatus"
         :fsq-background-video-url="fsqBackgroundVideoUrl"
@@ -536,6 +537,7 @@ const orbitalOpen = ref(false);
 const isCollapsed = ref(false);
 const generatingPNG = ref(false);
 const fsqDirty = ref(true); // Assume dirty until proven generated (no PNG = needs generation)
+const gfxDirty = ref(true); // Same dirty model as FSQ: dirty until generated, re-dirty on any param change
 const generatingGfx = ref(false);       // GFX generation in progress
 const gfxImageError = ref(false);       // GFX image failed to load
 const gfxGenerationStatus = ref(null);  // GFX generation status: null, 'queued', 'generating', 'completed', 'failed'
@@ -1338,6 +1340,10 @@ function handleChildUpdateMeta(payload) {
   if (props.cueData.type === 'FSQ') {
     fsqDirty.value = true;
   }
+  // Same for GFX — any adjustment re-dirties so the Generate button re-enables.
+  if (props.cueData.type === 'GFX') {
+    gfxDirty.value = true;
+  }
   emit('update-meta', payload);
 }
 
@@ -1788,6 +1794,7 @@ async function pollGfxTaskStatus(taskId, maxAttempts = 30) {
         if (status.successful) {
           console.log('🎉 GFX generation completed!', status.result);
           gfxGenerationStatus.value = 'completed';
+          gfxDirty.value = false; // up to date until the next adjustment
 
           if (status.result.asset_url) {
             const assetUrl = status.result.asset_url;

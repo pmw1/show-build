@@ -110,3 +110,4 @@ backups/
 .backups/
 app/celerybeat-schedule
 tools/sot-trace/data/
+.cloudflare-token

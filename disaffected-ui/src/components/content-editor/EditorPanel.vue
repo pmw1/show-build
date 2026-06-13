@@ -1307,6 +1307,27 @@
     @delete-preserve-assets="handleDeletePreserveAssets"
   />
 
+  <!-- Generic Delete Cue + media disposition modal (all media-linked cue types) -->
+  <DeleteCueWithMediaModal
+    v-model:show="showDeleteCueWithMedia"
+    :cue-type="deletingCueData?.type || ''"
+    :cue-slug="deletingCueData?.slug || ''"
+    :media-files="deletingCueMedia"
+    @delete-only="handleDeleteCueOnly"
+    @delete-with-media="handleDeleteWithMedia"
+    @delete-release-to-pool="handleDeleteReleaseToPool"
+  />
+
+  <!-- Warning shown when a media delete/release fails after the cue was removed -->
+  <MediaDeleteFailedModal
+    v-model:show="showMediaDeleteFailed"
+    :errors="mediaDeleteErrors"
+    :action="lastMediaDisposition"
+    @acknowledge="handleMediaFailAcknowledge"
+    @retry="handleMediaFailRetry"
+    @restore="handleMediaFailRestore"
+  />
+
   <!-- Speaker Selector Modal -->
   <SpeakerSelectorModal
     v-model:show="showSpeakerSelector"
@@ -1445,6 +1466,8 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, onUnmounted, nextTick
 import { getColorValue, resolveVuetifyColor, loadColorsFromDatabase } from '../../utils/themeColorMap.js'
 import draggable from 'vuedraggable'
 import DeleteImgCueModal from './modals/DeleteImgCueModal.vue'
+import DeleteCueWithMediaModal from './modals/DeleteCueWithMediaModal.vue'
+import MediaDeleteFailedModal from './modals/MediaDeleteFailedModal.vue'
 import ImageCueCard from './cards/ImageCueCard.vue'
 import PlaceholderCueCard from './cards/PlaceholderCueCard.vue'
 import SpeakerSelectorModal from './modals/SpeakerSelectorModal.vue'
@@ -1928,9 +1951,16 @@ const showStylesFlyout = ref(false)
 const showImgModal = ref(false)
 const showDeleteImgModal = ref(false)
 const showDeleteCueConfirm = ref(false)
+const showDeleteCueWithMedia = ref(false)   // disposition modal for media-linked cues
+const showMediaDeleteFailed = ref(false)    // post-deletion warning when media op fails
 const editingCueData = ref(null)
 const deletingCueData = ref(null)
 const deletingCueIndex = ref(null)
+const deletingCueMedia = ref([])            // linked file URLs for the cue being deleted
+const mediaDeleteErrors = ref([])           // [{ path, reason }] surfaced in the warning modal
+const lastMediaDisposition = ref(null)      // 'delete' | 'pool' — what to retry
+// Captured so a removed cue can be restored if the user cancels after a media failure.
+const restorableCue = ref(null)             // { blockText, removeStart }
 const selectedCueIndex = ref(null)
 const selectedSegmentIndex = ref(null)
 const pendingCueInsertionIndex = ref(null) // Snapshotted at cue-button-press time, survives modal interaction
@@ -3788,6 +3818,37 @@ function _clearAttentionIfNoRevisions(index) {
 }
 
 // Accept a single revision: replace <rev> block with replacement text
+// Make a revision-resolution authoritative over the contenteditable DOM and
+// the edit buffer. Accepting/rejecting operates on the parsed segment.content,
+// but the live <div contenteditable> still shows the old rev-markup and the
+// edit buffer may hold a stale (rev-markup / shrunken) capture from typing.
+// If left in place, the paragraph's blur handler (fired by clicking Accept)
+// re-persists that stale buffer and WIPES the paragraph. So: cancel the pending
+// debounce, drop the stale buffer entry, and sync the live DOM element to the
+// resolved content BEFORE we flush.
+function _applyResolvedRevisionContent(index, resolvedContent, revBlockEl) {
+  // Cancel any in-flight per-segment autosave that would race the resolution.
+  if (updateDebounceTimers && updateDebounceTimers[index]) {
+    clearTimeout(updateDebounceTimers[index]);
+    delete updateDebounceTimers[index];
+  }
+  // Drop the stale buffer capture so blur/flush can't re-persist it.
+  if (segmentEditBuffer && segmentEditBuffer[index] !== undefined) {
+    delete segmentEditBuffer[index];
+  }
+  // Sync the live contenteditable so a subsequent blur captures clean content.
+  const element = revBlockEl
+    ? revBlockEl.closest('[contenteditable="true"]')
+    : null;
+  if (element) {
+    element.innerHTML = resolvedContent;
+  }
+  // Push the resolved content through the normal path (re-buffers clean text).
+  updateTextSegment(index, resolvedContent);
+  hasLocalUnsavedChanges.value = true;
+  _clearAttentionIfNoRevisions(index);
+}
+
 function acceptRevision(index, revBlockEl) {
   const element = revBlockEl.closest('[contenteditable="true"]');
   if (!element) return;
@@ -3807,9 +3868,7 @@ function acceptRevision(index, revBlockEl) {
     }
   );
 
-  updateTextSegment(index, content);
-  hasLocalUnsavedChanges.value = true;
-  _clearAttentionIfNoRevisions(index);
+  _applyResolvedRevisionContent(index, content, revBlockEl);
   // Trigger immediate save
   nextTick(async () => {
     await flushPendingChanges();
@@ -3835,9 +3894,7 @@ function rejectRevision(index, revBlockEl) {
     }
   );
 
-  updateTextSegment(index, content);
-  hasLocalUnsavedChanges.value = true;
-  _clearAttentionIfNoRevisions(index);
+  _applyResolvedRevisionContent(index, content, revBlockEl);
   nextTick(async () => {
     await flushPendingChanges();
     emit('save-all');
@@ -3845,7 +3902,7 @@ function rejectRevision(index, revBlockEl) {
 }
 
 // Accept all revisions in a segment
-function acceptAllRevisions(index) {
+function acceptAllRevisions(index, revBlockEl = null) {
   const segment = scriptSegments.value[index];
   if (!segment) return;
 
@@ -3859,9 +3916,7 @@ function acceptAllRevisions(index) {
     }
   );
 
-  updateTextSegment(index, content);
-  hasLocalUnsavedChanges.value = true;
-  _clearAttentionIfNoRevisions(index);
+  _applyResolvedRevisionContent(index, content, revBlockEl);
   nextTick(async () => {
     await flushPendingChanges();
     emit('save-all');
@@ -3869,7 +3924,7 @@ function acceptAllRevisions(index) {
 }
 
 // Reject all revisions in a segment
-function rejectAllRevisions(index) {
+function rejectAllRevisions(index, revBlockEl = null) {
   const segment = scriptSegments.value[index];
   if (!segment) return;
 
@@ -3883,9 +3938,7 @@ function rejectAllRevisions(index) {
     }
   );
 
-  updateTextSegment(index, content);
-  hasLocalUnsavedChanges.value = true;
-  _clearAttentionIfNoRevisions(index);
+  _applyResolvedRevisionContent(index, content, revBlockEl);
   nextTick(async () => {
     await flushPendingChanges();
     emit('save-all');
@@ -5734,20 +5787,49 @@ function handleApplyAllGfx({ param, value }) {
   }
 }
 
+/**
+ * Collect every media file a cue links to. ALWAYS driven by the cue's own
+ * URL fields — never by globbing the AssetID, because one AssetID can be
+ * shared by multiple cues pointing at different files.
+ *
+ * Returns a deduped array of relative URL strings (e.g. '../assets/video/x.mp4').
+ */
+function collectCueMedia(cueData) {
+  if (!cueData) return [];
+  const raw = cueData.rawData || {};
+  const urls = [];
+
+  // Top-level + rawData variants (parser normalizes to camelCase; rawData is lowercase).
+  const push = (v) => { if (v && typeof v === 'string' && v.trim()) urls.push(v.trim()); };
+  push(cueData.mediaUrl); push(raw.mediaurl); push(raw.MediaURL);
+  push(cueData.audioUrl); push(raw.audiourl); push(raw.AudioURL);
+  push(cueData.thumbnailUrl); push(raw.thumbnailurl); push(raw.ThumbnailURL);
+
+  // SOT thumbnailOptions: array of up to 15 thumbnail URLs.
+  const opts = cueData.thumbnailOptions || raw.thumbnailOptions;
+  if (Array.isArray(opts)) opts.forEach(push);
+
+  // Dedupe.
+  return [...new Set(urls)];
+}
+
 function deleteCue(index) {
   const segment = scriptSegments.value[index];
+  const cueData = segment?.data || null;
+  const linkedMedia = collectCueMedia(cueData);
 
-  // If it's an IMG cue, show IMG-specific confirmation modal
-  if (segment?.type === 'cue' && segment.data?.type === 'IMG') {
-    deletingCueData.value = segment.data;
-    deletingCueIndex.value = index;
-    showDeleteImgModal.value = true;
+  deletingCueData.value = cueData;
+  deletingCueIndex.value = index;
+  deletingCueMedia.value = linkedMedia;
+
+  if (linkedMedia.length > 0) {
+    // Media-linked cue (IMG, GFX, SOT, VO, NAT, FSQ with generated art, ...):
+    // offer the media disposition choice (delete only / delete + media / release to pool).
+    showDeleteCueWithMedia.value = true;
     return;
   }
 
-  // For all other cue types, show generic confirmation
-  deletingCueData.value = segment?.data || null;
-  deletingCueIndex.value = index;
+  // No linked media — every cue is still deletable via a plain confirm.
   showDeleteCueConfirm.value = true;
 }
 
@@ -5871,8 +5953,20 @@ function performCueDeletion(index, deleteAssets = false) {
     removeEnd++;
   }
 
+  // Capture exactly what we remove so the cue can be restored if a follow-up
+  // media operation fails and the user chooses "cancel deletion".
+  const removedRegion = rawContent.substring(removeStart, removeEnd);
+  const joiner = (removeStart > 0 && removeEnd < rawContent.length ? '\n\n' : '');
+  restorableCue.value = {
+    // Re-inserting `removedRegion` at `removeStart` (after removing the `joiner`
+    // we inserted) reproduces the original raw content byte-for-byte.
+    removedRegion,
+    removeStart,
+    joinerLen: joiner.length,
+  };
+
   const newRawContent = rawContent.substring(0, removeStart) +
-    (removeStart > 0 && removeEnd < rawContent.length ? '\n\n' : '') +
+    joiner +
     rawContent.substring(removeEnd);
 
   console.log('🗑️ Raw content length after deletion:', newRawContent.length);
@@ -5899,26 +5993,205 @@ function performCueDeletion(index, deleteAssets = false) {
     emit('save');
   });
 
-  // TODO: If deleteAssets is true, also delete the media file via API
-  if (deleteAssets && deletingCueData.value?.rawData?.mediaurl) {
-    console.log('Would delete media file:', deletingCueData.value.rawData.mediaurl);
-  }
+  // Note: media disposition (delete files / release to pool) is handled
+  // separately by the disposition handlers below, AFTER this script-level
+  // removal. The `deleteAssets` flag is retained only for callers that don't
+  // run a follow-up media op (none currently pass true here).
+  void deleteAssets;
 }
 
-function handleDeleteWithAssets() {
-  if (deletingCueIndex.value !== null) {
-    performCueDeletion(deletingCueIndex.value, true);
-    deletingCueData.value = null;
-    deletingCueIndex.value = null;
+/**
+ * Restore the most-recently-deleted cue back into the script. Used when a
+ * media delete/release fails and the user chooses "cancel deletion".
+ */
+function restoreDeletedCue() {
+  const snap = restorableCue.value;
+  if (!snap) return;
+  const current = props.scriptContent || '';
+  // Undo: remove the joiner we inserted at removeStart, then splice the
+  // original removed region back in at the same offset.
+  const before = current.substring(0, snap.removeStart);
+  const after = current.substring(snap.removeStart + (snap.joinerLen || 0));
+  const restored = before + snap.removedRegion + after;
+
+  cachedScriptSegments.value = null;
+  lastParsedContent.value = null;
+  clearEditBuffer();
+  emit('update:scriptContent', restored);
+  nextTick(() => emit('save'));
+  restorableCue.value = null;
+}
+
+/**
+ * Build auth headers for fetch calls (JWT if present).
+ */
+function buildAuthHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  try {
+    const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  } catch (e) { /* ignore */ }
+  return headers;
+}
+
+/**
+ * Call the backend to delete or release the cue's linked media files.
+ * Returns the parsed JSON response, or throws on a transport-level failure.
+ */
+async function dispatchMediaDisposition(disposition, media, cueData) {
+  const ep = currentEpisodeNumber.value;
+  if (!ep) throw new Error('No episode selected');
+  const endpoint = disposition === 'pool'
+    ? `/api/episodes/${ep}/cue-assets/move-to-pool`
+    : `/api/episodes/${ep}/cue-assets/delete`;
+  const body = disposition === 'pool'
+    ? { media_urls: media, slug: cueData?.slug || '', cue_type: cueData?.type || '', asset_id: cueData?.assetId || cueData?.rawData?.assetid || '' }
+    : { media_urls: media };
+
+  const resp = await fetch(endpoint, {
+    method: 'POST',
+    headers: buildAuthHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    throw new Error(`Server returned ${resp.status}`);
   }
+  return resp.json();
+}
+
+/**
+ * Shared post-removal flow: remove the cue from the script, then run the
+ * chosen media disposition. On any media error, surface the warning modal.
+ */
+async function runCueDispositionFlow(disposition) {
+  const index = deletingCueIndex.value;
+  const cueData = deletingCueData.value;
+  const media = [...deletingCueMedia.value];
+  if (index === null || index === undefined) return;
+
+  // 1. Remove the cue from the script (captures restore state).
+  performCueDeletion(index, false);
+
+  // 2. Close the disposition modal.
+  showDeleteCueWithMedia.value = false;
+
+  // 3. Dispose of media (if any).
+  if (media.length > 0) {
+    lastMediaDisposition.value = disposition;
+    try {
+      const result = await dispatchMediaDisposition(disposition, media, cueData);
+      const errs = result?.errors || [];
+      if (errs.length > 0) {
+        mediaDeleteErrors.value = errs;
+        showMediaDeleteFailed.value = true;
+        return; // leave deletingCue* set so retry/restore can act
+      }
+      // Success.
+      flashMessage.value = {
+        show: true,
+        text: disposition === 'pool'
+          ? `Cue deleted · ${result.moved?.length || media.length} file(s) released to pool`
+          : `Cue deleted · ${result.deleted?.length || 0} file(s) removed`,
+        color: 'success',
+        timeout: 2000,
+      };
+    } catch (err) {
+      mediaDeleteErrors.value = [{ path: media.join(', '), reason: err.message || 'Request failed' }];
+      showMediaDeleteFailed.value = true;
+      return;
+    }
+  }
+
+  // Clear bookkeeping on the success / no-media path.
+  deletingCueData.value = null;
+  deletingCueIndex.value = null;
+  deletingCueMedia.value = [];
+  restorableCue.value = null;
+}
+
+// Disposition modal handlers
+function handleDeleteCueOnly() {
+  // Remove cue, leave media files in place.
+  const index = deletingCueIndex.value;
+  showDeleteCueWithMedia.value = false;
+  if (index !== null && index !== undefined) performCueDeletion(index, false);
+  deletingCueData.value = null;
+  deletingCueIndex.value = null;
+  deletingCueMedia.value = [];
+  restorableCue.value = null;
+}
+
+function handleDeleteWithMedia() {
+  runCueDispositionFlow('delete');
+}
+
+function handleDeleteReleaseToPool() {
+  runCueDispositionFlow('pool');
+}
+
+// IMG modal (legacy) handlers — keep working: delete file vs preserve.
+function handleDeleteWithAssets() {
+  // "Delete Cue & Media" path of the IMG modal.
+  if (deletingCueIndex.value === null || deletingCueIndex.value === undefined) return;
+  if (deletingCueMedia.value.length === 0) {
+    deletingCueMedia.value = collectCueMedia(deletingCueData.value);
+  }
+  runCueDispositionFlow('delete');
 }
 
 function handleDeletePreserveAssets() {
-  if (deletingCueIndex.value !== null) {
-    performCueDeletion(deletingCueIndex.value, false);
+  // "Delete Cue Only" path of the IMG modal.
+  handleDeleteCueOnly();
+}
+
+// Media-failure warning modal handlers
+function handleMediaFailAcknowledge() {
+  // Cue is already removed; user accepts the orphaned/failed media. Close.
+  showMediaDeleteFailed.value = false;
+  mediaDeleteErrors.value = [];
+  deletingCueData.value = null;
+  deletingCueIndex.value = null;
+  deletingCueMedia.value = [];
+  restorableCue.value = null;
+}
+
+async function handleMediaFailRetry() {
+  const media = [...deletingCueMedia.value];
+  const cueData = deletingCueData.value;
+  const disposition = lastMediaDisposition.value || 'delete';
+  try {
+    const result = await dispatchMediaDisposition(disposition, media, cueData);
+    const errs = result?.errors || [];
+    if (errs.length > 0) {
+      mediaDeleteErrors.value = errs; // keep modal open, show fresh errors
+      return;
+    }
+    // Retry succeeded.
+    showMediaDeleteFailed.value = false;
+    mediaDeleteErrors.value = [];
+    flashMessage.value = {
+      show: true,
+      text: disposition === 'pool' ? 'Media released to pool' : 'Media deleted',
+      color: 'success',
+      timeout: 2000,
+    };
     deletingCueData.value = null;
     deletingCueIndex.value = null;
+    deletingCueMedia.value = [];
+    restorableCue.value = null;
+  } catch (err) {
+    mediaDeleteErrors.value = [{ path: media.join(', '), reason: err.message || 'Request failed' }];
   }
+}
+
+function handleMediaFailRestore() {
+  // Cancel the whole deletion: put the cue back, leave media untouched.
+  restoreDeletedCue();
+  showMediaDeleteFailed.value = false;
+  mediaDeleteErrors.value = [];
+  deletingCueData.value = null;
+  deletingCueIndex.value = null;
+  deletingCueMedia.value = [];
 }
 
 /**
@@ -7549,7 +7822,11 @@ async function handleParagraphBlur(index, event) {
       const segments = [...scriptSegments.value];
 
       if (segments[index] && segments[index].type === 'text') {
-        segments[index].content = segmentEditBuffer[index];
+        // Defense-in-depth: the buffer may hold a stale DOM capture that still
+        // contains rev-markup (e.g. a blur racing a revision-accept). Persisting
+        // it raw would wipe the paragraph, so strip revision markup here too —
+        // the resolved <rev> tags are already applied via the accept/reject path.
+        segments[index].content = stripRevisionMarkup(segmentEditBuffer[index]);
         const newRawContent = reconstructRawContent(segments);
         emit('update:scriptContent', newRawContent);
 

@@ -27,6 +27,29 @@
     @update-clip-slug="(p) => { clips[p.index].slug = p.slug }"
   />
 
+  <!-- No-audio → convert to VO confirmation -->
+  <v-dialog v-model="showNoAudioDialog" max-width="460px" persistent style="z-index: 10001;">
+    <v-card>
+      <v-card-title class="text-h6 d-flex align-center" style="gap: 8px;">
+        <span style="font-size: 22px;">🔇</span> No audio detected
+      </v-card-title>
+      <v-card-text style="font-size: 14px; line-height: 1.5;">
+        This video has <strong>no audio track</strong>. A SOT (Sound on Tape) is
+        meant to carry audio — this looks like a <strong>VO</strong> (voiceover)
+        source instead.
+        <br /><br />
+        Convert this to a VO? The VO editor will open with this same video
+        <span v-if="slug">and the slug “<strong>{{ slug }}</strong>”</span>
+        pre-filled.
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="dismissNoAudioDialog">Keep as SOT</v-btn>
+        <v-btn color="primary" variant="flat" @click="convertToVo">Convert to VO</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
   <v-dialog
     :model-value="show"
     @update:model-value="$emit('update:show', $event)"
@@ -620,6 +643,55 @@
               </div>
             </transition>
 
+            <!-- Chunked Upload Status Panel (fly-in, teal) — shown for large
+                 files uploaded in chunks. Sits above the IN/OUT control grid.
+                 Detailed step text + prominent progress bar + ETA + reassembly. -->
+            <transition name="upload-panel-slide">
+              <div
+                v-if="showUploadPanel"
+                class="upload-status-panel"
+                :class="{ 'upload-failed': uploadStage === 'failed', 'upload-done': uploadStage === 'complete' }"
+              >
+                <!-- Big red wait warning while the upload is in flight. -->
+                <div
+                  v-if="uploadStage === 'uploading' || uploadStage === 'reassembling'"
+                  class="upload-wait-banner"
+                >
+                  ⏳ Uploading {{ formatBytes(uploadTotalBytes) }} in {{ uploadTotalChunks }} chunks —
+                  you MUST wait for this process to finish. Do not close this window.
+                </div>
+
+                <div class="upload-panel-header">
+                  <div class="upload-panel-title">
+                    <span v-if="uploadStage === 'uploading'">⬆ Uploading large file (chunked)</span>
+                    <span v-else-if="uploadStage === 'reassembling'">🧩 Reassembling on server</span>
+                    <span v-else-if="uploadStage === 'complete'">✅ Upload complete</span>
+                    <span v-else-if="uploadStage === 'failed'">⚠ Upload failed</span>
+                  </div>
+                  <div
+                    v-if="uploadStage === 'uploading'"
+                    class="upload-panel-eta"
+                  >ETA {{ formatEta(uploadEtaSeconds) }}</div>
+                </div>
+
+                <!-- Prominent progress bar with % rendered inside -->
+                <div class="upload-progress-track">
+                  <div
+                    class="upload-progress-fill"
+                    :class="{ indeterminate: uploadStage === 'reassembling' }"
+                    :style="{ width: (uploadStage === 'reassembling' ? 100 : uploadProgress) + '%' }"
+                  >
+                    <span class="upload-progress-pct">
+                      {{ uploadStage === 'reassembling' ? 'Assembling…' : uploadProgress + '%' }}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Detailed step line -->
+                <div class="upload-panel-detail">{{ uploadStatusLine }}</div>
+              </div>
+            </transition>
+
             <!-- 3x8 Control Grid Below Video -->
             <div class="control-grid-container" style="width: 100%; margin-top: 1px; margin-bottom: 15px; position: relative; z-index: 13;">
               <!-- Row 1: Mark In (1-2), Go In (3), Empty (4-5), Go Out (6), Mark Out (7-8) -->
@@ -992,7 +1064,7 @@ import { useTrimmableMediaModal } from '../../composables/useTrimmableMediaModal
 import { useMediaModalKeyboard } from '../../composables/useMediaModalKeyboard'
 import { useMediaModalClips } from '../../composables/useMediaModalClips'
 import { useFocusTrap } from '../../composables/useFocusTrap'
-import { uploadVideoInBackground } from '../../utils/mediaUpload'
+import { uploadVideoInBackground, uploadVideoChunked } from '../../utils/mediaUpload'
 import { registerModalEsc } from '../../composables/useModalStack'
 import { useDoubleEnterToSlug } from '../../composables/useDoubleEnterToSlug'
 import MediaModalOverlays from './shared/MediaModalOverlays.vue'
@@ -1021,12 +1093,16 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:show', 'submit', 'submit-multiple'])
+const emit = defineEmits(['update:show', 'submit', 'submit-multiple', 'switch-to-vo'])
+
+// No-audio → offer VO. A SOT (Sound on Tape) with no audio track is really a
+// VO source; offer to hand off to the VO modal prepopulated with this file+slug.
+const showNoAudioDialog = ref(false)
 
 const toast = useToast()
 
 // Waveform composable
-const { waveformData, isAnalyzing, extractWaveform, clearWaveform } = useWaveform() // eslint-disable-line no-unused-vars
+const { waveformData, isAnalyzing, hasNoAudio, extractWaveform, clearWaveform } = useWaveform() // eslint-disable-line no-unused-vars
 
 // Form refs
 const sotFormRef = ref(null) // eslint-disable-line no-unused-vars
@@ -1123,8 +1199,60 @@ const originalFile = ref(null)
 const uploadProgress = ref(0)
 const tempJobId = ref(null)
 const uploadComplete = ref(false) // eslint-disable-line no-unused-vars
+const uploadFailed = ref(false) // distinguishes a FAILED upload from one still in progress
 const isSubmitting = ref(false) // Debounce flag for Alt+Enter
 let uploadAbortFn = null // captures the abort() returned by uploadVideoInBackground
+
+// Files larger than this are sent via the chunked uploader so they survive
+// Cloudflare's 100 MB request-body cap on showbuild.app. Smaller files use the
+// single-shot /upload/background path.
+const CHUNK_THRESHOLD_BYTES = 90 * 1024 * 1024
+
+// Detailed chunked-upload status feeding the fly-in progress panel.
+const uploadStage = ref('') // '' | 'uploading' | 'reassembling' | 'complete' | 'failed'
+const uploadChunkIndex = ref(0)
+const uploadTotalChunks = ref(0)
+const uploadBytesSent = ref(0)
+const uploadTotalBytes = ref(0)
+const uploadEtaSeconds = ref(null)
+const uploadIsChunked = ref(false)
+
+// Whether the fly-in upload panel should be visible.
+const showUploadPanel = computed(() =>
+  uploadIsChunked.value && uploadStage.value && uploadStage.value !== ''
+)
+
+const formatBytes = (n) => {
+  if (!n && n !== 0) return '--'
+  if (n >= 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB'
+  if (n >= 1024 * 1024) return Math.round(n / 1024 / 1024) + ' MB'
+  if (n >= 1024) return Math.round(n / 1024) + ' KB'
+  return n + ' B'
+}
+
+const formatEta = (s) => {
+  if (s === null || s === undefined || !isFinite(s)) return '--'
+  s = Math.max(0, Math.round(s))
+  const m = Math.floor(s / 60)
+  const sec = String(s % 60).padStart(2, '0')
+  return `${m}:${sec}`
+}
+
+// Human-readable status line shown in the panel.
+const uploadStatusLine = computed(() => {
+  switch (uploadStage.value) {
+    case 'uploading':
+      return `Uploading chunk ${uploadChunkIndex.value + 1} / ${uploadTotalChunks.value} · ${formatBytes(uploadBytesSent.value)} / ${formatBytes(uploadTotalBytes.value)}`
+    case 'reassembling':
+      return `Reassembling ${uploadTotalChunks.value} chunks on server…`
+    case 'complete':
+      return `Upload complete — ready to insert`
+    case 'failed':
+      return `Upload failed — please re-upload`
+    default:
+      return ''
+  }
+})
 
 // Type of Cut keyboard navigation
 const focusedCutMode = ref(null)
@@ -1387,7 +1515,22 @@ const handleVideoMetadataLoaded = () => { // eslint-disable-line no-unused-vars
       console.log('[SOT Modal] Starting waveform extraction...')
       await extractWaveform(videoPlayerRef.value, 500)
 
-      // Show waveform with delay for slide-up animation
+      // No audio track → this isn't really a SOT. Offer to convert to a VO.
+      // TEMPORARY (2026-06-06, per Kevin): allow audioless video to process as a
+      // SOT without the "Convert to VO?" interstitial. The backend pipeline
+      // already supports silent video (reduced pipeline — see ffmpeg_tasks
+      // process_sot_video_multi_phase has_audio branches). To restore the
+      // VO-conversion prompt, set ALLOW_AUDIOLESS_SOT back to false.
+      const ALLOW_AUDIOLESS_SOT = true
+      if (hasNoAudio.value && !ALLOW_AUDIOLESS_SOT) {
+        console.log('[SOT Modal] Video has no audio track — offering VO conversion')
+        showNoAudioDialog.value = true
+      } else if (hasNoAudio.value) {
+        console.log('[SOT Modal] Video has no audio track — processing as silent SOT (audioless SOT temporarily enabled)')
+      }
+
+      // Show waveform with delay for slide-up animation (stays empty for
+      // silent videos — markers/duration/playhead still render).
       setTimeout(() => {
         showWaveform.value = true
         console.log('[SOT Modal] Waveform displayed')
@@ -1396,6 +1539,29 @@ const handleVideoMetadataLoaded = () => { // eslint-disable-line no-unused-vars
       console.error('[SOT Modal] Waveform extraction failed:', error)
     }
   }, 500)
+}
+
+// User accepted converting the audioless SOT into a VO. Hand the file + slug
+// to the parent, which closes this modal and opens VoModal prepopulated.
+const convertToVo = () => { // eslint-disable-line no-unused-vars
+  showNoAudioDialog.value = false
+  const payload = {
+    file: originalFile.value,
+    slug: slug.value || '',
+    tempJobId: tempJobId.value || null,
+  }
+  // Cancel any in-flight upload to this SOT job — VO will re-upload via its own path.
+  if (uploadAbortFn) {
+    try { uploadAbortFn() } catch (_) { /* noop */ }
+    uploadAbortFn = null
+  }
+  emit('switch-to-vo', payload)
+  emit('update:show', false)
+}
+
+// User declined — keep it as a (silent) SOT.
+const dismissNoAudioDialog = () => { // eslint-disable-line no-unused-vars
+  showNoAudioDialog.value = false
 }
 
 // updateTimecode and updatePlayPauseState come from the trim composable
@@ -1435,6 +1601,66 @@ const handleFileUpload = async (event) => { // eslint-disable-line no-unused-var
 const startBackgroundUpload = async (file) => {
   uploadProgress.value = 1
   uploadComplete.value = false
+  uploadFailed.value = false
+
+  const useChunked = file.size > CHUNK_THRESHOLD_BYTES
+  uploadIsChunked.value = useChunked
+
+  if (useChunked) {
+    // Large file → chunked upload (survives Cloudflare's 100 MB cap).
+    uploadStage.value = 'uploading'
+    uploadTotalBytes.value = file.size
+    uploadBytesSent.value = 0
+    uploadEtaSeconds.value = null
+    const totalChunks = Math.ceil(file.size / (50 * 1024 * 1024))
+    uploadTotalChunks.value = totalChunks
+    uploadChunkIndex.value = 0
+
+    const { promise, abort } = uploadVideoChunked(file, '/api/sot/upload', {
+      onProgress: (p) => {
+        uploadProgress.value = p.percent
+        uploadChunkIndex.value = p.chunkIndex
+        uploadTotalChunks.value = p.totalChunks
+        uploadBytesSent.value = p.bytesSent
+        uploadTotalBytes.value = p.totalBytes
+        uploadEtaSeconds.value = p.etaSeconds
+      },
+      onStage: (stage) => { uploadStage.value = stage },
+    })
+    uploadAbortFn = abort
+    // The prominent red wait-banner inside the panel replaces the old small
+    // "uploading in N chunks" toast.
+    try {
+      const response = await promise
+      tempJobId.value = response.temp_job_id
+      uploadComplete.value = true
+      uploadProgress.value = 100
+      toast.success('Upload complete — ready to insert')
+      // Keep the panel showing "complete" briefly, then hide.
+      setTimeout(() => {
+        if (uploadStage.value === 'complete') {
+          uploadStage.value = ''
+          uploadProgress.value = 0
+        }
+      }, 2500)
+    } catch (error) {
+      if (error?.message === 'aborted') {
+        uploadStage.value = ''
+        uploadProgress.value = 0
+        return // silent on user-initiated abort
+      }
+      console.error('Chunked upload error:', error)
+      uploadFailed.value = true
+      uploadStage.value = 'failed'
+      uploadProgress.value = 0
+      toast.error('Upload failed: ' + error.message)
+    } finally {
+      uploadAbortFn = null
+    }
+    return
+  }
+
+  // Small file → original single-shot upload.
   const { promise, abort } = uploadVideoInBackground(file, '/api/sot/upload/background', {
     onProgress: (p) => { uploadProgress.value = p }
   })
@@ -1452,8 +1678,15 @@ const startBackgroundUpload = async (file) => {
       return // silent on user-initiated abort
     }
     console.error('Background upload error:', error)
+    uploadFailed.value = true
+    // A single-shot 413 means the file is over Cloudflare's limit but somehow
+    // slipped past the chunk threshold — guide the user explicitly.
+    if (/413/.test(error.message || '')) {
+      toast.error('File too large to upload remotely (>100 MB). Use the LAN address or re-select to chunk it.')
+    } else {
+      toast.error('Upload failed: ' + error.message)
+    }
     uploadProgress.value = 0
-    toast.error('Upload failed: ' + error.message)
   } finally {
     uploadAbortFn = null
   }
@@ -1481,6 +1714,14 @@ const clearVideo = () => { // eslint-disable-line no-unused-vars
   uploadProgress.value = 0
   tempJobId.value = null
   uploadComplete.value = false
+  uploadFailed.value = false
+  uploadStage.value = ''
+  uploadIsChunked.value = false
+  uploadChunkIndex.value = 0
+  uploadTotalChunks.value = 0
+  uploadBytesSent.value = 0
+  uploadTotalBytes.value = 0
+  uploadEtaSeconds.value = null
 
   if (previewInterval.value) {
     clearInterval(previewInterval.value)
@@ -1623,6 +1864,14 @@ const handleAddCue = async () => { // eslint-disable-line no-unused-vars
   if (!tempJobId.value && !mediaUrl.value) {
     console.log('❌ Validation failed: No video uploaded')
     showTopError('ERROR: Please upload a video file before submitting')
+    return
+  }
+
+  // A failed upload looks like "no tempJobId" too — but it is NOT in progress.
+  // Surface the failure clearly instead of the misleading "still uploading".
+  if (blobUrl.value && !tempJobId.value && uploadFailed.value) {
+    console.log('❌ Validation failed: Upload failed')
+    showTopError('ERROR: Video upload failed. Please re-upload the file (or use the LAN address for very large files).')
     return
   }
 
@@ -2029,6 +2278,132 @@ onBeforeUnmount(() => {
 
 .frame-counter-fade-leave-to {
   transform: translateX(-50%) translateY(10px);
+  opacity: 0;
+}
+
+/* Big red "you must wait" warning inside the upload panel */
+.upload-wait-banner {
+  background: #c62828;
+  color: #fff;
+  font-weight: 800;
+  font-size: 16px;
+  line-height: 1.35;
+  text-align: center;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border-radius: 5px;
+  border: 2px solid #ff5252;
+  letter-spacing: 0.2px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  animation: upload-wait-pulse 1.4s ease-in-out infinite;
+}
+@keyframes upload-wait-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.55); }
+  50% { box-shadow: 0 0 0 6px rgba(244, 67, 54, 0); }
+}
+
+/* Chunked-upload status panel (teal fly-in, above the control grid) */
+.upload-status-panel {
+  width: 100%;
+  margin: 8px 0 12px;
+  padding: 12px 16px;
+  background: linear-gradient(180deg, #00363a 0%, #002b2e 100%);
+  border: 1px solid #00838f;
+  border-left: 5px solid #00BCD4;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 188, 212, 0.25);
+  position: relative;
+  z-index: 14;
+  font-family: 'Helvetica', Arial, sans-serif;
+}
+.upload-status-panel.upload-failed {
+  background: linear-gradient(180deg, #3a1010 0%, #2b0a0a 100%);
+  border-color: #c62828;
+  border-left-color: #f44336;
+  box-shadow: 0 4px 14px rgba(244, 67, 54, 0.25);
+}
+.upload-status-panel.upload-done {
+  border-left-color: #4CAF50;
+}
+.upload-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.upload-panel-title {
+  color: #e0f7fa;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.3px;
+}
+.upload-failed .upload-panel-title { color: #ffcdd2; }
+.upload-panel-eta {
+  color: #80deea;
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+.upload-progress-track {
+  width: 100%;
+  height: 22px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.upload-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00BCD4 0%, #26C6DA 100%);
+  border-radius: 4px;
+  transition: width 0.35s ease;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 38px;
+}
+.upload-failed .upload-progress-fill {
+  background: linear-gradient(90deg, #e53935 0%, #ff5722 100%);
+}
+.upload-progress-fill.indeterminate {
+  background-size: 40px 40px;
+  background-image: linear-gradient(45deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%, transparent);
+  animation: upload-stripes 1s linear infinite;
+}
+@keyframes upload-stripes {
+  from { background-position: 0 0; }
+  to { background-position: 40px 0; }
+}
+.upload-progress-pct {
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  font-family: monospace;
+  padding-right: 8px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+.upload-panel-detail {
+  margin-top: 7px;
+  color: #b2ebf2;
+  font-size: 12px;
+  font-family: monospace;
+}
+.upload-failed .upload-panel-detail { color: #ef9a9a; }
+
+/* Fly-in transition for the upload panel (matches the house bouncy ease) */
+.upload-panel-slide-enter-active {
+  transition: all 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.upload-panel-slide-leave-active {
+  transition: all 0.3s ease-in;
+}
+.upload-panel-slide-enter-from {
+  transform: translateY(-20px);
+  opacity: 0;
+}
+.upload-panel-slide-leave-to {
+  transform: translateY(-12px);
   opacity: 0;
 }
 

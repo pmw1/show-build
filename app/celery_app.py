@@ -184,3 +184,36 @@ if platform.system() == 'Windows':
     def notify_task_failed(task_id, exception, args, kwargs, traceback, einfo, **kw):
         """Show popup when task fails."""
         _show_popup("Task FAILED", str(exception)[:100], timeout_ms=5000)
+
+
+# ---------------------------------------------------------------------------
+# Fork safety: dispose the SQLAlchemy engine in each forked worker child.
+#
+# database.py creates a module-level `engine` (with a connection pool) at import
+# time — i.e. in the Celery PARENT process. When the prefork pool forks N child
+# workers (this worker runs --concurrency=8), every child inherits a COPY of the
+# parent's open psycopg2 sockets. Two children using the same inherited socket
+# concurrently corrupts libpq's protocol state, surfacing as:
+#     (psycopg2.DatabaseError) error with status PGRES_TUPLES_OK
+#     and no message from the libpq
+#
+# This bit multi-clip SOT jobs specifically: splitting one upload into two clips
+# spawns two child SOTProcessingJob tasks that run on different forked children
+# at the same time and collide on the shared connection.
+#
+# The fix (SQLAlchemy's documented multiprocessing pattern): on each child's
+# process-init, dispose the inherited engine so the child lazily builds its OWN
+# fresh connection pool. Nothing is shared across the fork after this.
+# ---------------------------------------------------------------------------
+from celery.signals import worker_process_init
+
+
+@worker_process_init.connect
+def _dispose_engine_on_fork(**kwargs):
+    """Give every forked worker child its own DB connection pool."""
+    try:
+        from database import engine
+        engine.dispose()
+        print("[celery] worker_process_init: disposed inherited DB engine (fresh pool per child)")
+    except Exception as e:  # never block worker startup on this
+        print(f"[celery] worker_process_init engine.dispose() skipped: {e}")

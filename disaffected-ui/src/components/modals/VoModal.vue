@@ -453,6 +453,9 @@ const props = defineProps({
   episode: String,
   duplicateSlugs: { type: Array, default: () => [] },
   cueType: { type: String, default: 'vo' }, // eslint-disable-line no-unused-vars
+  // Optional prepopulation payload — e.g. when a SOT with no audio is converted
+  // to a VO. Shape: { file: File, slug: string }.
+  incomingData: { type: Object, default: null },
 })
 const emit = defineEmits(['update:show', 'submit', 'submit-multiple'])
 
@@ -915,6 +918,14 @@ watch(
   (newValue, oldValue) => {
     if (newValue && !oldValue) {
       kbd.install()
+      // Prepopulate from a SOT→VO conversion: load the same file + slug.
+      if (props.incomingData) {
+        const { file, slug: incomingSlug } = props.incomingData
+        if (incomingSlug) slug.value = incomingSlug
+        if (file) {
+          nextTick(() => { loadFile(file) })
+        }
+      }
       nextTick(() => {
         focusTrap.install()
         // Auto-focus first cut-mode button (NONE)

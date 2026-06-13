@@ -1,0 +1,107 @@
+# llm-router capability-pool config
+#
+# Clients ask for a CAPABILITY (a logical role), not a model. The router
+# resolves the capability to the first CANDIDATE that is actually available
+# right now (backend enabled + key present, host healthy, model resident/fits).
+#
+# Edit this file live — the router watches it (mtime poll) and hot-reloads.
+# show-build may also read/write it via the /admin/config endpoint.
+#
+# A client request's `model` field is matched against `capabilities` first.
+# If it doesn't match a capability name, it's treated as a literal
+# "model@backend" or "model" passthrough (default_backend used if no @).
+
+version: 1
+
+policy:
+  # When a capability lists candidates, try them strictly in order. Set to
+  # "prefer_local" to reorder so local (ollama) candidates are tried before
+  # cloud ones regardless of file order. "as_listed" honors file order exactly.
+  ordering: as_listed
+  # Seconds to cache a backend health probe before re-checking.
+  health_ttl: 15
+  # Seconds to cache an ollama /api/ps residency snapshot.
+  residency_ttl: 5
+  # If a capability resolves to nothing available, return this HTTP status.
+  unavailable_status: 503
+
+backends:
+  prefect:
+    type: ollama
+    # 172.17.0.1 = docker bridge gateway -> host's ollama:11434 (matches
+    # show-build's DEFAULT_HOST). From the LAN this is 192.168.51.238:11434.
+    url: "http://172.17.0.1:11434"
+    # VRAM ceiling in GB used for the residency/fit check. The host ollama
+    # sits on the 3060 (12GB) when the win11 VM holds the 5090, and on the
+    # 5090 (32GB) when the VM is off. The router detects which is live.
+    vram_gb_3060: 12
+    vram_gb_5090: 32
+    enabled: true
+
+  kairobox:
+    type: ollama
+    url: "http://192.168.51.197:11434"   # RTX 3090, 24GB
+    vram_gb: 24
+    enabled: true
+
+  xai:
+    type: openai            # x.ai Grok speaks the OpenAI chat dialect
+    url: "https://api.x.ai/v1"
+    key_env: XAI_API_KEY
+    enabled: true
+
+  openai:
+    type: openai
+    url: "https://api.openai.com/v1"
+    key_env: OPENAI_API_KEY
+    enabled: false          # flip to true once OPENAI_API_KEY is set
+
+  anthropic:
+    type: anthropic
+    url: "https://api.anthropic.com"
+    key_env: ANTHROPIC_API_KEY
+    enabled: false          # flip to true once ANTHROPIC_API_KEY is set
+
+# Rough model sizes (GB) for the residency/fit check on ollama backends.
+# If a model isn't listed, the fit check is skipped (assumed to fit).
+model_sizes_gb:
+  "qwen3:8b": 6
+  "qwen3:14b": 9
+  "qwen3:32b-q4_K_M": 20
+  "llama3.3:70b": 42
+  "command-r-plus:104b-08-2024-q4_K_M": 62
+  "llava:34b": 20
+
+capabilities:
+
+  # Short, cheap text — descriptions, slugs, titles. Prefer the always-on
+  # local small model; climb to bigger/cloud only if it's gone.
+  description-writer:
+    candidates:
+      - {model: "qwen3:8b",          backend: prefect}
+      - {model: "qwen3:32b-q4_K_M",  backend: prefect}
+      - {model: "qwen3:32b-q4_K_M",  backend: kairobox}
+      - {model: "grok-4.3",     backend: xai}
+
+  # General quality generation where the bigger model is worth it when present.
+  generation:
+    candidates:
+      - {model: "qwen3:32b-q4_K_M",  backend: prefect}   # only passes fit-check when VM is off (5090 live)
+      - {model: "qwen3:32b-q4_K_M",  backend: kairobox}
+      - {model: "qwen3:8b",          backend: prefect}   # graceful degrade
+      - {model: "grok-4.3",     backend: xai}
+
+  # Structured extraction from transcripts/segments — needs reliability, json.
+  meta-extractor:
+    candidates:
+      - {model: "qwen3:8b",          backend: prefect}
+      - {model: "qwen3:32b-q4_K_M",  backend: kairobox}
+      - {model: "grok-4.3",     backend: xai}
+
+  # Long-context reasoning — skip the 12GB-limited local card, go where the
+  # context window can actually be held.
+  long-context-reasoner:
+    candidates:
+      - {model: "qwen3:32b-q4_K_M",  backend: kairobox}
+      - {model: "grok-4.20-0309-reasoning",     backend: xai}
+      - {model: "qwen3:32b-q4_K_M",  backend: prefect}

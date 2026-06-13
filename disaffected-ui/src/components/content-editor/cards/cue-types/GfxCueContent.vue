@@ -90,51 +90,50 @@
         </div>
       </div>
 
-      <!-- Action Buttons - discrete icon buttons, prominent and compact -->
-      <div class="fsq-controls-side gfx-actions-side">
-        <div class="gfx-action-icons">
-          <v-btn
-            size="large"
-            :variant="hasGfxAsset ? 'tonal' : 'elevated'"
-            :color="hasGfxAsset ? 'amber-darken-2' : 'success'"
-            icon
-            @click.stop="$emit('generate-gfx')"
-            :loading="generatingGfx"
-            class="gfx-action-btn"
-          >
-            <v-icon size="large">{{ hasGfxAsset ? 'mdi-sync' : 'mdi-creation' }}</v-icon>
-            <v-tooltip activator="parent" location="top">{{ hasGfxAsset ? 'Regenerate PNG' : 'Generate PNG' }}</v-tooltip>
-          </v-btn>
+      <!-- Action Buttons - full-width labeled buttons, mirroring the FSQ card -->
+      <div class="fsq-controls-side">
+        <v-btn
+          block
+          size="small"
+          :variant="'elevated'"
+          :color="!gfxDirty && hasGfxAsset ? 'success' : 'primary'"
+          @click.stop="$emit('generate-gfx')"
+          :loading="generatingGfx"
+          :disabled="!gfxDirty && hasGfxAsset"
+          class="mb-2"
+        >
+          <v-icon size="small" start>{{ !gfxDirty && hasGfxAsset ? 'mdi-check-circle' : (hasGfxAsset ? 'mdi-sync' : 'mdi-creation') }}</v-icon>
+          {{ !gfxDirty && hasGfxAsset ? 'Up to Date' : (hasGfxAsset ? 'Regenerate' : 'Generate PNG') }}
+        </v-btn>
 
-          <v-btn
-            size="large"
-            variant="tonal"
-            color="deep-purple"
-            icon
-            :disabled="!hasGfxAsset"
-            @click.stop="$emit('download-gfx-png')"
-            class="gfx-action-btn"
-          >
-            <v-icon size="large">mdi-download</v-icon>
-            <v-tooltip activator="parent" location="top">{{ hasGfxAsset ? 'Download PNG' : 'No PNG to download yet' }}</v-tooltip>
-          </v-btn>
+        <v-btn
+          block
+          size="small"
+          variant="text"
+          color="primary"
+          class="mb-2"
+          @click.stop="$emit('edit-gfx', cueData)"
+        >
+          <v-icon size="small" start>mdi-pencil</v-icon>
+          Edit GFX
+        </v-btn>
 
-          <v-btn
-            size="large"
-            variant="tonal"
-            color="primary"
-            icon
-            @click.stop="$emit('edit-gfx', cueData)"
-            class="gfx-action-btn"
-          >
-            <v-icon size="large">mdi-pencil</v-icon>
-            <v-tooltip activator="parent" location="top">Edit GFX in modal</v-tooltip>
-          </v-btn>
-        </div>
+        <v-btn
+          v-if="hasGfxAsset"
+          block
+          size="small"
+          variant="text"
+          color="deep-purple"
+          class="mb-2"
+          @click.stop="$emit('download-gfx-png')"
+        >
+          <v-icon size="small" start>mdi-download</v-icon>
+          Download PNG
+        </v-btn>
 
         <!-- GFX Generation Status -->
-        <div v-if="gfxGenerationStatus" class="fsq-status-chip mt-2">
-          <v-chip size="small" :color="gfxStatusChipColor" variant="tonal">
+        <div v-if="gfxGenerationStatus" class="fsq-status-chip mb-2">
+          <v-chip size="x-small" :color="gfxStatusChipColor" variant="tonal">
             <v-icon size="x-small" start :class="{ 'mdi-spin': gfxGenerationStatus === 'generating' }">{{ gfxStatusChipIcon }}</v-icon>
             {{ gfxStatusText }}
           </v-chip>
@@ -380,6 +379,10 @@ const props = defineProps({
   hasGfxAsset: {
     type: Boolean,
     default: false
+  },
+  gfxDirty: {
+    type: Boolean,
+    default: true
   },
   generatingGfx: {
     type: Boolean,
@@ -741,28 +744,6 @@ defineExpose({
   flex: 0 0 35%;
   display: flex;
   flex-direction: column;
-}
-
-/* GFX action icons — discrete, prominent, side-by-side. Replaces the
-   previous stack of full-width text buttons. */
-.gfx-actions-side {
-  justify-content: flex-start;
-  align-items: stretch;
-}
-
-.gfx-action-icons {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 4px 0;
-  flex-wrap: wrap;
-}
-
-.gfx-action-btn {
-  width: 48px;
-  height: 48px;
-  flex: 0 0 auto;
 }
 
 .fsq-status-chip {

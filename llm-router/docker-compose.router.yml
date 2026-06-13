@@ -1,0 +1,40 @@
+# Standalone launch for llm-router — runs independently of show-build.
+#
+#   cd /srv/show-build/llm-router
+#   docker compose -f docker-compose.router.yml up -d --build
+#
+# Reads cloud keys from the environment / an .env file in this dir. The config
+# (router.yaml) and the prefect GPU marker are bind-mounted so they hot-reload
+# without a rebuild and stay editable from the host / show-build.
+services:
+  llm-router:
+    build:
+      context: .
+    container_name: llm-router
+    user: "1000:1001"
+    ports:
+      - "0.0.0.0:11500:11500"
+    volumes:
+      # Mount the whole dir as /config so router.yaml AND prefect_gpu (written
+      # by the GPU-failover switch script) are both visible and live-editable.
+      - ./:/config
+    environment:
+      - TZ=America/New_York
+      - LOG_LEVEL=INFO
+      # Reused from show-build's secrets. Provide via this dir's .env or export.
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      # Admin auth for /admin/config (reused from show-build).
+      - LLM_STATE_API_KEY=${LLM_STATE_API_KEY:-}
+    extra_hosts:
+      # Lets the container reach the host's ollama at 172.17.0.1 reliably.
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:11500/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

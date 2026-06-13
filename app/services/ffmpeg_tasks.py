@@ -2200,11 +2200,11 @@ def process_sot_video_multi_phase(
             validation_warnings.append(f"High framerate: {frame_rate}fps (will be normalized to 30fps)")
 
         # 5. Audio stream validation
-        # Audio is no longer required — silent videos process through a reduced pipeline.
+        # Audio is NOT required — silent sources get a synthetic silent stereo
+        # track injected at Phase 1, so the rest of the pipeline runs unchanged.
         if not has_audio:
             validation_warnings.append(
-                "No audio stream detected — skipping transcription, channel analysis, "
-                "loudness normalization, and MP3 extraction"
+                "No audio stream detected — injecting a silent stereo track at Phase 1"
             )
 
         # Log validation results
@@ -2360,23 +2360,42 @@ def process_sot_video_multi_phase(
             # CPU encoding fallback for Linux workers (kairo)
             video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
 
-        # Audio args differ based on whether the source has an audio track.
+        # When the source has NO audio track, synthesize a silent stereo track
+        # (anullsrc) as a second input so the normalized MP4 always has audio.
+        # Every downstream phase (channel analysis, loudness, MP3) then runs
+        # unchanged, and the SOT ships with a real (silent) audio track instead
+        # of being audio-less — broadcast-safer and consistent across workers.
         if has_audio:
-            phase1_audio_args = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+            phase1_cmd = [
+                ffmpeg, "-y",
+                "-i", str(input_file),
+                *video_encoder_args,
+                "-r", "29.97",  # Broadcast standard framerate
+                "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",  # Max width 1920, maintain aspect
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                str(phase1_output)
+            ]
         else:
-            phase1_audio_args = ["-an"]
-
-        phase1_cmd = [
-            ffmpeg, "-y",
-            "-i", str(input_file),
-            *video_encoder_args,
-            "-r", "29.97",  # Broadcast standard framerate
-            "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",  # Max width 1920, maintain aspect
-            *phase1_audio_args,
-            str(phase1_output)
-        ]
+            phase1_cmd = [
+                ffmpeg, "-y",
+                "-i", str(input_file),
+                "-f", "lavfi",
+                "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                *video_encoder_args,
+                "-r", "29.97",
+                "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                "-shortest",  # stop at end of video (silent input is infinite)
+                str(phase1_output)
+            ]
         subprocess.run(phase1_cmd, check=True, capture_output=True)
         logger.info(f"Phase 1 complete: {phase1_output}")
+
+        # From here on the working file ALWAYS has an audio track (real or the
+        # injected silent one), so let the audio phases (1.1/2/4) run normally.
+        has_audio = True
 
         # Update cue block with Phase 1 completion
         if asset_id:
@@ -2598,12 +2617,19 @@ def process_sot_video_multi_phase(
                 end_sec = time_to_seconds(trim_end)
                 trim_duration = end_sec - start_sec
 
+                # Frame-accurate trim: -ss BEFORE -i does a fast seek to the
+                # nearest keyframe, then re-encoding decodes forward to the exact
+                # requested IN/OUT. Stream-copy (-c copy) was keyframe-bounded and
+                # could overrun the OUT point by up to one GOP (~8s here); we
+                # re-encode so both ends land on the exact requested frame.
+                # phase2_output is already normalized, so encoder args match.
                 phase3_cmd = [
                     ffmpeg, "-y",
-                    "-ss", str(start_sec),  # Use seconds, not raw timecode
+                    "-ss", str(start_sec),  # fast seek to nearby keyframe
                     "-i", str(phase2_output),
                     "-t", str(trim_duration),
-                    "-c", "copy",
+                    *video_encoder_args,
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
                     str(phase3_output)
                 ]
             else:
@@ -2619,11 +2645,13 @@ def process_sot_video_multi_phase(
                     return 0.0
 
                 start_sec = time_to_seconds(trim_start)
+                # Frame-accurate trim from start (re-encode; see note above).
                 phase3_cmd = [
                     ffmpeg, "-y",
-                    "-ss", str(start_sec),  # Use seconds, not raw timecode
+                    "-ss", str(start_sec),  # fast seek to nearby keyframe
                     "-i", str(phase2_output),
-                    "-c", "copy",
+                    *video_encoder_args,
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
                     str(phase3_output)
                 ]
 
