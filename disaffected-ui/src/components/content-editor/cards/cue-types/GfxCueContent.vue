@@ -91,7 +91,7 @@
       </div>
 
       <!-- Action Buttons - discrete icon buttons, prominent and compact -->
-      <div class="fsq-controls-side gfx-actions-side">
+      <div v-if="!readonly" class="fsq-controls-side gfx-actions-side">
         <div class="gfx-action-icons">
           <v-btn
             size="large"
@@ -352,7 +352,7 @@
     </div>
 
     <!-- Delete button - bottom right -->
-    <div class="fsq-footer-row">
+    <div v-if="!readonly" class="fsq-footer-row">
       <v-spacer></v-spacer>
       <v-btn
         size="small"
@@ -376,6 +376,11 @@ const props = defineProps({
   cueData: {
     type: Object,
     required: true
+  },
+  // Read-only render (version preview): hide edit/delete affordances (todo #35).
+  readonly: {
+    type: Boolean,
+    default: false
   },
   hasGfxAsset: {
     type: Boolean,

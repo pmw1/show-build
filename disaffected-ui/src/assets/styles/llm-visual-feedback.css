@@ -49,11 +49,61 @@
   border-radius: 0 !important;
 }
 
-.llm-analyzing.llm-scope-item {
-  border: 7px solid var(--llm-analyzing) !important;
+/* #47: rundown ROW (item scope) while busy — throbbing purple BACKGROUND, not a
+   border. The 7px border clipped to only the left/top edges inside the rundown's
+   overflow container. Background pulses purple<->deeper purple; white text. */
+.llm-analyzing.llm-scope-item,
+.llm-generating.llm-scope-item {
+  border: none !important;
   border-radius: 0 !important;
-  margin: 7px !important;
-  animation: throb 1.5s ease-in-out infinite !important;
+  margin: 0 !important;
+  transition: none !important;
+  color: #fff !important;
+  animation: llm-bg-throb 1.6s ease-in-out infinite !important;
+}
+.llm-analyzing.llm-scope-item *,
+.llm-generating.llm-scope-item * {
+  color: #fff !important;
+}
+
+/* #47: after generation completes, HOLD the busy color solid for 15s then
+   DISSOLVE back to the row's normal background (the row's own inline bg shows
+   through as this overlay fades). No border, no pulse — just a calm linger. */
+.llm-just-generated.llm-scope-item {
+  border: none !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  position: relative !important;
+  /* hold solid, then fade the overlay to transparent over the last ~2s */
+  animation: llm-linger-fade 15s ease-out forwards !important;
+}
+/* Text is white while the busy color is solid, then fades back to the row's
+   own color as the background dissolves (kept in sync with llm-linger-fade). */
+.llm-just-generated.llm-scope-item *:not(.v-icon) {
+  animation: llm-linger-text-fade 15s ease-out forwards !important;
+}
+
+@keyframes llm-linger-fade {
+  0% {
+    background-color: var(--llm-busy-color, #9C27B0);
+  }
+  /* hold the color for the first ~87% (~13s of 15s) */
+  87% {
+    background-color: var(--llm-busy-color, #9C27B0);
+  }
+  /* dissolve away over the final ~2s */
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes llm-linger-text-fade {
+  0%, 87% {
+    color: #fff;
+  }
+  100% {
+    color: inherit;
+  }
 }
 
 .llm-analyzing.llm-scope-asset {
@@ -107,12 +157,8 @@
   border-radius: 0 !important;
 }
 
-.llm-generating.llm-scope-item {
-  border: 7px solid var(--llm-generating) !important;
-  border-radius: 0 !important;
-  margin: 7px !important;
-  animation: throb 1.5s ease-in-out infinite !important;
-}
+/* .llm-generating.llm-scope-item is handled above, merged with analyzing
+   (#47: background throb, no border). */
 
 .llm-generating.llm-scope-asset {
   border: 5px dashed var(--llm-generating) !important;
@@ -370,6 +416,18 @@
   }
   50% {
     box-shadow: 0 0 20px 5px rgba(156, 39, 176, 0.4);
+  }
+}
+
+/* #47: whole-row background pulse for a busy rundown item. Color follows the
+   user-configurable "AI Generated" Settings color via --llm-busy-color (deeper
+   trough via --llm-busy-color-deep); falls back to purple if the vars are unset. */
+@keyframes llm-bg-throb {
+  0%, 100% {
+    background-color: var(--llm-busy-color, #9C27B0);
+  }
+  50% {
+    background-color: var(--llm-busy-color-deep, #5E1378);
   }
 }
 

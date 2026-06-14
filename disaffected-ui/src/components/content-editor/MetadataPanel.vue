@@ -72,7 +72,22 @@
               {{ item.duration || '00:00:00' }}
             </span>
           </div>
-          <v-text-field :placeholder="slugPlaceholder" :model-value="item.slug || ''" @update:model-value="$emit('update-segment-field', { field: 'slug', value: $event })" variant="underlined" density="compact" hide-details class="sidebar-field mb-1" :color="segmentTypeColor" />
+          <v-text-field :placeholder="slugPlaceholder" :model-value="item.slug || ''" @update:model-value="$emit('update-segment-field', { field: 'slug', value: $event })" variant="underlined" density="compact" hide-details class="sidebar-field mb-1" :color="segmentTypeColor">
+            <template v-slot:append-inner>
+              <v-btn
+                icon
+                size="x-small"
+                variant="text"
+                color="purple"
+                :loading="generatingSlug"
+                :disabled="generatingSlug"
+                @click="generateSlug"
+                title="Generate a short broadcast slug from the title + script with AI"
+              >
+                <v-icon size="small">mdi-auto-fix</v-icon>
+              </v-btn>
+            </template>
+          </v-text-field>
           <v-text-field :placeholder="titlePlaceholder" :model-value="item.title || ''" @update:model-value="$emit('update-segment-field', { field: 'title', value: $event })" variant="underlined" density="compact" hide-details class="sidebar-field mb-1" :color="segmentTypeColor" />
           <div class="description-wrapper">
                       <textarea
@@ -263,7 +278,7 @@
                     </template>
                   </v-expansion-panel-title>
                   <v-expansion-panel-text>
-                    <AssetPoolPanel :episode-number="episodeNumber" :rundown-items="rundownItems" :panel-width="panelWidth" @place-item="$emit('place-library-item', $event)" @create-new-item="$emit('create-new-library-item', $event)" />
+                    <AssetPoolPanel :episode-number="episodeNumber" :rundown-items="rundownItems" :panel-width="panelWidth" :selected-item-label="selectedItemLabel" @place-item="$emit('place-library-item', $event)" @create-new-item="$emit('create-new-library-item', $event)" @reinsert-pool-media="$emit('reinsert-pool-media', $event)" />
                   </v-expansion-panel-text>
                 </v-expansion-panel>
               </v-expansion-panels>
@@ -338,17 +353,26 @@
                       <p class="text-caption text-grey-lighten-1">Versions are created on manual save (Ctrl+S)</p>
                     </div>
                     <v-list v-else density="compact" class="version-list pa-0">
-                      <v-list-item v-for="(version, idx) in versionHistory.slice(0, 10)" :key="version.version_number" class="version-item px-2" :class="{ 'current-version': idx === 0 }">
+                      <v-list-item v-for="(version, idx) in versionHistory.slice(0, visibleVersionCount)" :key="version.version_number" class="version-item px-2" :class="{ 'current-version': idx === 0 }">
                         <template v-slot:prepend><v-chip size="x-small" :color="idx === 0 ? 'primary' : 'grey'" class="mr-2">v{{ version.version_number }}</v-chip></template>
                         <v-list-item-title class="text-body-2">{{ formatVersionDate(version.created_at) }}</v-list-item-title>
                         <v-list-item-subtitle class="text-caption">{{ version.content_length || 0 }} chars<span v-if="version.created_by"> &bull; {{ version.created_by }}</span></v-list-item-subtitle>
-                        <template v-slot:append>
-                          <v-btn v-if="idx > 0" icon size="x-small" variant="text" color="primary" @click="$emit('restore-version', version.version_number)"><v-icon size="small">mdi-restore</v-icon><v-tooltip activator="parent" location="left">Restore this version</v-tooltip></v-btn>
+                        <!-- Per-version actions: labeled Preview + Restore (todo #35). Current
+                             version shows a chip instead. -->
+                        <div class="version-actions mt-1">
+                          <template v-if="idx > 0">
+                            <v-btn size="x-small" variant="tonal" color="primary" class="mr-1" prepend-icon="mdi-eye" @click="$emit('preview-version', version.version_number)">Preview</v-btn>
+                            <v-btn size="x-small" variant="tonal" color="warning" prepend-icon="mdi-restore" @click="$emit('restore-version', version.version_number)">Restore</v-btn>
+                          </template>
                           <v-chip v-else size="x-small" color="success" variant="tonal">Current</v-chip>
-                        </template>
+                        </div>
                       </v-list-item>
                     </v-list>
-                    <div v-if="versionHistory.length > 10" class="text-caption text-grey text-center mt-1">Showing 10 of {{ versionHistory.length }} versions</div>
+                    <div v-if="versionHistory.length > visibleVersionCount" class="text-center mt-1">
+                      <v-btn size="x-small" variant="text" color="primary" prepend-icon="mdi-chevron-down" @click="visibleVersionCount += 10">
+                        Show more ({{ visibleVersionCount }} of {{ versionHistory.length }})
+                      </v-btn>
+                    </div>
                   </v-expansion-panel-text>
                 </v-expansion-panel>
               </v-expansion-panels>
@@ -374,10 +398,9 @@
                       </v-btn>
                       <v-expand-transition>
                         <div v-if="scriptFlyoutOpen" class="script-flyout ml-4">
-                          <v-btn v-for="st in scriptTypes" :key="st.preset" size="x-small" variant="text" :color="st.color" block class="script-flyout-btn" :loading="generatingScriptPreset === st.preset" :disabled="!!generatingScriptPreset" @click="generateScriptPreset(st.preset)">
+                          <v-btn v-for="st in scriptTypes" :key="st.preset" size="x-small" variant="text" :color="st.color" block class="script-flyout-btn" @click="generateScriptPreset(st.preset)">
                             <v-icon left size="small">{{ st.icon }}</v-icon> {{ st.label }}
                           </v-btn>
-                          <div v-if="scriptGenerationStatus" class="text-caption mt-1" :class="scriptGenerationStatus.includes('Error') ? 'text-error' : 'text-success'">{{ scriptGenerationStatus }}</div>
                         </div>
                       </v-expand-transition>
 
@@ -675,13 +698,17 @@ const emit = defineEmits([
   'save-all',
   'open-wpm-tool',
   'generate-host-script',
+  'generate-script',
   'generate-media-list',
   'generate-prompter-files',
   'refresh-rundown',
+  'cues-enumerated',
   'show-notification',
   'restore-version',
+  'preview-version',
   'place-library-item',
   'create-new-library-item',
+  'reinsert-pool-media',
   'update-segment-field',
   'scripts-updated',
   'reset-fields'
@@ -747,6 +774,9 @@ const instance = getCurrentInstance()
 const $axios = instance.appContext.config.globalProperties.$axios
 
 // --- data ---
+// How many version rows are shown; the "Show more" button bumps this by 10 (todo #35).
+const visibleVersionCount = ref(10)
+
 const expandedPanels = ref(['segmentinfo'])
 const panelOrder = ref([
   { key: 'assetpool' },
@@ -822,62 +852,34 @@ const descriptionTextareaRef = ref(null)
 // --- Regenerate description -------------------------------------------------
 // --- Generate Script flyout -----------------------------------------------
 const scriptFlyoutOpen = ref(false)
+// Generation now runs in ContentEditor's overlay; the flyout button's loading
+// state is no longer driven locally.
 const generatingScript = ref(false)
-const generatingScriptPreset = ref(null)
-const scriptGenerationStatus = ref('')
 
 const scriptTypes = [
   { preset: 'host_full', label: 'Host Script', icon: 'mdi-script-text', color: 'indigo' },
   { preset: 'production', label: 'Director Script', icon: 'mdi-clipboard-list', color: 'teal' },
   { preset: 'show_caller', label: 'Show Caller', icon: 'mdi-bullhorn', color: 'orange' },
-  { preset: 'prompter', label: 'Prompter', icon: 'mdi-television', color: 'blue' },
   { preset: 'media_list', label: 'Media List', icon: 'mdi-folder-multiple-image', color: 'green' }
 ]
-
-function formatBackendError(value) {
-  if (value == null) return ''
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) {
-    return value.map(v => (typeof v === 'string' ? v : (v?.msg || JSON.stringify(v)))).join('; ')
-  }
-  if (typeof value === 'object') {
-    return value.message || value.detail || value.error || value.msg || JSON.stringify(value)
-  }
-  return String(value)
-}
 
 async function generateScriptPreset(preset) {
   if (!props.episodeNumber) return
 
-  // Media List has a dedicated endpoint (GET /scripts/media-list/{ep}) and a
-  // dedicated overlay handled by ContentEditor. Delegate via emit instead of
-  // hitting /scripts/generate (which only accepts host_full/host_clean/production
-  // and would 422 with a Pydantic detail array → "[object Object]" in the toast).
+  // Every script generation now shows the full progress overlay handled by
+  // ContentEditor (the same modal experience as Media List), instead of a
+  // silent inline API call. Each preset delegates to the matching handler.
+  scriptFlyoutOpen.value = false
+
+  // Media List has a dedicated endpoint + overlay.
   if (preset === 'media_list') {
     emit('generate-media-list')
-    scriptFlyoutOpen.value = false
     return
   }
 
-  generatingScriptPreset.value = preset
-  generatingScript.value = true
-  scriptGenerationStatus.value = ''
-  try {
-    const response = await $axios.post(`/scripts/generate/${props.episodeNumber}?preset=${preset}`)
-    const label = scriptTypes.find(s => s.preset === preset)?.label || preset
-    if (response.data?.success) {
-      scriptGenerationStatus.value = `${label} generated (R${response.data.revision || '?'})`
-      // Notify AssetPoolPanel to refresh its scripts tab
-      emit('scripts-updated')
-    } else {
-      scriptGenerationStatus.value = `Error: ${formatBackendError(response.data?.error) || 'Unknown error'}`
-    }
-  } catch (error) {
-    scriptGenerationStatus.value = `Error: ${formatBackendError(error.response?.data?.detail) || error.message}`
-  } finally {
-    generatingScriptPreset.value = null
-    generatingScript.value = false
-  }
+  // host_full / host_clean / production (and any future /scripts/generate
+  // preset) → the generic overlay-driven generator in ContentEditor.
+  emit('generate-script', preset)
 }
 
 const showRegenModal = ref(false)
@@ -910,6 +912,31 @@ async function regenerateDescription() {
     console.error('Regeneration failed:', error)
   } finally {
     regenerating.value = false
+  }
+}
+
+// LLM slug generation (todo: slug-gen feature). Generates a short broadcast
+// slug from the title + script body; if the current slug is 5+ words the
+// backend includes it and shortens it. The result is emitted as a field update
+// so it persists through the normal path.
+const generatingSlug = ref(false)
+async function generateSlug() {
+  if (!props.item || !(props.item.asset_id || props.item.id)) return
+  const assetId = props.item.asset_id || props.item.id
+  generatingSlug.value = true
+  try {
+    const response = await $axios.post(`/episodes/generate-slug`, { asset_id: assetId })
+    if (response.data && response.data.slug) {
+      emit('update-segment-field', { field: 'slug', value: response.data.slug })
+    }
+  } catch (error) {
+    console.error('Slug generation failed:', error)
+    if (window.notifyUserStandard) {
+      const msg = error.response?.data?.detail || 'Slug generation failed'
+      window.notifyUserStandard(msg, '#F44336', 4000)
+    }
+  } finally {
+    generatingSlug.value = false
   }
 }
 
@@ -1177,6 +1204,17 @@ const panelHeightValue = computed(() => {
   return props.panelHeight ? `${props.panelHeight}px` : '100vh'
 })
 
+// Friendly label of the currently-selected rundown item's type, used by
+// AssetPoolPanel to title its "Add to {type}" buttons.
+const selectedItemLabel = computed(() => { // eslint-disable-line no-unused-vars
+  if (!props.item || !props.item.type) return ''
+  const match = (props.itemTypes || []).find(t => t.value === props.item.type)
+  if (match?.title) return match.title
+  // Fallback: capitalize the raw type.
+  const t = String(props.item.type)
+  return t.charAt(0).toUpperCase() + t.slice(1)
+})
+
 const itemHeaderStyle = computed(() => { // eslint-disable-line no-unused-vars
   if (!props.item) {
     return {
@@ -1432,7 +1470,8 @@ async function enumerateCueBlocks() {
         status += ` (${skipped_non_media} non-media skipped)`
       }
       enumerationStatus.value = status
-      emit('refresh-rundown')
+      // Refresh the open editor content in place (no manual page reload needed).
+      emit('cues-enumerated')
     } else {
       enumerationStatus.value = 'Error: ' + (response.data.message || 'Unknown error')
     }
@@ -2397,6 +2436,12 @@ onMounted(() => {
 
 .version-item:hover {
   background: rgba(var(--v-theme-primary), 0.12);
+}
+
+.version-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ═══════════════════════════════════════

@@ -131,9 +131,10 @@ async def get_whiteboard(
     items_data = []
     for item in whiteboard.items:
         item_dict = WhiteboardItemResponse.from_orm(item).dict()
-        # Build serving URL from media_path
+        # Build serving URL from media_path. Whiteboard media now lives in the
+        # pool, served via the /pool static mount (was /repo).
         if item.media_path:
-            item_dict["media_url"] = f"/repo/{item.media_path}"
+            item_dict["media_url"] = f"/pool/{item.media_path}"
         items_data.append(item_dict)
 
     response_dict = {

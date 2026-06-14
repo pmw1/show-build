@@ -191,14 +191,12 @@ export class CueParser {
       const fieldName = match[1].trim();
       let fieldValue = match[2].trim();
 
-      // Strip surrounding quotes from Quote field (both single and double)
-      if (fieldName.toLowerCase() === 'quote' && fieldValue) {
-        if (fieldValue.startsWith('"') || fieldValue.startsWith("'")) {
-          fieldValue = fieldValue.substring(1);
-        }
-        if (fieldValue.endsWith('"') || fieldValue.endsWith("'")) {
-          fieldValue = fieldValue.substring(0, fieldValue.length - 1);
-        }
+      // Strip the storage-wrapping quotes from the Quote field. The Quote is
+      // serialized as [Quote: "value"] by formatCueToMarkdown, so on parse we
+      // must remove exactly one layer of surrounding quotes — otherwise the
+      // marks accumulate across edit/save cycles and show up in the FSQ.
+      if (fieldName.toLowerCase() === 'quote') {
+        fieldValue = CueParser.stripWrappingQuotes(fieldValue);
       }
 
       const camelFieldName = this.toCamelCase(fieldName);
@@ -260,6 +258,31 @@ export class CueParser {
    * @param {string} fieldName - Field name to convert
    * @returns {string} camelCase field name
    */
+  /**
+   * Remove exactly ONE layer of surrounding quote marks (straight or curly,
+   * single or double) from a stored Quote value. Idempotent-safe: only strips
+   * when BOTH ends are quotes, so a quote that legitimately contains interior
+   * marks isn't mangled. Used by every cue-parse path (legacy parseCueBlock
+   * and the TipTap CueNodeView) so the de-quoting can't drift between them.
+   * @param {string} value
+   * @returns {string}
+   */
+  static stripWrappingQuotes(value) {
+    if (!value) return value || '';
+    let v = value.trim();
+    // First peel a backslash-escaped wrapping pair (\"...\") — an artifact of
+    // earlier double-encoding — then a plain/curly wrapping pair.
+    if (v.length >= 4 && v.startsWith('\\"') && v.endsWith('\\"')) {
+      v = v.slice(2, -2).trim();
+    }
+    const opens = ['"', "'", '“', '‘']; // " ' " '
+    const closes = ['"', "'", '”', '’']; // " ' " '
+    if (v.length >= 2 && opens.includes(v.charAt(0)) && closes.includes(v.charAt(v.length - 1))) {
+      v = v.slice(1, -1);
+    }
+    return v;
+  }
+
   static toCamelCase(fieldName) {
     // First, handle PascalCase by inserting spaces before uppercase letters
     // This converts "FontSize" → "Font Size", "AssetID" → "Asset ID"

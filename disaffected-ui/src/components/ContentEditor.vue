@@ -170,6 +170,10 @@
 
       <!-- Editor Panel (scrollable center column) -->
       <div class="editor-panel">
+        <!-- Migration: the TipTap ScriptEditor swap happens INSIDE EditorPanel
+             (it replaces only the contenteditable script surface, keeping the
+             toolbar / mode toggles / cue-insert chrome). EditorPanel reads the
+             useProseMirrorEditor flag itself. -->
         <EditorPanel
           ref="editorPanel"
           :item="currentRundownItem"
@@ -177,6 +181,7 @@
           :current-episode="currentEpisodeNumber"
           :current-episode-title="currentEpisodeTitle"
           :script-content="scriptContent"
+          :line-number-offset="lineNumberOffset"
           @update:script-content="updateScriptContent"
           @user-initiated-shrink="handleUserInitiatedShrink"
           v-model:scratch-content="scratchContent"
@@ -192,6 +197,7 @@
           @save="() => saveCurrentItem(true)"
           @save-all="saveEverything"
           @save-current="handleEditorSaveCurrent"
+          @take-over-segment="handleTakeOverSegment"
           @toggle-rundown-panel="showRundownPanel = !showRundownPanel"
           @toggle-metadata-panel="showMetadataPanel = !showMetadataPanel"
           @show-asset-browser-modal="showAssetBrowserModal = true"
@@ -255,13 +261,16 @@
         @open-wpm-tool="showWpmTool = true"
         @generate-script="handleGenerateScript"
         @generate-host-script="handleGenerateScript"
+        @cues-enumerated="handleCuesEnumerated"
         @generate-media-list="handleGenerateMediaList"
         @generate-prompter-files="handleGeneratePrompterFiles"
         @restore-version="restoreToVersion"
+        @preview-version="previewVersion"
         @place-library-item="handleLibraryItemSelected"
         @create-new-library-item="handleCreateNewLibraryItem"
         @save-all="saveEverything"
         @insert-whiteboard-cue="handleInsertWhiteboardCue"
+        @reinsert-pool-media="handleReinsertPoolMedia"
       />
 
       <!-- Collapse Metadata toggle (inner border, visible when panel is open) -->
@@ -334,12 +343,39 @@
     <VoModal
       v-model:show="showVoModal"
       :episode="currentEpisodeNumber"
+      :prefill-data="voPrefillData"
       @submit="submitVo"
       @submit-multiple="submitMultipleVos"
     />
-    <NatModal v-model:show="showNatModal" @submit="submitNat" />
+    <NatModal v-model:show="showNatModal" :prefill-data="natPrefillData" @submit="submitNat" />
     <RifModal v-model:show="showRifModal" :edit-cue-data="editingRifCueData" @submit="submitRif" />
-    <PkgModal v-model:show="showPkgModal" @submit="submitPkg" />
+    <PkgModal v-model:show="showPkgModal" :prefill-data="pkgPrefillData" @submit="submitPkg" />
+
+    <!-- Pool re-insert: choose a cue type for the picked pooled file (filtered
+         to the file's kind), then the matching cue modal opens pre-loaded. -->
+    <v-dialog v-model="showPoolCueTypePicker" max-width="360">
+      <v-card>
+        <v-card-title class="text-body-1 d-flex align-center">
+          <v-icon class="mr-2" size="small">mdi-shape-plus</v-icon>
+          Insert as which cue?
+        </v-card-title>
+        <v-card-text class="text-caption text-grey">
+          {{ poolReinsertFile?.original_filename || poolReinsertFile?.filename }}
+        </v-card-text>
+        <v-card-actions class="flex-wrap ga-2 px-4 pb-4">
+          <v-btn
+            v-for="ct in poolCueTypeOptions"
+            :key="ct"
+            size="small"
+            variant="tonal"
+            color="primary"
+            @click="choosePoolCueType(ct)"
+          >{{ ct }}</v-btn>
+          <v-spacer></v-spacer>
+          <v-btn size="small" variant="text" @click="showPoolCueTypePicker = false">Cancel</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
     <DirModal v-model:show="showDirModal" :editing-cue-data="editingDirCueData" @submit="submitDir" />
     <BumpModal v-model:show="showBumpModal" @submit="submitBump" />
     <StingModal v-model:show="showStingModal" @submit="submitSting" />
@@ -420,7 +456,7 @@
     />
 
     <!-- Pre-Generation Blocker Modal: unresolved revisions and/or needs-attention items -->
-    <v-dialog v-model="showRevisionBlockerModal" max-width="620" persistent>
+    <v-dialog v-model="showRevisionBlockerModal" max-width="860" persistent>
       <v-card class="revision-blocker-card">
         <v-card-title class="revision-blocker-header d-flex align-center">
           <v-icon color="amber" class="me-2">mdi-alert-circle</v-icon>
@@ -619,6 +655,67 @@
       </v-card>
     </v-dialog>
 
+    <!-- Eviction notice (todo #41): shown when another user took over the
+         editing lock on the segment this session was editing. -->
+    <v-dialog :model-value="!!segmentLockState?.evicted?.value" max-width="460" persistent>
+      <v-card>
+        <v-card-title class="d-flex align-center text-error">
+          <v-icon class="mr-2" color="error">mdi-account-lock</v-icon>
+          Editing taken over
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          You have been evicted from this Rundown Item by
+          <strong>{{ segmentLockState?.evictedBy?.value || 'another user' }}</strong>.
+          <div class="text-caption text-grey mt-2">
+            This segment is now read-only. Your unsaved changes are kept in the editor
+            so you can copy anything you still need before reloading.
+          </div>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="segmentLockState?.clearEviction?.()">OK</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Read-only version preview (todo #35). Shows a past version's script
+         content without restoring it. -->
+    <v-dialog v-model="showVersionPreview" max-width="800" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-eye</v-icon>
+          Version {{ versionPreviewNumber }} preview
+          <v-spacer />
+          <span class="text-caption text-grey">read-only</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text style="max-height: 60vh;">
+          <div v-if="versionPreviewLoading" class="text-center py-6">
+            <v-progress-circular indeterminate color="primary" />
+          </div>
+          <!-- Render the version with the same Script-Mode visuals (paragraphs,
+               speakers, cue cards) instead of raw markdown. Read-only: no save,
+               cue action buttons are harmless no-ops (no listeners wired). -->
+          <div v-else-if="showVersionPreview" class="version-preview-script">
+            <ScriptEditor
+              :key="versionPreviewNumber"
+              :script-content="versionPreviewContent"
+              :editable="false"
+              :show-line-numbers="false"
+            />
+          </div>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" color="warning" prepend-icon="mdi-restore" @click="restoreFromPreview">Restore this version</v-btn>
+          <v-btn variant="text" @click="showVersionPreview = false">Close</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
   </div>
 </template>
 
@@ -629,6 +726,10 @@ import axios from 'axios';
 
 // Core panels - always visible, load eagerly
 import EditorPanel from './content-editor/EditorPanel.vue';
+import ScriptEditor from './content-editor/ScriptEditor.vue'; // read-only version preview (todo #35)
+// Migration: the TipTap/ProseMirror ScriptEditor is mounted INSIDE EditorPanel
+// (it swaps only the contenteditable surface). EditorPanel owns the flag; nothing
+// to import here.
 import RundownPanel from './content-editor/RundownPanel.vue';
 import MetadataPanel from './content-editor/MetadataPanel.vue';
 import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
@@ -672,6 +773,7 @@ import { getItemTypesForDropdown } from '../config/itemTypes';
 import { notifyUserStandard, NOTIFICATION_COLORS } from '../composables/useStandardNotification';
 import { useLLM } from '../composables/useLLM';
 import { useLLMState } from '../composables/useLLMState';
+import { getLLMPrompt } from '../composables/useLLMPrompts';
 import { useSOTProcessing } from '../composables/useSOTProcessing';
 import { useRequireEpisode } from '../composables/useRequireEpisode';
 import { useSegmentLock } from '../composables/useSegmentLock';
@@ -712,6 +814,7 @@ export default {
   name: 'ContentEditor',
   components: {
     EditorPanel,
+    ScriptEditor,
     RundownPanel,
     // eslint-disable-next-line vue/no-unused-components
     MetadataPanel,
@@ -854,8 +957,9 @@ export default {
     // CRITICAL: Add beforeunload handler to catch browser refresh/close
     this.handleBeforeUnload = (e) => {
       // Flush any pending changes synchronously (best effort)
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        _ae.flushPendingChanges();
       }
       // Warn user if there are unsaved changes
       if (this.hasUnsavedChanges) {
@@ -1018,8 +1122,14 @@ export default {
             this.debouncedScratchSave(); // 2s debounce
           }
 
-          // Capture undo state
-          this.debouncedCaptureUndoState();
+          // Capture undo state — but NOT in Script Mode. There the ProseMirror
+          // editor owns Ctrl+Z with its own fine-grained history; capturing a
+          // coarse whole-script snapshot here too would make App.vue's global
+          // handler steal Ctrl+Z and undo a whole snapshot instead of one PM
+          // step (todo #34). The global manager is for Code Mode + Scratch only.
+          if (this.editorMode !== 'script') {
+            this.debouncedCaptureUndoState();
+          }
         }
       }
     },
@@ -1477,6 +1587,14 @@ Good night!
       
       // Graphic attachment state
       whiteboardPrefillData: null,
+      // Re-inserting a pooled media file as a cue: the picked file + the
+      // cue-type picker state. On pick we build a prefill and open the modal.
+      poolReinsertFile: null,        // the AssetPoolFile row being re-inserted
+      showPoolCueTypePicker: false,  // the "which cue type?" chooser
+      poolCueTypeOptions: [],        // filtered cue types for the file's kind
+      voPrefillData: null,           // existing-media prefill for VO/NAT/PKG modals
+      natPrefillData: null,
+      pkgPrefillData: null,
       lastModalCloseTime: 0,
       showGfxModal: false,
       showFsqModal: false,
@@ -1539,6 +1657,12 @@ Good night!
 
       // Delete Cue Modal
       showDeleteCueModal: false,
+
+      // Read-only version preview (todo #35)
+      showVersionPreview: false,
+      versionPreviewNumber: null,
+      versionPreviewContent: '',
+      versionPreviewLoading: false,
 
       // Unresolved Revisions Blocker Modal
       showRevisionBlockerModal: false,
@@ -1745,6 +1869,24 @@ Try dropping an image or video file here!`
       return (this.rundownItems && this.rundownItems[this.selectedItemIndex]) || null
     },
 
+    // Continuous-across-show line numbering: the number of script paragraphs in
+    // every rundown item BEFORE the currently-open one. The ScriptEditor adds
+    // this to its per-paragraph count so line numbers run from the START OF THE
+    // SHOW (first paragraph of the first item = 1) and never reset per item.
+    // Counts top-level paragraphs only (cues are not numbered), matching the
+    // LineNumbers plugin. Placeholder rows contribute nothing.
+    lineNumberOffset() {
+      if (!Array.isArray(this.rundownItems) || this.selectedItemIndex <= 0) return 0
+      let total = 0
+      for (let i = 0; i < this.selectedItemIndex; i++) {
+        const item = this.rundownItems[i]
+        if (!item || item.isPlaceholder) continue
+        const md = item.script_content || item.script || ''
+        total += this.countScriptParagraphs(md)
+      }
+      return total
+    },
+
     currentSpeakerWpm() {
       // Get speaker WPM from current rundown item's speaker data
       // Default to 150 if no speaker is set or WPM is not available
@@ -1814,6 +1956,61 @@ Try dropping an image or video file here!`
     }
   },
   methods: {
+    /**
+     * Count top-level SCRIPT PARAGRAPHS in a raw script_content string, the
+     * same units the editor's LineNumbers plugin numbers (cues excluded). Used
+     * to compute the continuous-across-show line-number offset for an item.
+     *
+     * Mirrors markdownToDoc's paragraph sources without importing the full PM
+     * parser: (1) text outside cue blocks split on blank lines = bare
+     * paragraphs; (2) each <p>…</p> may itself hold blank-line-separated
+     * paragraphs. Cue blocks (<!-- Begin Cue -->…<!-- End Cue -->) are removed
+     * first so they don't count.
+     */
+    countScriptParagraphs(raw) {
+      if (!raw || typeof raw !== 'string') return 0;
+      // Strip YAML frontmatter if present.
+      let body = raw;
+      const fm = body.match(/^---\n[\s\S]*?\n---\n?/);
+      if (fm) body = body.slice(fm[0].length);
+      // Remove cue blocks entirely (they are not numbered).
+      body = body.replace(/<!--\s*Begin Cue\s*-->[\s\S]*?<!--\s*End Cue\s*-->/gi, '\n\n');
+
+      let count = 0;
+      const pRe = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+      let last = 0;
+      let m;
+      const countBare = (s) => {
+        for (const para of s.split(/\n\s*\n/)) {
+          if (para.trim()) count += 1;
+        }
+      };
+      while ((m = pRe.exec(body)) !== null) {
+        countBare(body.slice(last, m.index));
+        const inner = (m[1] || '').trim();
+        if (inner) {
+          const parts = inner.split(/\n\s*\n/).filter((p) => p.trim());
+          count += parts.length || 1;
+        }
+        last = pRe.lastIndex;
+      }
+      countBare(body.slice(last));
+      return count;
+    },
+
+    /**
+     * Return whichever script editor is currently mounted (the flag-gated
+     * ScriptEditor or the legacy EditorPanel). Both expose the same reach-in
+     * contract: flushPendingChanges() and isActivelyEditing. Use this for the
+     * flush-critical paths so they work regardless of which editor is active.
+     */
+    activeEditor() {
+      // EditorPanel is always the script-surface host; when the ProseMirror
+      // editor is active it lives inside EditorPanel, which delegates its
+      // flushPendingChanges()/isActivelyEditing to the inner ScriptEditor.
+      return this.$refs.editorPanel || null;
+    },
+
     /**
      * Get authentication headers for API requests
      * Uses JWT token from localStorage
@@ -2087,8 +2284,9 @@ Try dropping an image or video file here!`
         return;
       }
       // CRITICAL: Flush pending changes before opening modal
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       if (!this.showImgCueModal) {
         // Capture cursor position BEFORE opening modal
@@ -2108,8 +2306,9 @@ Try dropping an image or video file here!`
     async handleShowGfxModal() {
       if (!this.requireRundownItemSelected('GFX cue')) return;
       // CRITICAL: Flush pending changes before opening modal
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       console.log('🎨 handleShowGfxModal called, current state:', this.showGfxModal);
       if (!this.showGfxModal) {
@@ -2130,8 +2329,9 @@ Try dropping an image or video file here!`
     async handleShowFsqModal() {
       if (!this.requireRundownItemSelected('FSQ cue')) return;
       // CRITICAL: Flush pending changes before opening modal
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       if (!this.showFsqModal) {
         // Capture the cursor position when FSQ hotkey is pressed
@@ -2156,32 +2356,36 @@ Try dropping an image or video file here!`
       // Flush any in-flight Script-mode typing into rawMarkdownContent before
       // the modal opens — otherwise the next debounce tick will overwrite the
       // modal-driven update with a stale snapshot of the script.
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       this.editingFsqCueData = cueData;
       this.showFsqModal = true;
     },
     async handleEditGfxCue(cueData) {
       console.log('📝 Editing GFX cue:', cueData);
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       this.editingGfxCueData = cueData;
       this.showGfxModal = true;
     },
     async handleEditImgCue(cueData) {
       console.log('📝 Editing IMG cue:', cueData);
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       this.editingImgCueData = cueData;
       this.showImgCueModal = true;
     },
     async handleEditDirCue(cueData) {
       console.log('📝 Editing NOTE cue:', cueData);
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       this.editingDirCueData = cueData;
       this.showDirModal = true;
@@ -2191,8 +2395,9 @@ Try dropping an image or video file here!`
       // Only require selection for NEW cues, not when editing existing ones
       if (!cueData && !this.requireRundownItemSelected('SOT cue')) return;
       // CRITICAL: Flush pending changes before opening modal
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       if (!this.showSotModal) {
         // If editing, store cue data; otherwise clear it
@@ -2328,8 +2533,9 @@ Try dropping an image or video file here!`
       }
     },
     async handleEditRifCue(cueData) {
-      if (this.$refs.editorPanel?.flushPendingChanges) {
-        await this.$refs.editorPanel.flushPendingChanges();
+      const _ae = this.activeEditor();
+      if (_ae?.flushPendingChanges) {
+        await _ae.flushPendingChanges();
       }
       this.editingRifCueData = cueData;
       this.showRifModal = true;
@@ -2442,6 +2648,21 @@ Try dropping an image or video file here!`
       console.log('📄 Text to append length:', textToAppend.length);
       console.log('📝 Text to append full content:\n', textToAppend);
       console.log('📍 Insert after paragraph:', insertAfterParagraph);
+
+      // ProseMirror editor path: the string-append + scriptSegments/focusedParagraphIndex
+      // machinery below does NOT work in the new editor (it has no scriptSegments and
+      // focusedParagraphIndex is always null there), so cues landed at the bottom.
+      // Delegate to EditorPanel.insertCueAtSnapshotPosition, which inserts at the
+      // ProseMirror CURSOR (via ScriptEditor.insertCueAtCursor). The new editor then
+      // serializes back into scriptContent on its own.
+      if (this.$refs.editorPanel?.useProseMirrorEditor && this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
+        console.log('📍 ProseMirror active — routing cue insert to the editor cursor');
+        // textToAppend arrives wrapped as `\n<cue>\n`; the cue inserter handles its own
+        // spacing, so pass the trimmed cue block.
+        this.$refs.editorPanel.insertCueAtSnapshotPosition(textToAppend.trim());
+        this.hasUnsavedChanges = true;
+        return;
+      }
       console.log('📊 this.parsedContent exists:', !!this.parsedContent);
       console.log('📊 this.parsedContent.scriptContent exists:', !!this.parsedContent?.scriptContent);
 
@@ -3382,6 +3603,18 @@ Try dropping an image or video file here!`
         return;
       }
 
+      // GUARD: never save while an item's content is still loading. During a
+      // load `rawMarkdownContent` may briefly hold the PREVIOUS item's content;
+      // a save firing now would write that stale content onto the NEW item.
+      // This is the safety net behind the "same cue appeared in every item"
+      // corruption (a frozen editor left rawMarkdownContent stuck, and each
+      // switch saved it onto the next item). Manual saves are exempt — they are
+      // explicit user intent and only fire when the editor is settled.
+      if (!isManualSave && this.isLoadingItemContent) {
+        console.warn('⏭️ saveCurrentItem skipped — item content is still loading (avoids cross-item content bleed)');
+        return;
+      }
+
       // Determine if user is actively typing — if so, skip reactive state changes
       const editorPanel = this.$refs.editorPanel;
       const isEditing = editorPanel?.isActivelyEditing;
@@ -3587,6 +3820,67 @@ Try dropping an image or video file here!`
         const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
         notifyUserStandard(`Restore failed: ${errorMsg}`, NOTIFICATION_COLORS.ERROR, 3000);
       }
+    },
+
+    // Read-only preview of a past version (todo #35). Fetches the version's full
+    // content via the existing GET versions/{n} endpoint and shows it in a dialog
+    // WITHOUT restoring (the live item is untouched).
+    async previewVersion(versionNumber) {
+      if (!this.currentRundownItem) {
+        notifyUserStandard('No item selected', NOTIFICATION_COLORS.WARNING, 2000);
+        return;
+      }
+      const assetId = this.currentRundownItem.asset_id || this.currentRundownItem.AssetID;
+      if (!assetId) {
+        notifyUserStandard('Cannot preview - item has no asset ID', NOTIFICATION_COLORS.WARNING, 2000);
+        return;
+      }
+      this.versionPreviewNumber = versionNumber;
+      this.versionPreviewContent = '';
+      this.versionPreviewLoading = true;
+      this.showVersionPreview = true;
+      try {
+        const headers = this.getAuthHeaders();
+        const response = await axios.get(
+          `/api/episodes/rundown-item/${assetId}/versions/${versionNumber}`,
+          { headers }
+        );
+        this.versionPreviewContent = response.data?.script_content || '(empty version)';
+      } catch (error) {
+        console.error('Version preview failed:', error);
+        const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
+        this.versionPreviewContent = `Failed to load version: ${errorMsg}`;
+      } finally {
+        this.versionPreviewLoading = false;
+      }
+    },
+
+    // Take over the editing lock on the current segment, evicting the holder
+    // (todo #41). After claiming, reload the item content fresh so the new
+    // editor starts from the latest server copy (not a stale local one).
+    async handleTakeOverSegment() {
+      if (!this.segmentLockState || !this.currentRundownItem) return;
+      const assetId = this.currentRundownItem.asset_id || this.currentRundownItem.AssetID;
+      if (!assetId) return;
+      const result = await this.segmentLockState.takeOverLock(assetId);
+      if (result.success) {
+        const who = result.evictedUsername ? ` (was ${result.evictedUsername})` : '';
+        notifyUserStandard(`You now hold the editing lock${who}`, NOTIFICATION_COLORS.SUCCESS, 2500);
+        // Reload fresh so we don't edit from a stale copy.
+        const idx = this.selectedItemIndex;
+        if (idx >= 0 && this.rundownItems[idx]) {
+          this.loadItemContent(this.rundownItems[idx]);
+        }
+      } else {
+        notifyUserStandard('Could not take over this segment', NOTIFICATION_COLORS.ERROR, 3000);
+      }
+    },
+
+    // Restore directly from the preview dialog (convenience).
+    restoreFromPreview() {
+      const n = this.versionPreviewNumber;
+      this.showVersionPreview = false;
+      if (n != null) this.restoreToVersion(n);
     },
 
     // Sync rundown order - update order values to match current positions
@@ -4013,13 +4307,89 @@ Try dropping an image or video file here!`
         this.hasUnsavedChanges = false;
         if (this._loadGuardSafetyTimer) { clearTimeout(this._loadGuardSafetyTimer); this._loadGuardSafetyTimer = null; }
         console.log('🔓 Content load complete - autosave re-enabled');
-        // Capture initial snapshot so first Ctrl+Z can revert to the loaded state
+        // Capture initial snapshot so first Ctrl+Z can revert to the loaded state.
+        // Skip in Script Mode — PM owns undo there; a baseline entry would make the
+        // global manager's canUndo true and let App.vue steal Ctrl+Z (todo #34).
         try {
-          this.captureUndoState();
+          if (this.editorMode !== 'script') this.captureUndoState();
         } catch (e) {
           console.warn('captureUndoState after load failed (non-fatal):', e);
         }
       });
+    },
+
+    // Event alias: cue enumeration finished → refresh content in place.
+    async handleCuesEnumerated() {
+      await this.refreshAllItemContentInPlace();
+    },
+
+    // Refresh ALL rundown items' content from the server while preserving the
+    // current selection, then reload the open item into the editor — WITHOUT a
+    // page reload and WITHOUT the structural teardown of reloadFromDatabase()
+    // (which clears selection). Reusable for any server-side operation that
+    // rewrites cue/script content across items but leaves the rundown structure
+    // (the set/order of items) unchanged — e.g. cue enumeration, and future
+    // bulk operations like re-slugging cues or rewriting MediaURLs.
+    //
+    // Do NOT use this when items are added/removed/reordered — use
+    // reloadFromDatabase() for structural changes.
+    //
+    // FUTURE / MULTI-USER: this is the "refresh half" of collaborative editing —
+    // it pulls another user's saved content into the open editor in place, no
+    // page reload, selection preserved. It is NOT a concurrency solution on its
+    // own: it has no trigger (nothing tells this client another user saved) and
+    // no conflict/merge policy (a refresh mid-edit on the SAME item is
+    // last-write-wins). The intended trigger is a server push — see the SSE
+    // plan, docs/SSE_JOB_STATUS_PLAN.md (standing todo #24, "Replace polling
+    // with SSE for job status"); a "rundown changed" SSE channel would call
+    // this to live-refresh other users' edits. NOT a fit for Autoscrub, which
+    // mutates the local in-memory copy and would have its work discarded by a
+    // server re-fetch.
+    async refreshAllItemContentInPlace() {
+      if (!this.currentEpisodeNumber) return;
+      try {
+        // Flush + save any in-flight editor edits so they aren't clobbered.
+        if (this.$refs.editorPanel?.flushPendingChanges) {
+          this.$refs.editorPanel.flushPendingChanges();
+          await this.$nextTick();
+        }
+
+        const response = await axios.get(`/api/episodes/${this.currentEpisodeNumber}/rundown`);
+        const items = response.data.items || [];
+        if (!items.length) return;
+
+        // Remember which item is open (by id, since indexes can shift).
+        const openId = this.selectedItemIndex >= 0
+          ? (this.currentRundownItem?.id ?? this.currentRundownItem?.asset_id)
+          : null;
+
+        // Replace the rundown array wholesale so every item carries the freshly
+        // enumerated script content.
+        this.rundownItems = items;
+
+        // Force EditorPanel to discard its parse cache / edit buffer.
+        if (this.$refs.editorPanel) {
+          this.$refs.editorPanel.segmentReparseKey++;
+          this.$refs.editorPanel.cachedScriptSegments = null;
+          this.$refs.editorPanel.lastParsedContent = null;
+          this.$refs.editorPanel.segmentEditBuffer = {};
+        }
+
+        // Re-resolve and reload the previously-open item into the editor.
+        if (openId != null) {
+          const newIdx = items.findIndex(
+            it => (it.id ?? it.asset_id) === openId
+          );
+          if (newIdx >= 0) {
+            this.selectedItemIndex = newIdx;
+            await this.$nextTick();
+            this.loadItemContent(items[newIdx]);
+          }
+        }
+        console.log('✅ Rundown content refreshed after cue enumeration');
+      } catch (error) {
+        console.error('Failed to refresh after enumeration:', error);
+      }
     },
 
     async reloadCurrentItemContent() {
@@ -4333,28 +4703,27 @@ Try dropping an image or video file here!`
         this.lastCapturedSnapshot = null;
       }
 
-      // Unregister previous active edit and release lock
+      // Unregister previous active edit and release lock. FIRE-AND-FORGET — these
+      // are background presence/lock bookkeeping and must NOT block the item
+      // switch on network round-trips (awaiting them made switching very slow
+      // once locking was enabled — todo #41).
       if (this.selectedItemIndex >= 0 && this.rundownItems[this.selectedItemIndex]) {
         const prevAssetId = this.rundownItems[this.selectedItemIndex].asset_id;
         if (prevAssetId) {
-          // Release segment lock first
-          if (this.segmentLockState && this.segmentLockState.currentAssetId.value === prevAssetId) {
-            try {
-              await this.segmentLockState.releaseLock();
-              console.log('🔓 Released segment lock for', prevAssetId);
-            } catch (err) {
-              console.warn('Failed to release segment lock:', err);
-            }
+          // Release the PREVIOUS segment's lock explicitly (fire-and-forget).
+          // Pass prevAssetId so we always release the segment we're leaving,
+          // even if currentAssetId has already been overwritten by a concurrent
+          // acquire — the old guard skipped the release in that race and left a
+          // stale lock that greyed the row on other users until TTL (todo #41).
+          if (this.segmentLockState) {
+            Promise.resolve(this.segmentLockState.releaseLock(prevAssetId))
+              .catch(err => console.warn('Failed to release segment lock:', err));
           }
-          // Unregister active edit
-          try {
-            await axios.post('/api/housekeeping/active-edit/unregister',
-              { asset_id: prevAssetId },
-              { headers: this.getAuthHeaders() }
-            );
-          } catch (err) {
-            console.warn('Failed to unregister active edit:', err);
-          }
+          // Unregister active edit (fire-and-forget).
+          axios.post('/api/housekeeping/active-edit/unregister',
+            { asset_id: prevAssetId },
+            { headers: this.getAuthHeaders() }
+          ).catch(err => console.warn('Failed to unregister active edit:', err));
         }
       }
 
@@ -4422,28 +4791,24 @@ Try dropping an image or video file here!`
         // Fetch version history for undo functionality
         this.fetchVersionHistory();
 
-        // Register new active edit
+        // Register new active edit + acquire segment lock. FIRE-AND-FORGET so the
+        // item switch is instant; the lock/presence state updates reactively when
+        // these resolve (todo #41). acquireLock updates segmentLockState refs on
+        // its own, which drives the editor's locked overlay.
         const newAssetId = itemToLoad.asset_id;
         if (newAssetId) {
-          try {
-            await axios.post('/api/housekeeping/active-edit/register',
-              { asset_id: newAssetId },
-              { headers: this.getAuthHeaders() }
-            );
-            console.log('✅ Registered active edit for', newAssetId);
-          } catch (err) {
-            console.warn('Failed to register active edit:', err);
-          }
+          axios.post('/api/housekeeping/active-edit/register',
+            { asset_id: newAssetId },
+            { headers: this.getAuthHeaders() }
+          ).catch(err => console.warn('Failed to register active edit:', err));
 
-          // Try to acquire segment lock
           if (this.segmentLockState) {
-            const lockResult = await this.segmentLockState.acquireLock(newAssetId);
-            if (lockResult.success) {
-              console.log('🔒 Acquired segment lock for', newAssetId);
-            } else if (lockResult.locked) {
-              console.log('🔒 Segment locked by:', lockResult.lockedBy);
-              // Lock info is automatically updated in segmentLockState
-            }
+            Promise.resolve(this.segmentLockState.acquireLock(newAssetId))
+              .then(lockResult => {
+                if (lockResult?.success) console.log('🔒 Acquired segment lock for', newAssetId);
+                else if (lockResult?.locked) console.log('🔒 Segment locked by:', lockResult.lockedBy);
+              })
+              .catch(err => console.warn('acquireLock failed:', err));
           }
         }
       } else {
@@ -5707,6 +6072,96 @@ Try dropping an image or video file here!`
       }
     },
 
+    // ── Re-insert a pooled media file as a cue ──
+    // Double-clicking a file in the AssetPoolPanel "Media" tab lands here. We
+    // don't know the cue type (a video could be VO/SOT/NAT/PKG; an image
+    // IMG/GFX), so we show a cue-type picker filtered to the file's kind, then
+    // open the matching modal pre-loaded with the file URL.
+    handleReinsertPoolMedia(file) {
+      if (!file || !file.url) return;
+      this.poolReinsertFile = file;
+      // GFX is text/title-card/social only — it has no image-file ingest path,
+      // so a pooled image reinserts as IMG (not GFX).
+      const KIND_CUE_TYPES = {
+        video: ['SOT', 'VO', 'NAT', 'PKG'],
+        image: ['IMG'],
+        audio: ['VO', 'NAT'],
+      };
+      this.poolCueTypeOptions = KIND_CUE_TYPES[file.kind] || ['SOT', 'VO', 'NAT', 'PKG', 'IMG'];
+      this.showPoolCueTypePicker = true;
+    },
+
+    // User picked a cue type for the pooled file → build a prefill and open the
+    // matching modal pre-loaded with the existing media URL (no fresh upload).
+    choosePoolCueType(cueType) {
+      const file = this.poolReinsertFile;
+      this.showPoolCueTypePicker = false;
+      if (!file) return;
+
+      // Derive a usable slug from the filename when the pooled file has no
+      // origin_slug (e.g. manual uploads), so the cue modals' Submit button
+      // (which requires a slug) is enabled.
+      const baseName = (file.original_filename || file.filename || '')
+        .replace(/\.[^.]+$/, '');
+      const fallbackSlug = baseName
+        .toLowerCase()
+        .replace(/['".,!?]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+
+      // Shared prefill shape consumed by the cue modals (mirrors buildModalPrefill).
+      const prefill = {
+        type: cueType.toLowerCase(),
+        mediaUrl: file.url,
+        assetId: file.asset_id,
+        title: file.origin_slug || file.original_filename || file.filename || '',
+        slug: file.origin_slug || fallbackSlug || '',
+        fromPool: true,
+      };
+
+      this.whiteboardPrefillData = null;
+      switch (cueType) {
+        case 'SOT':
+          // SotModal pre-loads from top-level initialData.mediaUrl + slug
+          // (its editMode watcher reads those fields directly).
+          this.editingSotCueData = {
+            mediaUrl: file.url,
+            assetId: file.asset_id,
+            slug: file.origin_slug || fallbackSlug || '',
+            fromPool: true,
+          };
+          this.showSotModal = true;
+          break;
+        case 'IMG':
+          // ImgCueModal reads editData.rawData.mediaurl for the preview and the
+          // reuse-existing-media submit path.
+          this.editingImgCueData = {
+            rawData: { mediaurl: file.url, slug: file.origin_slug || fallbackSlug || '' },
+            slug: file.origin_slug || fallbackSlug || '',
+            mediaUrl: file.url,
+            assetId: file.asset_id,
+            fromPool: true,
+          };
+          this.showImgCueModal = true;
+          break;
+        case 'VO':
+          this.voPrefillData = prefill;
+          this.showVoModal = true;
+          break;
+        case 'NAT':
+          this.natPrefillData = prefill;
+          this.showNatModal = true;
+          break;
+        case 'PKG':
+          this.pkgPrefillData = prefill;
+          this.showPkgModal = true;
+          break;
+        default:
+          console.warn('Pool reinsert: unsupported cue type', cueType);
+      }
+      this.poolReinsertFile = null;
+    },
+
     async submitGraphic(gfxCueData) {
       console.log('🎨 GFX cue submitted:', gfxCueData);
 
@@ -6178,7 +6633,9 @@ Try dropping an image or video file here!`
           console.log(`📝 Inserting ${totalParts} FSQ cue(s) at BOTTOM of script (no valid cursor position: ${insertionPosition})`);
         }
 
-        // Use EditorPanel's snapshotted position for precise insertion
+        // insertCueAtSnapshotPosition routes to a reliable append internally when
+        // the ProseMirror editor is active (see EditorPanel), so this one path
+        // works for both editors.
         if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
           this.$refs.editorPanel.insertCueAtSnapshotPosition(allCues);
           console.log('✅ FSQ cue(s) inserted via EditorPanel.insertCueAtSnapshotPosition');
@@ -6334,9 +6791,13 @@ Try dropping an image or video file here!`
         //   isStandardEdit → user edited metadata only; replace cue in
         //                 place, REUSE the original AssetID
         //   else        → new cue; insert at cursor
+        // A pooled-file reinsert pre-populates via editingSotCueData (so the
+        // modal's editMode watcher fills the form), but it is a NEW cue, not an
+        // edit of an existing one — never take the in-place replace path.
+        const isPoolReinsert = !!editing?.fromPool;
         const isReupload = editing?.isReupload;
         const originalAssetId = editing?.originalAssetId;
-        const isStandardEdit = !!editing && !isReupload;
+        const isStandardEdit = !!editing && !isReupload && !isPoolReinsert;
         const standardEditAssetId = isStandardEdit
           ? (editing.assetId || editing.rawData?.assetId || data.assetId)
           : null;
@@ -6514,7 +6975,9 @@ Try dropping an image or video file here!`
         // Capture selection before insertion — modal close can race with re-renders
         const savedItemIndex = this.selectedItemIndex;
 
-        // Delegate to EditorPanel (uses pendingCueInsertionIndex snapshotted at button-press time)
+        // insertCueAtSnapshotPosition routes to a reliable append internally when
+        // the ProseMirror editor is active (see EditorPanel), so this one path
+        // works for both editors.
         if (this.$refs.editorPanel?.insertCueAtSnapshotPosition) {
           this.$refs.editorPanel.insertCueAtSnapshotPosition(sotCue);
           console.log('✅ SOT cue inserted via EditorPanel.insertCueAtSnapshotPosition');
@@ -6544,13 +7007,19 @@ Try dropping an image or video file here!`
         console.log(`✅ SOT cue inserted successfully`);
         this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
 
+        // Clear the pooled-reinsert prefill state now that the new cue is in.
+        if (isPoolReinsert) this.editingSotCueData = null;
+
         // Wait for Vue to process the content update, then save
         await this.$nextTick();
         await this.saveCurrentItem();
 
-        // Trigger processing NOW that cue is in database
-        console.log('🔄 About to trigger SOT processing...');
-        await this.triggerSOTProcessing(data);
+        // Trigger processing NOW that cue is in database. A pooled reinsert
+        // points at already-processed media (no tempJobId), so skip it.
+        if (!isPoolReinsert) {
+          console.log('🔄 About to trigger SOT processing...');
+          await this.triggerSOTProcessing(data);
+        }
         console.log('🎬🎬🎬 submitSot COMPLETED');
         console.log('🎬🎬🎬 ===============================================');
 
@@ -7823,8 +8292,11 @@ Try dropping an image or video file here!`
       // Snapshot edit state at function entry — modal close watcher may clear
       // this.editingImgCueData mid-flight as the modal animates away.
       const editing = this.editingImgCueData;
-      const isEdit = !!editing;
-      console.log('🖼️ IMG cue submitted (isEdit=' + isEdit + '):', imgCueData);
+      // A pooled-file reinsert pre-populates via editingImgCueData (so the modal
+      // shows the existing image), but it is a NEW cue — not an in-place edit.
+      const isPoolReinsert = !!editing?.fromPool;
+      const isEdit = !!editing && !isPoolReinsert;
+      console.log('🖼️ IMG cue submitted (isEdit=' + isEdit + ', poolReinsert=' + isPoolReinsert + '):', imgCueData);
       if (isEdit) {
         console.log('🖼️ Editing cue snapshot:', {
           assetId: editing.assetId,
@@ -7999,6 +8471,13 @@ Try dropping an image or video file here!`
         this.hasUnsavedChanges = true;
         this.$toast?.success('IMG cue inserted successfully!');
         this.$refs.metadataPanel?.$refs?.assetPoolPanelRef?.confirmInsertSuccess();
+        // Clear the pooled-reinsert prefill state and close the modal.
+        if (isPoolReinsert) {
+          this.editingImgCueData = null;
+          this.showImgCueModal = false;
+          await this.$nextTick();
+          await this.saveCurrentItem();
+        }
         console.log('✅ IMG cue inserted');
 
       } catch (error) {
@@ -8906,6 +9385,23 @@ Try dropping an image or video file here!`
         return;
       }
 
+      // ⚠️ FLUSH LIVE EDITS BEFORE SNAPSHOTTING THE BASE SCRIPT.
+      // We append the generated text onto the item's EXISTING script. The
+      // displayed item's freshly-typed content lives in the editor's edit
+      // buffer / rawMarkdownContent and may not yet be persisted onto
+      // targetItem.script_content. If we read script_content without
+      // flushing first, the base is stale (often empty) and the "append"
+      // silently overwrites what's on screen — looking like a replace.
+      // Flush, then snapshot the LIVE content for the displayed item.
+      const isTargetDisplayed = this.currentRundownItem?.id === targetItemId;
+      if (isTargetDisplayed) {
+        try {
+          await this.$refs.editorPanel?.flushPendingChanges?.();
+        } catch (e) {
+          console.warn('flushPendingChanges before generate failed (continuing):', e);
+        }
+      }
+
       // Get target item's duration or use default
       const duration = targetItem.duration || '3';
       const segmentType = targetItem.type || 'segment';
@@ -8929,6 +9425,28 @@ Try dropping an image or video file here!`
         }
       }
 
+      // ── Build the richer prompt context (per Kevin) ──────────────────────
+      // Expose to the segment-generator prompt: this segment's own slug, title,
+      // and current script body (so the model can continue/expand with context
+      // instead of writing blind), plus the OTHER rundown segments each with
+      // their title + description (show-wide awareness). All overridable via the
+      // Prompt Manager variables: {slug} {title} {currentScript} {otherSegments}.
+      const slug = targetItem.slug || '';
+      const title = targetItem.title || '';
+      const currentScript = (targetItem.script_content || '').trim();
+
+      // Other segments (everything except the target), title + description.
+      const otherList = this.rundownItems
+        .filter(item => (item.id || item.asset_id) !== targetItemId)
+        .map(item => {
+          const t = item.title || item.slug || 'Untitled';
+          const d = (item.description || '').trim();
+          return d ? `- ${t}: ${d}` : `- ${t}`;
+        });
+      const otherSegments = otherList.length
+        ? `\n\nOther segments in this episode:\n${otherList.join('\n')}`
+        : '';
+
       // Show loading notification with LLM generating color
       notifyUserStandard(`Generating ${paragraphCount}-paragraph ${segmentType}...`, NOTIFICATION_COLORS.GENERATING);
 
@@ -8944,42 +9462,41 @@ Try dropping an image or video file here!`
 
         // Target item already captured at function start (lines 4212-4213)
 
-        // Fetch prompt template from settings based on segment type
-        let promptName;
+        // Resolve the prompt through the unified Prompt Override system
+        // (useLLMPrompts -> prompt_overrides table, category 'generate'). The
+        // operation key maps from the segment type; getLLMPrompt returns the
+        // DB override if one exists, else the default template defined in
+        // useLLMPrompts.js. The keypress number is the {paragraphs} param.
+        let promptId;
         if (segmentType === 'tease') {
-          promptName = 'Segment Generator (Tease)';
+          promptId = 'generate-tease-script';
         } else if (segmentType === 'coldopen') {
-          promptName = 'Segment Generator (Cold Open)';
+          promptId = 'generate-coldopen-script';
         } else {
-          promptName = 'Segment Generator (Standard)';
+          promptId = 'generate-segment-script';
         }
 
-        // Get LLM routing settings from database
-        let template = null;
+        let prompt;
+        // Defaults match the prior hardcoded values; overridden below by the
+        // resolved prompt's settings (incl. any Prompt Manager override's
+        // temperature / max_tokens), so the override is actually honored.
+        let genTemperature = 0.8;
+        let genMaxTokens = 2000;
         try {
-          const response = await this.$axios.get('/settings/llm_routing');
-          const prompts = response.data?.value?.prompts || [];
-          const promptConfig = prompts.find(p => p.name === promptName && p.enabled);
-
-          if (promptConfig) {
-            template = promptConfig.template;
-            console.log(`📋 Using prompt template: ${promptName}`);
-          }
+          const resolved = await getLLMPrompt(
+            promptId,
+            { paragraphs: paragraphCount, duration, segmentType, upcomingSegments,
+              slug, title, currentScript, otherSegments },
+            { category: 'generate' }
+          );
+          prompt = resolved.prompt;
+          if (resolved.temperature != null) genTemperature = resolved.temperature;
+          if (resolved.maxTokens != null) genMaxTokens = resolved.maxTokens;
+          console.log(`📋 Using prompt ${promptId}${resolved.overridden ? ' (DB override)' : ' (default)'} — temp ${genTemperature}, max_tokens ${genMaxTokens}`);
         } catch (error) {
-          console.warn('Failed to load prompt from settings, using fallback:', error);
+          console.warn(`Failed to resolve prompt ${promptId}, using inline fallback:`, error);
+          prompt = `Write a ${duration}-minute podcast ${segmentType} with ${paragraphCount} paragraphs. DO NOT include any introductory text - start immediately with the content.`;
         }
-
-        // Fallback to basic template if not found in settings
-        if (!template) {
-          console.warn(`⚠️ Prompt "${promptName}" not found in settings, using fallback template`);
-          template = 'Write a {duration}-minute podcast {segmentType} with {paragraphs} paragraphs. DO NOT include any introductory text - start immediately with the content.';
-        }
-
-        const prompt = template
-          .replace('{duration}', duration)
-          .replace('{paragraphs}', paragraphCount)
-          .replace('{upcomingSegments}', upcomingSegments)
-          .replace('{segmentType}', segmentType);
 
         console.log('🎯 Calling smartCall with taskType: content-expansion');
 
@@ -8991,8 +9508,8 @@ Try dropping an image or video file here!`
           async () => {
             return await smartCall(prompt, {
               taskType: 'content-expansion',
-              temperature: 0.8,
-              max_tokens: 2000
+              temperature: genTemperature,
+              max_tokens: genMaxTokens
             });
           },
           {
@@ -9006,8 +9523,15 @@ Try dropping an image or video file here!`
         );
 
         // ⚠️ INSERT INTO TARGET ITEM - Not currently displayed item
-        // Get target item's current script content (might be different from displayed scriptContent)
-        const targetScript = targetItem?.script_content || '';
+        // Get target item's current script content. For the item that's
+        // actually open in the editor, rawMarkdownContent is the live source
+        // of truth (flushed above) and is fresher than the rundown-array
+        // copy on targetItem.script_content; use it so we append rather than
+        // clobber the on-screen text. For a non-displayed item, the array
+        // copy is correct.
+        const targetScript = isTargetDisplayed
+          ? (this.rawMarkdownContent || targetItem?.script_content || '')
+          : (targetItem?.script_content || '');
 
         console.log('📝 Generated text length:', generatedText?.length, 'chars');
         console.log('📝 Generated text preview:', generatedText?.substring(0, 100));
@@ -9953,6 +10477,33 @@ Try dropping an image or video file here!`
 .revision-blocker-actions {
   padding: 12px 20px !important;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+  /* Up to four buttons (Cancel + Reject/Accept Revisions + Continue Anyway).
+     Allow wrapping with row-gap so nothing clips on a narrow viewport; the
+     dialog max-width is sized to fit them on one row at normal widths. */
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+/* Read-only version preview (todo #35): render the version with Script-Mode
+   visuals via a non-editable ScriptEditor. */
+.version-preview-script {
+  cursor: default;
+}
+/* Soften the editing affordances so it reads as a preview, not the live editor. */
+.version-preview-script :deep(.ProseMirror) {
+  cursor: default;
+}
+.version-preview-script :deep(.ProseMirror-focused) {
+  outline: none;
+}
+/* Hide the drag gutter in the read-only preview (reordering is disabled). Cue
+   edit/delete buttons are hidden at the source via the cards' `readonly` prop,
+   driven by editor.isEditable in CueNodeView. */
+.version-preview-script :deep(.pm-drag-gutter::before) {
+  display: none !important;
+}
+.version-preview-script :deep(.pm-drag-gutter) {
+  padding-left: 0 !important;
 }
 
 </style>

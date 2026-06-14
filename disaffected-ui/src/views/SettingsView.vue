@@ -43,6 +43,7 @@
           <v-tab value="interface">Interface</v-tab>
           <v-tab value="content">Content</v-tab>
           <v-tab value="whiteboard">Whiteboard</v-tab>
+          <v-tab value="infrastructure">Infrastructure</v-tab>
           <v-tab value="system">System</v-tab>
         </v-tabs>
 
@@ -128,6 +129,26 @@
             <WhiteboardSettings />
           </v-tabs-window-item>
 
+          <!-- Infrastructure Tab -->
+          <v-tabs-window-item value="infrastructure">
+            <v-card flat>
+              <v-card-text class="pa-0">
+                <v-tabs v-model="infraSubTab" color="primary" density="compact" class="settings-subtabs mb-3">
+                  <v-tab value="workers" prepend-icon="mdi-server-network">Workers</v-tab>
+                  <v-tab value="sibling-tools" prepend-icon="mdi-hub">Sibling Tools</v-tab>
+                </v-tabs>
+                <v-tabs-window v-model="infraSubTab">
+                  <v-tabs-window-item value="workers">
+                    <WorkerSettings />
+                  </v-tabs-window-item>
+                  <v-tabs-window-item value="sibling-tools">
+                    <SiblingToolSettings />
+                  </v-tabs-window-item>
+                </v-tabs-window>
+              </v-card-text>
+            </v-card>
+          </v-tabs-window-item>
+
           <!-- System Tab -->
           <v-tabs-window-item value="system">
             <SystemSettings
@@ -154,6 +175,8 @@ import ContentLibraryManager from '@/components/settings/ContentLibraryManager.v
 import EpisodeBlueprintSettings from '@/components/settings/EpisodeBlueprintSettings.vue' // eslint-disable-line no-unused-vars
 import { applyIndicatorCSSVars } from '@/composables/useContentIndicators'
 import WhiteboardSettings from '@/components/settings/WhiteboardSettings.vue' // eslint-disable-line no-unused-vars
+import WorkerSettings from '@/components/settings/WorkerSettings.vue' // eslint-disable-line no-unused-vars
+import SiblingToolSettings from '@/components/settings/SiblingToolSettings.vue' // eslint-disable-line no-unused-vars
 import { useUserPrefs } from '@/composables/useUserPrefs'
 
 // Admin detection (permissive — falls back closed at the API layer anyway).
@@ -203,6 +226,7 @@ const _savedTabs = userPrefs.get('settings.tabs', _legacyTabs)
 const activeTab = ref(_savedTabs.active || _legacyTabs.active)
 const aiSubTab = ref(_savedTabs.ai || _legacyTabs.ai)
 const contentSubTab = ref(_savedTabs.content || _legacyTabs.content)
+const infraSubTab = ref('workers')
 const apiConfigs = ref({
   ollama: {
     host: '',

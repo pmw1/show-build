@@ -90,7 +90,10 @@ try:
 
     # LLM & AI
     from llm_proxy_router import router as llm_proxy_router
-    from llm_state_router import router as llm_state_router
+    # llm_state_router removed 2026-06-04 — orphaned /api/llm/operations +
+    # /api/llm/notifications endpoints whose llm_notifications table schema no
+    # longer matched the model (every call 500'd). State is now in-memory +
+    # localStorage; the live notification feed is /api/llm-notifications/*.
     from prompts_router import router as prompts_router
     from segment_llm_router import router as segment_llm_router
 
@@ -150,6 +153,9 @@ app.mount("/episodes", StaticFiles(directory="/home/episodes"), name="episodes")
 for mount_path, mount_dir, mount_name in [
     ("/repo", "/home/repo", "repo"),
     ("/media_assets", "/home/media_assets", "media_assets"),
+    # Unbound media pool (episodes/, ads/, repo/, whiteboard/). Whiteboard media
+    # and cue-released media are served from here; was /repo/whiteboard.
+    ("/pool", "/home/pool", "pool"),
     ("/api/profile-pictures", "/home/profile_pictures", "profile_pictures"),
 ]:
     try:
@@ -226,7 +232,6 @@ app.include_router(blueprint_config_router, prefix="/api/settings/blueprint-node
 
 # LLM & AI
 app.include_router(llm_proxy_router)
-app.include_router(llm_state_router)
 app.include_router(prompts_router)
 app.include_router(segment_llm_router)
 

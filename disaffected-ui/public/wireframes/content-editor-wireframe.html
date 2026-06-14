@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Content-Editor Region Wireframe</title>
+
+  <!-- Vuetify 3 + Vue 3 via CDN — no build step -->
+  <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/vuetify@3.7.4/dist/vuetify.min.css" rel="stylesheet" />
+  <style>
+    html, body { margin: 0; padding: 0; }
+    /* Region card base */
+    .region {
+      cursor: pointer;
+      border: 2px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      transition: all 0.12s ease;
+      user-select: none;
+      position: relative;
+      overflow: hidden;
+    }
+    .region:hover {
+      border-color: #7e57c2;
+      box-shadow: 0 0 0 1px #7e57c2 inset;
+    }
+    .region.selected {
+      border-color: #7e57c2;
+      box-shadow: 0 0 0 2px #7e57c2 inset, 0 4px 18px rgba(126,87,194,0.4);
+    }
+    .region.copied {
+      border-color: #66bb6a !important;
+      box-shadow: 0 0 0 2px #66bb6a inset, 0 4px 18px rgba(102,187,106,0.5) !important;
+    }
+    .region-name { font-weight: 700; font-size: 0.95rem; line-height: 1.1; }
+    .region-class { font-family: ui-monospace, monospace; font-size: 0.72rem; opacity: 0.65; }
+    .region-info { font-size: 0.74rem; opacity: 0.8; margin-top: 4px; line-height: 1.25; }
+    .region-parent { font-size: 0.66rem; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; }
+    .copied-flag {
+      position: absolute; top: 6px; right: 8px;
+      background: #66bb6a; color: #11111b;
+      font-size: 0.62rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;
+      opacity: 0; transition: opacity 0.15s;
+    }
+    .region.copied .copied-flag { opacity: 1; }
+    .col-label {
+      font-size: 0.66rem; text-transform: uppercase; letter-spacing: 1px;
+      opacity: 0.45; font-weight: 700; margin: 0 0 4px 2px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vuetify@3.7.4/dist/vuetify.min.js"></script>
+
+  <script>
+    const { createApp, ref } = Vue;
+    const { createVuetify } = Vuetify;
+
+    const vuetify = createVuetify({
+      theme: { defaultTheme: 'dark' },
+    });
+
+    // The route these regions live on.
+    const ROUTE = '/content-editor/:episode?';
+
+    // Region model. Each entry: name, parent (for the copy prompt), the code
+    // class/component (info), and a short description shown in the card.
+    // `parent` is the region_name used as {parent region_name} in the copy text.
+    const R = (name, parent, klass, info) => ({ name, parent, klass, info });
+
+    // Build the clipboard text exactly as specified.
+    function focusText(region) {
+      const parent = region.parent || 'the page';
+      return `Let's focus on region ${region.name} inside ${parent} on the route ${ROUTE} on the development server at dev.showbuild.app.\n`;
+    }
+
+    const app = createApp({
+      setup() {
+        const selected = ref(null);
+        const copiedKey = ref(null);
+
+        function select(region) { selected.value = region.name; }
+
+        async function copyFocus(region) {
+          const text = focusText(region);
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch (e) {
+            // Fallback for non-secure contexts
+            const ta = document.createElement('textarea');
+            ta.value = text; document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); } catch (_) {}
+            document.body.removeChild(ta);
+          }
+          copiedKey.value = region.name;
+          setTimeout(() => { if (copiedKey.value === region.name) copiedKey.value = null; }, 1400);
+        }
+
+        // ---- The region map (mirrors EditorPanel / RundownPanel / MetadataPanel) ----
+        const topAppBar = R('Top App Bar', 'the page (global)', 'v-app-bar (App.vue)',
+          'Global, every page: logo, clocks (date/UTC/custom/countdown), Episode Selector, auth + access badge, LLM Notification Center, messaging/presence, health status grid.');
+
+        const showInfoHeader = R('Show Info Header', 'ContentEditor', 'ShowInfoHeader.vue / .show-info-header',
+          'Page-wide header above the 3 columns; scrolls off as you scroll down. Show / episode info banner.');
+
+        // Left column — Rundown Panel
+        const rundownPanel = R('Rundown Panel', 'ContentEditor', 'RundownPanel.vue / .rundown-card',
+          'Left sidebar — the rundown item list, regions, drag-reorder.');
+        const rundownHeader = R('Rundown Header', 'Rundown Panel', '.rundown-title',
+          'Top bar of the sidebar: "Rundown" title, expand/narrow toggle, close, and the TRT (total runtime) box.');
+        const rundownToolbar = R('Rundown Toolbar', 'Rundown Panel', '.rundown-toolbar-split',
+          'Options menu + collapse/expand-all controls below the header.');
+        const rundownList = R('Rundown Items / Regions', 'Rundown Panel', '.rundown-regions-container',
+          'The scrollable list of rundown items and collapsible break regions.');
+
+        // Center column — Editor Panel
+        const editorPanel = R('Editor Panel', 'ContentEditor', 'EditorPanel.vue / .editor-panel',
+          'Center column. Hosts the mode toolbar, cue/styles toolbars, and the script editing surface.');
+        const editorToolbar = R('Editor Toolbar (Modes/Views)', 'Editor Panel', 'v-toolbar',
+          'Top header bar: EDIT MODES group (Script / Code toggle) and VIEWS group (iPad / Caller / Director / Prompter).');
+        const insertCuesToolbar = R('Insert Cues Toolbar', 'Editor Panel', '.editor-cues-toolbar',
+          'The ADD CUE button (Alt+C) that twirls out cue-type buttons (IMG, GFX, FSQ, SOT, VO, NAT, PKG, NOTE, BUMP, STING, RIF).');
+        const stylesFlyout = R('Styles Flyout', 'Editor Panel', '.styles-flyout-container',
+          'Text-formatting hotkey flyout: Bold, Italic, Underline, Highlight, Bullet, Revise/Add, Regen AssetID.');
+        const scriptEditor = R('Script Content Area (ScriptEditor)', 'Editor Panel', '.script-content-container / ScriptEditor.vue',
+          'The actual editing surface. With the new editor flag on, this is the TipTap/ProseMirror ScriptEditor. Slash (/) inserts cues at the caret.');
+
+        // Right column — Metadata Panel
+        const metadataPanel = R('Metadata Panel', 'ContentEditor', 'MetadataPanel.vue / .metadata-card',
+          'Right sidebar — per-item metadata + collapsible tool panels.');
+        const saveHeader = R('Save / Sync Status Header', 'Metadata Panel', '.save-header-btn',
+          'Save/sync state button at the top of the metadata panel.');
+        const statusBar = R('Status Bar', 'Metadata Panel', '.status bar (attention indicator)',
+          'Black normally; red-throbbing when the item needs attention.');
+        const segmentInfo = R('Segment Info Header', 'Metadata Panel', '.segment-info-header',
+          'Core per-item fields: Slug, Title, Description (with regenerate), Tone badges, customer.');
+        const assetPool = R('Asset Pool', 'Metadata Panel', "expansion-panel 'assetpool'",
+          'Episode asset pool (images, scripts, media). Collapsible, draggable.');
+        const people = R('People & Resources', 'Metadata Panel', "expansion-panel 'people'",
+          'People & resources for the item. Collapsible, draggable.');
+        const speaker = R('Speaker Stats', 'Metadata Panel', "expansion-panel 'speaker'",
+          'Per-speaker statistics. Collapsible, draggable.');
+        const versions = R('Versions', 'Metadata Panel', "expansion-panel 'versions'",
+          'Version history for the item. Collapsible, draggable.');
+        const workflow = R('Workflow Tools', 'Metadata Panel', "expansion-panel 'assetgen'",
+          'Asset/script generation tools, incl. Generate Script. Collapsible, draggable.');
+
+        return {
+          selected, copiedKey, select, copyFocus,
+          topAppBar, showInfoHeader,
+          rundownPanel, rundownHeader, rundownToolbar, rundownList,
+          editorPanel, editorToolbar, insertCuesToolbar, stylesFlyout, scriptEditor,
+          metadataPanel, saveHeader, statusBar, segmentInfo,
+          assetPool, people, speaker, versions, workflow,
+          ROUTE,
+        };
+      },
+      template: `
+      <v-app>
+        <v-main class="bg-grey-darken-4">
+          <v-container fluid class="pa-4">
+            <div class="d-flex align-center mb-2">
+              <v-icon color="purple-lighten-2" class="mr-2">mdi-map-marker-radius</v-icon>
+              <div>
+                <div class="text-h6">Content-Editor Region Wireframe</div>
+                <div class="text-caption text-grey">
+                  Route <code>{{ ROUTE }}</code> on dev.showbuild.app —
+                  <strong>single-click</strong> to select,
+                  <strong>double-click</strong> to copy a focus prompt to the clipboard.
+                </div>
+              </div>
+            </div>
+
+            <!-- TOP APP BAR (global, full width) -->
+            <div class="col-label">Global top region</div>
+            <region-card :region="topAppBar" :selected="selected" :copied="copiedKey"
+                         :on-select="select" :on-copy="copyFocus" min-h="64" />
+
+            <!-- SHOW INFO HEADER (page-wide, full width) -->
+            <div class="col-label mt-3">ContentEditor page header</div>
+            <region-card :region="showInfoHeader" :selected="selected" :copied="copiedKey"
+                         :on-select="select" :on-copy="copyFocus" min-h="56" />
+
+            <!-- THREE COLUMNS -->
+            <v-row class="mt-3" no-gutters>
+              <!-- LEFT: Rundown Panel -->
+              <v-col cols="3" class="pr-2">
+                <div class="col-label">Left sidebar</div>
+                <region-card :region="rundownPanel" :selected="selected" :copied="copiedKey"
+                             :on-select="select" :on-copy="copyFocus">
+                  <region-card :region="rundownHeader" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="50" />
+                  <region-card :region="rundownToolbar" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="44" />
+                  <region-card :region="rundownList" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="160" />
+                </region-card>
+              </v-col>
+
+              <!-- CENTER: Editor Panel -->
+              <v-col cols="6" class="px-2">
+                <div class="col-label">Center column</div>
+                <region-card :region="editorPanel" :selected="selected" :copied="copiedKey"
+                             :on-select="select" :on-copy="copyFocus">
+                  <region-card :region="editorToolbar" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="48" />
+                  <region-card :region="insertCuesToolbar" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="44" />
+                  <region-card :region="stylesFlyout" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="40" />
+                  <region-card :region="scriptEditor" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="220" />
+                </region-card>
+              </v-col>
+
+              <!-- RIGHT: Metadata Panel -->
+              <v-col cols="3" class="pl-2">
+                <div class="col-label">Right sidebar</div>
+                <region-card :region="metadataPanel" :selected="selected" :copied="copiedKey"
+                             :on-select="select" :on-copy="copyFocus">
+                  <region-card :region="saveHeader" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="38" />
+                  <region-card :region="statusBar" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="30" />
+                  <region-card :region="segmentInfo" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="80" />
+                  <region-card :region="assetPool" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="36" />
+                  <region-card :region="people" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="36" />
+                  <region-card :region="speaker" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="36" />
+                  <region-card :region="versions" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="36" />
+                  <region-card :region="workflow" :selected="selected" :copied="copiedKey"
+                               :on-select="select" :on-copy="copyFocus" nested min-h="36" />
+                </region-card>
+              </v-col>
+            </v-row>
+
+            <div v-if="selected" class="mt-4 text-caption text-grey">
+              Selected: <strong class="text-purple-lighten-2">{{ selected }}</strong>
+              — double-click it (or any region) to copy its focus prompt.
+            </div>
+          </v-container>
+        </v-main>
+      </v-app>`
+    });
+
+    // Reusable region card component.
+    app.component('region-card', {
+      props: {
+        region: { type: Object, required: true },
+        selected: { default: null },
+        copied: { default: null },
+        onSelect: { type: Function, required: true },
+        onCopy: { type: Function, required: true },
+        nested: { type: Boolean, default: false },
+        minH: { default: '70' },
+      },
+      computed: {
+        isSelected() { return this.selected === this.region.name; },
+        isCopied() { return this.copied === this.region.name; },
+      },
+      template: `
+        <div class="region pa-2"
+             :class="{ selected: isSelected, copied: isCopied }"
+             :style="{ minHeight: minH + 'px', marginBottom: nested ? '6px' : '0',
+                       background: nested ? 'rgba(126,87,194,0.06)' : 'rgba(255,255,255,0.02)' }"
+             @click.stop="onSelect(region)"
+             @dblclick.stop="onCopy(region)">
+          <div class="copied-flag">COPIED ✓</div>
+          <div class="region-parent" v-if="region.parent">in {{ region.parent }}</div>
+          <div class="region-name">{{ region.name }}</div>
+          <div class="region-class">{{ region.klass }}</div>
+          <div class="region-info">{{ region.info }}</div>
+          <div v-if="$slots.default" class="mt-2"><slot /></div>
+        </div>`
+    });
+
+    app.use(vuetify).mount('#app');
+  </script>
+</body>
+</html>

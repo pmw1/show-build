@@ -1,5 +1,5 @@
 <template>
-  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="1100" persistent>
+  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="720" persistent>
     <v-card class="fsq-modal-card">
       <v-card-title class="d-flex align-center text-black py-2" :class="`bg-${cueTypeColor}`">
         <v-icon class="mr-2" size="small">mdi-format-quote-close</v-icon>
@@ -12,172 +12,231 @@
 
       <v-card-text class="pb-2 compact-fsq-modal pa-3">
         <v-form ref="fsqFormRef" v-model="formValid">
-          <!-- TWO-COLUMN LAYOUT -->
-          <v-row dense>
-            <!-- LEFT COLUMN: Large Preview -->
-            <v-col cols="7">
-              <!-- Large Preview Container -->
-              <div class="large-preview-container mb-2">
-                <video
-                  ref="previewVideoRef"
-                  class="preview-video-background"
-                  autoplay
-                  loop
-                  muted
-                  playsinline
-                  @loadeddata="handleVideoLoaded"
-                  @error="handleVideoError"
-                >
-                  <source :src="previewBackgroundVideo" type="video/mp4">
-                </video>
-                <div class="black-bar-overlay"></div>
-                <div class="quote-preview" :style="previewStyle">
-                  <div class="quote-text" :style="quoteTextStyle" v-html="formattedQuotePreview"></div>
-                  <div v-if="includeAttribution && source" class="quote-source" :style="quoteSourceStyle">{{ attributionPrefix }}{{ source }}</div>
-                </div>
-              </div>
+          <!-- ===== PREVIEW ON TOP (full-width, WYSIWYG) ===== -->
+          <div class="large-preview-container mb-2">
+            <video
+              ref="previewVideoRef"
+              class="preview-video-background"
+              autoplay
+              loop
+              muted
+              playsinline
+              @loadeddata="handleVideoLoaded"
+              @error="handleVideoError"
+            >
+              <source :src="previewBackgroundVideo" type="video/mp4">
+            </video>
+            <div class="black-bar-overlay" :style="blackBarStyle"></div>
+            <div class="quote-preview" :style="previewStyle">
+              <div class="quote-text" :style="quoteTextStyle" v-html="formattedQuotePreview"></div>
+              <div v-if="includeAttribution && source" class="quote-source" :style="quoteSourceStyle">{{ attributionPrefix }}{{ source }}</div>
+            </div>
+          </div>
 
-              <!-- Word count and AI status below preview -->
-              <div class="d-flex align-center justify-space-between mb-2">
-                <div v-if="quote && quote.length > 0" class="word-count-badge">
-                  <v-chip size="x-small" color="grey-darken-2">{{ quote.trim().split(/\s+/).filter(w => w.length > 0).length }} words</v-chip>
-                </div>
-                <div v-if="aiState" class="ai-status-badge">
-                  <v-chip size="x-small" :color="aiStatusColor">
-                    <v-icon size="x-small" class="mr-1" :class="{ 'rotating': aiState === 'analyzing' }">{{ aiStatusIcon }}</v-icon>
-                    {{ aiStatusText }}
-                  </v-chip>
-                </div>
-              </div>
+          <!-- Word count + AI status under the preview -->
+          <div class="d-flex align-center mb-2" style="gap: 8px;">
+            <v-chip v-if="quote && quote.length > 0" size="x-small" color="grey-darken-2">
+              {{ quote.trim().split(/\s+/).filter(w => w.length > 0).length }} words
+            </v-chip>
+            <v-chip v-if="aiState" size="x-small" :color="aiStatusColor">
+              <v-icon size="x-small" class="mr-1" :class="{ 'rotating': aiState === 'analyzing' }">{{ aiStatusIcon }}</v-icon>
+              {{ aiStatusText }}
+            </v-chip>
+            <v-spacer></v-spacer>
+            <v-btn
+              v-if="splitRecommendations && splitRecommendations.length > 1"
+              size="x-small"
+              variant="tonal"
+              color="warning"
+              @click="showSplitPanel = !showSplitPanel"
+            >
+              <v-icon size="x-small" start>mdi-robot</v-icon>
+              {{ showSplitPanel ? 'Hide' : 'Show' }} {{ splitRecommendations.length }} splits
+            </v-btn>
+          </div>
 
-              <!-- AI Recommendation Panel (if splits detected) -->
-              <v-alert
-                v-if="splitRecommendations && splitRecommendations.length > 1"
-                type="warning"
-                variant="tonal"
+          <!-- ===== TABBED CONTROLS ===== -->
+          <v-tabs
+            v-model="activeTab"
+            density="compact"
+            color="primary"
+            class="fsq-tabs mb-3"
+            grow
+          >
+            <v-tab value="content"><v-icon size="small" start>mdi-format-quote-close</v-icon>Content</v-tab>
+            <v-tab value="style"><v-icon size="small" start>mdi-palette</v-icon>Style</v-tab>
+            <v-tab value="layout"><v-icon size="small" start>mdi-page-layout-body</v-icon>Layout</v-tab>
+            <v-tab value="output"><v-icon size="small" start>mdi-export</v-icon>Output</v-tab>
+          </v-tabs>
+
+          <v-window v-model="activeTab" class="fsq-tab-window">
+            <!-- ---------- CONTENT TAB ---------- -->
+            <v-window-item value="content">
+              <v-textarea
+                ref="quoteFieldRef"
+                v-model="quote"
+                label="Quote"
+                placeholder="Enter quote text..."
+                variant="outlined"
+                rows="4"
+                auto-grow
+                :rules="quoteRules"
+                required
                 density="compact"
-                class="mb-2"
-              >
-                <div class="d-flex align-center">
-                  <v-icon size="small" class="mr-2">mdi-robot</v-icon>
-                  <span class="text-caption">AI suggests {{ splitRecommendations.length }} splits</span>
-                  <v-spacer></v-spacer>
-                  <v-btn size="x-small" variant="text" color="warning" @click="showSplitPanel = !showSplitPanel">
-                    {{ showSplitPanel ? 'Hide' : 'Show' }}
-                  </v-btn>
-                </div>
-              </v-alert>
-            </v-col>
+                hide-details="auto"
+                class="mb-3"
+                @paste="handleQuotePaste"
+                @input="handleQuoteInput"
+                @click="updateCursorPosition"
+                @keyup="updateCursorPosition"
+              />
 
-            <!-- RIGHT COLUMN: Compact Controls -->
-            <v-col cols="5">
-              <!-- Quote Text Input -->
-              <div class="quote-input-wrapper mb-2">
-                <v-textarea
-                  ref="quoteFieldRef"
-                  v-model="quote"
-                  label="Quote"
-                  placeholder="Enter quote text..."
-                  variant="outlined"
-                  rows="5"
-                  auto-grow
-                  :rules="quoteRules"
-                  required
-                  density="compact"
-                  hide-details="auto"
-                  @paste="handleQuotePaste"
-                  @input="handleQuoteInput"
-                  @click="updateCursorPosition"
-                  @keyup="updateCursorPosition"
-                />
+              <v-row dense class="mb-2" align="center">
+                <v-col cols="9">
+                  <v-combobox
+                    v-model="source"
+                    :items="sourceOptions"
+                    label="Attribution / Source"
+                    placeholder="Source name"
+                    variant="outlined"
+                    density="compact"
+                    :disabled="!includeAttribution"
+                    hide-details
+                    clearable
+                  />
+                </v-col>
+                <v-col cols="3" class="d-flex align-center justify-center">
+                  <v-switch
+                    v-model="includeAttribution"
+                    density="compact"
+                    hide-details
+                    color="success"
+                    inset
+                  >
+                    <template #label>
+                      <span class="text-caption">{{ includeAttribution ? 'Show' : 'Hide' }}</span>
+                    </template>
+                  </v-switch>
+                </v-col>
+              </v-row>
+
+              <v-text-field
+                ref="slugFieldRef"
+                v-model="slug"
+                label="Slug"
+                placeholder="short-slug"
+                hint="Used for the filename — auto-generated from the quote"
+                persistent-hint
+                variant="outlined"
+                :rules="slugRules"
+                required
+                density="compact"
+                @input="handleSlugInput"
+                @blur="normalizeSlug"
+              />
+            </v-window-item>
+
+            <!-- ---------- STYLE TAB ---------- -->
+            <v-window-item value="style">
+              <v-row dense class="mb-3">
+                <v-col cols="6">
+                  <div class="fsq-field-caption">Font</div>
+                  <v-select
+                    v-model="fontFamily"
+                    :items="fontOptions"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6">
+                  <div class="fsq-field-caption">Alignment</div>
+                  <v-btn-toggle v-model="quoteStyle" mandatory density="compact" color="primary" class="w-100 fsq-align-toggle">
+                    <v-btn value="left" class="flex-grow-1"><v-icon size="small">mdi-format-align-left</v-icon></v-btn>
+                    <v-btn value="center" class="flex-grow-1"><v-icon size="small">mdi-format-align-center</v-icon></v-btn>
+                    <v-btn value="right" class="flex-grow-1"><v-icon size="small">mdi-format-align-right</v-icon></v-btn>
+                  </v-btn-toggle>
+                </v-col>
+              </v-row>
+
+              <!-- Quote size -->
+              <div class="fsq-slider-row">
+                <span class="fsq-slider-label">Quote size</span>
+                <v-slider v-model="fontSizePx" :min="60" :max="300" :step="2" density="compact" hide-details thumb-label class="fsq-slider" />
+                <v-text-field v-model.number="fontSizePx" type="number" suffix="px" density="compact" variant="outlined" hide-details class="fsq-slider-num" />
               </div>
 
-              <!-- Split Mode Selector -->
-              <div class="split-mode-selector mb-2">
-                <div class="text-caption text-grey mb-1">SPLIT MODE</div>
-                <v-btn-toggle
-                  v-model="splitMode"
-                  mandatory
-                  density="compact"
-                  color="purple"
-                  class="w-100"
-                >
-                  <v-btn value="ai" size="small" class="flex-grow-1">
-                    <v-icon left size="small">mdi-robot</v-icon>
-                    <span class="text-caption">AI</span>
-                  </v-btn>
-                  <v-btn value="manual" size="small" class="flex-grow-1">
-                    <v-icon left size="small">mdi-cursor-text</v-icon>
-                    <span class="text-caption">Manual</span>
-                  </v-btn>
-                  <v-btn value="none" size="small" class="flex-grow-1">
-                    <v-icon left size="small">mdi-file-document</v-icon>
-                    <span class="text-caption">Full</span>
-                  </v-btn>
-                </v-btn-toggle>
+              <!-- Attribution size -->
+              <div class="fsq-slider-row">
+                <span class="fsq-slider-label">Attrib size</span>
+                <v-slider v-model="attributionSizePx" :min="32" :max="240" :step="2" density="compact" hide-details thumb-label class="fsq-slider" :disabled="!includeAttribution" />
+                <v-text-field v-model.number="attributionSizePx" type="number" suffix="px" density="compact" variant="outlined" hide-details class="fsq-slider-num" :disabled="!includeAttribution" />
               </div>
+            </v-window-item>
 
-              <!-- Manual Split Panel (visible when splitMode === 'manual') -->
+            <!-- ---------- LAYOUT TAB ---------- -->
+            <v-window-item value="layout">
+              <!-- Black box height -->
+              <div class="fsq-slider-row">
+                <span class="fsq-slider-label">Box height</span>
+                <v-slider v-model="boxHeight" :min="0" :max="100" :step="1" density="compact" hide-details thumb-label class="fsq-slider" />
+                <v-text-field v-model.number="boxHeight" type="number" suffix="%" density="compact" variant="outlined" hide-details class="fsq-slider-num" />
+              </div>
+              <!-- Box opacity -->
+              <div class="fsq-slider-row">
+                <span class="fsq-slider-label">Opacity</span>
+                <v-slider v-model="boxOpacity" :min="0" :max="100" :step="1" density="compact" hide-details thumb-label class="fsq-slider" />
+                <v-text-field v-model.number="boxOpacity" type="number" suffix="%" density="compact" variant="outlined" hide-details class="fsq-slider-num" />
+              </div>
+              <!-- Line spacing -->
+              <div class="fsq-slider-row">
+                <span class="fsq-slider-label">Line space</span>
+                <v-slider v-model="lineSpacing" :min="1" :max="100" :step="1" density="compact" hide-details thumb-label class="fsq-slider" />
+                <v-text-field v-model.number="lineSpacing" type="number" suffix="%" density="compact" variant="outlined" hide-details class="fsq-slider-num" />
+              </div>
+            </v-window-item>
+
+            <!-- ---------- OUTPUT TAB ---------- -->
+            <v-window-item value="output">
+              <div class="fsq-field-caption">Split mode</div>
+              <v-btn-toggle v-model="splitMode" mandatory density="compact" color="purple" class="w-100 mb-3">
+                <v-btn value="ai" size="small" class="flex-grow-1"><v-icon left size="small">mdi-robot</v-icon>AI</v-btn>
+                <v-btn value="manual" size="small" class="flex-grow-1"><v-icon left size="small">mdi-cursor-text</v-icon>Manual</v-btn>
+                <v-btn value="none" size="small" class="flex-grow-1"><v-icon left size="small">mdi-file-document</v-icon>Full</v-btn>
+              </v-btn-toggle>
+
+              <!-- Manual Split Panel -->
               <v-expand-transition>
-                <v-card v-if="splitMode === 'manual'" class="manual-split-panel mb-2" variant="outlined">
+                <v-card v-if="splitMode === 'manual'" class="manual-split-panel mb-3" variant="outlined">
                   <v-card-title class="text-caption py-2 bg-purple-lighten-5 d-flex align-center">
                     <v-icon size="small" class="mr-1">mdi-scissors-cutting</v-icon>
                     Manual Split Mode
                   </v-card-title>
-
                   <v-card-text class="pa-2">
-                    <!-- Instructions -->
                     <v-alert type="info" variant="tonal" density="compact" class="mb-2 text-caption">
-                      Click in quote where you want to split, then "Add Split"
+                      Click in the Quote (Content tab) where you want to split, then "Add Split"
                     </v-alert>
-
-                    <!-- Split Controls -->
                     <div class="d-flex gap-1 mb-2">
-                      <v-btn
-                        color="purple"
-                        variant="outlined"
-                        size="x-small"
-                        @click="markManualSplit"
-                        :disabled="!cursorPosition || !quote"
-                      >
-                        <v-icon left size="x-small">mdi-plus</v-icon>
-                        Add Split
+                      <v-btn color="purple" variant="outlined" size="x-small" @click="markManualSplit" :disabled="!cursorPosition || !quote">
+                        <v-icon left size="x-small">mdi-plus</v-icon>Add Split
                       </v-btn>
-
-                      <v-btn
-                        color="grey"
-                        variant="outlined"
-                        size="x-small"
-                        @click="clearManualSplits"
-                        :disabled="manualSplitPoints.length === 0"
-                      >
-                        <v-icon left size="x-small">mdi-delete-sweep</v-icon>
-                        Clear All
+                      <v-btn color="grey" variant="outlined" size="x-small" @click="clearManualSplits" :disabled="manualSplitPoints.length === 0">
+                        <v-icon left size="x-small">mdi-delete-sweep</v-icon>Clear All
                       </v-btn>
-
                       <v-spacer></v-spacer>
-
-                      <v-chip size="x-small" color="purple" variant="outlined">
-                        {{ manualSplitPoints.length }} split(s)
-                      </v-chip>
+                      <v-chip size="x-small" color="purple" variant="outlined">{{ manualSplitPoints.length }} split(s)</v-chip>
                     </div>
-
-                    <!-- Visual Split Preview - Full FSQ Previews -->
                     <div v-if="manualSplitPoints.length > 0" class="manual-split-preview mt-2">
                       <v-divider class="mb-2"></v-divider>
                       <div class="text-caption text-grey mb-2">MANUAL SPLITS PREVIEW ({{ manualSplitSegments.length }} parts)</div>
                       <div class="split-parts-grid">
-                        <div
-                          v-for="(segment, index) in manualSplitSegments"
-                          :key="`manual-split-${index}`"
-                          class="split-part-preview"
-                        >
+                        <div v-for="(segment, index) in manualSplitSegments" :key="`manual-split-${index}`" class="split-part-preview">
                           <div class="part-label">{{ index + 1 }}/{{ manualSplitSegments.length }}</div>
                           <div class="quote-preview-container split-container">
                             <video class="preview-video-background" autoplay loop muted playsinline>
                               <source :src="previewBackgroundVideo" type="video/mp4">
                             </video>
-                            <div class="black-bar-overlay"></div>
+                            <div class="black-bar-overlay" :style="blackBarStyle"></div>
                             <div class="quote-preview" :style="getSplitPreviewStyle">
                               <div class="quote-text" :style="getSplitTextStyle" v-html="formatSplitSegment(segment)"></div>
                               <div v-if="includeAttribution" class="quote-source" :style="getSplitSourceStyle">{{ attributionPrefix }}{{ source || 'Source' }}</div>
@@ -190,192 +249,39 @@
                 </v-card>
               </v-expand-transition>
 
-              <!-- Slug -->
-              <v-text-field
-                ref="slugFieldRef"
-                v-model="slug"
-                label="Slug"
-                placeholder="short-slug"
-                variant="outlined"
-                :rules="slugRules"
-                required
-                density="compact"
-                hide-details="auto"
-                class="mb-2"
-                @input="handleSlugInput"
-                @blur="normalizeSlug"
-              />
+              <div class="fsq-field-caption">Render as</div>
+              <v-btn-toggle v-model="renderMode" mandatory density="compact" color="lime" class="w-100">
+                <v-btn value="png" size="small" class="flex-grow-1"><v-icon size="small" class="mr-1">mdi-file-image</v-icon>PNG</v-btn>
+                <v-btn value="video" size="small" class="flex-grow-1"><v-icon size="small" class="mr-1">mdi-video</v-icon>Video</v-btn>
+              </v-btn-toggle>
+            </v-window-item>
+          </v-window>
 
-              <!-- Attribution Row -->
-              <v-row dense class="mb-2">
-                <v-col cols="8">
-                  <v-combobox
-                    v-model="source"
-                    :items="sourceOptions"
-                    label="Attribution"
-                    placeholder="Source name"
-                    variant="outlined"
-                    density="compact"
-                    :disabled="!includeAttribution"
-                    hide-details
-                    clearable
-                  />
-                </v-col>
-                <v-col cols="4" class="d-flex align-center justify-center">
-                  <v-switch
-                    v-model="includeAttribution"
-                    density="compact"
-                    hide-details
-                    color="success"
-                  >
-                    <template #label>
-                      <span class="text-caption">{{ includeAttribution ? 'On' : 'Off' }}</span>
-                    </template>
-                  </v-switch>
-                </v-col>
-              </v-row>
-
-              <v-divider class="mb-2"></v-divider>
-
-              <!-- Style Settings - Compact Text Fields -->
-              <div class="style-settings">
-                <div class="text-caption text-grey mb-1">STYLE SETTINGS</div>
-                <v-row dense class="mb-1">
-                  <v-col cols="4">
-                    <v-text-field
-                      v-model.number="fontSizePx"
-                      label="Size"
-                      type="number"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                      suffix="px"
-                      :min="40"
-                      :max="200"
-                      :step="4"
-                    />
-                  </v-col>
-                  <v-col cols="8">
-                    <v-select
-                      v-model="fontFamily"
-                      :items="fontOptions"
-                      label="Font"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                    />
-                  </v-col>
-                </v-row>
-                <v-row dense class="mb-2">
-                  <v-col cols="12">
-                    <v-btn-toggle
-                      v-model="quoteStyle"
-                      mandatory
-                      density="compact"
-                      color="primary"
-                      class="w-100"
-                    >
-                      <v-btn value="left" size="small" class="flex-grow-1">
-                        <v-icon size="small">mdi-format-align-left</v-icon>
-                      </v-btn>
-                      <v-btn value="center" size="small" class="flex-grow-1">
-                        <v-icon size="small">mdi-format-align-center</v-icon>
-                      </v-btn>
-                      <v-btn value="right" size="small" class="flex-grow-1">
-                        <v-icon size="small">mdi-format-align-right</v-icon>
-                      </v-btn>
-                    </v-btn-toggle>
-                  </v-col>
-                </v-row>
-              </div>
-
-              <!-- Render Mode -->
-              <div class="render-mode-section">
-                <div class="text-caption text-grey mb-1">OUTPUT</div>
-                <v-btn-toggle
-                  v-model="renderMode"
-                  mandatory
-                  density="compact"
-                  color="lime"
-                  class="w-100 mb-2"
-                >
-                  <v-btn value="png" size="small" class="flex-grow-1">
-                    <v-icon size="small" class="mr-1">mdi-file-image</v-icon>
-                    PNG
-                  </v-btn>
-                  <v-btn value="video" size="small" class="flex-grow-1">
-                    <v-icon size="small" class="mr-1">mdi-video</v-icon>
-                    Video
-                  </v-btn>
-                </v-btn-toggle>
-              </div>
-
-              <!-- Action Buttons -->
-              <div class="action-buttons mt-2">
-                <!-- Manual Split Mode Buttons -->
-                <template v-if="splitMode === 'manual'">
-                  <v-btn
-                    block
-                    color="purple"
-                    @click="insertManualSplit"
-                    :disabled="!formValid || !quote || manualSplitPoints.length === 0"
-                    :loading="loading"
-                    variant="elevated"
-                    size="default"
-                  >
-                    <v-icon size="small" class="mr-1">mdi-scissors-cutting</v-icon>
-                    Insert {{ manualSplitSegments.length }} Split(s)
-                  </v-btn>
-                </template>
-
-                <!-- AI Split Mode Buttons -->
-                <template v-else-if="splitMode === 'ai'">
-                  <v-btn
-                    block
-                    color="warning"
-                    @click="rejectAIRecommendation"
-                    :disabled="!formValid || !quote"
-                    :loading="loading"
-                    variant="elevated"
-                    size="default"
-                  >
-                    <v-icon size="small" class="mr-1">mdi-plus</v-icon>
-                    {{ splitRecommendations && splitRecommendations.length > 1 ? 'Insert Full Quote' : 'Insert Quote' }}
-                  </v-btn>
-                  <v-btn
-                    v-if="splitRecommendations && splitRecommendations.length > 1"
-                    block
-                    color="deep-purple"
-                    @click="acceptAIRecommendation"
-                    :disabled="!formValid"
-                    :loading="loading"
-                    variant="elevated"
-                    size="small"
-                    class="mt-1"
-                  >
-                    <v-icon size="small" class="mr-1">mdi-robot</v-icon>
-                    Insert {{ splitRecommendations.length }} Splits
-                  </v-btn>
-                </template>
-
-                <!-- None Mode (Full Quote) Button -->
-                <template v-else>
-                  <v-btn
-                    block
-                    color="warning"
-                    @click="rejectAIRecommendation"
-                    :disabled="!formValid || !quote"
-                    :loading="loading"
-                    variant="elevated"
-                    size="default"
-                  >
-                    <v-icon size="small" class="mr-1">mdi-plus</v-icon>
-                    Insert Full Quote
-                  </v-btn>
-                </template>
-              </div>
-            </v-col>
-          </v-row>
+          <!-- ===== PRIMARY ACTION (always visible, below tabs) ===== -->
+          <div class="action-buttons mt-4">
+            <template v-if="splitMode === 'manual'">
+              <v-btn block color="purple" @click="insertManualSplit" :disabled="!formValid || !quote || manualSplitPoints.length === 0" :loading="loading" variant="elevated" size="large">
+                <v-icon size="small" class="mr-1">mdi-scissors-cutting</v-icon>
+                {{ editMode ? 'Save' : 'Insert' }} {{ manualSplitSegments.length }} Split(s)
+              </v-btn>
+            </template>
+            <template v-else-if="splitMode === 'ai'">
+              <v-btn block color="primary" @click="rejectAIRecommendation" :disabled="!formValid || !quote" :loading="loading" variant="elevated" size="large">
+                <v-icon size="small" class="mr-1">{{ editMode ? 'mdi-content-save' : 'mdi-plus' }}</v-icon>
+                {{ editMode ? 'Save FSQ' : (splitRecommendations && splitRecommendations.length > 1 ? 'Insert Full Quote' : 'Insert Quote') }}
+              </v-btn>
+              <v-btn v-if="splitRecommendations && splitRecommendations.length > 1" block color="deep-purple" @click="acceptAIRecommendation" :disabled="!formValid" :loading="loading" variant="elevated" size="default" class="mt-2">
+                <v-icon size="small" class="mr-1">mdi-robot</v-icon>
+                Insert {{ splitRecommendations.length }} Splits
+              </v-btn>
+            </template>
+            <template v-else>
+              <v-btn block color="primary" @click="rejectAIRecommendation" :disabled="!formValid || !quote" :loading="loading" variant="elevated" size="large">
+                <v-icon size="small" class="mr-1">{{ editMode ? 'mdi-content-save' : 'mdi-plus' }}</v-icon>
+                {{ editMode ? 'Save FSQ' : 'Insert Full Quote' }}
+              </v-btn>
+            </template>
+          </div>
 
           <!-- SPLIT PREVIEW PANEL (collapsible, shown when AI recommends splits) -->
           <v-expand-transition>
@@ -393,7 +299,7 @@
                     <video class="preview-video-background" autoplay loop muted playsinline>
                       <source :src="previewBackgroundVideo" type="video/mp4">
                     </video>
-                    <div class="black-bar-overlay"></div>
+                    <div class="black-bar-overlay" :style="blackBarStyle"></div>
                     <div class="quote-preview" :style="getSplitPreviewStyle">
                       <div class="quote-text" :style="getSplitTextStyle" v-html="formatSplitSegment(segment)"></div>
                       <div v-if="includeAttribution" class="quote-source" :style="getSplitSourceStyle">{{ attributionPrefix }}{{ source || 'Source' }}</div>
@@ -433,7 +339,7 @@
           <v-icon size="small" start>mdi-eye</v-icon>
           View PNG
         </v-btn>
-        <span class="text-caption text-grey ml-2">Style settings auto-populated from saved defaults</span>
+        <span class="text-caption text-grey ml-2">Live preview updates as you edit · Style &amp; Layout tabs hold all parameters</span>
       </v-card-actions>
     </v-card>
 
@@ -533,19 +439,79 @@
   line-height: 1.4 !important;
 }
 
-/* Style settings section */
-.style-settings {
-  background: rgba(255, 255, 255, 0.03);
-  padding: 8px;
-  border-radius: 4px;
-  margin-bottom: 8px;
+/* Tabbed controls */
+.fsq-tabs {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.fsq-tab-window {
+  min-height: 170px;   /* keep modal height stable across tabs */
+  padding-top: 14px;
+}
+/* Tighten the compact-modal default vertical rhythm so floating-label fields
+   don't crowd the field below them. */
+.compact-fsq-modal :deep(.v-input) {
+  margin-bottom: 0;
 }
 
-/* Render mode section */
-.render-mode-section {
-  background: rgba(255, 255, 255, 0.03);
-  padding: 8px;
-  border-radius: 4px;
+/* Slider + editable-number rows (Style / Layout tabs) */
+.fsq-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.fsq-slider-label {
+  flex: 0 0 72px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.65);
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  line-height: 1.1;
+}
+.fsq-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Compact number box: tight width, right-aligned, small suffix so the
+   value + unit never wrap or collide with the slider's thumb bubble. */
+.fsq-slider-num {
+  flex: 0 0 78px;
+}
+.fsq-slider-num :deep(input) {
+  text-align: right;
+  font-size: 12px;
+  padding-right: 2px;
+}
+.fsq-slider-num :deep(.v-text-field__suffix) {
+  font-size: 11px;
+  opacity: 0.7;
+  padding-left: 2px;
+  min-width: 0;
+}
+.fsq-slider-num :deep(.v-field__input) {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Small caption above a control (Font, Alignment, Split mode, Render as) —
+   replaces floating labels in tight rows so heights line up and nothing
+   overlaps. */
+.fsq-field-caption {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.65);
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+  line-height: 1.1;
+}
+/* Match the alignment toggle's height to the compact select beside it. */
+.fsq-align-toggle.v-btn-toggle {
+  height: 40px;
+}
+.fsq-align-toggle :deep(.v-btn) {
+  height: 40px;
 }
 
 /* Split preview panel */
@@ -564,139 +530,13 @@
 .compact-fsq-modal :deep(.v-field-label),
 .compact-fsq-modal :deep(.v-input__details),
 .compact-fsq-modal :deep(.v-messages) {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
-:deep(.v-field-label--floating) {
-  transform: translateY(-1em) !important;
-}
-
-:deep(.v-text-field .v-field-label--floating) {
-  transform: translateY(-1.7em) !important;
-}
-
-/* Larger Quote Field */
-.large-quote-field :deep(textarea) {
-  font-size: 16px !important;
-  line-height: 1.6 !important;
-  padding: 12px !important;
-}
-
-.large-quote-field :deep(.v-field__input) {
-  min-height: 200px !important;
-}
-
-/* AI Processing Visual Feedback */
-.ai-analyzing {
-  margin-top: 7px !important;
-  margin-bottom: 7px !important;
-}
-
-.ai-analyzing :deep(.v-field) {
-  border: 7px solid #9C27B0 !important;
-  border-radius: 0 !important;
-}
-
-.ai-analyzing :deep(textarea) {
-  max-height: none !important;
-  overflow-y: hidden !important;
-}
-
-.ai-rejected {
-  margin-top: 7px !important;
-  margin-bottom: 7px !important;
-}
-
-.ai-rejected :deep(.v-field) {
-  border: 7px solid #F44336 !important;
-  border-radius: 0 !important;
-}
-
-.ai-rejected :deep(textarea) {
-  max-height: none !important;
-  overflow-y: hidden !important;
-}
-
-.ai-approved {
-  margin-top: 7px !important;
-  margin-bottom: 7px !important;
-}
-
-.ai-approved :deep(.v-field) {
-  border: 7px solid #4CAF50 !important;
-  border-radius: 0 !important;
-}
-
-.ai-approved :deep(textarea) {
-  max-height: none !important;
-  overflow-y: hidden !important;
-}
-
-.ai-auto {
-  margin-top: 7px !important;
-  margin-bottom: 7px !important;
-}
-
-.ai-auto :deep(.v-field) {
-  border: 7px solid #2196F3 !important;
-  border-radius: 0 !important;
-}
-
-.ai-auto :deep(textarea) {
-  max-height: none !important;
-  overflow-y: hidden !important;
-}
-
-/* AI Model Badge */
-.ai-model-badge {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  z-index: 100;
-  pointer-events: none;
-  font-family: 'Courier New', monospace;
-  font-size: 9px;
-  line-height: 1.2;
-  padding: 4px 6px;
-  background: rgba(0, 0, 0, 0.85);
-  color: white;
-  border-radius: 2px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-.ai-model-badge.badge-analyzing {
-  border-left: 3px solid #9C27B0;
-}
-
-.ai-model-badge.badge-rejected {
-  border-left: 3px solid #F44336;
-}
-
-.ai-model-badge.badge-approved {
-  border-left: 3px solid #4CAF50;
-}
-
-.ai-model-badge.badge-auto {
-  border-left: 3px solid #2196F3;
-}
-
-.badge-content {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.badge-service {
-  font-weight: bold;
-  text-transform: uppercase;
-  opacity: 0.8;
-  font-size: 8px;
-}
-
-.badge-model {
-  font-weight: normal;
-  color: #00ff00;
-}
+/* NOTE: the previous translateY(-1em)/(-1.7em) overrides on floating labels
+   were removed — they were hacks for the old two-column layout and pushed
+   labels out of their fields, causing the overlap. Vuetify positions the
+   floating label correctly on its own at density="compact". */
 
 .rotating {
   animation: rotate 2s linear infinite;
@@ -777,117 +617,6 @@
   /* Font size inherited and scaled from parent */
 }
 
-.quote-timestamp {
-  font-size: 0.85rem;
-  color: #b0b0b0;
-  font-family: 'Courier New', monospace;
-}
-
-/* Responsive scaling now handled by percentage-based font sizes that scale with container */
-
-.font-size-slider {
-  margin-top: 8px;
-}
-
-.word-count-display {
-  font-size: 12px;
-  color: #666;
-  text-align: left;
-  margin-top: 4px;
-}
-
-.ai-feedback-message {
-  font-size: 13px;
-  padding: 4px 8px;
-  margin-top: 4px;
-  font-weight: 500;
-}
-
-.ai-message-analyzing {
-  color: #9C27B0;
-}
-
-.ai-message-rejected {
-  color: #D32F2F;
-}
-
-.ai-message-approved {
-  color: #388E3C;
-}
-
-.ai-message-auto {
-  color: #1976D2;
-}
-
-.ai-credit-text {
-  font-size: 9px;
-  color: #999;
-  font-family: 'Courier New', monospace;
-  margin-top: -8px;
-  margin-bottom: 8px;
-  padding-left: 4px;
-  opacity: 0.7;
-}
-
-.split-segment {
-  background: rgba(33, 150, 243, 0.05);
-  padding: 8px 12px;
-  border-radius: 0 !important;
-  border-left: 3px solid #2196F3;
-}
-
-.segment-text {
-  font-style: italic;
-  color: #424242;
-  line-height: 1.5;
-}
-
-.ai-recommendation-panel {
-  border-radius: 0 !important;
-}
-
-.ai-recommendation-panel.ai-panel-analyzing {
-  border: 3px solid #9C27B0;
-}
-
-.ai-recommendation-panel.ai-panel-analyzing .ai-recommendation-header {
-  background: linear-gradient(135deg, rgba(156, 39, 176, 0.1) 0%, rgba(156, 39, 176, 0.05) 100%);
-}
-
-.ai-recommendation-panel.ai-panel-rejected {
-  border: 3px solid #F44336;
-}
-
-.ai-recommendation-panel.ai-panel-rejected .ai-recommendation-header {
-  background: linear-gradient(135deg, rgba(244, 67, 54, 0.1) 0%, rgba(244, 67, 54, 0.05) 100%);
-}
-
-.ai-recommendation-panel.ai-panel-approved {
-  border: 3px solid #4CAF50;
-}
-
-.ai-recommendation-panel.ai-panel-approved .ai-recommendation-header {
-  background: linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(76, 175, 80, 0.05) 100%);
-}
-
-.ai-recommendation-panel.ai-panel-auto {
-  border: 3px solid #2196F3;
-}
-
-.ai-recommendation-panel.ai-panel-auto .ai-recommendation-header {
-  background: linear-gradient(135deg, rgba(33, 150, 243, 0.1) 0%, rgba(33, 150, 243, 0.05) 100%);
-}
-
-.ai-recommendation-header {
-  font-weight: 600;
-  background: linear-gradient(135deg, rgba(255, 193, 7, 0.15) 0%, rgba(255, 193, 7, 0.05) 100%) !important;
-  border-left: 4px solid #FFC107 !important;
-}
-
-.ai-recommendation-content {
-  padding: 12px 0;
-}
-
 .fsq-modal-card :deep(.v-field),
 .fsq-modal-card :deep(.v-text-field),
 .fsq-modal-card :deep(.v-textarea),
@@ -941,7 +670,7 @@ import { useLLM } from '@/composables/useLLM'
 import { useLLMState } from '@/composables/useLLMState'
 import { useAsyncAnalysis } from '@/composables/useAsyncAnalysis'
 import { getColorValue } from '@/utils/themeColorMap'
-import { FSQ_DEFAULTS, FSQ_FONT_MAP, FSQ_PNG_SCALE, fsqPreviewCanvasHeightUnit } from '@/utils/fsqLayout'
+import { FSQ_DEFAULTS, FSQ_FONT_MAP, FSQ_PNG_SCALE, fsqPreviewCanvasHeightUnit, computeLineHeight, computeBlackBarStyle } from '@/utils/fsqLayout'
 import { registerModalEsc } from '@/composables/useModalStack'
 import { useDoubleEnterToSlug } from '@/composables/useDoubleEnterToSlug'
 
@@ -987,6 +716,18 @@ const fontSizePx = computed({
   get: () => Math.round(fontSize.value * FSQ_PNG_SCALE),
   set: (px) => { fontSize.value = Math.max(1, Math.round(px / FSQ_PNG_SCALE)); }
 })
+// Attribution size: legacy 1/4-scale ref + real-px bridge (mirrors the card).
+const attributionSize = ref(FSQ_DEFAULTS.attributionSize)
+const attributionSizePx = computed({
+  get: () => Math.round(attributionSize.value * FSQ_PNG_SCALE),
+  set: (px) => { attributionSize.value = Math.max(1, Math.round(px / FSQ_PNG_SCALE)); }
+})
+// Layout params — same units/ranges the per-cue card sliders use.
+const boxHeight = ref(FSQ_DEFAULTS.boxHeight)       // % of canvas height
+const boxOpacity = ref(FSQ_DEFAULTS.boxOpacity)     // % opacity
+const lineSpacing = ref(FSQ_DEFAULTS.lineSpacing)   // % of font size
+// Which control tab is showing (Content / Style / Layout / Output).
+const activeTab = ref('content')
 const renderMode = ref('png')
 const duration = ref('00:00:05:00')
 // Original AssetID when editing an existing cue. Preserves the on-disk
@@ -1183,21 +924,27 @@ const quoteTextStyle = computed(() => {
   return {
     fontFamily: FSQ_FONT_MAP[fontFamily.value] || FSQ_FONT_MAP['sans-serif'],
     fontSize: fsqPreviewCanvasHeightUnit(fontSize.value),
+    lineHeight: computeLineHeight(lineSpacing.value),
     textAlign: quoteStyle.value || FSQ_DEFAULTS.alignment
   }
 })
 
 const quoteSourceStyle = computed(() => {
-  // FsqModal has no attribution-size control of its own — derive it the
-  // same way the renderer's auto-fallback does (quote × attributionRatio)
-  // so the modal preview matches the PNG that ultimately gets generated.
-  const derivedAttrib = (fontSize.value || FSQ_DEFAULTS.fontSize) * FSQ_DEFAULTS.attributionRatio
+  // Use the explicit attribution size if set; otherwise fall back to the
+  // renderer's auto rule (quote × attributionRatio) so the preview matches
+  // the generated PNG.
+  const effectiveAttrib = attributionSize.value
+    || (fontSize.value || FSQ_DEFAULTS.fontSize) * FSQ_DEFAULTS.attributionRatio
   return {
     fontFamily: FSQ_FONT_MAP[fontFamily.value] || FSQ_FONT_MAP['sans-serif'],
-    fontSize: fsqPreviewCanvasHeightUnit(derivedAttrib),
+    fontSize: fsqPreviewCanvasHeightUnit(effectiveAttrib),
     textAlign: quoteStyle.value || FSQ_DEFAULTS.alignment
   }
 })
+
+// Live black-bar overlay driven by the Layout params (height + opacity), so
+// the preview reflects those sliders just like the rendered PNG will.
+const blackBarStyle = computed(() => computeBlackBarStyle(boxHeight.value, boxOpacity.value))
 
 const formattedQuotePreview = computed(() => {
   let rawText = quote.value || 'Quote text will appear here...'
@@ -1230,46 +977,11 @@ const attributionPrefix = computed(() => {
   return dashMap[attributionDashStyle.value] || '\u2014 '
 })
 
-const getSplitPreviewStyle = computed(() => {
-  return {
-    alignItems: splitQuoteStyle.value === 'center' ? 'center' :
-               splitQuoteStyle.value === 'left' ? 'flex-start' :
-               splitQuoteStyle.value === 'right' ? 'flex-end' : 'center'
-  }
-})
-
-const getSplitTextStyle = computed(() => {
-  const fontMap = {
-    'sans-serif': 'Helvetica, Arial, sans-serif',
-    'serif': 'Georgia, "Times New Roman", serif',
-    'monospace': '"Courier New", Courier, monospace'
-  }
-  return {
-    fontFamily: fontMap[splitFontFamily.value] || fontMap['sans-serif'],
-    fontSize: fsqPreviewCanvasHeightUnit(splitFontSize.value),
-    textAlign: splitQuoteStyle.value === 'center' ? 'center' :
-              splitQuoteStyle.value === 'left' ? 'left' :
-              splitQuoteStyle.value === 'right' ? 'right' : 'center'
-  }
-})
-
-const getSplitSourceStyle = computed(() => {
-  const fontMap = {
-    'sans-serif': 'Helvetica, Arial, sans-serif',
-    'serif': 'Georgia, "Times New Roman", serif',
-    'monospace': '"Courier New", Courier, monospace'
-  }
-  // Derive attribution from quote × attributionRatio so split previews match
-  // the renderer's auto-attribution behavior.
-  const derivedAttrib = (splitFontSize.value || FSQ_DEFAULTS.fontSize) * FSQ_DEFAULTS.attributionRatio
-  return {
-    fontFamily: fontMap[splitFontFamily.value] || fontMap['sans-serif'],
-    fontSize: fsqPreviewCanvasHeightUnit(derivedAttrib),
-    textAlign: splitQuoteStyle.value === 'center' ? 'center' :
-              splitQuoteStyle.value === 'left' ? 'left' :
-              splitQuoteStyle.value === 'right' ? 'right' : 'center'
-  }
-})
+// Split previews mirror the live style controls so each split part looks
+// exactly like the main preview (same font, size, alignment, spacing).
+const getSplitPreviewStyle = computed(() => previewStyle.value)
+const getSplitTextStyle = computed(() => quoteTextStyle.value)
+const getSplitSourceStyle = computed(() => quoteSourceStyle.value)
 
 const getManualSplitPreviewStyle = computed(() => { // eslint-disable-line no-unused-vars
   return {
@@ -1468,7 +1180,14 @@ function loadInitialData() {
   }
   if (data.fontFamily) fontFamily.value = data.fontFamily
   if (data.fontSize) fontSize.value = parseInt(data.fontSize) || FSQ_DEFAULTS.fontSize
+  if (data.attributionSize) attributionSize.value = parseInt(data.attributionSize) || FSQ_DEFAULTS.attributionSize
+  if (data.boxHeight !== undefined && data.boxHeight !== '') boxHeight.value = parseInt(data.boxHeight)
+  if (data.boxOpacity !== undefined && data.boxOpacity !== '') boxOpacity.value = parseInt(data.boxOpacity)
+  if (data.lineSpacing !== undefined && data.lineSpacing !== '') lineSpacing.value = parseInt(data.lineSpacing)
+  if (data.renderMode) renderMode.value = data.renderMode
   if (data.duration) duration.value = data.duration
+  // Edit mode shows the full quote as-is \u2014 don't let AI re-split on open.
+  splitMode.value = 'none'
 
   console.log('\u2705 Loaded FSQ data for editing:', { quote: quote.value, source: source.value, slug: slug.value, style: quoteStyle.value })
 }
@@ -2080,6 +1799,10 @@ async function submit() {
         style: quoteStyle.value,  // backward compat for existing cue parsing
         fontFamily: fontFamily.value,
         fontSize: fontSize.value,
+        attributionSize: attributionSize.value,
+        boxHeight: boxHeight.value,
+        boxOpacity: boxOpacity.value,
+        lineSpacing: lineSpacing.value,
         renderMode: renderMode.value,
         duration: calculatedDuration,
         wordCount: wordCount,
@@ -2183,6 +1906,11 @@ function reset() {
   quoteStyle.value = FSQ_DEFAULTS.alignment
   fontFamily.value = FSQ_DEFAULTS.fontFamily
   fontSize.value = FSQ_DEFAULTS.fontSize
+  attributionSize.value = FSQ_DEFAULTS.attributionSize
+  boxHeight.value = FSQ_DEFAULTS.boxHeight
+  boxOpacity.value = FSQ_DEFAULTS.boxOpacity
+  lineSpacing.value = FSQ_DEFAULTS.lineSpacing
+  activeTab.value = 'content'
   duration.value = '00:00:05:00'
   error.value = ''
   loading.value = false
@@ -2410,23 +2138,13 @@ function applyManualSplit() { // eslint-disable-line no-unused-vars
 }
 
 async function insertManualSplit() {
-  console.log('\u2705 Inserting manual split with manual split preview controls')
-  const originalQuoteStyle = quoteStyle.value
-  const originalFontFamily = fontFamily.value
-  const originalFontSize = fontSize.value
-
-  quoteStyle.value = manualSplitQuoteStyle.value
-  fontFamily.value = manualSplitFontFamily.value
-  fontSize.value = manualSplitFontSize.value
-
+  console.log('\u2705 Inserting manual split using the live style controls')
+  // Use the style the user actually set (Style/Layout tabs) \u2014 no override.
   const tempSplitRecs = splitRecommendations.value
   splitRecommendations.value = manualSplitSegments.value
 
   await acceptAIRecommendation()
 
-  quoteStyle.value = originalQuoteStyle
-  fontFamily.value = originalFontFamily
-  fontSize.value = originalFontSize
   splitRecommendations.value = tempSplitRecs
 }
 
@@ -2485,33 +2203,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* Dual Preview Mode Layout */
-.dual-preview-mode {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  margin-bottom: 24px;
-}
-
-/* LLM Recommended Split Section - Purple Dotted Border */
-.split-preview-section {
-  border: 4px dotted #9C27B0;
-  border-radius: 8px;
-  padding: 16px;
-  background: rgba(156, 39, 176, 0.03);
-}
-
-.split-preview-section .section-title {
-  font-size: 14px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  color: #9C27B0;
-}
-
 /* Multi-part previews - stacked vertically */
 .split-parts-grid {
   display: flex;
@@ -2592,145 +2283,6 @@ onBeforeUnmount(() => {
   text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
 }
 
-/* Original Quote Section - Black Dotted Border */
-.original-preview-section {
-  border: 4px dotted #333;
-  border-radius: 8px;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.original-preview-section .section-title {
-  font-size: 14px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  color: #333;
-}
-
-/* 16:9 aspect ratio for original preview too */
-.original-preview-section .quote-preview-container {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  background: #000;
-}
-
-.original-preview-section .preview-video-background {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.original-preview-section .black-bar-overlay {
-  position: absolute;
-  top: 10%;
-  left: 0;
-  width: 100%;
-  height: 80%;
-  background: rgba(0, 0, 0, 0.75);
-  z-index: 2;
-  pointer-events: none;
-}
-
-.original-preview-section .quote-preview {
-  position: absolute;
-  top: 10%;
-  left: 0;
-  width: 100%;
-  height: 80%;
-  color: white;
-  padding: 10% 10% 20% 10%;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  z-index: 3;
-  box-sizing: border-box;
-}
-
-.original-preview-section .quote-text {
-  max-width: 100%;
-  word-wrap: break-word;
-  color: white;
-  text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-}
-
-.original-preview-section .quote-source {
-  margin-top: 20px;
-  color: rgba(255,255,255,0.9);
-  text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
-}
-
-/* Manual Split Section - Blue Dotted Border */
-.manual-split-section {
-  border: 4px dotted #2196F3;
-  border-radius: 8px;
-  padding: 16px;
-  background: rgba(33, 150, 243, 0.03);
-}
-
-.manual-split-section .section-title {
-  font-size: 14px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  color: #2196F3;
-}
-
-.manual-split-quote-display {
-  background: white;
-  border: 1px solid #E0E0E0;
-  padding: 12px;
-  border-radius: 4px;
-  font-family: 'Georgia', serif;
-  font-size: 16px;
-  line-height: 1.6;
-  cursor: text;
-  min-height: 100px;
-  user-select: text;
-}
-
-.manual-split-quote-display:hover {
-  background: #F5F5F5;
-  border-color: #2196F3;
-}
-
-.manual-markers-display {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-/* Reject AI button - yellow with green hover */
-.reject-ai-btn:hover {
-  background-color: #4CAF50 !important;
-  color: white !important;
-}
-
-/* Collapsible header */
-.collapsible-header {
-  cursor: pointer;
-  user-select: none;
-  display: flex;
-  align-items: center;
-}
-
-.collapsible-header:hover {
-  background-color: rgba(33, 150, 243, 0.05);
-}
-
-/* No responsive changes needed - already vertical stacking */
-
 /* Manual Split Mode Styling */
 .manual-split-panel {
   background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
@@ -2739,38 +2291,5 @@ onBeforeUnmount(() => {
 .manual-split-panel .v-card-title {
   font-weight: 500;
   font-size: 0.875rem;
-}
-
-.split-segment-preview {
-  background: white;
-  border-left: 3px solid #9C27B0;
-  font-style: italic;
-  color: #424242;
-  line-height: 1.5;
-  padding: 8px 12px;
-  border-radius: 4px;
-  margin-bottom: 8px;
-  transition: all 0.2s ease;
-}
-
-.split-segment-preview:hover {
-  border-left-width: 5px;
-  background: #fafafa;
-  box-shadow: 0 2px 4px rgba(156, 39, 176, 0.1);
-}
-
-.split-mode-selector {
-  margin-top: 12px;
-}
-
-.split-mode-selector .v-btn-toggle {
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.split-mode-selector .v-btn {
-  text-transform: none;
-  font-weight: 500;
 }
 </style>

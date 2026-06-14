@@ -41,7 +41,8 @@ celery_app = Celery(
         "services.tools_tasks",  # Production tools (validation, reports)
         "celery_cleanup",  # Orphaned job cleanup tasks
         "services.auto_description_service",  # Background tone + description generation
-        "services.phase2_enrichment_service"  # Async Phase 2 Grok enrichment
+        "services.phase2_enrichment_service",  # Async Phase 2 Grok enrichment
+        "services.script_scrub_service",  # Autoscrub: normalize idle rundown items
     ]
 )
 
@@ -56,6 +57,11 @@ def route_fsq_task(name, args, kwargs, options, task=None, **kw):
     if name == 'services.asset_processing.generate_fsq_png':
         # Route to dedicated FSQ queue - only Kairo worker listens to this
         return {'queue': 'fsq'}
+    # Transcription chain link must run on the dedicated whisper queue, NOT
+    # the default media queue that the `services.ffmpeg_tasks.*` rule would
+    # otherwise assign it. This dynamic route takes precedence.
+    if name == 'services.ffmpeg_tasks.transcribe_sot_audio':
+        return {'queue': 'whisper'}
     return None
 
 
@@ -76,7 +82,11 @@ celery_app.conf.update(
             "services.asset_processing.*": {"queue": "assets"},  # Default for other asset tasks
             "services.ffmpeg_tasks.*": {"queue": "media"},
             "services.auto_description_service.*": {"queue": "llm_content"},
+            "services.slug_gen_service.*": {"queue": "llm_content"},
             "services.phase2_enrichment_service.*": {"queue": "llm_content"},
+            # Autoscrub sweep is lightweight (regex + DB); route to the general
+            # 'assets' queue, which the worker fleet consumes.
+            "services.script_scrub_service.*": {"queue": "assets"},
         }
     ],
 
@@ -106,6 +116,10 @@ celery_app.conf.update(
         'media': {
             'exchange': 'media',
             'routing_key': 'media',
+        },
+        'whisper': {
+            'exchange': 'whisper',
+            'routing_key': 'whisper',
         },
         'fsq': {
             'exchange': 'fsq',
@@ -151,6 +165,19 @@ celery_app.conf.update(
             'task': 'services.auto_description_service.sweep_episodes_for_auto_generation',
             'schedule': 120.0,
         },
+        # Slug auto-generation: fill empty slugs / shorten >=5-word slugs.
+        'slug-sweep-every-90s': {
+            'task': 'services.slug_gen_service.sweep_segments_for_slug_generation',
+            'schedule': 90.0,
+        },
+        # Autoscrub: normalize idle rundown items (>2min since last edit). The
+        # task itself reads autoscrub_enabled from interface settings each run,
+        # so toggling it off in the UI stops the work even though beat fires.
+        # See docs/AUTOSCRUB_SERVER_REFACTOR_PLAN.md.
+        'autoscrub-idle-items-every-60s': {
+            'task': 'services.script_scrub_service.sweep_idle_items_for_scrub',
+            'schedule': 60.0,
+        },
     },
 )
 
@@ -184,3 +211,36 @@ if platform.system() == 'Windows':
     def notify_task_failed(task_id, exception, args, kwargs, traceback, einfo, **kw):
         """Show popup when task fails."""
         _show_popup("Task FAILED", str(exception)[:100], timeout_ms=5000)
+
+
+# ---------------------------------------------------------------------------
+# Fork safety: dispose the SQLAlchemy engine in each forked worker child.
+#
+# database.py creates a module-level `engine` (with a connection pool) at import
+# time — i.e. in the Celery PARENT process. When the prefork pool forks N child
+# workers (this worker runs --concurrency=8), every child inherits a COPY of the
+# parent's open psycopg2 sockets. Two children using the same inherited socket
+# concurrently corrupts libpq's protocol state, surfacing as:
+#     (psycopg2.DatabaseError) error with status PGRES_TUPLES_OK
+#     and no message from the libpq
+#
+# This bit multi-clip SOT jobs specifically: splitting one upload into two clips
+# spawns two child SOTProcessingJob tasks that run on different forked children
+# at the same time and collide on the shared connection.
+#
+# The fix (SQLAlchemy's documented multiprocessing pattern): on each child's
+# process-init, dispose the inherited engine so the child lazily builds its OWN
+# fresh connection pool. Nothing is shared across the fork after this.
+# ---------------------------------------------------------------------------
+from celery.signals import worker_process_init
+
+
+@worker_process_init.connect
+def _dispose_engine_on_fork(**kwargs):
+    """Give every forked worker child its own DB connection pool."""
+    try:
+        from database import engine
+        engine.dispose()
+        print("[celery] worker_process_init: disposed inherited DB engine (fresh pool per child)")
+    except Exception as e:  # never block worker startup on this
+        print(f"[celery] worker_process_init engine.dispose() skipped: {e}")

@@ -259,10 +259,12 @@
                 >
                   <div class="region-header-left">
                     <span class="region-name font-weight-bold">{{ region.name }}</span>
-                    <span class="region-duration-inline">: {{ calculateRegionDuration(region) }}</span>
                   </div>
 
                   <div class="region-header-right">
+                    <!-- Region duration right-aligned to line up with the item
+                         durations (todo #41 cleanup). -->
+                    <span class="region-duration-inline region-duration-right">{{ calculateRegionDuration(region) }}</span>
                     <v-menu>
                       <template v-slot:activator="{ props }">
                         <v-btn
@@ -361,9 +363,12 @@
                           { 'region-item-selected': isItemRegionSelected(item) },
                           { 'generating-item': getItemGlobalIndex(item) === generatingItemIndex },
                           { 'needs-attention-item': itemHasNeedsAttention(item) },
+                          { 'locked-by-other': isLockedByOther(item) },
                           llmState ? llmState.getVisualClass('item', item.id) : ''
                         ]"
-                        :style="Object.assign({},
+                        :style="isLockedByOther(item)
+                          ? { backgroundColor: '#bdbdbd', color: '#616161' }
+                          : Object.assign({},
                           {
                             backgroundColor: (joinSelectMode && joinSelectedIds.has(item.asset_id || item.id))
                               ? 'rgba(103, 58, 183, 0.35)'
@@ -377,6 +382,26 @@
                         @click="handleItemSelect(item, $event)"
                         @dblclick="handleItemDoubleClick(item)"
                       >
+                        <!-- Locked-by-other overlay (todo #41): padlock + the
+                             editor's name badge, grouped at the LEFT. Siblings of
+                             (not inside) .compact-rundown-row so the row's grey
+                             filter never touches them — they stay full colour. -->
+                        <div v-if="isLockedByOther(item)" class="locked-lockgroup">
+                          <div class="locked-padlock-frame" :title="`Locked — being edited by another user`">
+                            <v-icon class="locked-padlock-icon" size="18">mdi-lock</v-icon>
+                          </div>
+                          <v-avatar
+                            v-for="u in presentUsersFor(item)"
+                            :key="u.id"
+                            :color="u.chip_color || 'primary'"
+                            size="28"
+                            class="presence-avatar"
+                            :title="`Locked — ${u.display_name || u.username} is editing this segment`"
+                          >
+                            <v-img v-if="u.profile_picture" :src="u.profile_picture" />
+                            <span v-else class="presence-initials">{{ avatarInitials(u) }}</span>
+                          </v-avatar>
+                        </div>
                         <div class="compact-rundown-row">
                             <!-- Index Number Cell -->
                             <div class="index-number-cell">
@@ -410,20 +435,6 @@
                                 WC: {{ getWordCount(item) }}
                               </div>
                             </div>
-                            <div v-if="presentUsersFor(item).length > 0" class="presence-stack">
-                              <v-avatar
-                                v-for="u in presentUsersFor(item)"
-                                :key="u.id"
-                                :color="u.chip_color || 'primary'"
-                                size="18"
-                                class="presence-avatar"
-                                :title="`${u.display_name || u.username} is here`"
-                              >
-                                <v-img v-if="u.profile_picture" :src="u.profile_picture" />
-                                <span v-else class="presence-initials">{{ avatarInitials(u) }}</span>
-                              </v-avatar>
-                            </div>
-
                             <!-- Duration (Right side) -->
                             <div class="duration-display">
                               {{ formatDurationShort(getEffectiveItemDuration(item)) }}
@@ -456,23 +467,23 @@
                                     Request New AssetID
                                   </v-list-item-title>
                                 </v-list-item>
+                                <!-- Revision history moved here from the under-duration
+                                     display (todo #41 cleanup). -->
+                                <v-list-item @click.stop.prevent="openRollbackModal(item)">
+                                  <v-list-item-title>
+                                    <v-icon size="small" class="mr-2" color="primary">mdi-history</v-icon>
+                                    View Revisions<span v-if="historyStats[item.id]"> ({{ historyStats[item.id].count }})</span>
+                                  </v-list-item-title>
+                                </v-list-item>
                               </v-list>
                             </v-menu>
+                            <!-- Char count shown under the duration on the selected
+                                 item (replaced the old revision info here). -->
                             <span
                               v-if="getItemGlobalIndex(item) === selectedItemIndex"
-                              class="history-link-row"
-                            >
-                              <span v-if="historyStats[item.id]" class="history-stats">
-                                <span>{{ historyStats[item.id].count }} revisions</span>
-                                <span>oldest: {{ historyStats[item.id].oldest }}</span>
-                                <span>largest: {{ historyStats[item.id].largest }}</span>
-                              </span>
-                              <a
-                                href="#"
-                                class="history-link"
-                                @click.stop.prevent="openRollbackModal(item)"
-                              >[view revisions]</a>
-                            </span>
+                              class="selected-char-count"
+                              :title="`${getContentCharCount(item)} content characters`"
+                            >{{ getContentCharCount(item) }} chars</span>
                           </div>
                         </v-card>
                       </div>
@@ -1003,7 +1014,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import { themeColorMap, getColorValue, resolveVuetifyColor, getTextColorForBackground, loadColorsFromDatabase } from '@/utils/themeColorMap'
 import { useRegions } from '@/composables/useRegions'
 import { useUserPrefs } from '@/composables/useUserPrefs'
@@ -1166,25 +1177,71 @@ const showRegions = ref(_userPrefs.get('rundown.showRegions', true))
 // ──────────────────────────────────────────────────────────────────
 const _messagesApi = useMessages()
 
-function _currentMe() {
+
+// ──────────────────────────────────────────────────────────────────
+// Near-instant lock state (todo #41). Source of truth = the server
+// segment_locks table, delivered via the /api/locks/events SSE stream so a
+// lock acquire/release/take-over shows up on every other user's rundown in
+// <1s with NO polling. Seeded once from /api/locks/active on mount.
+//   lockedByOther: Map<rundown_item_asset_id, { holder_user_id, holder_username }>
+//   (only holds locks owned by OTHER users; my own lock is excluded.)
+// ──────────────────────────────────────────────────────────────────
+const lockedByOther = ref(new Map())
+let _lockPollTimer = null
+const LOCK_POLL_MS = 4000  // poll /active every 4s (cheap query; no streaming)
+
+async function _refreshActiveLocks() {
   try {
-    const me = JSON.parse(localStorage.getItem('user-data') || '{}')
-    return { id: me?.id ?? null, username: me?.username ?? null }
-  } catch { return { id: null, username: null } }
+    const token = localStorage.getItem('auth-token')
+    const res = await fetch('/api/locks/active', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    const m = new Map()
+    for (const l of (data?.locks || [])) {
+      if (!l.held_by_me && l.rundown_item_asset_id) {
+        m.set(String(l.rundown_item_asset_id),
+          { holder_user_id: l.holder_user_id, holder_username: l.holder_username })
+      }
+    }
+    lockedByOther.value = m  // new ref so Vue reacts
+  } catch (e) {
+    console.warn('[locks] /active poll failed:', e)
+  }
 }
 
+onMounted(() => {
+  _refreshActiveLocks()
+  _lockPollTimer = setInterval(() => {
+    if (!document.hidden) _refreshActiveLocks()
+  }, LOCK_POLL_MS)
+})
+onUnmounted(() => {
+  if (_lockPollTimer) { clearInterval(_lockPollTimer); _lockPollTimer = null }
+})
+
+// Users present on this item, for the avatar. Prefer the authoritative lock
+// holder (from SSE); fall back to presence so the avatar still resolves a name.
 function presentUsersFor(item) {
   if (!item) return []
-  const itemId = item.asset_id || item.id
+  const itemId = String(item.asset_id || item.id || '')
   if (!itemId) return []
-  const { id: myId, username: myUsername } = _currentMe()
-  return (_messagesApi.users.value || []).filter(u =>
-    (myId == null || String(u.id) !== String(myId))
-    && (myUsername == null || u.username !== myUsername)
-    && u.online
-    && u.current_location?.segment_id != null
-    && String(u.current_location.segment_id) === String(itemId)
-  )
+  const lock = lockedByOther.value.get(itemId)
+  if (lock) {
+    // Try to enrich with the full user row (for colour/avatar); else synthesize.
+    const u = (_messagesApi.users.value || []).find(x => String(x.id) === String(lock.holder_user_id))
+    return [u || { id: lock.holder_user_id, username: lock.holder_username, display_name: lock.holder_username }]
+  }
+  return []
+}
+
+// True when another user holds the lock on this item (server truth via SSE).
+// Drives the greyed-out row + red padlock + enlarged avatar.
+function isLockedByOther(item) {
+  if (!item) return false
+  const itemId = String(item.asset_id || item.id || '')
+  return itemId !== '' && lockedByOther.value.has(itemId)
 }
 
 function avatarInitials(u) {
@@ -1538,7 +1595,12 @@ function itemHasNeedsAttention(item) {
   const hasParagraphFlag = scriptContent.includes('data-needs-attention="true"')
   // Check for cue flags (NeedsAttention: true or NeedsAttention:true)
   const hasCueFlag = /NeedsAttention:\s*true/i.test(scriptContent)
-  const result = hasParagraphFlag || hasCueFlag
+  // An UNRESOLVED revision proposal also qualifies the item as needs-attention
+  // (mirrors the editor rule). Unresolved revisions persist in the script as
+  // <rev user ts>kill|add</rev>; match "<rev " (space) so the legacy <rev-block>
+  // chrome tags don't false-positive.
+  const hasUnresolvedRevision = /<rev\s/i.test(scriptContent)
+  const result = hasParagraphFlag || hasCueFlag || hasUnresolvedRevision
   return result
 }
 
@@ -3291,6 +3353,14 @@ defineExpose({
   margin-left: 4px; /* Small space after the colon */
   opacity: 0.8; /* Slightly transparent for lighter appearance */
 }
+/* When the region duration is right-aligned in the header, nudge it so it lines
+   up with the item durations below (which sit ~50px from the card's right
+   overhang). The header's right padding (1rem) + the ⋮ menu account for the
+   rest; this margin sits the text at the same x as the item durations. */
+.region-duration-inline.region-duration-right {
+  margin-left: 0;
+  margin-right: 18px;
+}
 
 /* Rundown item wrapper with solid region background color - ZERO spacing between items */
 .rundown-item-wrapper {
@@ -3561,25 +3631,90 @@ defineExpose({
 
 /* Presence avatars: small overlapping circles to the right of the slug,
    indicating other users currently editing this segment. */
-.presence-stack {
+/* Presence/lock avatar: overlaid on the right edge of the row, absolutely
+   positioned so the enlarged (28px) avatar does NOT push the slug / char-count
+   / duration cells out of alignment (todo #41). The row is position:relative
+   when locked-by-other; the .rundown-item-card is the positioning context. */
+/* Lock group: the red padlock followed immediately by the editor's name badge,
+   anchored at the LEFT edge of a locked row (todo #41). Card-level overlay so
+   the row's grey filter never desaturates it. */
+.locked-lockgroup {
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
-  margin-left: 6px;
-  flex-shrink: 0;
+  gap: 4px;
+  z-index: 7;
+  pointer-events: none;
 }
-.presence-stack .presence-avatar {
-  margin-left: -6px;
-  border: 1.5px solid #fff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+/* Padlock framed in a bordered circle that matches the name badge. */
+.locked-padlock-frame {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 2px solid #ffd54f;   /* amber lock ring — same as the badge */
+  box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.65), 0 1px 4px rgba(0, 0, 0, 0.4);
 }
-.presence-stack .presence-avatar:first-child {
-  margin-left: 0;
+.locked-padlock-frame .locked-padlock-icon {
+  color: #ff1100 !important;   /* vibrant red */
+}
+.locked-lockgroup .presence-avatar {
+  border: 2px solid #ffd54f;   /* amber lock ring */
+  box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.65), 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 .presence-initials {
-  font-size: 9px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   color: #fff;
   letter-spacing: 0;
+}
+
+/* Locked by another user (todo #41): the whole row goes GRAY so it reads as
+   occupied/read-only at a glance. The solid gray bg/text is forced on the card
+   via inline style (so it beats the per-type colour); this block desaturates
+   any child cells that carry their OWN colour (status bars, type label, chips,
+   icons) so nothing stays coloured. The presence avatar is lifted back out and
+   amber-ringed so "who is editing" stays the one vivid indicator. */
+.rundown-item-card.locked-by-other {
+  background-color: #bdbdbd !important;
+  color: #616161 !important;
+  position: relative;   /* anchor the padlock overlay */
+}
+
+/* Only the ROW CONTENT goes grey. The padlock + presence avatar are siblings
+   of .compact-rundown-row (card-level overlays), so this filter never touches
+   them — they stay full colour. */
+/* IMPORTANT: do NOT put `filter:` on .compact-rundown-row — a filter makes it a
+   containing block, which would re-anchor the absolutely-positioned
+   .duration-display to the (20px-narrower) row instead of the overhanging card
+   and shift it out of place. Instead the solid gray bg/text comes from the
+   inline style + the per-element rules below, and we desaturate only the few
+   child elements that carry their own colour. */
+.rundown-item-card.locked-by-other .compact-rundown-row {
+  /* Make room at the left for the leading padlock + name badge group. Padding
+     does not move the right-anchored duration. */
+  padding-left: 66px;
+}
+.rundown-item-card.locked-by-other .compact-rundown-row .index-number,
+.rundown-item-card.locked-by-other .compact-rundown-row .type-label,
+.rundown-item-card.locked-by-other .compact-rundown-row .slug-text,
+.rundown-item-card.locked-by-other .compact-rundown-row .duration-display,
+.rundown-item-card.locked-by-other .compact-rundown-row .content-char-count {
+  color: #616161 !important;
+}
+/* Desaturate the small coloured accents (status bar, type/library icons, chips)
+   without filtering the row container itself. */
+.rundown-item-card.locked-by-other .compact-rundown-row .status-indicator,
+.rundown-item-card.locked-by-other .compact-rundown-row .library-badge,
+.rundown-item-card.locked-by-other .compact-rundown-row .v-chip,
+.rundown-item-card.locked-by-other .compact-rundown-row .v-icon {
+  filter: grayscale(1) brightness(0.9);
 }
 .slug-text {
   font-weight: normal;
@@ -3799,21 +3934,21 @@ defineExpose({
   margin-right: 5px;
 }
 
-/* Generating item - purple throbbing border */
+/* Generating item (#47) — the WHOLE ROW background slowly throbs purple while
+   the LLM is working, instead of a 7px border (which clipped to only the
+   left/top edges inside the overflow container). Pulses between purple and a
+   deeper purple so it reads clearly as "busy". No border, no box-shadow, so
+   nothing can clip. Slow ~2s loop until the operation completes. */
+/* #47: the rundown row's LLM-busy treatment (throbbing purple background, no
+   border) is owned by the GLOBAL stylesheet assets/styles/llm-visual-feedback.css
+   (.llm-analyzing/.llm-generating.llm-scope-item, applied via getVisualClass).
+   That file's rules are !important and were the real driver — earlier attempts
+   here were overridden by them. The legacy `generating-item` class (driven by
+   generatingItemIndex) just kills the transition so any background change isn't
+   damped; the global animation does the rest. */
+.generating-item.rundown-item-card,
 .generating-item {
-  border: 7px solid #9C27B0 !important; /* Purple border */
-  animation: throb 1.5s ease-in-out infinite !important;
-}
-
-@keyframes throb {
-  0%, 100% {
-    border-color: #9C27B0;
-    box-shadow: 0 0 0 0 rgba(156, 39, 176, 0.7);
-  }
-  50% {
-    border-color: #BA68C8;
-    box-shadow: 0 0 20px 5px rgba(156, 39, 176, 0.4);
-  }
+  transition: none !important;
 }
 
 .editing-item {
@@ -4867,17 +5002,20 @@ defineExpose({
   margin-top: 2px;
 }
 
-.history-link-row {
+/* Char count under the duration on the selected item (replaced the revision
+   info that used to live here). Same anchor spot as the old .history-link-row. */
+.selected-char-count {
   position: absolute;
   bottom: 2px;
   right: 27px;
   z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: inherit;
+  opacity: 0.85;
   text-align: right;
-  padding: 0;
+  white-space: nowrap;
+  pointer-events: none;
 }
 .history-stats {
   color: rgba(0, 0, 0, 0.7);

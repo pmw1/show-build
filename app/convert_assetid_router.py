@@ -445,8 +445,8 @@ class AssetIDConverter:
         i = 0
         while i < len(lines):
             line = lines[i].strip()
-            if '<!-- Begin Cue -->' in line:
-                # Found start of cue block
+            if '<!-- Begin Cue -->' in line or '<!-- Begin Cue collapsed -->' in line:
+                # Found start of cue block (expanded or collapsed)
                 cue_data = {}
                 i += 1
                 

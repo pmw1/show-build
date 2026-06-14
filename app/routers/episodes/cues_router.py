@@ -12,6 +12,11 @@ from sqlalchemy.orm import Session
 import logging
 
 from ._shared import logger
+from services.cue_extractor import (
+    CUE_BLOCK_RE,
+    CUE_BLOCK_RE_MARKER,
+    rebuild_cue,
+)
 
 router = APIRouter()
 
@@ -27,7 +32,9 @@ async def enumerate_cue_blocks(
 
     Process:
     1. Iterate through all rundown items in chronological order
-    2. Find all cue blocks (<!-- Begin Cue --> ... <!-- End Cue -->)
+    2. Find all cue blocks (<!-- Begin Cue --> or <!-- Begin Cue collapsed -->
+       ... <!-- End Cue -->); collapsed cues are handled identically and their
+       collapsed marker is preserved through enumeration.
     3. Skip non-media cue types (RIF, DIR) - only enumerate media cues
     4. Strip any existing enumeration prefix from slugs
     5. Add new enumeration prefix (10, 20, 30, ...)
@@ -105,15 +112,16 @@ async def enumerate_cue_blocks(
             content = item.script_content
             modified = False
 
-            # Find all cue blocks in this item
-            cue_block_pattern = re.compile(
-                r'<!-- Begin Cue -->(.*?)<!-- End Cue -->',
-                re.DOTALL
-            )
+            # Find all cue blocks in this item (both expanded and collapsed).
+            # CUE_BLOCK_RE_MARKER captures the marker suffix in group(1) so a
+            # collapsed cue is rebuilt collapsed (never silently expanded);
+            # the cue body is group(2).
+            cue_block_pattern = CUE_BLOCK_RE_MARKER
 
             def de_enumerate_cue(match):
                 nonlocal de_enumerated, files_de_enumerated, modified
-                cue_body = match.group(1)
+                marker_suffix = match.group(1) or ''
+                cue_body = match.group(2)
                 original_body = cue_body
 
                 # Remove [Enumerator: XX] field
@@ -160,7 +168,7 @@ async def enumerate_cue_blocks(
                     de_enumerated += 1
                     modified = True
 
-                return f'<!-- Begin Cue -->{cue_body}<!-- End Cue -->'
+                return rebuild_cue(marker_suffix, cue_body)
 
             content = cue_block_pattern.sub(de_enumerate_cue, content)
 
@@ -189,12 +197,9 @@ async def enumerate_cue_blocks(
             if not item.script_content:
                 continue
 
-            # Find all cue blocks in this item
-            cue_block_pattern = re.compile(
-                r'<!-- Begin Cue -->(.*?)<!-- End Cue -->',
-                re.DOTALL
-            )
-            matches = list(cue_block_pattern.finditer(item.script_content))
+            # Find all cue blocks in this item (expanded + collapsed). This is a
+            # read-only scan — CUE_BLOCK_RE keeps the cue body in group(1).
+            matches = list(CUE_BLOCK_RE.finditer(item.script_content))
 
             for match in matches:
                 total_cues += 1
@@ -398,13 +403,11 @@ async def enumerate_cue_blocks(
 
                     return updated_body
 
-                # Apply update - process ALL cue blocks (not just count=1)
-                # The update_cue_block function only modifies the matching slug
-                cue_pattern = re.compile(
-                    r'<!-- Begin Cue -->.*?<!-- End Cue -->',
-                    re.DOTALL
-                )
-                content = cue_pattern.sub(update_cue_block, content)
+                # Apply update - process ALL cue blocks (expanded + collapsed).
+                # update_cue_block operates on match.group(0) (the whole block)
+                # and only edits fields + the End marker, so the Begin marker
+                # (collapsed or not) passes through verbatim and is preserved.
+                content = CUE_BLOCK_RE.sub(update_cue_block, content)
                 # Update old_slug for subsequent iterations within same item
                 repl['old_slug'] = repl['new_slug']
 

@@ -12,6 +12,9 @@
           <v-tab value="editor" prepend-icon="mdi-file-document-edit">
             Content Editor
           </v-tab>
+          <v-tab value="typesetting" prepend-icon="mdi-format-font">
+            Typesetting &amp; Characters
+          </v-tab>
           <v-tab value="colors" prepend-icon="mdi-palette">
             Colors & Themes
           </v-tab>
@@ -399,6 +402,11 @@
             </v-btn>
           </v-tabs-window-item>
 
+          <!-- Typesetting & Characters Tab -->
+          <v-tabs-window-item value="typesetting">
+            <TypesettingSettings />
+          </v-tabs-window-item>
+
           <!-- Colors & Themes Tab -->
           <v-tabs-window-item value="colors">
             <h3 class="text-h6 mb-4">
@@ -650,6 +658,7 @@ import axios from 'axios'
 import ColorSelector from '@/components/ColorSelector.vue'
 import OverridableDot from '@/components/OverridableDot.vue'
 import EditorDisplaySettings from '@/components/settings/EditorDisplaySettings.vue'
+import TypesettingSettings from '@/components/settings/TypesettingSettings.vue'
 import { useUserPrefs } from '@/composables/useUserPrefs'
 
 const _userPrefs = useUserPrefs()

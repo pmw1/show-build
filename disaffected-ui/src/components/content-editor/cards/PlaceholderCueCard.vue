@@ -7,16 +7,28 @@
       { 'cue-complete': cueStatus === 'complete' },
       { 'cue-needs-attention': cueStatus === 'needs_attention' },
       { 'cue-urgent-attention': cueStatus === 'urgent_attention' },
-      { 'cue-collapsed': isCollapsed },
+      { 'cue-collapsed': collapsed },
       getAnalysisClass
     ]"
     :style="cardStyleWithStatus"
     variant="elevated"
     @click="$emit('select')"
   >
-    <!-- Card Header -->
-    <v-card-title class="cue-card-header" :style="headerStyleWithStatus" @dblclick.stop="isCollapsed = !isCollapsed">
-      <v-icon size="small" class="drag-handle" style="cursor: grab; margin-right: 8px;">mdi-drag-vertical</v-icon>
+    <!-- Card Header — the entire header is the double-click hotzone for collapse -->
+    <v-card-title class="cue-card-header" :style="headerStyleWithStatus" @dblclick.stop="$emit('toggle-collapsed')">
+      <v-icon size="small" class="drag-handle" :color="headerTextColor" style="cursor: grab; margin-right: 8px;">mdi-drag-vertical</v-icon>
+      <v-btn
+        icon
+        size="x-small"
+        variant="text"
+        class="collapse-toggle"
+        :color="headerTextColor"
+        tabindex="-1"
+        :title="collapsed ? 'Expand cue' : 'Collapse cue'"
+        @click.stop="$emit('toggle-collapsed')"
+      >
+        <v-icon size="small">{{ collapsed ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
+      </v-btn>
       <div class="cue-type-badge" :style="badgeStyle">
         {{ cueTypeBadgeLabel }}
       </div>
@@ -33,11 +45,12 @@
 
       <!-- RIF: Show action buttons and duration in header -->
       <template v-if="cueData.type === 'RIF'">
-        <div class="cue-actions">
+        <div v-if="!readonly" class="cue-actions">
           <v-btn
             icon
             size="small"
             variant="text"
+            :color="headerTextColor"
             @click.stop="$emit('edit')"
             class="action-btn"
             tabindex="-1"
@@ -49,6 +62,7 @@
             icon
             size="small"
             variant="text"
+            :color="headerTextColor"
             @click.stop="$emit('delete')"
             class="action-btn delete-btn"
             tabindex="-1"
@@ -58,17 +72,18 @@
           </v-btn>
         </div>
         <div class="duration-display-header">
-          <v-icon size="small" color="white">mdi-timer-outline</v-icon>
+          <v-icon size="small" :color="headerTextColor">mdi-timer-outline</v-icon>
           <span class="duration-text-header">{{ cueData.duration || '00:00:00:00' }}</span>
         </div>
       </template>
 
       <!-- Non-RIF/GFX: Show action buttons in header (GFX has its own controls) -->
-      <div v-if="cueData.type !== 'RIF' && cueData.type !== 'GFX'" class="cue-actions">
+      <div v-if="!readonly && cueData.type !== 'RIF' && cueData.type !== 'GFX'" class="cue-actions">
         <v-btn
           icon
           size="small"
           variant="text"
+          :color="headerTextColor"
           @click.stop="$emit('edit')"
           class="action-btn"
         >
@@ -79,6 +94,7 @@
           icon
           size="small"
           variant="text"
+          :color="headerTextColor"
           @click.stop="$emit('delete')"
           class="action-btn delete-btn"
         >
@@ -88,13 +104,19 @@
       </div>
     </v-card-title>
 
-    <!-- Card Content (hidden entirely for RIF) -->
-    <v-card-text v-if="cueData.type !== 'RIF' && !isCollapsed" class="cue-card-content">
-      <!-- FSQ-specific Display - Delegated to FsqCueContent -->
+    <!-- Card Content (RIF is header-only by design — it has no body to collapse) -->
+    <v-card-text v-if="cueData.type !== 'RIF' && !collapsed" class="cue-card-content">
+      <!-- FSQ-specific Display - Delegated to FsqCueContent.
+           Render for ANY FSQ cue, even before a quote is entered. The old
+           "&& cueData.quote" guard made a quote-less FSQ fall through to the
+           generic "Display not yet implemented" placeholder, which read as the
+           cue "disappearing" on reload. FsqCueContent handles an empty quote
+           (renders an empty preview box / edit affordance). -->
       <FsqCueContent
-        v-if="cueData.type === 'FSQ' && cueData.quote"
+        v-if="cueData.type === 'FSQ'"
         ref="fsqContentRef"
         :cue-data="cueData"
+        :readonly="readonly"
         :fsq-dirty="fsqDirty"
         :generatingPNG="generatingPNG"
         :fsq-generation-status="fsqGenerationStatus"
@@ -103,6 +125,7 @@
         @delete="$emit('delete')"
         @generate-png="handleGeneratePNG"
         @download-png="downloadFsqPNG"
+        @view-png="openFsqFullResModal"
         @open-fsq-preview="openFsqPreviewModal"
         @update-meta="handleChildUpdateMeta"
         @apply-all-fsq="$emit('apply-all-fsq', $event)"
@@ -155,6 +178,7 @@
         v-else-if="cueData.type === 'GFX'"
         ref="gfxContentRef"
         :cue-data="cueData"
+        :readonly="readonly"
         :has-gfx-asset="hasGfxAsset"
         :generating-gfx="generatingGfx"
         :gfx-generation-status="gfxGenerationStatus"
@@ -186,6 +210,16 @@
         </div>
       </div>
 
+      <!-- IMG Display - Delegated to ImageCueContent (#49: folded in from the
+           former standalone ImageCueCard so every cue renders through this shell). -->
+      <ImageCueContent
+        v-else-if="cueData.type === 'IMG'"
+        :cue-data="cueData"
+        :readonly="readonly"
+        @modify="$emit('modify', $event)"
+        @update-meta="handleChildUpdateMeta"
+      />
+
       <!-- Generic Placeholder Display for other cue types -->
       <div v-else class="placeholder-container">
         <div class="placeholder-icon-section">
@@ -204,8 +238,8 @@
         </div>
       </div>
 
-      <!-- Cue Information (hidden for FSQ) -->
-      <div v-if="cueData.type !== 'FSQ'" class="cue-info">
+      <!-- Cue Information (hidden for FSQ and IMG — those render their own body) -->
+      <div v-if="cueData.type !== 'FSQ' && cueData.type !== 'IMG'" class="cue-info">
         <div v-if="cueData.description" class="cue-description">
           <v-icon size="small" class="info-icon">mdi-text</v-icon>
           <span class="description-text">{{ cueData.description }}</span>
@@ -261,10 +295,10 @@
     </v-card-text>
 
     <!-- Card Footer (hidden for RIF and collapsed) -->
-    <v-card-actions v-if="cueData.type !== 'RIF' && !isCollapsed" class="cue-card-footer" :style="footerStyle">
+    <v-card-actions v-if="cueData.type !== 'RIF' && !collapsed" class="cue-card-footer" :style="footerStyle">
       <!-- Show duration in footer -->
       <div class="duration-display">
-        <v-icon size="small" color="white">mdi-timer-outline</v-icon>
+        <v-icon size="small" :color="footerTextColor">mdi-timer-outline</v-icon>
         <span class="duration-text-footer">{{ cueData.duration || '00:00:00:00' }}</span>
       </div>
 
@@ -427,6 +461,50 @@
       </v-card>
     </v-dialog>
 
+    <!-- FSQ Full-Resolution 1:1 Viewer — the ACTUAL rendered 1920×1080 PNG,
+         shown at native size on a fullscreen black canvas. ESC to exit. -->
+    <v-dialog
+      v-model="showFsqFullResModal"
+      fullscreen
+      :scrim="false"
+      transition="dialog-bottom-transition"
+    >
+      <div class="fsq-fullres-stage" @click.self="closeFsqFullResModal">
+        <v-btn
+          icon
+          size="small"
+          variant="flat"
+          color="grey-darken-3"
+          class="fsq-fullres-close"
+          @click="closeFsqFullResModal"
+        >
+          <v-icon color="white">mdi-close</v-icon>
+          <v-tooltip activator="parent" location="left">Close (ESC)</v-tooltip>
+        </v-btn>
+        <!-- 1:1 canvas: looping background video, with the rendered PNG (which
+             has a transparent window where the video shows through) on top.
+             Both are exactly 1920×1080 so they stay pixel-aligned. -->
+        <div class="fsq-fullres-canvas" @click.self="closeFsqFullResModal">
+          <video
+            class="fsq-fullres-video"
+            autoplay
+            loop
+            muted
+            playsinline
+          >
+            <source :src="fsqBackgroundVideoUrl" type="video/mp4">
+          </video>
+          <img
+            v-if="cueData.mediaUrl"
+            :src="fsqThumbnailUrl"
+            class="fsq-fullres-img"
+            alt="FSQ full resolution"
+          />
+        </div>
+        <div class="fsq-fullres-hint text-caption">{{ cueData.slug || 'FSQ' }} · 1920×1080 · press ESC to exit</div>
+      </div>
+    </v-dialog>
+
     <!-- SOT Preview Modal (960x540 video player) -->
     <v-dialog
       v-model="showSotPreviewModal"
@@ -492,11 +570,13 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
-import { getColorValue, resolveVuetifyColor } from '../../../utils/themeColorMap.js';
+import { getColorValue, resolveVuetifyColor, getReadableTextColor } from '../../../utils/themeColorMap.js';
+import { formatTimecode } from '../../../utils/timecode.js';
 import { useSOTProcessing } from '../../../composables/useSOTProcessing.js';
 import FsqCueContent from './cue-types/FsqCueContent.vue'; // eslint-disable-line no-unused-vars
 import SotCueContent from './cue-types/SotCueContent.vue'; // eslint-disable-line no-unused-vars
 import GfxCueContent from './cue-types/GfxCueContent.vue'; // eslint-disable-line no-unused-vars
+import ImageCueContent from './cue-types/ImageCueContent.vue'; // eslint-disable-line no-unused-vars
 import { FSQ_DEFAULTS, FSQ_PNG_SCALE, FSQ_PNG_ATTRIBUTION_SCALE } from '../../../utils/fsqLayout.js';
 
 const props = defineProps({
@@ -516,10 +596,23 @@ const props = defineProps({
   currentEpisode: {
     type: String,
     default: ''
+  },
+  // Controlled collapsed state — owned by the cue node (via CueNodeView), so it
+  // survives drag-drop and persists into the saved markdown. The card emits
+  // 'toggle-collapsed' and never mutates this directly.
+  collapsed: {
+    type: Boolean,
+    default: false
+  },
+  // Read-only render (version preview): hide edit/delete affordances. The card
+  // still renders fully, it just can't be mutated. (todo #35)
+  readonly: {
+    type: Boolean,
+    default: false
   }
 });
 
-const emit = defineEmits(['select', 'edit', 'delete', 'update-meta', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq', 'apply-all-gfx', 'status-changed']);
+const emit = defineEmits(['select', 'edit', 'delete', 'update-meta', 'modify', 'reupload-sot-cue', 'edit-fsq', 'edit-gfx', 'relocate', 'apply-all-fsq', 'apply-all-gfx', 'status-changed', 'toggle-collapsed']);
 
 const route = useRoute();
 const { getJobByAssetId, retryFailedJob, reprocessJob } = useSOTProcessing();
@@ -533,9 +626,12 @@ const inlineVideoPlayer = ref(null);
 
 // Reactive data (was data())
 const orbitalOpen = ref(false);
-const isCollapsed = ref(false);
 const generatingPNG = ref(false);
-const fsqDirty = ref(true); // Assume dirty until proven generated (no PNG = needs generation)
+// Dirty = the rendered PNG no longer matches the cue. On mount, a cue that
+// already has a rendered PNG (mediaUrl) is considered up-to-date; one without
+// is dirty (needs a first render). Any subsequent edit flips this true via
+// handleChildUpdateMeta; a successful render flips it false.
+const fsqDirty = ref(!props.cueData?.mediaUrl);
 const generatingGfx = ref(false);       // GFX generation in progress
 const gfxImageError = ref(false);       // GFX image failed to load
 const gfxGenerationStatus = ref(null);  // GFX generation status: null, 'queued', 'generating', 'completed', 'failed'
@@ -554,6 +650,8 @@ const gfxGeneratedUrl = ref(null);  // Local override for immediate card refresh
 const showInlinePlayer = ref(false);
 // FSQ preview modal state
 const showFsqPreviewModal = ref(false);
+// Full-resolution 1:1 PNG viewer (the actual rendered 1920×1080 file)
+const showFsqFullResModal = ref(false);
 // SOT preview modal state
 const showSotPreviewModal = ref(false);
 // Preview countdown state
@@ -581,24 +679,27 @@ const cueTypeBadgeLabel = computed(() => {
 const cardStyleWithStatus = computed(() => {
   const baseStyle = getCardStyle.value;
 
+  // Status colors are configurable via Settings → Colors (Global Action Colors).
   switch (cueStatus.value) {
-    case 'complete':
+    case 'complete': {
+      const completeHex = resolveVuetifyColor(getColorValue('complete'));
       return {
         ...baseStyle,
-        backgroundColor: '#C8E6C9',  // Light green background
-        borderColor: '#4CAF50'       // Green border
+        backgroundColor: lightenColor(completeHex, 75),
+        borderColor: completeHex
       };
+    }
     case 'needs_attention':
       return {
         ...baseStyle,
         // Keep body background unchanged, just border
-        borderColor: '#FFC107'       // Yellow/amber border
+        borderColor: resolveVuetifyColor(getColorValue('needs-attention'))
       };
     case 'urgent_attention':
       return {
         ...baseStyle,
         // Keep body background unchanged, just border
-        borderColor: '#D32F2F',      // Red border
+        borderColor: resolveVuetifyColor(getColorValue('urgent-attention')),
         borderWidth: '5px'           // Slightly thicker for urgency
       };
     default:
@@ -610,22 +711,21 @@ const cardStyleWithStatus = computed(() => {
  * Header style based on cue_status
  */
 const headerStyleWithStatus = computed(() => {
+  // Header bg derived from the same configurable status colors; text color is
+  // chosen for contrast automatically.
   switch (cueStatus.value) {
-    case 'complete':
-      return {
-        backgroundColor: '#388E3C',  // Darker green header
-        color: 'white'
-      };
-    case 'needs_attention':
-      return {
-        backgroundColor: '#FFD54F',  // Bright yellow header
-        color: '#1a1a1a'             // Dark text for readability
-      };
-    case 'urgent_attention':
-      return {
-        backgroundColor: '#D32F2F',  // Red header
-        color: 'white'
-      };
+    case 'complete': {
+      const bg = darkenColor(resolveVuetifyColor(getColorValue('complete')), 0.2);
+      return { backgroundColor: bg, color: getReadableTextColor(bg) };
+    }
+    case 'needs_attention': {
+      const bg = resolveVuetifyColor(getColorValue('needs-attention'));
+      return { backgroundColor: bg, color: getReadableTextColor(bg) };
+    }
+    case 'urgent_attention': {
+      const bg = resolveVuetifyColor(getColorValue('urgent-attention'));
+      return { backgroundColor: bg, color: getReadableTextColor(bg) };
+    }
     default:
       return headerStyle.value;
   }
@@ -759,33 +859,33 @@ const isJobCompleted = computed(() => {
 const displayDuration = computed(() => {
   const stalePlaceholders = ['calculating', 'processing', 'queued', 'pending', ''];
 
+  // Resolve the raw duration value (a seconds decimal from analysis, or an
+  // already-formatted timecode string from cueData), then format it ONCE below
+  // so every display point (SOT body row, footer, header) shows hh:mm:ss:ff.
+  let raw = null;
+
   // If job is completed, prefer jobStatus data
   if (isJobCompleted.value) {
-    // Try post_analysis duration first
-    if (jobStatus.value?.post_analysis?.duration) {
-      return jobStatus.value.post_analysis.duration;
-    }
-    // Try video_specs duration
-    if (jobStatus.value?.video_specs?.duration) {
-      return jobStatus.value.video_specs.duration;
-    }
+    raw = jobStatus.value?.post_analysis?.duration ?? jobStatus.value?.video_specs?.duration ?? null;
   }
 
   // Check cueData, but filter out placeholder values
-  const cueDuration = props.cueData?.duration?.toLowerCase?.() || props.cueData?.duration;
-  if (cueDuration && !stalePlaceholders.includes(cueDuration?.toLowerCase?.())) {
-    return props.cueData.duration;
+  if (raw == null) {
+    const cueDuration = props.cueData?.duration?.toLowerCase?.() || props.cueData?.duration;
+    if (cueDuration && !stalePlaceholders.includes(cueDuration?.toLowerCase?.())) {
+      raw = props.cueData.duration;
+    }
   }
 
   // Fallback to jobStatus even if not completed
-  if (jobStatus.value?.post_analysis?.duration) {
-    return jobStatus.value.post_analysis.duration;
-  }
-  if (jobStatus.value?.video_specs?.duration) {
-    return jobStatus.value.video_specs.duration;
+  if (raw == null) {
+    raw = jobStatus.value?.post_analysis?.duration ?? jobStatus.value?.video_specs?.duration ?? null;
   }
 
-  return null;
+  if (raw == null) return null;
+  // formatTimecode passes through existing "00:00:05:00" strings and converts a
+  // raw seconds decimal (e.g. 12.34) to hh:mm:ss:ff; returns null if unusable.
+  return formatTimecode(raw) ?? raw;
 });
 
 /**
@@ -1189,11 +1289,24 @@ const cueTypeColor = computed(() => {
   return resolveVuetifyColor(colorName);
 });
 
+// Single source of truth for the header/footer FOREGROUND color (text + icons +
+// buttons). Mirrors whatever background the header is actually showing — the
+// cue-type color, or the status-border color when one is active — and resolves
+// to black or white for WCAG contrast. Bound to every header child so nothing
+// stays hardcoded white on a light cue color (FSQ lime, NAT, NOTE, ...).
+const headerTextColor = computed(() => headerStyleWithStatus.value.color || '#FFFFFF');
+// Footer foreground mirrors the footer background (the cue-type color).
+const footerTextColor = computed(() => getReadableTextColor(cueTypeColor.value));
+
+// Text/icon color is chosen for CONTRAST against the cue-type background via
+// getReadableTextColor (WCAG 4.5:1; prefers white, flips to black on light cue
+// colors like FSQ lime / NAT light-green / NOTE light-yellow). Previously these
+// hardcoded white, which was unreadable on light backgrounds.
 const cueTypeStyle = computed(() => { // eslint-disable-line no-unused-vars
   const backgroundColor = cueTypeColor.value;
   return {
     backgroundColor: backgroundColor,
-    color: 'white'
+    color: getReadableTextColor(backgroundColor)
   };
 });
 
@@ -1201,7 +1314,7 @@ const headerStyle = computed(() => {
   const backgroundColor = cueTypeColor.value;
   return {
     backgroundColor: backgroundColor,
-    color: 'white'
+    color: getReadableTextColor(backgroundColor)
   };
 });
 
@@ -1211,9 +1324,11 @@ const badgeStyle = computed(() => {
   const lighterColor = (typeof baseColor === 'string' && baseColor.startsWith('#'))
     ? lightenColor(baseColor, 20)
     : baseColor;
+  const bg = lighterColor || '#666';
   return {
-    backgroundColor: lighterColor || '#666',
-    color: 'white'
+    backgroundColor: bg,
+    // contrast against the LIGHTENED badge color, not the base
+    color: getReadableTextColor(bg)
   };
 });
 
@@ -1221,7 +1336,7 @@ const footerStyle = computed(() => {
   const backgroundColor = cueTypeColor.value;
   return {
     backgroundColor: backgroundColor,
-    color: 'white'
+    color: getReadableTextColor(backgroundColor)
   };
 });
 
@@ -1563,6 +1678,27 @@ function closeFsqPreviewModal() {
 }
 
 /**
+ * Open the full-resolution 1:1 PNG viewer (actual rendered 1920×1080 file).
+ */
+function openFsqFullResModal() {
+  if (!props.cueData?.mediaUrl) return;
+  console.log('🔍 Opening FSQ full-resolution 1:1 viewer');
+  showFsqFullResModal.value = true;
+  nextTick(() => {
+    document.addEventListener('keydown', handlePreviewModalEsc);
+  });
+}
+
+/**
+ * Close the full-resolution 1:1 PNG viewer.
+ */
+function closeFsqFullResModal() {
+  console.log('🔍 Closing FSQ full-resolution viewer');
+  showFsqFullResModal.value = false;
+  document.removeEventListener('keydown', handlePreviewModalEsc);
+}
+
+/**
  * Open SOT preview modal with video player
  */
 function openSotPreviewModal() {
@@ -1636,6 +1772,9 @@ function onPreviewVideoReady() {
  */
 function handlePreviewModalEsc(event) {
   if (event.key === 'Escape') {
+    if (showFsqFullResModal.value) {
+      closeFsqFullResModal();
+    }
     if (showFsqPreviewModal.value) {
       closeFsqPreviewModal();
     }
@@ -1969,7 +2108,11 @@ async function handleGeneratePNG() {
       box_opacity: localBoxOpacity,
       line_spacing: localLineSpacing,
       attribution_size: scaledAttributionSize,
-      duration: props.cueData.duration || '00:00:05:00'
+      duration: props.cueData.duration || '00:00:05:00',
+      // Overwrite-in-place: when the cue already has a rendered PNG, hand the
+      // worker its existing path so the regenerate writes to the SAME file
+      // (no slug-renamed orphan). New FSQs send null → worker names it fresh.
+      existing_media_url: props.cueData.mediaUrl || null
     };
 
     console.log('📤 Sending FSQ PNG generation request:', requestData);
@@ -2291,6 +2434,30 @@ function stopPolling() {
 
 // Watchers
 // Watch for assetId changes to start/stop polling dynamically
+// Mark an FSQ dirty whenever its content/style changes (e.g. quote text edited
+// via the FSQ modal, or any style param) so the rendered PNG is treated as
+// stale: the button reverts to "Regenerate" and View/Download PNG hide until a
+// new PNG is generated. We deliberately exclude mediaUrl from the signature —
+// a successful render updates mediaUrl and must NOT re-mark the cue dirty.
+watch(
+  () => {
+    if (props.cueData?.type !== 'FSQ') return null;
+    const d = props.cueData;
+    return [
+      d.quote, d.attribution, d.source, d.alignment, d.style,
+      d.fontFamily, d.fontSize, d.attributionSize,
+      d.boxHeight, d.boxOpacity, d.lineSpacing,
+    ].join('|');
+  },
+  (next, prev) => {
+    // Skip the initial run (prev === undefined) and non-FSQ cues.
+    if (prev === undefined || next === null) return;
+    if (next !== prev) {
+      fsqDirty.value = true;
+    }
+  }
+);
+
 watch(showJobStatus, (newVal, oldVal) => {
   console.log('👁️ showJobStatus changed:', oldVal, '->', newVal);
   if (newVal && !oldVal) {
@@ -2402,8 +2569,11 @@ defineExpose({
 }
 
 .placeholder-cue-card {
-  max-width: 75%;
-  width: 75%;
+  /* Full-width cue: fill the available editor column so the card matches the
+     paragraph width. The old 75% cap was a legacy (contenteditable-era) value
+     that left the card at ~60-70% of the script area. */
+  max-width: 100%;
+  width: 100%;
   /* Margins removed - alignment now controlled by parent .cue-segment flex container */
   transition: all 0.2s ease;
 }
@@ -2462,8 +2632,10 @@ defineExpose({
   border-radius: 4px;
   font-weight: bold;
   font-size: 0.9rem;
-  background-color: rgba(255, 255, 255, 0.2);
-  color: white;
+  /* tint from currentColor so the badge chip + its text both follow the header's
+     contrast-aware color (readable on light cue colors, not hardcoded white) */
+  background-color: color-mix(in srgb, currentColor 18%, transparent);
+  color: currentColor;
   display: flex;
   align-items: center;
   margin-left: -8px;
@@ -2500,7 +2672,9 @@ defineExpose({
 
 .action-btn {
   opacity: 0.7;
-  color: white;
+  /* inherit the header's contrast-aware color (headerTextColor) instead of
+     forcing white — so Edit/Delete icons stay readable on light cue colors */
+  color: currentColor;
 }
 
 .action-btn:hover {
@@ -2508,7 +2682,8 @@ defineExpose({
 }
 
 .delete-btn:hover {
-  color: white;
+  /* keep contrast on hover too (was hardcoded white) */
+  color: currentColor;
 }
 
 /* Duration Display in Header (RIF only) */
@@ -2517,7 +2692,8 @@ defineExpose({
   align-items: center;
   gap: 8px;
   font-size: 0.9rem;
-  color: white;
+  /* inherit the header's contrast-aware color (was hardcoded white) */
+  color: currentColor;
   font-weight: 500;
   margin-right: 8px;
 }
@@ -3614,6 +3790,69 @@ defineExpose({
 }
 
 /* FSQ Preview Modal Styles */
+/* Full-resolution 1:1 FSQ viewer — black fullscreen canvas; the PNG is shown
+   at its native 1920×1080 (no scaling). If the viewport is smaller, the stage
+   scrolls so the image stays true 1:1. */
+.fsq-fullres-stage {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+/* The true-1:1 canvas: fixed 1920×1080 box holding the video + PNG layers. */
+.fsq-fullres-canvas {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  flex: 0 0 auto;       /* never let flexbox shrink it below native size */
+  background: #000;
+}
+
+.fsq-fullres-video {
+  position: absolute;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  object-fit: cover;
+  z-index: 1;
+}
+
+.fsq-fullres-img {
+  position: absolute;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  object-fit: none;     /* render the PNG 1:1, no resampling */
+  z-index: 2;           /* PNG sits over the video; its transparent window shows it through */
+  display: block;
+}
+
+.fsq-fullres-close {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+}
+
+.fsq-fullres-hint {
+  position: fixed;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
 .fsq-preview-modal-card {
   border-radius: 0 !important;
   overflow: hidden;
@@ -3863,7 +4102,8 @@ defineExpose({
   align-items: center;
   gap: 8px;
   font-size: 0.9rem;
-  color: white;
+  /* inherit the footer's contrast-aware color (was hardcoded white) */
+  color: currentColor;
   font-weight: 500;
 }
 

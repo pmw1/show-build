@@ -32,18 +32,23 @@ class ShowBuildPaths:
                 self.shared_media = Path('/shared_media')
                 self.repo_root = Path('/home/repo')
                 self.media_assets_root = Path('/home/media_assets')
+                # Unbound media pool — mounted at /home/pool (host:
+                # media_assets/pool). Holds episodes/, ads/, repo/, whiteboard/.
+                self.pool_root = Path('/home/pool')
             elif Path('/mnt/sync/disaffected/episodes').exists():
                 # Kairo worker with /mnt/sync mount
                 self.episodes_root = Path('/mnt/sync/disaffected/episodes')
                 self.shared_media = Path('/mnt/sync/shared_media')
                 self.repo_root = Path('/mnt/sync/disaffected/repo')
                 self.media_assets_root = Path('/mnt/sync/media_assets')
+                self.pool_root = Path('/mnt/sync/media_assets/pool')
             else:
                 # Fallback to standard paths (will warn if not found)
                 self.episodes_root = Path('/home/episodes')
                 self.shared_media = Path('/shared_media')
                 self.repo_root = Path('/home/repo')
                 self.media_assets_root = Path('/home/media_assets')
+                self.pool_root = Path('/home/pool')
         else:
             # Development paths
             self.app_root = Path(__file__).parent.parent
@@ -53,6 +58,7 @@ class ShowBuildPaths:
             self.shared_media = Path('/mnt/sync/shared_media')
             self.repo_root = Path('/data/sync/disaffected/repo')
             self.media_assets_root = Path('/data/sync/media_assets')
+            self.pool_root = Path('/data/sync/media_assets/pool')
 
         # Verify critical paths
         self._verify_paths()
@@ -113,11 +119,40 @@ class ShowBuildPaths:
     def get_whiteboard_media_dir(self, episode_id: str) -> Path:
         """Get the whiteboard media directory for an episode.
 
-        Path: /home/repo/whiteboard/{episode}/ (container)
-        Host: /data/sync/disaffected/repo/whiteboard/{episode}/
+        RELOCATED into the unbound media pool:
+          /home/pool/whiteboard/{episode}/ (container)
+          /data/sync/media_assets/pool/whiteboard/{episode}/ (host)
+        Served via the /pool static mount (was /repo/whiteboard).
         """
+        return self.get_pool_whiteboard_dir(episode_id)
+
+    # ---- Unbound media pool (media_assets/pool) ----------------------------
+    # Single bag of reusable / released media, mounted at /home/pool. Layout:
+    #   episodes/{ep}/{file}          cue-released media + loose per-episode uploads (FLAT)
+    #   ads/{advertiserID}/{file}     reusable ad media (scaffold)
+    #   repo/{file}                   other reusables: promos, CTAs, etc. (scaffold)
+    #   whiteboard/{ep}/{file}        whiteboard media
+    def get_pool_root(self) -> Path:
+        """Root of the unbound media pool."""
+        return self.pool_root
+
+    def get_pool_episodes_dir(self, episode_id: str) -> Path:
+        """Per-episode pool dir for cue-released / loose media (FLAT, no subdirs)."""
         episode_num = self._normalize_episode_id(episode_id)
-        return self.repo_root / 'whiteboard' / episode_num
+        return self.pool_root / 'episodes' / episode_num
+
+    def get_pool_whiteboard_dir(self, episode_id: str) -> Path:
+        """Per-episode whiteboard media dir within the pool."""
+        episode_num = self._normalize_episode_id(episode_id)
+        return self.pool_root / 'whiteboard' / episode_num
+
+    def get_pool_ads_dir(self, advertiser_id: str) -> Path:
+        """Per-advertiser reusable ad-media dir (SCAFFOLD: not yet wired to uploads)."""
+        return self.pool_root / 'ads' / str(advertiser_id)
+
+    def get_pool_repo_dir(self) -> Path:
+        """Flat repo of other reusables — promos, CTAs, etc. (SCAFFOLD; layout TBD)."""
+        return self.pool_root / 'repo'
     
     # CLI Tool Integration Paths
     def get_compiled_script_path(self, episode_id: str) -> Path:

@@ -49,10 +49,84 @@ See docs/SHOWTIME_INTEGRATION_ANALYSIS.md Gap A.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Iterator, NamedTuple
 
-_BEGIN = "<!-- Begin Cue -->"
-_END = "<!-- End Cue -->"
+# ---------------------------------------------------------------------------
+# Canonical cue-block markers + scanners (shared across the whole backend).
+#
+# The ProseMirror Script editor serializes a COLLAPSED cue with a different
+# Begin marker — `<!-- Begin Cue collapsed -->` — than an expanded one
+# (`<!-- Begin Cue -->`); see disaffected-ui/src/utils/prosemirror/markdown.js
+# (BEGIN / BEGIN_COLLAPSED / findBegin). The ` collapsed` suffix is the ONLY
+# difference; the End marker and the cue body are identical.
+#
+# CRITICAL: `<!-- Begin Cue collapsed -->` is NOT a prefix-superset of
+# `<!-- Begin Cue -->` (they diverge at "Cue " -> "collapsed" vs "-->"), so a
+# plain `str.find("<!-- Begin Cue -->")` or a regex of the plain marker will
+# NOT match a collapsed cue. Every backend cue scanner must use the helpers
+# below so collapsed cues are seen identically to expanded ones, and every
+# REWRITER must preserve the original marker (use CUE_BLOCK_RE_MARKER +
+# rebuild_cue) so a collapsed cue is never silently expanded.
+# ---------------------------------------------------------------------------
+
+CUE_BEGIN = "<!-- Begin Cue -->"
+CUE_BEGIN_COLLAPSED = "<!-- Begin Cue collapsed -->"
+CUE_END = "<!-- End Cue -->"
+
+# READ/SCAN matcher — group(1) is the cue body, identical for both markers
+# (the " collapsed" suffix is consumed by the non-capturing group).
+CUE_BLOCK_RE = re.compile(
+    r"<!-- Begin Cue(?: collapsed)? -->(.*?)<!-- End Cue -->",
+    re.DOTALL,
+)
+# REWRITE matcher — group(1) is the marker suffix ('' or ' collapsed') to
+# restore on reconstruction; group(2) is the cue body.
+CUE_BLOCK_RE_MARKER = re.compile(
+    r"<!-- Begin Cue( collapsed)? -->(.*?)<!-- End Cue -->",
+    re.DOTALL,
+)
+# Matches just a Begin marker (either variant) — for imperative line scans.
+CUE_BEGIN_RE = re.compile(r"<!-- Begin Cue(?: collapsed)? -->")
+
+
+class CueBlock(NamedTuple):
+    """One cue block located in a script. `marker_suffix` is '' or
+    ' collapsed'; `collapsed` is the bool form; `body` is the text between
+    the Begin and End markers. `start`/`end` are absolute offsets covering
+    the WHOLE block (Begin marker through End marker) for index splicing."""
+    start: int
+    end: int
+    marker_suffix: str
+    collapsed: bool
+    body: str
+
+
+def iter_cue_blocks(content: str | None) -> Iterator[CueBlock]:
+    """Yield every cue block (both expanded and collapsed) in declared
+    order. Use this instead of re-deriving a regex at each call site."""
+    if not content:
+        return
+    for m in CUE_BLOCK_RE_MARKER.finditer(content):
+        suffix = m.group(1) or ""
+        yield CueBlock(
+            start=m.start(),
+            end=m.end(),
+            marker_suffix=suffix,
+            collapsed=bool(suffix),
+            body=m.group(2),
+        )
+
+
+def rebuild_cue(marker_suffix: str, body: str) -> str:
+    """Reassemble a cue block, PRESERVING its marker variant. Pass the
+    `marker_suffix` captured from CUE_BLOCK_RE_MARKER / iter_cue_blocks so a
+    collapsed cue stays collapsed."""
+    return f"<!-- Begin Cue{marker_suffix or ''} -->{body}<!-- End Cue -->"
+
+
+# Legacy module-private aliases kept for the imperative scanner below.
+_BEGIN = CUE_BEGIN
+_END = CUE_END
 
 # Field regex mirrors the JS one in cueParser.js:
 #   /\[([^:\n\[\]]+):\s*([\s\S]*?)\](?=\s*(?:\n\s*\[|\n\s*<!--|$))/g
@@ -112,29 +186,14 @@ def extract_cues(script_content: str | None) -> list[dict[str, Any]]:
         return []
 
     cues: list[dict[str, Any]] = []
-    i = 0
     order = 0
-    content = script_content
 
-    while i < len(content):
-        begin_idx = content.find(_BEGIN, i)
-        if begin_idx == -1:
-            break
-        end_idx = content.find(_END, begin_idx + len(_BEGIN))
-        next_begin_idx = content.find(_BEGIN, begin_idx + len(_BEGIN))
-        malformed = (
-            end_idx == -1
-            or (next_begin_idx != -1 and next_begin_idx < end_idx)
-        )
-        if malformed:
-            # Skip past this Begin marker only; do not consume the
-            # next cue's content. The JS parser logs this as a
-            # malformed cue; we silently skip on the server because
-            # the editor will surface it on the next load.
-            i = begin_idx + len(_BEGIN)
-            continue
-
-        cue_body = content[begin_idx + len(_BEGIN) : end_idx]
+    # Collapsed and expanded cues are scanned identically via iter_cue_blocks
+    # (the non-greedy body capture stops at the first End marker, so a missing
+    # End / interleaved Begin can't swallow the next cue — same safety the old
+    # imperative malformed-skip provided).
+    for block in iter_cue_blocks(script_content):
+        cue_body = block.body
         parsed = _parse_cue_block(cue_body)
         if parsed is not None:
             cue_type = parsed.get("type")
@@ -177,7 +236,5 @@ def extract_cues(script_content: str | None) -> list[dict[str, Any]]:
                 "type": cue_type,
             })
             order += 1
-
-        i = end_idx + len(_END)
 
     return cues

@@ -76,6 +76,7 @@ class FSQAssetAsyncRequest(BaseModel):
     duration: str = "00:00:05:00"
     enumerator: Optional[str] = None  # e.g., "10_05" for rundown position
     priority: str = "normal"  # Queue priority: high, normal, low
+    existing_media_url: Optional[str] = None  # When set, overwrite this exact file (regenerate-in-place)
 
 
 class FSQAssetTaskResponse(BaseModel):
@@ -391,7 +392,8 @@ async def generate_fsq_asset_async(
                 'attribution_size': request.attribution_size,
                 'duration': request.duration,
                 'enumerator': request.enumerator,
-                'priority': priority
+                'priority': priority,
+                'existing_media_url': request.existing_media_url
             },
             queue=queue_name  # Route to FSQ queue (Kairo worker)
         )
@@ -561,7 +563,7 @@ async def regenerate_all_fsq_assets(
         # Parse FSQ cue blocks from script content
         fsq_cues = []
         fsq_pattern = re.compile(
-            r'<!-- Begin Cue -->.*?'
+            r'<!-- Begin Cue(?: collapsed)? -->.*?'
             r'\[Type:\s*FSQ\].*?'
             r'<!-- End Cue -->',
             re.DOTALL | re.IGNORECASE
@@ -683,6 +685,8 @@ async def regenerate_all_fsq_assets(
                     },
                     queue='fsq'
                 )
+
+                register_celery_job(db, task.id, "services.asset_processing.generate_fsq_png", "Regenerate FSQ", "assets", episode_id, "fsq")
 
                 task_ids.append(task.id)
                 generated += 1

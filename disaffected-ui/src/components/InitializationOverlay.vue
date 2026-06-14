@@ -15,9 +15,19 @@ import { ref, onMounted, watch } from 'vue'
 import { useSystemHealth } from '@/composables/useSystemHealth'
 import axios from 'axios'
 
+// Module-level latch (shared across every mount of this component in the page
+// session). Once dismissed, the overlay NEVER shows again — even if the
+// component re-mounts (HMR / route change) or health.status briefly flips back
+// to 'unknown' during a slow poll. This is what stops the recurring
+// "Initializing status check" flashing.
+let dismissedThisSession = false
+const alreadyDismissed = () => dismissedThisSession
+const latchDismiss = () => { dismissedThisSession = true }
+
 const { health } = useSystemHealth()
-const show = ref(true)
+
 const startTime = ref(Date.now())
+const show = ref(!alreadyDismissed())
 
 // Log initialization overlay display
 const logOverlayEvent = async (duration, reason) => {
@@ -45,37 +55,35 @@ const logOverlayEvent = async (duration, reason) => {
   }
 }
 
-// Hide overlay once we have a valid health status (not 'unknown')
+// Hide overlay once we have a valid health status (not 'unknown'), and LATCH it
+// dismissed so it can't reappear later.
 watch(() => health.value.status, (newStatus) => {
   if (newStatus !== 'unknown') {
     const duration = Date.now() - startTime.value
-
-    // Log if health check took longer than 2 seconds
     if (duration > 2000) {
       console.warn(`⚠️ Health check took ${duration}ms - this may indicate a problem`)
       logOverlayEvent(duration, 'health_check_completed')
     }
-
-    // Keep showing for minimum 300ms to avoid flash
     setTimeout(() => {
+      latchDismiss()
       show.value = false
     }, 300)
   }
 }, { immediate: true })
 
-// Failsafe: Hide after 5 seconds even if health check hasn't completed
+// Failsafe: hide after 2 seconds no matter what, and latch it dismissed so it
+// can never trap the user (e.g. behind a slow/failing health check). 2s is
+// plenty for the fast /health/critical to resolve; if it hasn't, we don't block.
 onMounted(() => {
   setTimeout(() => {
     if (show.value) {
       const duration = Date.now() - startTime.value
-      console.error(`❌ Health check took longer than 5s (${duration}ms), hiding initialization overlay anyway`)
-
-      // Log timeout event
+      console.warn(`Health check still pending after ${duration}ms — dismissing overlay anyway`)
       logOverlayEvent(duration, 'health_check_timeout')
-
-      show.value = false
     }
-  }, 5000)
+    latchDismiss()
+    show.value = false
+  }, 2000)
 })
 </script>
 

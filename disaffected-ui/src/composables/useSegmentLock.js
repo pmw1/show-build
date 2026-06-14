@@ -13,10 +13,10 @@ const HEARTBEAT_INTERVAL_MS = 15000
 
 export function useSegmentLock() {
   // ============================================================
-  // SEGMENT LOCKING DISABLED — all calls are no-ops that succeed
-  // Remove this flag (and restore original code below) to re-enable
+  // SEGMENT LOCKING — re-enabled for todo #41 (single-writer + take-over).
+  // Set LOCKING_DISABLED=true to turn it back into no-ops if ever needed.
   // ============================================================
-  const LOCKING_DISABLED = true
+  const LOCKING_DISABLED = false
 
   // Lock state
   const isLocked = ref(false)
@@ -30,6 +30,12 @@ export function useSegmentLock() {
   const currentAssetId = ref(null)
   const isAcquiring = ref(false)
   const error = ref(null)
+
+  // Eviction state (todo #41): set when this session's lock is taken over by
+  // another user. The UI watches this to show "You have been evicted from this
+  // Rundown Item by {username}" and flip the editor to read-only.
+  const evicted = ref(false)
+  const evictedBy = ref('')
 
   // Heartbeat interval reference
   let heartbeatInterval = null
@@ -169,9 +175,14 @@ export function useSegmentLock() {
   }
 
   /**
-   * Release the current lock
+   * Release a lock. Pass an explicit assetId to release THAT segment regardless
+   * of current composable state (todo #41 — prevents stale locks when the
+   * tracked currentAssetId has already moved on). With no arg, releases the
+   * currently-held lock.
    */
-  const releaseLock = async () => {
+  const releaseLock = async (assetId = null) => {
+    const target = assetId || currentAssetId.value
+
     if (LOCKING_DISABLED) {
       currentAssetId.value = null
       return { success: true }
@@ -180,22 +191,24 @@ export function useSegmentLock() {
     // Stop heartbeat first
     stopHeartbeat()
 
-    if (!currentAssetId.value) {
+    if (!target) {
       return { success: true, message: 'No lock to release' }
     }
 
     try {
-      const response = await axios.post(`/api/locks/${currentAssetId.value}/release`)
+      const response = await axios.post(`/api/locks/${target}/release`)
 
-      // Reset state
-      currentAssetId.value = null
-      isLocked.value = false
-      isMyLock.value = false
-      lockInfo.value = {
-        lockedBy: '',
-        lockedById: null,
-        lockedAt: null,
-        expiresAt: null
+      // Only clear reactive state if we released the lock we were tracking.
+      if (target === currentAssetId.value) {
+        currentAssetId.value = null
+        isLocked.value = false
+        isMyLock.value = false
+        lockInfo.value = {
+          lockedBy: '',
+          lockedById: null,
+          lockedAt: null,
+          expiresAt: null
+        }
       }
 
       error.value = null
@@ -204,10 +217,12 @@ export function useSegmentLock() {
       console.error('[SegmentLock] Failed to release lock:', err)
       error.value = err.message
 
-      // Even if release fails, clear local state
-      currentAssetId.value = null
-      isLocked.value = false
-      isMyLock.value = false
+      if (target === currentAssetId.value) {
+        // Even if release fails, clear local state
+        currentAssetId.value = null
+        isLocked.value = false
+        isMyLock.value = false
+      }
 
       return { success: false, error: err.message }
     }
@@ -222,9 +237,29 @@ export function useSegmentLock() {
     try {
       await axios.post(`/api/locks/${assetId}/heartbeat`)
     } catch (err) {
+      // 409 taken_over: another user evicted us via take-over (todo #41).
+      // Surface the eviction so the editor flips to read-only and shows the
+      // canonical "You have been evicted ... by {username}" notice.
+      if (err.response && err.response.status === 409) {
+        const detail = err.response.data?.detail || {}
+        stopHeartbeat()
+        isMyLock.value = false
+        isLocked.value = true
+        evicted.value = true
+        evictedBy.value = detail.taken_over_by || 'another user'
+        lockInfo.value = {
+          lockedBy: detail.taken_over_by || 'another user',
+          lockedById: detail.taken_over_by_id || null,
+          lockedAt: null,
+          expiresAt: null
+        }
+        console.warn('[SegmentLock] Evicted by', evictedBy.value)
+        return
+      }
+
       console.error('[SegmentLock] Heartbeat failed:', err)
 
-      // If heartbeat fails, the lock may have expired
+      // If heartbeat fails with 404, the lock expired / no longer exists.
       if (err.response && err.response.status === 404) {
         stopHeartbeat()
         isMyLock.value = false
@@ -232,6 +267,49 @@ export function useSegmentLock() {
         error.value = 'Lock expired'
       }
     }
+  }
+
+  /**
+   * Take over a lock held by another user, evicting them (todo #41).
+   */
+  const takeOverLock = async (assetId) => {
+    if (LOCKING_DISABLED) {
+      currentAssetId.value = assetId
+      return { success: true }
+    }
+    const target = assetId || currentAssetId.value
+    if (!target) return { success: false, error: 'No asset ID' }
+
+    try {
+      const response = await axios.post(`/api/locks/${target}/take-over`)
+      const data = response.data
+      currentAssetId.value = target
+      isLocked.value = true
+      isMyLock.value = true
+      evicted.value = false
+      evictedBy.value = ''
+      lockInfo.value = {
+        lockedBy: 'You',
+        lockedById: null,
+        lockedAt: new Date().toISOString(),
+        expiresAt: data.expires_at
+      }
+      startHeartbeat(target)
+      error.value = null
+      return { success: true, evictedUsername: data.evicted_username }
+    } catch (err) {
+      console.error('[SegmentLock] Take-over failed:', err)
+      error.value = err.message
+      return { success: false, error: err.message }
+    }
+  }
+
+  /**
+   * Clear the eviction flag (e.g. after the user dismisses the notice).
+   */
+  const clearEviction = () => {
+    evicted.value = false
+    evictedBy.value = ''
   }
 
   /**
@@ -302,10 +380,14 @@ export function useSegmentLock() {
     isAcquiring,
     error,
     currentAssetId,
+    evicted,
+    evictedBy,
 
     // Methods
     checkLockStatus,
     acquireLock,
+    takeOverLock,
+    clearEviction,
     releaseLock,
     releaseAllLocks,
     getMyLocks,

@@ -1,6 +1,6 @@
 <template>
   <!-- Phase 1: Between/Paragraph Selection -->
-  <div v-if="show && phase === 1" class="cue-placement-overlay phase-1">
+  <div v-if="show && phase === 1" class="cue-placement-overlay phase-1" :style="{ '--cue-color': cueColor }">
     <!-- Between-paragraph drop zones (with 20px vertical expansion) -->
     <div
       v-for="(zone, index) in betweenZones"
@@ -42,7 +42,7 @@
   </div>
 
   <!-- Phase 2: Character-Level Cursor -->
-  <div v-else-if="show && phase === 2" class="cue-placement-overlay phase-2">
+  <div v-else-if="show && phase === 2" class="cue-placement-overlay phase-2" :style="{ '--cue-color': cueColor }">
     <!-- Paragraph content overlay with character cursor -->
     <div
       class="paragraph-content-overlay"
@@ -92,6 +92,17 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['place-cue', 'cancel', 'update:show']);
+
+// #39: the insertion overlay's accent must match the cue's OWN registry color
+// (the same getColorValue + resolveVuetifyColor source the toolbar button and the
+// in-script cue card use), not a hardcoded orange. Drives both the character
+// caret (inline) and the drop-zone borders/fill (via the --cue-color CSS var on
+// the overlay root). Falls back to the legacy orange if the type can't resolve.
+const cueColor = computed(() => {
+  const name = props.cueType ? getColorValue(props.cueType.toLowerCase()) : null;
+  const resolved = name ? resolveVuetifyColor(name) : null;
+  return resolved || '#ff6600';
+});
 
 // data
 const phase = ref(1); // 1 = between/paragraph selection, 2 = character-level cursor
@@ -354,7 +365,7 @@ function handleCharacterMouseMove(event) {
       top: `${event.clientY - textareaRect.top + scrollTop}px`,
       width: '3px',
       height: '20px',
-      backgroundColor: '#ff6600',
+      backgroundColor: cueColor.value,
       zIndex: 10002
     }
   };
@@ -688,8 +699,9 @@ function getDroplineBackground() { // eslint-disable-line no-unused-vars
 .paragraph-content-overlay {
   pointer-events: all;
   background-color: rgba(255, 255, 255, 0.95);
-  border: 3px solid #ff6600;
-  box-shadow: 0 0 30px rgba(255, 102, 0, 0.5);
+  /* #39: accent follows the cue's registry color (--cue-color), not a fixed orange */
+  border: 3px solid var(--cue-color, #ff6600);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.35);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -701,7 +713,8 @@ function getDroplineBackground() { // eslint-disable-line no-unused-vars
 }
 
 .pushed-char {
-  background-color: rgba(255, 102, 0, 0.3);
+  /* #39: highlight the pushed character in the cue's own color (semi-opaque) */
+  background-color: color-mix(in srgb, var(--cue-color, #ff6600) 30%, transparent);
   padding: 0 2px;
   margin: 0 2px;
   display: inline-block;

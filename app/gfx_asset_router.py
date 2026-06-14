@@ -309,7 +309,7 @@ async def regenerate_all_gfx_assets(
             )
 
         gfx_pattern = re.compile(
-            r'<!-- Begin Cue -->.*?'
+            r'<!-- Begin Cue(?: collapsed)? -->.*?'
             r'\[Type:\s*GFX\].*?'
             r'<!-- End Cue -->',
             re.DOTALL | re.IGNORECASE

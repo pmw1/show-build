@@ -198,39 +198,11 @@ export function useLLM() {
     const cloudServices = ['openai', 'anthropic', 'gemini', 'grok']
     const isCloudService = cloudServices.includes(serviceName)
 
-    if (isCloudService) {
-      const serviceNames = {
-        'openai': 'OpenAI',
-        'anthropic': 'Anthropic Claude',
-        'gemini': 'Google Gemini',
-        'grok': 'xAI Grok'
-      }
-      const displayName = serviceNames[serviceName] || serviceName
-
-      try {
-        await axios.post('/api/llm/notifications', {
-          notifications: [{
-            id: `llm-usage-${Date.now()}`,
-            title: '💰 Cloud LLM Used',
-            message: `${displayName} is processing your request`,
-            priority: 'medium',
-            type: 'llm-usage',
-            operationId: null,
-            success: true,
-            read: false,
-            dismissed: false,
-            timestamp: Date.now(),
-            metadata: {
-              service: serviceName,
-              model: modelOverride || options.model || 'default',
-              taskType: options.taskType || 'unknown'
-            }
-          }]
-        })
-      } catch (err) {
-        console.warn('Failed to send cloud LLM notification:', err)
-      }
-    }
+    // NOTE: the old POST /api/llm/notifications here was removed (dead endpoint —
+    // llm_state_router retired 2026-06-04). The user-facing "Cloud AI API Call"
+    // notice is already shown per-provider via notifyUserStandard() below, so this
+    // duplicate backend notification served no purpose.
+    void isCloudService
 
     const routing = getRoutingPreferences()
     const serviceConfig = configs?.preproduction?.ai_services?.[serviceName]

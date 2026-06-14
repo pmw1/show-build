@@ -117,7 +117,7 @@
     </v-card>
 
     <!-- Create/Edit Dialog -->
-    <v-dialog v-model="dialog" max-width="1200px" persistent>
+    <v-dialog v-model="dialog" max-width="1200px" persistent class="prompt-edit-dialog">
       <v-card>
         <v-card-title>
           <span class="text-h5">{{ editMode ? 'Edit' : 'Create' }} Prompt Override</span>
@@ -173,6 +173,7 @@
                       hint="Leave empty to use default system prompt"
                       rows="6"
                       auto-grow
+                      variant="outlined"
                     ></v-textarea>
                   </v-col>
                 </v-row>
@@ -185,6 +186,7 @@
                       hint="Use {{variable}} syntax for template variables. See available variables →"
                       rows="8"
                       auto-grow
+                      variant="outlined"
                     ></v-textarea>
                   </v-col>
                 </v-row>
@@ -197,6 +199,7 @@
                       hint="Optional notes about this override"
                       rows="3"
                       auto-grow
+                      variant="outlined"
                     ></v-textarea>
                   </v-col>
                 </v-row>
@@ -491,14 +494,39 @@ const defaultPromptData = ref({
 
 // Variable definitions by operation
 const operationVariables = {
+  // Slug generation
+  'slug-generator': [
+    { name: 'show_name', description: 'Show name', example: 'Disaffected' },
+    { name: 'segment_title', description: 'The segment title', example: 'Charlie Kirk Shooting' },
+    { name: 'segment_content', description: 'The segment script body', example: 'When confronted...' },
+    { name: 'has_long_slug', description: 'True when the current slug is 5+ words (shorten mode)', example: 'true / false' },
+    { name: 'long_slug', description: 'The existing too-long slug (only in shorten mode)', example: 'the-very-long-overly-wordy-slug' }
+  ],
   // Generate operations
+  // NOTE: generate-segment-script / -tease-script / -coldopen-script power the
+  // Ctrl+Alt+Shift+[1-9] in-segment generation (ContentEditor.generateTestSegment
+  // via useLLMPrompts). {paragraphs} is the keypress number.
   'generate-segment-script': [
-    { name: 'title', description: 'Segment title', example: 'The Rise of AI' },
-    { name: 'topic', description: 'Main topic or subject', example: 'Artificial Intelligence' },
-    { name: 'duration', description: 'Target duration', example: '5:00' },
-    { name: 'tone', description: 'Desired tone', example: 'casual, formal, humorous' },
-    { name: 'audience', description: 'Target audience', example: 'developers, general public' },
-    { name: 'context', description: 'Additional background', example: 'Follow-up to episode 243' }
+    { name: 'paragraphs', description: 'How many paragraphs to write (the Ctrl+Alt+Shift+N keypress number)', example: '3' },
+    { name: 'duration', description: 'Target duration (minutes) from the rundown item', example: '5' },
+    { name: 'segmentType', description: 'The rundown item type', example: 'segment' },
+    { name: 'title', description: "This segment's title", example: 'The Manipulation Playbook' },
+    { name: 'slug', description: "This segment's slug", example: 'manipulation-playbook' },
+    { name: 'currentScript', description: "This segment's current script body (so the model continues/expands it)", example: 'When confronted, the narcissist...' },
+    { name: 'otherSegments', description: 'Auto-filled list of the OTHER segments in the episode, each with title + description', example: '\\n\\nOther segments in this episode:\\n- Cold Open: ...' }
+  ],
+  'generate-tease-script': [
+    { name: 'paragraphs', description: 'How many paragraphs to write (the Ctrl+Alt+Shift+N keypress number)', example: '3' },
+    { name: 'duration', description: 'Target duration (minutes)', example: '1' },
+    { name: 'title', description: "This tease's title", example: 'Coming Up' },
+    { name: 'upcomingSegments', description: 'Auto-filled list of the next ~3 segment titles to tease', example: '\\n\\nUpcoming segments to tease:\\n- ...' },
+    { name: 'otherSegments', description: 'Fallback list of OTHER segments (title + description) if no upcoming list', example: '\\n\\nOther segments in this episode:\\n- ...' }
+  ],
+  'generate-coldopen-script': [
+    { name: 'paragraphs', description: 'How many paragraphs to write (the Ctrl+Alt+Shift+N keypress number)', example: '2' },
+    { name: 'duration', description: 'Target duration (minutes)', example: '1' },
+    { name: 'title', description: "This cold open's title", example: 'The Setup' },
+    { name: 'otherSegments', description: 'Auto-filled list of OTHER segments in the episode (title + description)', example: '\\n\\nOther segments in this episode:\\n- ...' }
   ],
   'generate-ad-script': [
     { name: 'product', description: 'Product/service name', example: 'VPN Service' },
@@ -524,6 +552,26 @@ const operationVariables = {
     { name: 'guests', description: 'Guest names', example: 'Dr. Jane Smith' },
     { name: 'duration', description: 'Episode duration', example: '45 minutes' }
   ],
+
+  // Modify operations
+  // modify-blocks powers the multi-select "Modify with AI": the whole script is
+  // sent as line-numbered context, only the selected lines are modified per the
+  // instruction, and the model returns the full reworked script.
+  'modify-blocks': [
+    { name: 'instruction', description: "The user's instruction / chosen quick-action (what to do to the selected lines)", example: 'Fix grammar without changing meaning' },
+    { name: 'selectedText', description: 'The selected lines to modify, each prefixed with its line number', example: '12: When confronted, the narcissist...' },
+    { name: 'selectedLineNumbers', description: 'Compact range of the selected line numbers', example: '12-14, 17' },
+    { name: 'fullSegment', description: 'The ENTIRE script, line-numbered, for context', example: '1: ...\\n2: ...' }
+  ],
+  // Quick-action instruction prompts (Modify-with-AI buttons). Each returns just
+  // an instruction string — no variables — which is fed into modify-blocks as
+  // {instruction}. Override to change what a button tells the LLM.
+  'modify-grammar': [],
+  'modify-spelling': [],
+  'modify-shorten': [],
+  'modify-expand': [],
+  'modify-tone': [],
+  'modify-stub': [],
 
   // Analyze operations
   'analyze-script-tone': [
@@ -746,6 +794,10 @@ const getCategoryColor = (category) => {
 
 // Operation metadata for tooltips
 const operationMetadata = {
+  'slug-generator': {
+    title: 'Segment Slug Generator',
+    description: 'Generates a short broadcast slug (2-4 words, prefer 2-3) for a rundown segment from its title + script body. If the current slug is 5+ words, the prompt includes it and asks for a shorter replacement. Used by the slug Generate button and the background slug sweep.'
+  },
   'inventory-match-file-to-slot': {
     title: 'File to Slot Matcher',
     description: 'Determines if a specific file matches an expected episode file slot (e.g., episode_info, rundown_json). Called when validating individual files against canonical expectations.'
@@ -927,14 +979,18 @@ onMounted(async () => {
   padding: 4px;
 }
 
-/* Fix textarea top line fading/clipping issue */
-.prompt-manager :deep(.v-textarea .v-field__input) {
-  padding-top: 12px !important;
+/* The edit dialog teleports to <body>, OUTSIDE .prompt-manager, so target it by
+   its own class. Vuetify masks the top of the textarea content with a
+   linear-gradient (to hide text scrolling under the label notch) — that mask is
+   what made the first line look faded. Kill it so the text is fully opaque. */
+:deep(.prompt-edit-dialog .v-textarea .v-field__input) {
+  -webkit-mask-image: none !important;
+          mask-image: none !important;
+  padding-top: 14px !important;
   min-height: 60px;
 }
-
-.prompt-manager :deep(.v-textarea textarea) {
-  padding-top: 8px !important;
+:deep(.prompt-edit-dialog .v-textarea textarea) {
+  margin-top: 0 !important;
 }
 
 /* Make disabled category/operation fields more visible */

@@ -12,7 +12,7 @@
       ></v-app-bar-nav-icon>
 
       <v-app-bar-title class="text-primary font-weight-bold app-title-compact" style="margin-right: 0.25em;">
-        Show Builder
+        Show Build
       </v-app-bar-title>
 
       <!-- Status Clock (Today's Date) -->
@@ -223,6 +223,18 @@
         <v-list-item to="/organization" prepend-icon="mdi-domain">
           <v-list-item-title>Organization</v-list-item-title>
         </v-list-item>
+        <!-- Development Section (admin-only) -->
+        <v-list-group v-if="isAdmin" value="development">
+          <template #activator="{ props }">
+            <v-list-item v-bind="props" prepend-icon="mdi-dev-to">
+              <v-list-item-title>Development</v-list-item-title>
+            </v-list-item>
+          </template>
+          <v-list-item to="/dev/wireframes" prepend-icon="mdi-vector-rectangle">
+            <v-list-item-title>Wireframes</v-list-item-title>
+          </v-list-item>
+        </v-list-group>
+
         <v-list-item
           to="/settings"
           prepend-icon="mdi-cog"
@@ -308,8 +320,12 @@
     <!-- Screen Flash for modal triggers and aborts -->
     <ScreenFlash />
 
-    <!-- Initialization Overlay - shows while health check loads -->
-    <InitializationOverlay />
+    <!-- Initialization Overlay - shows while the health check loads. Gated on
+         auth: before login there's no token, so the health poll 401s and the
+         overlay would flash; only show once authenticated. (The reload-loop
+         "flashing" we chased turned out to be Cloudflare edge-caching a stale
+         HMR bundle — fixed separately — NOT this overlay.) -->
+    <InitializationOverlay v-if="isAuthenticated" />
 
     <!-- Status Grid - Fixed at top right, each cell clickable with detail dropdown -->
     <div v-if="isAuthenticated" class="status-grid-overlay" @click.stop>
@@ -488,12 +504,14 @@ const { toggleModal: toggleHotkeyModal } = useHotkeys()
 const undoManager = useUndoManager()
 
 // True when the keyboard target is a real text-entry element where the
-// browser's native undo should win (sidebar fields, modal inputs, etc).
-// Script-mode paragraph contenteditables are excluded — they carry the
-// `script-paragraph` class and belong to our undo manager because the
-// reactive `rawMarkdownContent` is the source of truth, not the DOM.
+// browser's native (or editor-owned) undo should win (sidebar fields, modal
+// inputs, etc) — in those cases the global useUndoManager must NOT fire.
+// The ProseMirror script editor (.ProseMirror) is included: it owns Ctrl+Z
+// with its own fine-grained history, so a Ctrl+Z inside it must reach PM and
+// never be intercepted by the global manager (todo #34).
 function isInNativeTextField(target) {
   if (!target || !(target instanceof Element)) return false
+  if (target.closest('.ProseMirror')) return true
   return !!target.closest('input, textarea, [contenteditable="true"]:not(.script-paragraph)')
 }
 

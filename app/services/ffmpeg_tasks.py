@@ -93,22 +93,24 @@ def transcribe_audio_simple(audio_path: str, max_retries: int = 3) -> str:
     import httpx
     import time
 
-    # Whisper servers - try Docker internal first, then LAN fallbacks
-    # Worker on kairo_kairo-network can reach whisper-medium container directly
-    # CRITICAL: whisper-medium internal port is 8000 (mapped to host 8887)
+    # Whisper servers — LAN-IP endpoints only, tried in order.
+    # whisperbox (.210) is PRIMARY: benchmarked ~2.7x faster than kairo on a real
+    # 5-min clip (5.3s vs 14.5s), identical transcript, both running
+    # faster-distil-whisper-large-v3 + int8_float16. whisperbox's RTX 3060 Ti is
+    # DEDICATED to whisper; kairo's RTX 3090 sits ~93% busy / 17GB used from
+    # ollama + fishspeech, so the bigger card actually loses here. kairo is the
+    # fallback (still sub-15s, same quality).
+    # (The old "whisper-medium:8000" docker-name entry was removed 2026-06-04 — it
+    # only resolved on whisper-medium's own docker network, which our workers
+    # aren't on; published host ports work from any worker.)
     whisper_servers = [
-        {
-            "name": "whisper-medium (docker)",
-            "url": "http://whisper-medium:8000/v1/audio/transcriptions",
-            "timeout": 120.0
-        },
         {
             "name": "whisperbox (LAN)",
             "url": "http://192.168.51.210:8885/v1/audio/transcriptions",
             "timeout": 120.0
         },
         {
-            "name": "whisper-medium (host)",
+            "name": "kairo (LAN)",
             "url": "http://192.168.51.197:8887/v1/audio/transcriptions",
             "timeout": 120.0
         }
@@ -1028,9 +1030,12 @@ def _replace_sot_cue_asset_id(episode: str, old_asset_id: str, new_asset_id: str
                 if not item.script_content:
                     continue
 
-                # Look for SOT cue block with matching AssetID (case-insensitive)
+                # Look for SOT cue block with matching AssetID (case-insensitive).
+                # Matches expanded + collapsed cues; the whole block (incl. its
+                # original Begin marker) is captured and field-edited in place,
+                # so the collapsed marker is preserved.
                 cue_pattern = re.compile(
-                    r'(<!-- Begin Cue -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
+                    r'(<!-- Begin Cue(?: collapsed)? -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
                     re.DOTALL | re.IGNORECASE
                 )
                 asset_pattern = re.compile(r'\[Asset[Ii][Dd]:\s*' + re.escape(old_asset_id) + r'\s*\]', re.IGNORECASE)
@@ -1101,7 +1106,7 @@ def _update_sot_cue_block(episode: str, slug: str, asset_id: str, updates: dict)
                 # Look for SOT cue block with matching AssetID (case-insensitive for field names)
                 # The cue block contains [Type: SOT] and [Asset Id: xxx] or [AssetID: xxx] in any order
                 cue_pattern = re.compile(
-                    r'(<!-- Begin Cue -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
+                    r'(<!-- Begin Cue(?: collapsed)? -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*SOT\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
                     re.DOTALL | re.IGNORECASE
                 )
                 # Find cue blocks and check if they contain our asset_id
@@ -1596,7 +1601,7 @@ def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
             # Look for parent SOT cue block - more flexible pattern
             # Try exact match first
             cue_pattern = re.compile(
-                r'(<!-- Begin Cue -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
+                r'(<!-- Begin Cue(?: collapsed)? -->.*?\[Type: SOT\].*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
                 re.DOTALL
             )
 
@@ -1605,7 +1610,7 @@ def _insert_multiple_cue_blocks(episode, clip_results, parent_asset_id):
             # Fallback: try searching just for AssetID in any cue block
             if not match:
                 fallback_pattern = re.compile(
-                    r'(<!-- Begin Cue -->.*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
+                    r'(<!-- Begin Cue(?: collapsed)? -->.*?\[AssetID: ' + re.escape(parent_asset_id) + r'\].*?<!-- End Cue -->)',
                     re.DOTALL
                 )
                 match = fallback_pattern.search(item.script_content)
@@ -1880,22 +1885,25 @@ def _update_cue_block_with_result(episode, asset_id, result):
                 if not item.script_content:
                     continue
 
-                # Look for the SOT cue block with matching AssetID
+                # Look for the SOT cue block with matching AssetID (expanded or
+                # collapsed). Capture the marker suffix so a collapsed cue is
+                # rebuilt collapsed (the new_cue below is built from scratch).
                 cue_pattern = re.compile(
-                    r'(<!-- Begin Cue -->.*?\[AssetID: ' + re.escape(asset_id) + r'\].*?<!-- End Cue -->)',
+                    r'(<!-- Begin Cue( collapsed)? -->.*?\[AssetID: ' + re.escape(asset_id) + r'\].*?<!-- End Cue -->)',
                     re.DOTALL
                 )
 
                 match = cue_pattern.search(item.script_content)
                 if match:
                     old_cue = match.group(1)
+                    marker_suffix = match.group(2) or ''
 
                     # Get transcription and outcue with fallbacks
                     transcription = result.get('transcription', '')
                     outcue = result.get('outcue', '')
 
-                    # Build updated cue block
-                    new_cue = f"""<!-- Begin Cue -->
+                    # Build updated cue block (preserve the original marker)
+                    new_cue = f"""<!-- Begin Cue{marker_suffix} -->
 [Type: SOT]
 [AssetID: {asset_id}]
 [Slug: {result.get('slug', '')}]
@@ -1922,17 +1930,75 @@ def _update_cue_block_with_result(episode, asset_id, result):
         logger.error(f"Failed to update cue block: {e}")
 
 
+def _resolve_shared_media_root() -> Path:
+    """Return the platform-appropriate shared_media root.
+
+    Docker: /shared_media · Linux worker (kairo): /mnt/sync/shared_media ·
+    Windows worker: W:/mnt/sync/shared_media. Centralised so all three chain
+    links compute the same working directory.
+    """
+    if platform.system() == 'Windows':
+        return Path('W:/mnt/sync/shared_media')
+    elif Path('/shared_media').exists():
+        return Path('/shared_media')
+    else:
+        return Path('/mnt/sync/shared_media')
+
+
+def _is_zero_time(time_str) -> bool:
+    """Check if timecode is effectively zero (handles 00:00:00 and 00:00:00:00)."""
+    return time_str in ("00:00:00", "00:00:00:00", "0", "0.0", "", None)
+
+
+def _timecode_to_seconds(time_str) -> float:
+    """Convert HH:MM:SS or HH:MM:SS:FF (30fps assumed) timecode to seconds."""
+    parts = str(time_str).split(':')
+    if len(parts) == 3:
+        h, m, s = map(float, parts)
+        return h * 3600 + m * 60 + s
+    elif len(parts) == 4:
+        h, m, s, f = map(float, parts)
+        return h * 3600 + m * 60 + s + (f / 30.0)
+    return 0.0
+
+
+# ============================================================================
+# SOT single_trim / full_process CELERY CHAIN
+# ----------------------------------------------------------------------------
+# The single_trim / full_process pipeline runs as a 3-link Celery chain so that
+# transcription is a genuine chain LINK on the dedicated whisper queue — no
+# `.get()` inside a task (which Celery forbids):
+#
+#   chain(sot_prepare.s(...), transcribe_sot_audio.s(), sot_finalize.s())
+#
+#   1. sot_prepare      (media)   phases 1-3: validate + raw probe + TRIM +
+#                                 extract audio (from the TRIMMED file)
+#   2. transcribe_sot_audio (whisper) phase 4: receives the ctx dict, transcribes
+#                                 the trimmed wav, returns ctx + transcription/outcue
+#   3. sot_finalize     (media)   phases 5-11: analyze trimmed clip + normalize
+#                                 video + fix audio + loudness + derivatives +
+#                                 move-to-assets + post-analysis verify
+#
+# State flows between links through a single JSON-serialisable `ctx` dict
+# (strings / numbers / lists / dicts only — Path objects are stored as str).
+# Every link keeps calling _update_job_status() and _update_sot_cue_block() so
+# the ShowBuild cue block stays live at each phase. Phases are clean integers
+# 1-11 (the SOTProcessingJob model has current_phase but NO phase_message
+# column, so only the integer phase strings are written).
+# ============================================================================
+
+
 @shared_task(
     bind=True,
     queue='media',
-    name='services.ffmpeg_tasks.process_sot_video_multi_phase',
+    name='services.ffmpeg_tasks.sot_prepare',
     max_retries=3,
-    soft_time_limit=1800,      # Warn at 30 minutes
-    time_limit=2400,           # Hard kill at 40 minutes
-    acks_late=True,            # Don't ack until task completes
-    reject_on_worker_lost=True  # Reject task if worker dies
+    soft_time_limit=1800,
+    time_limit=2400,
+    acks_late=True,
+    reject_on_worker_lost=True
 )
-def process_sot_video_multi_phase(
+def sot_prepare(
     self,
     temp_job_id: str,
     episode: str,
@@ -1940,65 +2006,35 @@ def process_sot_video_multi_phase(
     trim_start: str = "00:00:00",
     trim_end: str = "00:00:00",
     job_type: str = "full_process",
-    clips: list = None,
     asset_id: str = None,
     devel_mode: bool = False
 ):
     """
-    Multi-phase SOT video processing pipeline with intermediate files.
+    Chain link 1/3 — phases 1-3 of the single_trim/full_process SOT pipeline.
 
-    NEW PHASE ORDER (as of 2025-10-22):
-    - Phase 0: Pre-Analysis (analyze RAW uploaded file)
-    - Phase 1: Trimming (remove unwanted content FIRST - skip if no trim needed)
-    - Phase 1.5: Audio Extract + Whisper Transcription
-    - Phase 2: Video Normalization (aspect-aware: 16:9, 9:16, 1:1)
-    - Phase 2.5: Audio Channel Fix (dual-mono, channel mapping)
-    - Phase 3: Audio Normalization (EBU R128 loudness)
-    - Phase 4: Derivatives (10-15 thumbnails + MP3 extract)
-    - Phase 5: Final Move to Assets
-    - Phase 8: Post-Analysis (verify final output)
+    Phase 1: validate upload (size/duration/resolution/framerate/audio).
+    Phase 2: ffprobe the RAW upload (sanity only — detects has_audio, dimensions,
+             codec; does NOT write user-facing duration, phase 5 does that on the
+             trimmed clip).
+    Phase 3: TRIM the upload EARLY (no-op pass-through if no trim requested).
+    Then extract audio (WAV 16kHz mono) from the TRIMMED file for the whisper link.
 
-    Args:
-        temp_job_id: Temporary job ID (e.g., "sot_20251011_143022_abc123")
-        episode: Episode number (e.g., "0245")
-        slug: Item slug for final naming
-        trim_start: Start time for trimming (HH:MM:SS)
-        trim_end: End time for trimming (HH:MM:SS)
-        job_type: Processing workflow (single_trim, individual_clips, montage, full_process)
-        clips: Array of clip objects for individual_clips/montage modes
-        asset_id: AssetID for linking to cue block
-        devel_mode: If True, keep all intermediate files and return paths in payload
-
-    Returns:
-        dict: Final file paths, processing metadata, and failure report
+    Returns a JSON-serialisable `ctx` dict carrying everything the downstream
+    links need (Paths are stored as strings).
     """
-    # Cross-platform working directory
-    # shared_media is a sibling of disaffected, not a child
-    # Docker: /shared_media/preproc/working/{job_id}
-    # Linux workers: /mnt/sync/shared_media/preproc/working/{job_id}
-    # Windows workers: W:/mnt/sync/shared_media/preproc/working/{job_id}
+    import json
+    from models_v2 import SOTProcessingJob
+
     media_root = get_media_root()
-    if platform.system() == 'Windows':
-        shared_media_root = Path('W:/mnt/sync/shared_media')
-    elif Path('/shared_media').exists():
-        # Docker container
-        shared_media_root = Path('/shared_media')
-    else:
-        # Linux worker (kairo)
-        shared_media_root = Path('/mnt/sync/shared_media')
+    shared_media_root = _resolve_shared_media_root()
     working_dir = shared_media_root / "preproc" / "working" / temp_job_id
     normalized_slug = _normalize_slug(slug)
 
-    # Get platform info for logging
     worker_name = platform.node()
     worker_platform = platform.system()
 
     try:
-        logger.info(f"🎬 Starting multi-phase processing on {worker_name} ({worker_platform}) for {temp_job_id} (job_type: {job_type}, devel_mode: {devel_mode})")
-
-        # Initialize failure tracking
-        import json
-        from models_v2 import SOTProcessingJob  # Speaker now in models_v2, no import order issue
+        logger.info(f"🎬 sot_prepare on {worker_name} ({worker_platform}) for {temp_job_id} (job_type: {job_type}, devel_mode: {devel_mode})")
 
         processing_report = {
             "job_id": temp_job_id,
@@ -2011,36 +2047,6 @@ def process_sot_video_multi_phase(
             "intermediate_files": [] if devel_mode else None
         }
 
-        # Update job record with job_type and clips_data
-        with db_session() as db:
-            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
-            if job:
-                job.job_type = job_type
-                if clips:
-                    job.clips_data = json.dumps(clips)
-                db.commit()
-
-        # Route to appropriate processing workflow based on job_type
-        if job_type == "single_trim":
-            logger.info(f"Executing SINGLE_TRIM workflow for {temp_job_id}")
-            # Single trim workflow: Phases 1-5 with simple trim
-            # (Current implementation is suitable for this)
-        elif job_type == "individual_clips":
-            logger.info(f"Executing INDIVIDUAL_CLIPS workflow for {temp_job_id} with {len(clips or [])} clips")
-            # Individual clips: Split first, then process each clip through full pipeline
-            return _process_individual_clips(
-                temp_job_id, episode, slug, clips, asset_id, working_dir, normalized_slug
-            )
-        elif job_type == "montage":
-            logger.info(f"Executing MONTAGE workflow for {temp_job_id} with {len(clips or [])} clips")
-            # Montage: Split, process individually, then concatenate
-            return _process_montage(
-                temp_job_id, episode, slug, clips, asset_id, working_dir, normalized_slug
-            )
-        else:  # full_process (default)
-            logger.info(f"Executing FULL_PROCESS workflow for {temp_job_id}")
-
-        # Get platform-appropriate binaries
         ffmpeg = get_ffmpeg_binary()
         ffprobe = get_ffprobe_binary()
 
@@ -2053,27 +2059,24 @@ def process_sot_video_multi_phase(
         with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job and job.source_asset_id:
-                # Create sources directory for original uploads
                 source_dir = media_root / "episodes" / episode / "assets" / "video" / "sources"
                 source_dir.mkdir(parents=True, exist_ok=True)
-
-                # Copy uploaded video to source asset location
                 source_filename = f"{job.source_asset_id}.mp4"
                 source_path = source_dir / source_filename
-
                 if not source_path.exists():
                     import shutil
                     shutil.copy2(input_file, source_path)
                     logger.info(f"✅ Saved source video: {source_path}")
 
         # ================================================================
-        # PHASE 0: Technical Analysis with FFprobe
-        # - Extract duration, resolution, framerate, audio channels
-        # - Determine orientation (horizontal/vertical)
-        # - Store technical metadata
+        # PHASE 2: ffprobe the RAW upload (sanity only)
+        #  - Extract duration, resolution, framerate, audio channels
+        #  - Determine orientation + has_audio
+        #  - This is the cheap raw probe; the real cue-block metadata is
+        #    written by phase 5 (analyze) AFTER trim.
         # ================================================================
-        logger.info(f"Phase 0: Technical analysis for {temp_job_id}")
-        _update_job_status(temp_job_id, 'phase0', 'processing')
+        logger.info(f"Phase 2: Probing source for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase2', 'processing')
 
         # Get video stream info
         video_probe_cmd = [
@@ -2116,7 +2119,6 @@ def process_sot_video_multi_phase(
         width = int(video_stream.get('width', 0))
         height = int(video_stream.get('height', 0))
 
-        # Parse framerate (e.g., "30000/1001" -> 29.97)
         frame_rate_str = video_stream.get('r_frame_rate', '0/1')
         if '/' in frame_rate_str:
             num, denom = map(int, frame_rate_str.split('/'))
@@ -2145,18 +2147,19 @@ def process_sot_video_multi_phase(
         else:
             audio_config = f'{audio_channels}ch'
 
-        # Format duration as HH:MM:SS
+        # Format raw duration as HH:MM:SS (informational only)
         hours = int(duration_seconds // 3600)
         minutes = int((duration_seconds % 3600) // 60)
         seconds = int(duration_seconds % 60)
         duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-        logger.info(f"Phase 0 analysis: {width}x{height} {orientation}, {frame_rate}fps, {audio_config}, {duration_formatted}")
+        logger.info(f"Phase 2 probe: {width}x{height} {orientation}, {frame_rate}fps, {audio_config}, {duration_formatted}")
 
         # ================================================================
-        # PRE-PROCESSING VALIDATION
+        # PHASE 1: PRE-PROCESSING VALIDATION
         # Fail fast on invalid inputs to prevent wasted processing time
         # ================================================================
+        _update_job_status(temp_job_id, 'phase1', 'processing')
         validation_errors = []
         validation_warnings = []
 
@@ -2217,21 +2220,18 @@ def process_sot_video_multi_phase(
             error_msg = "; ".join(validation_errors)
             logger.error(f"❌ Pre-processing validation failed: {error_msg}")
             processing_report["overall_status"] = "failed"
-            processing_report["phases"]["validation"] = {"status": "failed", "errors": validation_errors}
-            _update_job_status(temp_job_id, 'validation', 'failed')
-
-            # Update cue block with failure info
+            processing_report["phases"]["phase1"] = {"status": "failed", "errors": validation_errors}
+            _update_job_status(temp_job_id, 'phase1', 'failed', error_msg)
             if asset_id:
                 _update_sot_cue_block(episode, slug, asset_id, {
                     'ProcessingStatus': f'❌ Validation Failed: {error_msg}'
                 })
-
             raise ValueError(f"Pre-processing validation failed: {error_msg}")
 
-        logger.info(f"✅ Pre-processing validation passed for {temp_job_id}")
-        processing_report["phases"]["validation"] = {"status": "success", "file_size_gb": round(file_size_gb, 2)}
+        logger.info(f"✅ Phase 1 validation passed for {temp_job_id}")
+        processing_report["phases"]["phase1"] = {"status": "success", "file_size_gb": round(file_size_gb, 2)}
 
-        # Store pre-analysis in database
+        # Store pre-analysis (raw probe) in database
         pre_analysis_data = {
             "duration": duration_formatted,
             "duration_seconds": duration_seconds,
@@ -2253,13 +2253,12 @@ def process_sot_video_multi_phase(
                 job.pre_analysis = pre_analysis_data
                 db.commit()
 
-        processing_report["phases"]["phase0"] = {"status": "success", "data": pre_analysis_data}
+        processing_report["phases"]["phase2"] = {"status": "success", "data": pre_analysis_data}
 
-        # Update cue block with technical metadata
+        # Update cue block with raw probe metadata (sanity values, refined in phase 5)
         if asset_id:
             _update_sot_cue_block(episode, slug, asset_id, {
-                'ProcessingStatus': 'Phase 0 Complete: Technical Analysis',
-                'Duration': duration_formatted,
+                'ProcessingStatus': 'Phase 2 Complete: Source Probed',
                 'Resolution': f'{width}x{height}',
                 'Framerate': f'{frame_rate}fps',
                 'Orientation': orientation,
@@ -2269,144 +2268,388 @@ def process_sot_video_multi_phase(
             })
 
         # ================================================================
-        # PHASE 0.5: Audio Extraction and Whisper Transcription
-        # - Extract audio as WAV for transcription
-        # - Send to Whisper (medium model on kairo)
-        # - Store transcription in cue block
-        # Skipped entirely when the source has no audio track.
+        # PHASE 3: Trimming (EARLY — before transcription + analyze)
+        #  - Trim based on trim_start and trim_end
+        #  - No-op pass-through when no trim requested
         # ================================================================
-        transcription_text = None  # Store for final return payload
-        if not has_audio:
-            logger.info(f"Phase 0.5: Skipped (no audio track) for {temp_job_id}")
-            _update_job_status(temp_job_id, 'phase0.5', 'skipped')
+        if not _is_zero_time(trim_start) or not _is_zero_time(trim_end):
+            logger.info(f"Phase 3: Trimming for {temp_job_id} (start={trim_start}, end={trim_end})")
+            _update_job_status(temp_job_id, 'phase3', 'processing')
+
+            phase3_output = working_dir / f"{temp_job_id}_3_trimmed.mp4"
+
+            # Frame-accurate trim: -ss BEFORE -i fast-seeks to the nearest
+            # keyframe, then re-encoding decodes forward to the EXACT requested
+            # IN/OUT frame. Stream-copy (-c copy) was keyframe-bounded and could
+            # overrun the OUT point by up to one GOP (~8s); re-encoding lands both
+            # ends on the exact requested frame. The full resolution/framerate
+            # normalization still happens later in Phase 6 (sot_finalize) — here
+            # we only re-encode for cut accuracy, so use the same encoder pick.
+            from platform_utils import IS_WINDOWS, has_nvidia_gpu
+            if IS_WINDOWS and has_nvidia_gpu():
+                video_encoder_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18", "-maxrate", "8M", "-bufsize", "16M"]
+            else:
+                video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
+
+            # Audio handling for the trim re-encode. When the source has audio,
+            # re-encode it to AAC alongside the video; when it doesn't, drop it
+            # (the silent track is injected later in Phase 6).
+            trim_audio_args = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"] if has_audio else ["-an"]
+
+            if not _is_zero_time(trim_end):
+                start_sec = _timecode_to_seconds(trim_start)
+                end_sec = _timecode_to_seconds(trim_end)
+                trim_duration = end_sec - start_sec
+                phase3_cmd = [
+                    ffmpeg, "-y",
+                    "-ss", str(start_sec),  # fast seek to nearby keyframe
+                    "-i", str(input_file),
+                    "-t", str(trim_duration),
+                    *video_encoder_args,
+                    *trim_audio_args,
+                    str(phase3_output)
+                ]
+            else:
+                # Trim from start only (frame-accurate re-encode; see note above)
+                start_sec = _timecode_to_seconds(trim_start)
+                phase3_cmd = [
+                    ffmpeg, "-y",
+                    "-ss", str(start_sec),  # fast seek to nearby keyframe
+                    "-i", str(input_file),
+                    *video_encoder_args,
+                    *trim_audio_args,
+                    str(phase3_output)
+                ]
+
+            subprocess.run(phase3_cmd, check=True, capture_output=True)
+            logger.info(f"Phase 3 complete (trimmed): {phase3_output}")
+            trimmed_file = phase3_output
+
             if asset_id:
                 _update_sot_cue_block(episode, slug, asset_id, {
-                    'ProcessingStatus': 'Phase 0.5 Skipped: No Audio Track',
-                    'Transcription': '',
-                    'Outcue': ''
+                    'ProcessingStatus': 'Phase 3 Complete: Trimmed'
                 })
         else:
-            logger.info(f"Phase 0.5: Audio extraction and transcription for {temp_job_id}")
-            _update_job_status(temp_job_id, 'phase0.5', 'processing')
+            # No trimming needed — pass the upload through unchanged
+            logger.info(f"Phase 3: Skipped (no trimming needed) for {temp_job_id}")
+            trimmed_file = input_file
+            if asset_id:
+                _update_sot_cue_block(episode, slug, asset_id, {
+                    'ProcessingStatus': 'Phase 3 Skipped: No Trimming Needed'
+                })
 
-            # Extract audio as WAV for Whisper
-            phase05_audio = working_dir / f"{temp_job_id}_0.5_audio_for_whisper.wav"
+        # Extract audio (WAV 16kHz mono) from the TRIMMED file for the whisper link.
+        audio_wav_path = None
+        if has_audio:
+            phase3_audio = working_dir / f"{temp_job_id}_4_audio.wav"
             audio_extract_cmd = [
                 ffmpeg, "-y",
-                "-i", str(input_file),
-                "-vn",  # No video
-                "-acodec", "pcm_s16le",  # WAV format
-                "-ar", "16000",  # 16kHz sample rate (Whisper standard)
-                "-ac", "1",  # Mono
-                str(phase05_audio)
+                "-i", str(trimmed_file),
+                "-vn",
+                "-acodec", "pcm_s16le",
+                "-ar", "16000",
+                "-ac", "1",
+                str(phase3_audio)
             ]
             subprocess.run(audio_extract_cmd, check=True, capture_output=True)
-            logger.info(f"Phase 0.5: Audio extracted to {phase05_audio}")
+            audio_wav_path = str(phase3_audio)
+            logger.info(f"Phase 3: Trimmed audio extracted to {phase3_audio} (for whisper link)")
 
-            # Transcribe with Whisper
-            try:
-                # Use simple transcription function (no FastAPI dependencies)
-                transcription_text = transcribe_audio_simple(str(phase05_audio))
+        # Build the JSON-serialisable context for the rest of the chain.
+        ctx = {
+            "temp_job_id": temp_job_id,
+            "episode": episode,
+            "slug": slug,
+            "asset_id": asset_id,
+            "normalized_slug": normalized_slug,
+            "job_type": job_type,
+            "devel_mode": devel_mode,
+            "trim_start": trim_start,
+            "trim_end": trim_end,
+            "working_dir": str(working_dir),
+            "media_root": str(media_root),
+            "trimmed_file": str(trimmed_file),
+            "audio_wav_path": audio_wav_path,
+            "has_audio": has_audio,
+            "pre_analysis_data": pre_analysis_data,
+            "processing_report": processing_report,
+            # transcription/outcue are filled in by the whisper link
+            "transcription": None,
+            "outcue": "",
+        }
+        return ctx
 
-                logger.info(f"Phase 0.5: Transcription complete, {len(transcription_text)} characters")
+    except subprocess.CalledProcessError as e:
+        if hasattr(e, 'stderr') and e.stderr:
+            stderr_text = e.stderr.decode('utf-8', errors='replace') if isinstance(e.stderr, bytes) else str(e.stderr)
+        else:
+            stderr_text = f"Exit code {e.returncode}"
+        error_msg = f"FFmpeg error in sot_prepare: {stderr_text}"
+        logger.error(error_msg)
+        _update_job_status(temp_job_id, 'phase3', 'failed', error_msg)
+        raise
+    except Exception as e:
+        error_msg = f"sot_prepare error: {str(e)}"
+        logger.error(error_msg)
+        _update_job_status(temp_job_id, 'phase1', 'failed', error_msg)
+        raise
 
-                # Derive outcue from transcription (last 5 words)
-                outcue_text = derive_outcue(transcription_text, word_count=5)
-                logger.info(f"Phase 0.5: Outcue derived: {outcue_text}")
 
-                # Store transcription in database
-                with db_session() as db:
-                    job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
-                    if job:
-                        job.transcription = transcription_text
-                        db.commit()
+@shared_task(
+    bind=True,
+    queue='whisper',
+    name='services.ffmpeg_tasks.transcribe_sot_audio',
+    max_retries=0,
+    soft_time_limit=900,
+    time_limit=1200,
+    acks_late=True,
+    reject_on_worker_lost=True
+)
+def transcribe_sot_audio(self, ctx: dict):
+    """
+    Chain link 2/3 — phase 4: transcribe the TRIMMED audio on the whisper queue.
 
-                # Update cue block with transcription and outcue
-                if asset_id:
-                    _update_sot_cue_block(episode, slug, asset_id, {
-                        'ProcessingStatus': 'Phase 0.5 Complete: Transcribed',
-                        'Transcription': transcription_text,
-                        'Outcue': outcue_text
-                    })
+    As a chain link this RECEIVES the previous task's return value (the prepare
+    `ctx` dict) as its first positional arg. It pulls the wav path from the ctx,
+    runs Whisper via transcribe_audio_simple(), and RETURNS the same ctx dict
+    augmented with `transcription` + `outcue` so sot_finalize gets everything.
 
-            except Exception as e:
-                logger.error(f"Phase 0.5: Transcription failed: {e}")
-                transcription_text = f'[Transcription failed: {str(e)}]'
-                # Continue processing even if transcription fails
-                if asset_id:
-                    _update_sot_cue_block(episode, slug, asset_id, {
-                        'ProcessingStatus': 'Phase 0.5 Complete: Transcription Failed',
-                        'Transcription': transcription_text
-                    })
+    Transcription failure is NON-FATAL: it sets transcription to a sentinel
+    ('[Transcription failed: ...]') and outcue '', and passes the ctx on so the
+    chain continues (preserves the original pipeline's behaviour).
+    """
+    temp_job_id = ctx["temp_job_id"]
+    episode = ctx["episode"]
+    slug = ctx["slug"]
+    asset_id = ctx["asset_id"]
+    has_audio = ctx.get("has_audio", False)
+    audio_wav_path = ctx.get("audio_wav_path")
+
+    from models_v2 import SOTProcessingJob
+
+    if not has_audio or not audio_wav_path:
+        logger.info(f"Phase 4: Skipped (no audio track) for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase4', 'skipped')
+        ctx["transcription"] = ''
+        ctx["outcue"] = ''
+        if asset_id:
+            _update_sot_cue_block(episode, slug, asset_id, {
+                'ProcessingStatus': 'Phase 4 Skipped: No Audio Track',
+                'Transcription': '',
+                'Outcue': ''
+            })
+        return ctx
+
+    logger.info(f"Phase 4: Transcribing trimmed audio for {temp_job_id} on {platform.node()}")
+    _update_job_status(temp_job_id, 'phase4', 'processing')
+
+    try:
+        transcription_text = transcribe_audio_simple(audio_wav_path)
+        logger.info(f"Phase 4: Transcription complete, {len(transcription_text)} characters")
+
+        outcue_text = derive_outcue(transcription_text, word_count=5)
+        logger.info(f"Phase 4: Outcue derived: {outcue_text}")
+
+        with db_session() as db:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.transcription = transcription_text
+                db.commit()
+
+        ctx["transcription"] = transcription_text
+        ctx["outcue"] = outcue_text
+
+        if asset_id:
+            _update_sot_cue_block(episode, slug, asset_id, {
+                'ProcessingStatus': 'Phase 4 Complete: Transcribed',
+                'Transcription': transcription_text,
+                'Outcue': outcue_text
+            })
+
+    except Exception as e:
+        # NON-FATAL: keep the chain going so the rest of the pipeline still runs.
+        logger.error(f"Phase 4: Transcription failed: {e}")
+        ctx["transcription"] = f'[Transcription failed: {str(e)}]'
+        ctx["outcue"] = ''
+        if asset_id:
+            _update_sot_cue_block(episode, slug, asset_id, {
+                'ProcessingStatus': 'Phase 4 Complete: Transcription Failed',
+                'Transcription': ctx["transcription"]
+            })
+
+    return ctx
+
+
+@shared_task(
+    bind=True,
+    queue='media',
+    name='services.ffmpeg_tasks.sot_finalize',
+    max_retries=3,
+    soft_time_limit=1800,
+    time_limit=2400,
+    acks_late=True,
+    reject_on_worker_lost=True
+)
+def sot_finalize(self, ctx: dict):
+    """
+    Chain link 3/3 — phases 5-11 of the single_trim/full_process SOT pipeline.
+
+    Receives the ctx dict (now carrying transcription + outcue from the whisper
+    link) and runs, on the TRIMMED clip:
+      Phase 5  — analyze trimmed clip (real cue-block duration/metadata)
+      Phase 6  — normalize video (H.264)
+      Phase 7  — fix audio channels (dual-mono)
+      Phase 8  — normalize loudness (EBU R128)
+      Phase 9  — derivatives (thumbnails + MP3)
+      Phase 10 — move to assets + DB final paths + asset relationship
+      Phase 11 — post-analysis verify
+
+    Returns the final result dict (same shape the original returned).
+    """
+    import json
+    from models_v2 import SOTProcessingJob
+
+    temp_job_id = ctx["temp_job_id"]
+    episode = ctx["episode"]
+    slug = ctx["slug"]
+    asset_id = ctx["asset_id"]
+    normalized_slug = ctx["normalized_slug"]
+    job_type = ctx["job_type"]
+    devel_mode = ctx["devel_mode"]
+    trim_start = ctx["trim_start"]
+    trim_end = ctx["trim_end"]
+    working_dir = Path(ctx["working_dir"])
+    media_root = Path(ctx["media_root"])
+    trimmed_file = Path(ctx["trimmed_file"])
+    has_audio = ctx.get("has_audio", False)
+    pre_analysis_data = ctx.get("pre_analysis_data")
+    processing_report = ctx.get("processing_report") or {
+        "job_id": temp_job_id, "overall_status": "in_progress",
+        "phases": {}, "failures": [], "warnings": [],
+        "devel_mode": devel_mode, "intermediate_files": [] if devel_mode else None
+    }
+    transcription_text = ctx.get("transcription")
+
+    ffmpeg = get_ffmpeg_binary()
+    ffprobe = get_ffprobe_binary()
+    episodes_root = media_root / "episodes"
+
+    try:
+        logger.info(f"🎬 sot_finalize on {platform.node()} for {temp_job_id}")
 
         # ================================================================
-        # PHASE 1: Video Normalization
-        # - Convert to H.264/AAC MP4
-        # - Normalize framerate to 29.97fps
-        # - Normalize resolution (maintain aspect ratio)
-        # - Video bitrate: 8Mbps VBR
+        # PHASE 5: Analyze the TRIMMED clip (real cue-block metadata)
+        #  - Re-probe the trimmed file so duration/etc reflect what the user
+        #    actually kept (the raw probe in phase 2 was sanity-only).
         # ================================================================
-        logger.info(f"Phase 1: Video normalization for {temp_job_id}")
-        _update_job_status(temp_job_id, 'phase1', 'processing')
+        logger.info(f"Phase 5: Analyzing trimmed clip for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase5', 'processing')
 
-        phase1_output = working_dir / f"{temp_job_id}_1_normalized.mp4"
+        trimmed_duration_probe = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(trimmed_file)],
+            capture_output=True, text=True, check=True
+        )
+        trimmed_duration_seconds = float(trimmed_duration_probe.stdout.strip())
+        t_hours = int(trimmed_duration_seconds // 3600)
+        t_minutes = int((trimmed_duration_seconds % 3600) // 60)
+        t_seconds = int(trimmed_duration_seconds % 60)
+        trimmed_duration_formatted = f"{t_hours:02d}:{t_minutes:02d}:{t_seconds:02d}"
 
-        # Determine video encoder based on platform
-        # NVENC for Windows with GPU, libx264 CPU fallback for Linux workers
+        processing_report["phases"]["phase5"] = {
+            "status": "success",
+            "data": {"duration": trimmed_duration_formatted, "duration_seconds": trimmed_duration_seconds}
+        }
+        logger.info(f"Phase 5 analyze: trimmed duration {trimmed_duration_formatted}")
+
+        if asset_id:
+            _update_sot_cue_block(episode, slug, asset_id, {
+                'ProcessingStatus': 'Phase 5 Complete: Trimmed Clip Analyzed',
+                'Duration': trimmed_duration_formatted
+            })
+
+        # ================================================================
+        # PHASE 6: Video Normalization
+        #  - Convert to H.264/AAC MP4, 29.97fps, max width 1920
+        # ================================================================
+        logger.info(f"Phase 6: Video normalization for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase6', 'processing')
+
+        phase6_output = working_dir / f"{temp_job_id}_6_normalized.mp4"
+
+        # Determine video encoder based on platform.
+        # NVENC for Windows with GPU, libx264 CPU fallback for Linux workers.
         from platform_utils import IS_WINDOWS, has_nvidia_gpu
         if IS_WINDOWS and has_nvidia_gpu():
             video_encoder_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18", "-maxrate", "8M", "-bufsize", "16M"]
         else:
-            # CPU encoding fallback for Linux workers (kairo)
             video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
 
-        # Audio args differ based on whether the source has an audio track.
+        # When the source has NO audio track, synthesize a silent stereo track
+        # (anullsrc) as a second input so the normalized MP4 always carries audio.
+        # Every downstream phase (channel analysis, loudness, MP3 extraction) then
+        # runs unchanged, and the SOT ships WITH a real (silent) audio track
+        # instead of being audio-less — broadcast-safer and consistent across
+        # workers. See MEMORY: project_audioless_sot_silent_inject.
         if has_audio:
-            phase1_audio_args = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+            phase6_cmd = [
+                ffmpeg, "-y",
+                "-i", str(trimmed_file),
+                *video_encoder_args,
+                "-r", "29.97",  # Broadcast standard framerate
+                "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",  # Max width 1920, maintain aspect
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                str(phase6_output)
+            ]
         else:
-            phase1_audio_args = ["-an"]
+            phase6_cmd = [
+                ffmpeg, "-y",
+                "-i", str(trimmed_file),
+                "-f", "lavfi",
+                "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                *video_encoder_args,
+                "-r", "29.97",  # Broadcast standard framerate
+                "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",  # Max width 1920, maintain aspect
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                "-shortest",  # stop at end of video (silent input is infinite)
+                str(phase6_output)
+            ]
+        subprocess.run(phase6_cmd, check=True, capture_output=True)
+        logger.info(f"Phase 6 complete: {phase6_output}")
 
-        phase1_cmd = [
-            ffmpeg, "-y",
-            "-i", str(input_file),
-            *video_encoder_args,
-            "-r", "29.97",  # Broadcast standard framerate
-            "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",  # Max width 1920, maintain aspect
-            *phase1_audio_args,
-            str(phase1_output)
-        ]
-        subprocess.run(phase1_cmd, check=True, capture_output=True)
-        logger.info(f"Phase 1 complete: {phase1_output}")
+        # From here on the normalized file ALWAYS has an audio track (real or the
+        # injected silent one), so let the audio phases (7 channels, 8/9 loudness,
+        # MP3) run normally instead of being skipped.
+        has_audio = True
 
-        # Update cue block with Phase 1 completion
         if asset_id:
             _update_sot_cue_block(episode, slug, asset_id, {
-                'ProcessingStatus': 'Phase 1 Complete: Video Normalized'
+                'ProcessingStatus': 'Phase 6 Complete: Video Normalized'
             })
 
         # ================================================================
-        # PHASE 1.1: Audio Channel Analysis and Dual-Mono Conversion
-        # - Analyze left/right channel distribution
-        # - Convert to dual-mono if channels are unbalanced
-        # Skipped entirely when the source has no audio track.
+        # PHASE 7: Audio Channel Analysis and Dual-Mono Conversion
+        #  - Convert to dual-mono if channels are unbalanced
+        #  - Skipped entirely when the source has no audio track.
         # ================================================================
         if not has_audio:
-            logger.info(f"Phase 1.1: Skipped (no audio track) for {temp_job_id}")
-            _update_job_status(temp_job_id, 'phase1.1', 'skipped')
-            phase1_1_output = phase1_output
+            logger.info(f"Phase 7: Skipped (no audio track) for {temp_job_id}")
+            _update_job_status(temp_job_id, 'phase7', 'skipped')
+            phase7_output = phase6_output
             if asset_id:
                 _update_sot_cue_block(episode, slug, asset_id, {
-                    'ProcessingStatus': 'Phase 1.1 Skipped: No Audio Track',
+                    'ProcessingStatus': 'Phase 7 Skipped: No Audio Track',
                     'AudioProcessing': 'No audio track'
                 })
         else:
-            logger.info(f"Phase 1.1: Audio channel analysis for {temp_job_id}")
-            _update_job_status(temp_job_id, 'phase1.1', 'processing')
+            logger.info(f"Phase 7: Audio channel analysis for {temp_job_id}")
+            _update_job_status(temp_job_id, 'phase7', 'processing')
 
-            # Analyze audio channels with volumedetect and astats
             analyze_cmd = [
                 ffmpeg,
-                "-i", str(phase1_output),
+                "-i", str(phase6_output),
                 "-map", "0:a:0",
                 "-af", "astats=measure_overall=Peak_level:measure_perchannel=Peak_level",
                 "-f", "null",
@@ -2415,17 +2658,14 @@ def process_sot_video_multi_phase(
             analyze_result = subprocess.run(analyze_cmd, capture_output=True, text=True)
             astats_output = analyze_result.stderr
 
-            # Parse channel levels from astats output
-            # Look for lines like: [Parsed_astats_0 @ ...] Peak level dB: -12.34
             import re
             channel_levels = []
             for line in astats_output.split('\n'):
                 if 'Peak level dB' in line:
-                    # Handle -inf (silence), inf, and regular dB values
                     if '-inf' in line.lower():
-                        channel_levels.append(-96.0)  # Treat -inf as very quiet
+                        channel_levels.append(-96.0)
                     elif 'inf' in line.lower():
-                        channel_levels.append(0.0)  # Treat inf as 0 dB
+                        channel_levels.append(0.0)
                     else:
                         match = re.search(r'Peak level dB:\s*([-]?\d+\.?\d*)', line)
                         if match:
@@ -2433,246 +2673,104 @@ def process_sot_video_multi_phase(
                                 channel_levels.append(float(match.group(1)))
                             except ValueError:
                                 logger.warning(f"Could not parse dB level from: {line}")
-                                channel_levels.append(-96.0)  # Default to very quiet
+                                channel_levels.append(-96.0)
 
-            logger.info(f"Phase 1.1: Channel levels: {channel_levels}")
+            logger.info(f"Phase 7: Channel levels: {channel_levels}")
 
-            # Determine if dual-mono conversion is needed
             needs_dual_mono = False
             if len(channel_levels) >= 2:
                 left_level = channel_levels[0]
                 right_level = channel_levels[1]
-
-                # If one channel is significantly quieter (>10dB difference), convert to dual-mono
                 level_diff = abs(left_level - right_level)
                 if level_diff > 10:
                     needs_dual_mono = True
-                    logger.info(f"Phase 1.1: Unbalanced channels detected ({level_diff:.1f}dB diff), converting to dual-mono")
+                    logger.info(f"Phase 7: Unbalanced channels detected ({level_diff:.1f}dB diff), converting to dual-mono")
 
-            phase1_1_output = working_dir / f"{temp_job_id}_1.1_audio-fixed.mp4"
+            phase7_output = working_dir / f"{temp_job_id}_7_audio-fixed.mp4"
 
             if needs_dual_mono:
-                # Convert to dual-mono: mix both channels and output to both L/R
                 dual_mono_cmd = [
                     ffmpeg, "-y",
-                    "-i", str(phase1_output),
-                    "-c:v", "copy",  # Don't re-encode video
-                    "-af", "pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1",  # Mix both channels equally
+                    "-i", str(phase6_output),
+                    "-c:v", "copy",
+                    "-af", "pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1",
                     "-c:a", "aac",
                     "-b:a", "192k",
-                    str(phase1_1_output)
+                    str(phase7_output)
                 ]
                 subprocess.run(dual_mono_cmd, check=True, capture_output=True)
-                logger.info(f"Phase 1.1 complete: Converted to dual-mono")
-
+                logger.info(f"Phase 7 complete: Converted to dual-mono")
                 if asset_id:
                     _update_sot_cue_block(episode, slug, asset_id, {
-                        'ProcessingStatus': 'Phase 1.1 Complete: Dual-Mono Conversion Applied',
+                        'ProcessingStatus': 'Phase 7 Complete: Dual-Mono Conversion Applied',
                         'AudioProcessing': 'Dual-mono conversion (unbalanced channels detected)'
                     })
             else:
-                # Channels are balanced, just copy
                 import shutil
-                shutil.copy2(phase1_output, phase1_1_output)
-                logger.info(f"Phase 1.1 complete: Channels balanced, no conversion needed")
-
+                shutil.copy2(phase6_output, phase7_output)
+                logger.info(f"Phase 7 complete: Channels balanced, no conversion needed")
                 if asset_id:
                     _update_sot_cue_block(episode, slug, asset_id, {
-                        'ProcessingStatus': 'Phase 1.1 Complete: Audio Channels OK',
+                        'ProcessingStatus': 'Phase 7 Complete: Audio Channels OK',
                         'AudioProcessing': 'Channels balanced'
                     })
 
         # ================================================================
-        # 🧪 TESTING MODE DISABLED: Full pipeline enabled
-        # - All phases will now execute through to completion
-        # ================================================================
-        # logger.info(f"🧪 TESTING MODE: Stopping after Phase 1.1 for {temp_job_id}")
-        # processing_report["overall_status"] = "partial_complete"
-        # processing_report["end_time"] = str(func.now())
-        # processing_report["phases"]["phase1.1"] = {"status": "success"}
-        #
-        # # Return Phase 1.1 output as final for testing
-        # test_output_video = phase1_1_output
-        #
-        # # Store processing report in database
-        # db = SessionLocal()
-        # try:
-        #     job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
-        #     if job:
-        #         job.processing_report = processing_report
-        #         job.status = 'partial_complete'
-        #         db.commit()
-        # finally:
-        #     db.close()
-        #
-        # logger.info(f"🧪 Phase 0-1.1 testing complete for {temp_job_id}")
-        # logger.info(f"🧪 Output file: {test_output_video}")
-        #
-        # return {
-        #     "temp_job_id": temp_job_id,
-        #     "episode": episode,
-        #     "slug": normalized_slug,
-        #     "video_path": str(test_output_video.relative_to(media_root)),
-        #     "status": "partial_complete",
-        #     "message": "Testing mode: Phase 0-1.1 complete, later phases disabled",
-        #     "pre_analysis": pre_analysis_data,
-        #     "processing_report": processing_report,
-        #     "test_mode": True
-        # }
-
-        # ================================================================
-        # PHASE 2: Audio Normalization
-        # - EBU R128 loudness normalization (-23 LUFS target)
-        # - Dynamic range compression
-        # - Peak limiting to -1dB
-        # Skipped entirely when the source has no audio track.
+        # PHASE 8: Audio Normalization (EBU R128 loudness)
+        #  - -23 LUFS target, dynamic range compression, peak limit -1dB
+        #  - Skipped entirely when the source has no audio track.
         # ================================================================
         if not has_audio:
-            logger.info(f"Phase 2: Skipped (no audio track) for {temp_job_id}")
-            _update_job_status(temp_job_id, 'phase2', 'skipped')
-            phase2_output = phase1_1_output
+            logger.info(f"Phase 8: Skipped (no audio track) for {temp_job_id}")
+            _update_job_status(temp_job_id, 'phase8', 'skipped')
+            phase8_output = phase7_output
             if asset_id:
                 _update_sot_cue_block(episode, slug, asset_id, {
-                    'ProcessingStatus': 'Phase 2 Skipped: No Audio Track'
+                    'ProcessingStatus': 'Phase 8 Skipped: No Audio Track'
                 })
         else:
-            logger.info(f"Phase 2: Audio normalization for {temp_job_id}")
-            _update_job_status(temp_job_id, 'phase2', 'processing')
+            logger.info(f"Phase 8: Audio normalization for {temp_job_id}")
+            _update_job_status(temp_job_id, 'phase8', 'processing')
 
-            phase2_output = working_dir / f"{temp_job_id}_2_audio-normalized.mp4"
-            phase2_cmd = [
+            phase8_output = working_dir / f"{temp_job_id}_8_audio-normalized.mp4"
+            phase8_cmd = [
                 ffmpeg, "-y",
-                "-i", str(phase1_1_output),
-                "-c:v", "copy",  # Don't re-encode video
+                "-i", str(phase7_output),
+                "-c:v", "copy",
                 "-af", "loudnorm=I=-23:TP=-1:LRA=11,acompressor=threshold=-18dB:ratio=4:attack=5:release=50",
                 "-c:a", "aac",
                 "-b:a", "192k",
-                str(phase2_output)
+                str(phase8_output)
             ]
-            subprocess.run(phase2_cmd, check=True, capture_output=True)
-            logger.info(f"Phase 2 complete: {phase2_output}")
-
-            # Update cue block with Phase 2 completion
+            subprocess.run(phase8_cmd, check=True, capture_output=True)
+            logger.info(f"Phase 8 complete: {phase8_output}")
             if asset_id:
                 _update_sot_cue_block(episode, slug, asset_id, {
-                    'ProcessingStatus': 'Phase 2 Complete: Audio Normalized'
-                })
-
-
-        # ================================================================
-        # PHASE 3-8: DISABLED FOR TESTING
-        # - All phases below are disabled while testing Phase 0-1.1
-        # - Uncomment to re-enable
-        # ================================================================
-
-        # PHASE 3: Trimming (if requested)
-        # - Trim based on trim_start and trim_end
-        # - Skip entirely if no trimming needed
-        # ================================================================
-
-        # Check if trimming is actually needed - handle both HH:MM:SS and HH:MM:SS:FF formats
-        def is_zero_time(time_str):
-            """Check if timecode is effectively zero (handles 00:00:00 and 00:00:00:00)"""
-            return time_str in ("00:00:00", "00:00:00:00", "0", "0.0", "")
-
-        if not is_zero_time(trim_start) or not is_zero_time(trim_end):
-            logger.info(f"Phase 3: Trimming for {temp_job_id} (start={trim_start}, end={trim_end})")
-            _update_job_status(temp_job_id, 'phase3', 'processing')
-
-            phase3_output = working_dir / f"{temp_job_id}_3_trimmed.mp4"
-
-            if not is_zero_time(trim_end):
-                # Calculate duration - handle both HH:MM:SS and HH:MM:SS:FF formats
-                def time_to_seconds(time_str):
-                    parts = time_str.split(':')
-                    if len(parts) == 3:
-                        h, m, s = map(float, parts)
-                        return h * 3600 + m * 60 + s
-                    elif len(parts) == 4:
-                        h, m, s, f = map(float, parts)
-                        # Assume 30fps for frame conversion
-                        return h * 3600 + m * 60 + s + (f / 30.0)
-                    return 0.0
-
-                start_sec = time_to_seconds(trim_start)
-                end_sec = time_to_seconds(trim_end)
-                trim_duration = end_sec - start_sec
-
-                phase3_cmd = [
-                    ffmpeg, "-y",
-                    "-ss", str(start_sec),  # Use seconds, not raw timecode
-                    "-i", str(phase2_output),
-                    "-t", str(trim_duration),
-                    "-c", "copy",
-                    str(phase3_output)
-                ]
-            else:
-                # Trim from start only - handle HH:MM:SS:FF format
-                def time_to_seconds(time_str):
-                    parts = time_str.split(':')
-                    if len(parts) == 3:
-                        h, m, s = map(float, parts)
-                        return h * 3600 + m * 60 + s
-                    elif len(parts) == 4:
-                        h, m, s, f = map(float, parts)
-                        return h * 3600 + m * 60 + s + (f / 30.0)
-                    return 0.0
-
-                start_sec = time_to_seconds(trim_start)
-                phase3_cmd = [
-                    ffmpeg, "-y",
-                    "-ss", str(start_sec),  # Use seconds, not raw timecode
-                    "-i", str(phase2_output),
-                    "-c", "copy",
-                    str(phase3_output)
-                ]
-
-            subprocess.run(phase3_cmd, check=True, capture_output=True)
-            logger.info(f"Phase 3 complete (trimmed): {phase3_output}")
-
-            # Update cue block with Phase 3 completion
-            if asset_id:
-                _update_sot_cue_block(episode, slug, asset_id, {
-                    'ProcessingStatus': 'Phase 3 Complete: Trimmed'
-                })
-        else:
-            # No trimming needed - skip phase entirely and use Phase 2 output
-            logger.info(f"Phase 3: Skipped (no trimming needed) for {temp_job_id}")
-            phase3_output = phase2_output
-
-            # Update cue block to reflect skipped phase
-            if asset_id:
-                _update_sot_cue_block(episode, slug, asset_id, {
-                    'ProcessingStatus': 'Phase 3 Skipped: No Trimming Needed'
+                    'ProcessingStatus': 'Phase 8 Complete: Audio Normalized'
                 })
 
         # ================================================================
-        # PHASE 4: Derivative Extraction
-        # - Generate 5 thumbnail options at different timepoints
-        # - Audio extract as MP3 (full segment)
+        # PHASE 9: Derivative Extraction
+        #  - Generate 15 thumbnail options + MP3 audio extract
         # ================================================================
-        logger.info(f"Phase 4: Derivative extraction for {temp_job_id}")
-        _update_job_status(temp_job_id, 'phase4', 'processing')
+        logger.info(f"Phase 9: Derivative extraction for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase9', 'processing')
 
-        # Get video duration for thumbnail spacing
+        # Get video duration for thumbnail spacing (use the processed clip)
         duration_probe = subprocess.run(
             [ffprobe, "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(phase3_output)],
+             "-of", "default=noprint_wrappers=1:nokey=1", str(phase8_output)],
             capture_output=True, text=True, check=True
         )
         video_duration = float(duration_probe.stdout.strip())
 
-        # Generate 15 thumbnail options at evenly spaced intervals
-        # Use smaller offsets for short videos to ensure we get usable frames
         num_thumbnails = 15  # Generate 15 options for user selection
 
         if video_duration < 10:
-            # Short video: use minimal offsets (0.5s) to maximize usable range
             start_offset = min(0.5, video_duration * 0.1)
             end_offset = max(start_offset, video_duration - start_offset)
-            logger.info(f"Phase 4: Short video ({video_duration:.1f}s), using reduced offsets: {start_offset:.1f}s")
+            logger.info(f"Phase 9: Short video ({video_duration:.1f}s), using reduced offsets: {start_offset:.1f}s")
         else:
-            # Normal video: skip first/last 2 seconds to avoid fade/black
             start_offset = 2
             end_offset = max(2, video_duration - 2)
 
@@ -2680,96 +2778,83 @@ def process_sot_video_multi_phase(
 
         thumbnail_times = []
         if usable_duration > 0:
-            # Generate evenly spaced timepoints
             for i in range(num_thumbnails):
                 time_point = start_offset + (usable_duration * i / (num_thumbnails - 1))
                 thumbnail_times.append(time_point)
         else:
-            # Video extremely short, spread across full duration
             for i in range(num_thumbnails):
                 time_point = video_duration * i / (num_thumbnails - 1)
                 thumbnail_times.append(max(0.1, time_point))
-            logger.warning(f"Phase 4: Very short video, using full duration for thumbnails")
+            logger.warning(f"Phase 9: Very short video, using full duration for thumbnails")
 
-        phase4_thumbs = []
+        phase9_thumbs = []
         thumbnail_data = []  # Store (filename, sharpness, time_point) tuples
         for i, time_point in enumerate(thumbnail_times, 1):
-            thumb_file = working_dir / f"{temp_job_id}_4_thumb_{i:02d}.png"
-            # Use accurate seeking (-ss after -i) for better frame quality
-            # This decodes from nearest keyframe ensuring sharp frames
-            # PNG format for sharpness validation
+            thumb_file = working_dir / f"{temp_job_id}_9_thumb_{i:02d}.png"
             thumb_cmd = [
                 ffmpeg, "-y",
-                "-i", str(phase3_output),
+                "-i", str(phase8_output),
                 "-ss", str(time_point),
                 "-vframes", "1",
                 str(thumb_file)
             ]
             subprocess.run(thumb_cmd, check=True, capture_output=True)
 
-            # Calculate sharpness score - also validates the file is a real PNG.
-            # If validation fails, drop the bad frame and keep going — one
-            # corrupt thumbnail shouldn't kill an otherwise successful job.
+            # Calculate sharpness score — also validates the file is a real PNG.
+            # A single corrupt thumbnail shouldn't kill an otherwise successful job.
             try:
                 sharpness = calculate_sharpness_simple(str(thumb_file))
             except (ValueError, FileNotFoundError) as e:
-                logger.warning(f"Phase 4: skipping thumbnail {i}/{num_thumbnails} at {time_point:.1f}s ({e})")
+                logger.warning(f"Phase 9: skipping thumbnail {i}/{num_thumbnails} at {time_point:.1f}s ({e})")
                 try:
                     thumb_file.unlink()
                 except FileNotFoundError:
                     pass
                 continue
 
-            phase4_thumbs.append(thumb_file)
+            phase9_thumbs.append(thumb_file)
             thumbnail_data.append({
-                'filename': f"{temp_job_id}_4_thumb_{i:02d}.png",
+                'filename': f"{temp_job_id}_9_thumb_{i:02d}.png",
                 'sharpness': sharpness,
                 'time': time_point,
                 'index': i
             })
-            logger.info(f"Phase 4: Generated thumbnail {i}/{num_thumbnails} at {time_point:.1f}s (sharpness: {sharpness:.1f})")
+            logger.info(f"Phase 9: Generated thumbnail {i}/{num_thumbnails} at {time_point:.1f}s (sharpness: {sharpness:.1f})")
 
-        # Sort thumbnails by sharpness (highest first) for better default selection
         thumbnail_data_sorted = sorted(thumbnail_data, key=lambda x: x['sharpness'], reverse=True)
 
-        # Check for blur warning
         max_sharpness = thumbnail_data_sorted[0]['sharpness'] if thumbnail_data_sorted else 0
         avg_sharpness = sum(t['sharpness'] for t in thumbnail_data) / len(thumbnail_data) if thumbnail_data else 0
 
         if max_sharpness < SHARPNESS_THRESHOLD_BLURRY:
-            logger.warning(f"⚠️ Phase 4: ALL thumbnails appear blurry! Max sharpness: {max_sharpness:.1f} (threshold: {SHARPNESS_THRESHOLD_BLURRY})")
+            logger.warning(f"⚠️ Phase 9: ALL thumbnails appear blurry! Max sharpness: {max_sharpness:.1f} (threshold: {SHARPNESS_THRESHOLD_BLURRY})")
             logger.warning(f"⚠️ Source video may contain motion blur or be out of focus")
         elif avg_sharpness < SHARPNESS_THRESHOLD_WARNING:
-            logger.warning(f"⚠️ Phase 4: Thumbnails have below-average sharpness. Avg: {avg_sharpness:.1f}")
+            logger.warning(f"⚠️ Phase 9: Thumbnails have below-average sharpness. Avg: {avg_sharpness:.1f}")
 
-        # Keep original order for filenames list but track best thumbnail
         thumbnail_filenames = [t['filename'] for t in thumbnail_data]
         best_thumbnail_idx = next((i for i, t in enumerate(thumbnail_data) if t['filename'] == thumbnail_data_sorted[0]['filename']), 0)
 
-        # Store thumbnail candidates in database for user selection
         with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job:
                 job.thumbnail_candidates = thumbnail_filenames
-                # Select the SHARPEST thumbnail as default (not middle anymore)
                 job.selected_thumbnail = thumbnail_data_sorted[0]['filename'] if thumbnail_data_sorted else thumbnail_filenames[0]
                 db.commit()
 
-        logger.info(f"Phase 4: Stored {len(thumbnail_filenames)} thumbnail candidates (best sharpness: {max_sharpness:.1f} at index {best_thumbnail_idx + 1})")
+        logger.info(f"Phase 9: Stored {len(thumbnail_filenames)} thumbnail candidates (best sharpness: {max_sharpness:.1f} at index {best_thumbnail_idx + 1})")
 
-        # Store thumbnail data with sharpness scores in processing_report for API access
-        processing_report["phases"]["phase4"] = {
+        processing_report["phases"]["phase9"] = {
             "status": "success",
             "data": {
                 "thumbnail_count": len(thumbnail_data),
-                "thumbnail_data": thumbnail_data,  # Full array with sharpness scores
+                "thumbnail_data": thumbnail_data,
                 "best_thumbnail": thumbnail_data_sorted[0] if thumbnail_data_sorted else None,
                 "max_sharpness": max_sharpness,
                 "avg_sharpness": avg_sharpness
             }
         }
 
-        # Add blur warning to processing_report if detected
         if max_sharpness < SHARPNESS_THRESHOLD_BLURRY:
             processing_report["warnings"].append(f"low_sharpness: All thumbnails appear blurry (max: {max_sharpness:.1f})")
         elif avg_sharpness < SHARPNESS_THRESHOLD_WARNING:
@@ -2777,65 +2862,57 @@ def process_sot_video_multi_phase(
 
         # Audio extract (full segment) — skipped when source has no audio track
         if has_audio:
-            phase4_audio = working_dir / f"{temp_job_id}_4_audio.mp3"
+            phase9_audio = working_dir / f"{temp_job_id}_9_audio.mp3"
             audio_cmd = [
                 ffmpeg, "-y",
-                "-i", str(phase3_output),
+                "-i", str(phase8_output),
                 "-vn",
                 "-acodec", "libmp3lame",
                 "-ab", "192k",
-                str(phase4_audio)
+                str(phase9_audio)
             ]
             subprocess.run(audio_cmd, check=True, capture_output=True)
-            logger.info(f"Phase 4 complete: thumbnails + audio")
-            phase4_status = 'Phase 4 Complete: Thumbnails + MP3 Generated'
+            logger.info(f"Phase 9 complete: thumbnails + audio")
+            phase9_status = 'Phase 9 Complete: Thumbnails + MP3 Generated'
         else:
-            phase4_audio = None
-            logger.info(f"Phase 4 complete: thumbnails only (no audio track)")
-            phase4_status = 'Phase 4 Complete: Thumbnails Only (No Audio Track)'
+            phase9_audio = None
+            logger.info(f"Phase 9 complete: thumbnails only (no audio track)")
+            phase9_status = 'Phase 9 Complete: Thumbnails Only (No Audio Track)'
 
-        # Update cue block with Phase 4 completion
         if asset_id:
             _update_sot_cue_block(episode, slug, asset_id, {
-                'ProcessingStatus': phase4_status
+                'ProcessingStatus': phase9_status
             })
 
         # ================================================================
-        # PHASE 5: Final Move and Rename
-        # - Move to episode assets directory
-        # - Rename with normalized slug
-        # - Clean up working directory
+        # PHASE 10: Final Move and Rename
+        #  - Move to episode assets directory, rename with normalized slug
         # ================================================================
-        logger.info(f"Phase 5: Final move for {temp_job_id}")
-        _update_job_status(temp_job_id, 'phase5', 'processing')
+        logger.info(f"Phase 10: Final move for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase10', 'processing')
 
-        # Create final output directories (cross-platform)
-        # SOT videos go to assets/video/ per episode directory standard
-        # Thumbnails go to assets/thumbnails/ per episode directory standard
         final_video_dir = media_root / "episodes" / episode / "assets" / "video"
         final_thumb_dir = media_root / "episodes" / episode / "assets" / "thumbnails"
         final_video_dir.mkdir(parents=True, exist_ok=True)
         final_thumb_dir.mkdir(parents=True, exist_ok=True)
 
-        # Move and rename files
         final_video = final_video_dir / f"{normalized_slug}.mp4"
         final_audio = final_video_dir / f"{normalized_slug}.mp3" if has_audio else None
 
         import shutil
-        shutil.move(str(phase3_output), str(final_video))
-        if has_audio and phase4_audio is not None:
-            shutil.move(str(phase4_audio), str(final_audio))
+        shutil.move(str(phase8_output), str(final_video))
+        if has_audio and phase9_audio is not None:
+            shutil.move(str(phase9_audio), str(final_audio))
 
-        # Move all 15 thumbnails to thumbnails directory (PNG format)
         final_thumbs = []
-        for i, thumb_file in enumerate(phase4_thumbs, 1):
+        for i, thumb_file in enumerate(phase9_thumbs, 1):
             final_thumb = final_thumb_dir / f"{normalized_slug}-thumb-{i:02d}.png"
             shutil.move(str(thumb_file), str(final_thumb))
             final_thumbs.append(final_thumb)
 
-        logger.info(f"Phase 5 complete: video/audio moved to {final_video_dir}, {len(final_thumbs)} thumbnails moved to {final_thumb_dir}")
+        logger.info(f"Phase 10 complete: video/audio moved to {final_video_dir}, {len(final_thumbs)} thumbnails moved to {final_thumb_dir}")
 
-        # Get video duration for metadata
+        # Get final video duration for metadata
         duration_cmd = [
             ffprobe,
             "-v", "error",
@@ -2846,32 +2923,24 @@ def process_sot_video_multi_phase(
         duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, check=True)
         duration = float(duration_result.stdout.strip())
 
-        # Update database with final paths
-        from models_v2 import SOTProcessingJob
-
-        # Calculate relative paths from episodes root
-        episodes_root = media_root / "episodes"
-
         with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job:
-                job.current_phase = 'completed'
-                job.status = 'completed'
+                job.current_phase = 'phase10'
+                job.status = 'processing'
                 job.final_video_path = str(final_video.relative_to(episodes_root))
                 job.final_audio_path = str(final_audio.relative_to(episodes_root)) if final_audio else None
-                job.final_thumbnail_path = str(final_thumbs[0].relative_to(episodes_root))  # Store first thumbnail as primary
+                job.final_thumbnail_path = str(final_thumbs[0].relative_to(episodes_root)) if final_thumbs else None
                 db.commit()
 
                 # Create parent/child asset relationship if source asset exists
                 if job.source_asset_id and job.final_asset_id:
-                    # Import with sys.path - ensure /app is available in forked process
                     if '/app' not in sys.path:
                         sys.path.insert(0, '/app')
                     import models_assetid
                     AssetIDRegistry = models_assetid.AssetIDRegistry
                     AssetRelationship = models_assetid.AssetRelationship
 
-                    # Update final asset with parent reference
                     final_asset = db.query(AssetIDRegistry).filter_by(asset_id=job.final_asset_id).first()
                     if final_asset:
                         final_asset.parent_asset_id = job.source_asset_id
@@ -2880,7 +2949,6 @@ def process_sot_video_multi_phase(
                         db.commit()
                         logger.info(f"✅ Updated final asset {job.final_asset_id} with parent {job.source_asset_id}")
 
-                    # Create asset_relationship record with processing metadata
                     relationship = AssetRelationship(
                         parent_asset_id=job.source_asset_id,
                         child_asset_id=job.final_asset_id,
@@ -2903,19 +2971,17 @@ def process_sot_video_multi_phase(
         seconds = int(duration % 60)
         duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-        # Build thumbnail URLs for all 15 options (PNG format in thumbnails directory)
         thumbnail_urls = [
             f"/episodes/{episode}/assets/thumbnails/{normalized_slug}-thumb-{i:02d}.png"
             for i in range(1, 16)
         ]
 
         # ================================================================
-        # PHASE 8: Post-Analysis (verify final output)
+        # PHASE 11: Post-Analysis (verify final output)
         # ================================================================
-        logger.info(f"Phase 8: Post-analysis of final video for {temp_job_id}")
-        _update_job_status(temp_job_id, 'phase8', 'processing')
+        logger.info(f"Phase 11: Post-analysis of final video for {temp_job_id}")
+        _update_job_status(temp_job_id, 'phase11', 'processing')
 
-        # Analyze final video
         post_video_probe = subprocess.run(
             [ffprobe, "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=width,height,r_frame_rate,codec_name,bit_rate",
@@ -2940,23 +3006,21 @@ def process_sot_video_multi_phase(
                 job.post_analysis = post_analysis_data
                 db.commit()
 
-        processing_report["phases"]["phase8"] = {"status": "success", "data": post_analysis_data}
+        processing_report["phases"]["phase11"] = {"status": "success", "data": post_analysis_data}
         processing_report["overall_status"] = "completed"
-        logger.info(f"Phase 8 complete: {post_analysis_data}")
+        logger.info(f"Phase 11 complete: {post_analysis_data}")
 
         # Update cue block with final completion and all MediaURLs
         if asset_id:
-            import json
-            # Derive outcue if we have valid transcription
             final_outcue = derive_outcue(transcription_text) if transcription_text else ''
             cue_updates = {
                 'ProcessingStatus': 'Complete',
                 'MediaURL': f"/episodes/{episode}/assets/video/{normalized_slug}.mp4",
                 'ThumbnailURL': thumbnail_urls[7],  # Middle thumbnail (8/15) as primary
-                'ThumbnailOptions': json.dumps(thumbnail_urls),  # All 15 thumbnail URLs as JSON string
+                'ThumbnailOptions': json.dumps(thumbnail_urls),
                 'Duration': duration_formatted,
-                'Transcription': transcription_text or '',  # Include transcription in final cue update
-                'Outcue': final_outcue  # Last 5 words of transcription
+                'Transcription': transcription_text or '',
+                'Outcue': final_outcue
             }
             if has_audio:
                 cue_updates['AudioURL'] = f"/episodes/{episode}/assets/video/{normalized_slug}.mp3"
@@ -2969,7 +3033,7 @@ def process_sot_video_multi_phase(
                 logger.info(f"🔄 Replacing AssetID in cue: {job.source_asset_id} → {job.final_asset_id}")
                 _replace_sot_cue_asset_id(episode, job.source_asset_id, job.final_asset_id)
 
-        # Store final processing report in database and mark as completed
+        # Store final processing report and mark completed
         with db_session() as db:
             job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
             if job:
@@ -2979,7 +3043,7 @@ def process_sot_video_multi_phase(
                 db.commit()
                 logger.info(f"✅ Job {temp_job_id} marked as completed")
 
-        # Handle devel_mode: Keep or clean up working directory
+        # Handle devel_mode: keep or clean up working directory
         if devel_mode:
             logger.info(f"DEVEL MODE: Keeping working directory with intermediate files: {working_dir}")
             processing_report["intermediate_files"] = [
@@ -2987,7 +3051,6 @@ def process_sot_video_multi_phase(
             ]
         else:
             logger.info(f"Cleaning up working directory: {working_dir}")
-            import shutil
             shutil.rmtree(working_dir)
 
         logger.info(f"Multi-phase processing complete for {temp_job_id}")
@@ -2999,7 +3062,7 @@ def process_sot_video_multi_phase(
             "asset_id": asset_id,
             "video_path": str(final_video.relative_to(episodes_root)),
             "audio_path": str(final_audio.relative_to(episodes_root)) if final_audio else None,
-            "thumbnail_path": str(final_thumbs[7].relative_to(episodes_root)),  # Primary (middle) thumbnail
+            "thumbnail_path": str(final_thumbs[7].relative_to(episodes_root)) if len(final_thumbs) > 7 else (str(final_thumbs[0].relative_to(episodes_root)) if final_thumbs else None),
             "thumbnail_options": [str(t.relative_to(episodes_root)) for t in final_thumbs],
             "duration": duration,
             "transcription": transcription_text,
@@ -3011,20 +3074,170 @@ def process_sot_video_multi_phase(
         }
 
     except subprocess.CalledProcessError as e:
-        # CRITICAL FIX: Properly extract FFmpeg stderr for debugging
-        # stderr is bytes when capture_output=True without text=True
         if hasattr(e, 'stderr') and e.stderr:
             stderr_text = e.stderr.decode('utf-8', errors='replace') if isinstance(e.stderr, bytes) else str(e.stderr)
         else:
             stderr_text = f"Exit code {e.returncode}"
-        error_msg = f"FFmpeg error in phase {self.request.retries + 1}: {stderr_text}"
+        error_msg = f"FFmpeg error in sot_finalize: {stderr_text}"
         logger.error(error_msg)
-        _update_job_status(temp_job_id, f"phase{self.request.retries + 1}", 'failed', error_msg)
+        _update_job_status(temp_job_id, 'phase11', 'failed', error_msg)
         raise
     except Exception as e:
-        error_msg = f"Unexpected error: {str(e)}"
+        error_msg = f"sot_finalize error: {str(e)}"
         logger.error(error_msg)
         _update_job_status(temp_job_id, 'unknown', 'failed', error_msg)
+        raise
+
+
+@shared_task(
+    bind=True,
+    queue='media',
+    name='services.ffmpeg_tasks.process_sot_video_multi_phase',
+    max_retries=3,
+    soft_time_limit=1800,      # Warn at 30 minutes
+    time_limit=2400,           # Hard kill at 40 minutes
+    acks_late=True,            # Don't ack until task completes
+    reject_on_worker_lost=True  # Reject task if worker dies
+)
+def process_sot_video_multi_phase(
+    self,
+    temp_job_id: str,
+    episode: str,
+    slug: str,
+    trim_start: str = "00:00:00",
+    trim_end: str = "00:00:00",
+    job_type: str = "full_process",
+    clips: list = None,
+    asset_id: str = None,
+    devel_mode: bool = False
+):
+    """
+    Orchestrator for SOT video processing.
+
+    For montage / individual_clips this delegates to the existing helpers
+    (unchanged). For single_trim / full_process it builds and fires a Celery
+    CHAIN of three tasks so transcription runs as a real chain LINK on the
+    whisper queue — NO `.get()` inside a task:
+
+        chain(sot_prepare.s(...), transcribe_sot_audio.s(), sot_finalize.s())
+
+    CORRECTED PHASE ORDER (trim moved EARLY; integers 1-11):
+    - Phase 1:  Validate upload                (sot_prepare,        media)
+    - Phase 2:  Probe source (raw, sanity)     (sot_prepare,        media)
+    - Phase 3:  Trim (no-op if not requested)  (sot_prepare,        media)
+    - Phase 4:  Transcribe TRIMMED audio       (transcribe_sot_audio, whisper)
+    - Phase 5:  Analyze trimmed clip           (sot_finalize,       media)
+    - Phase 6:  Normalize video                (sot_finalize,       media)
+    - Phase 7:  Fix audio channels             (sot_finalize,       media)
+    - Phase 8:  Normalize loudness (EBU R128)  (sot_finalize,       media)
+    - Phase 9:  Derivatives (thumbnails + MP3) (sot_finalize,       media)
+    - Phase 10: Move to assets                 (sot_finalize,       media)
+    - Phase 11: Post-analysis verify           (sot_finalize,       media)
+
+    Args:
+        temp_job_id: Temporary job ID (e.g., "sot_20251011_143022_abc123")
+        episode: Episode number (e.g., "0245")
+        slug: Item slug for final naming
+        trim_start: Start time for trimming (HH:MM:SS)
+        trim_end: End time for trimming (HH:MM:SS)
+        job_type: Processing workflow (single_trim, individual_clips, montage, full_process)
+        clips: Array of clip objects for individual_clips/montage modes
+        asset_id: AssetID for linking to cue block
+        devel_mode: If True, keep all intermediate files and return paths in payload
+
+    Returns:
+        For single_trim/full_process: a dict {"chain_id": <AsyncResult id>, ...}
+        describing the dispatched chain (the chain runs asynchronously, so the
+        final result dict is produced by sot_finalize, not returned here).
+        For montage/individual_clips: the existing synchronous return value.
+    """
+    from celery import chain
+
+    # Cross-platform working directory (used only for the montage/individual paths)
+    shared_media_root = _resolve_shared_media_root()
+    working_dir = shared_media_root / "preproc" / "working" / temp_job_id
+    normalized_slug = _normalize_slug(slug)
+
+    worker_name = platform.node()
+    worker_platform = platform.system()
+
+    try:
+        logger.info(f"\U0001F3AC Orchestrating SOT processing on {worker_name} ({worker_platform}) for {temp_job_id} (job_type: {job_type}, devel_mode: {devel_mode})")
+
+        import json
+        from models_v2 import SOTProcessingJob
+
+        # Update job record with job_type and clips_data
+        with db_session() as db:
+            job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+            if job:
+                job.job_type = job_type
+                if clips:
+                    job.clips_data = json.dumps(clips)
+                db.commit()
+
+        # Route to appropriate processing workflow based on job_type
+        if job_type == "individual_clips":
+            logger.info(f"Executing INDIVIDUAL_CLIPS workflow for {temp_job_id} with {len(clips or [])} clips")
+            # DEPRECATED path — left UNCHANGED.
+            return _process_individual_clips(
+                temp_job_id, episode, slug, clips, asset_id, working_dir, normalized_slug
+            )
+        elif job_type == "montage":
+            logger.info(f"Executing MONTAGE workflow for {temp_job_id} with {len(clips or [])} clips")
+            # Montage path — left UNCHANGED (trim-correct upstream).
+            return _process_montage(
+                temp_job_id, episode, slug, clips, asset_id, working_dir, normalized_slug
+            )
+
+        # single_trim / full_process → fire the 3-link chain.
+        logger.info(f"Executing {job_type.upper()} workflow for {temp_job_id} via Celery chain")
+        pipeline = chain(
+            sot_prepare.s(
+                temp_job_id=temp_job_id,
+                episode=episode,
+                slug=slug,
+                trim_start=trim_start,
+                trim_end=trim_end,
+                job_type=job_type,
+                asset_id=asset_id,
+                devel_mode=devel_mode,
+            ),
+            transcribe_sot_audio.s(),
+            sot_finalize.s(),
+        )
+        async_result = pipeline.apply_async()
+        chain_id = async_result.id
+        logger.info(f"\u2705 Dispatched SOT chain {chain_id} for {temp_job_id}")
+
+        # Record the chain's terminal task id on the job for traceability.
+        try:
+            with db_session() as db:
+                job = db.query(SOTProcessingJob).filter_by(temp_job_id=temp_job_id).first()
+                if job:
+                    job.celery_task_id = chain_id
+                    job.status = 'processing'
+                    job.current_phase = 'phase1'
+                    db.commit()
+        except Exception as track_err:
+            logger.warning(f"Could not record chain id on job {temp_job_id}: {track_err}")
+
+        return {
+            "temp_job_id": temp_job_id,
+            "episode": episode,
+            "slug": normalized_slug,
+            "asset_id": asset_id,
+            "job_type": job_type,
+            "chain_id": chain_id,
+            "status": "dispatched",
+            "message": "SOT processing chain dispatched (sot_prepare → transcribe_sot_audio → sot_finalize)",
+            "devel_mode": devel_mode,
+        }
+
+    except Exception as e:
+        error_msg = f"Failed to dispatch SOT processing chain: {str(e)}"
+        logger.error(error_msg)
+        _update_job_status(temp_job_id, 'phase1', 'failed', error_msg)
         raise
 
 

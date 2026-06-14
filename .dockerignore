@@ -1,0 +1,57 @@
+# Worker/app image build context excludes.
+# The worker flavors only need ./app, ./app/requirements.txt, and ./tools.
+# Everything else is noise (and disaffected-ui/ssl/*.pem is root-only -> read error).
+
+# Frontend — never part of a backend/worker image
+disaffected-ui/
+
+# VCS + IDE
+.git/
+.github/
+.vscode/
+.idea/
+
+# Secrets / keys / env (never bake into an image)
+**/*.pem
+**/*.key
+.env
+.env.*
+.cloudflare-token
+**/.cloudflare-token
+
+# Python caches / build artifacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+# Archives, dumps, local scratch
+archive/
+**/*.dump
+**/*.sql.gz
+**/*.bundle
+today.md
+showtime-*.md
+
+# Node (in case any sneaks in)
+**/node_modules/
+
+# Docker/compose meta (not needed inside image)
+docker-compose*.yml
+deploy/*
+# ...but the worker entrypoint IS copied into worker images:
+!deploy/workers/worker-entrypoint.sh
+
+# Logs + dbs
+**/*.log
+**/*.sqlite
+**/*.db
+
+# Runtime sockets / control files (gunicorn .ctl etc.) — tar can't add sockets
+**/*.ctl
+**/*.sock
+gunicorn.ctl

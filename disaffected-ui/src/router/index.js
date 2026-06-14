@@ -74,6 +74,19 @@ const routes = [
     props: true,
     meta: { requiresAuth: true }
   },
+  // Dev-only: ScriptEditor (TipTap migration) harness — not linked from nav.
+  {
+    path: '/dev/script-editor',
+    name: 'dev-script-editor',
+    component: () => import('@/views/DevScriptEditorView.vue')
+  },
+  // Development > Wireframes (admin-only). Index of interactive region maps.
+  {
+    path: '/dev/wireframes',
+    name: 'dev-wireframes',
+    component: () => import('@/views/WireframesView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
   // Add new routes for other sections
   {
     path: '/assets',

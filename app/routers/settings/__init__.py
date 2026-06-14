@@ -11,6 +11,8 @@ from .media_paths_router import router as media_paths_router
 from .interface_router import router as interface_router
 from .system_router import router as system_router
 from .llm_identity_router import router as llm_identity_router
+from .workers_router import router as workers_router
+from .tools_config_router import router as tools_config_router
 
 # Re-export shared utilities for backward compatibility
 from ._shared import (
@@ -28,3 +30,5 @@ router.include_router(media_paths_router)
 router.include_router(interface_router)
 router.include_router(system_router)
 router.include_router(llm_identity_router)
+router.include_router(workers_router)
+router.include_router(tools_config_router)

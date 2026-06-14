@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from celery import shared_task, current_task
+from services.cue_extractor import CUE_BLOCK_RE
 
 logger = logging.getLogger(__name__)
 
@@ -409,9 +410,8 @@ def _validate_cue_blocks(script_content: str) -> List[Dict[str, Any]]:
     """Validate cue blocks in script content."""
     issues = []
 
-    # Find cue blocks
-    cue_pattern = r'<!-- Begin Cue -->(.*?)<!-- End Cue -->'
-    cue_blocks = re.findall(cue_pattern, script_content, re.DOTALL)
+    # Find cue blocks (expanded + collapsed; group 1 = cue body).
+    cue_blocks = CUE_BLOCK_RE.findall(script_content)
 
     for idx, block in enumerate(cue_blocks):
         # Check for required fields based on cue type

@@ -69,6 +69,21 @@ export function useTrimmableMediaModal(options = {}) {
   const remainingTimecode = ref('00:00:00:00')
   const duration = ref('') // user-entered duration string (legacy)
 
+  // Reactive playback position in seconds. The raw <video>.currentTime is NOT
+  // reactive, so the waveform playhead must bind to this ref. It is driven by a
+  // requestAnimationFrame loop while playing (smooth ~60fps) and updated on
+  // timeupdate/seek/step while paused. See startPlayheadLoop / updateTimecode.
+  const currentTimeSec = ref(0)
+  let playheadRafId = null
+
+  // Reactive media duration in seconds. Like currentTime, the raw <video>.duration
+  // is NOT reactive — the waveform's in/out markers and region are positioned as
+  // (point / duration), so binding duration to the raw DOM property leaves them at
+  // 0 (markers hidden / region undrawn) until an unrelated re-render. The OUT-point
+  // marker in particular never appeared because of this. Set on metadata load and
+  // in updateTimecode().
+  const durationSec = ref(0)
+
   // Preview-mode interval (auto-stop at OUT point)
   const previewInterval = ref(null)
 
@@ -443,15 +458,50 @@ export function useTrimmableMediaModal(options = {}) {
     if (!v) return
     const cur = v.currentTime || 0
     const dur = v.duration || 0
+    currentTimeSec.value = cur
+    if (Number.isFinite(dur)) durationSec.value = dur
     currentTimecode.value = secondsToTimecode(cur)
     durationTimecode.value = secondsToTimecode(dur)
     remainingTimecode.value = secondsToTimecode(Math.max(0, dur - cur))
+  }
+
+  // requestAnimationFrame loop that keeps currentTimeSec (and the timecode
+  // readouts) updating smoothly while the video plays. The native timeupdate
+  // event only fires ~4×/sec, which makes the waveform playhead visibly stutter
+  // / appear frozen — this drives it per animation frame instead.
+  function _playheadTick() {
+    const v = videoPlayerRef.value
+    if (!v || v.paused) {
+      playheadRafId = null
+      return
+    }
+    updateTimecode()
+    playheadRafId = requestAnimationFrame(_playheadTick)
+  }
+
+  function startPlayheadLoop() {
+    if (playheadRafId != null) return
+    playheadRafId = requestAnimationFrame(_playheadTick)
+  }
+
+  function stopPlayheadLoop() {
+    if (playheadRafId != null) {
+      cancelAnimationFrame(playheadRafId)
+      playheadRafId = null
+    }
+    // One final sync so the playhead lands exactly where playback stopped.
+    updateTimecode()
   }
 
   function updatePlayPauseState() {
     const v = videoPlayerRef.value
     if (!v) return
     isPlaying.value = !v.paused
+    if (v.paused) {
+      stopPlayheadLoop()
+    } else {
+      startPlayheadLoop()
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -459,6 +509,10 @@ export function useTrimmableMediaModal(options = {}) {
   // ---------------------------------------------------------------------------
 
   onBeforeUnmount(() => {
+    if (playheadRafId != null) {
+      cancelAnimationFrame(playheadRafId)
+      playheadRafId = null
+    }
     if (previewInterval.value) {
       clearInterval(previewInterval.value)
       previewInterval.value = null
@@ -485,6 +539,8 @@ export function useTrimmableMediaModal(options = {}) {
     currentFramerate,
     isPlaying,
     currentTimecode,
+    currentTimeSec,
+    durationSec,
     durationTimecode,
     remainingTimecode,
     previewInterval,

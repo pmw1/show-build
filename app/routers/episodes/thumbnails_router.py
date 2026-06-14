@@ -77,7 +77,8 @@ async def get_episode_thumbnails(episode_number: str) -> Dict[str, Any]:
 @router.post("/{episode_number}/thumbnail/convert-to-png")
 async def convert_thumbnail_to_png(
     episode_number: str,
-    request: ConvertThumbnailRequest
+    request: ConvertThumbnailRequest,
+    db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Dispatch a Celery task to convert a non-PNG thumbnail to PNG format.
 
@@ -111,6 +112,15 @@ async def convert_thumbnail_to_png(
             args=[str(source_path), episode_num],
             queue='assets'
         )
+
+        try:
+            from celery_jobs_router import register_celery_job
+            register_celery_job(
+                db, task.id, 'services.asset_processing.convert_thumbnail_to_png',
+                f"Thumbnail → PNG: {source_path.name}", "thumbnail", episode_num, "assets"
+            )
+        except Exception as reg_err:
+            logger.warning(f"Could not register thumbnail conversion job in ledger: {reg_err}")
 
         logger.info(f"Dispatched thumbnail PNG conversion: {source_path.name} -> task {task.id}")
 

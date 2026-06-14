@@ -139,7 +139,8 @@ def generate_fsq_png(
     max_attribution_size: int = None,
     duration: str = '00:00:05:00',
     enumerator: str = None,
-    priority: str = 'normal'
+    priority: str = 'normal',
+    existing_media_url: str = None
 ):
     """
     Generate FSQ (Full Screen Quote) PNG asset using Celery background processing.
@@ -170,6 +171,8 @@ def generate_fsq_png(
         duration: Timecode duration
         enumerator: Optional enumerator prefix for filename (e.g., "10_05")
         priority: Task priority ('high', 'normal', 'low') - affects queue routing
+        existing_media_url: When set (cue already has a PNG), render to that exact
+            file to overwrite in place instead of minting a new slug-based name.
 
     Returns:
         dict: Generation results with asset_path and asset_url
@@ -258,17 +261,51 @@ def generate_fsq_png(
 
         renderer = FSQPNGRenderer(**renderer_kwargs)
 
-        # Build output filename
-        clean_slug = slug.lower().replace(' ', '-').replace('_', '-')
-        # Remove any non-alphanumeric characters except hyphens
-        clean_slug = re.sub(r'[^\w\-]', '', clean_slug)
+        # Output path resolution.
+        #
+        # REGENERATE-IN-PLACE: if the cue already has a rendered PNG, the
+        # frontend hands us its existing media URL. We render to that exact
+        # file so the regenerate OVERWRITES it — no slug-renamed orphan, and
+        # the cue's stored mediaUrl never has to change. The asset URL is
+        # always "/episodes/{path-relative-to-episodes_root}", so we reverse
+        # that mapping. A path-traversal guard keeps the resolved file inside
+        # this episode's quotes/ dir; if anything looks off we fall through to
+        # fresh naming rather than writing somewhere unexpected.
+        output_path = None
+        if existing_media_url:
+            try:
+                rel = existing_media_url.split('?', 1)[0]  # drop cache-buster
+                rel = rel.lstrip('/')
+                if rel.startswith('episodes/'):
+                    rel = rel[len('episodes/'):]
+                candidate = (path_manager.episodes_root / rel).resolve()
+                if str(candidate).startswith(str(assets_dir.resolve()) + '/') \
+                        and candidate.suffix.lower() == '.png':
+                    output_path = candidate
+                    logger.info(f"   ♻️  Regenerate-in-place → {output_path}")
+                else:
+                    logger.warning(
+                        f"   ⚠️ existing_media_url {existing_media_url!r} resolved "
+                        f"outside quotes dir ({candidate}); using fresh name"
+                    )
+            except Exception as url_err:
+                logger.warning(f"   ⚠️ Could not resolve existing_media_url "
+                               f"{existing_media_url!r}: {url_err}; using fresh name")
 
-        if enumerator:
-            output_filename = f"{enumerator}-{clean_slug}.png"
-        else:
-            output_filename = f"fsq_{clean_slug}.png"
+        if output_path is None:
+            # Fresh name (first-time generation or unresolvable existing URL)
+            clean_slug = slug.lower().replace(' ', '-').replace('_', '-')
+            # Remove any non-alphanumeric characters except hyphens
+            clean_slug = re.sub(r'[^\w\-]', '', clean_slug)
 
-        output_path = assets_dir / output_filename
+            if enumerator:
+                output_filename = f"{enumerator}-{clean_slug}.png"
+            else:
+                output_filename = f"fsq_{clean_slug}.png"
+
+            output_path = assets_dir / output_filename
+
+        output_filename = output_path.name
 
         # Update progress
         self.update_state(
@@ -511,10 +548,17 @@ def generate_gfx_png(
         # Title-body gap scales with the same spacing slider but a bit
         # larger so the title still feels separated from the body.
         title_body_gap = int(scaled_font_size * (ls_pct + 20) / 100) if title_lines else 0
+        # Height of a blank line (empty paragraph) — an empty string measures to
+        # zero height, so fall back to the font's natural line height so user
+        # blank lines render as real vertical space.
+        _empty_bbox = draw.textbbox((0, 0), 'Ag', font=body_font)
+        empty_line_h = _empty_bbox[3] - _empty_bbox[1]
+
         body_block_h = 0
         for line in body_lines:
             bbox = draw.textbbox((0, 0), line, font=body_font)
-            body_block_h += (bbox[3] - bbox[1]) + line_gap
+            lh = (bbox[3] - bbox[1]) if line else empty_line_h
+            body_block_h += lh + line_gap
         total_block_h = title_block_h + title_body_gap + body_block_h
 
         # Clamp vertical_offset to [-40, 40] so callers can't shove text
@@ -548,7 +592,9 @@ def generate_gfx_png(
         for line in body_lines:
             bbox = draw.textbbox((0, 0), line, font=body_font)
             line_width = bbox[2] - bbox[0]
-            line_height = bbox[3] - bbox[1]
+            # Blank lines have zero measured height — advance by the font's
+            # natural line height so they show as real empty lines.
+            line_height = (bbox[3] - bbox[1]) if line else empty_line_h
 
             if text_align == 'center':
                 x = (width - line_width) // 2
@@ -688,7 +734,14 @@ def convert_thumbnail_to_png(self, source_path: str, episode_id: str):
 
 def _wrap_text(text: str, font, max_width: int, draw) -> list:
     """
-    Wrap text to fit within max_width.
+    Wrap text to fit within max_width, RESPECTING explicit line breaks.
+
+    The input may contain hard line breaks as real newlines ('\\n') or as the
+    two-character escape sequence ('\\\\n') — the editor stores them escaped and
+    only some call paths un-escape before reaching here. We normalize both, then
+    split on hard breaks FIRST and word-wrap each paragraph independently, so a
+    user's deliberate line returns are preserved in the rendered PNG instead of
+    being collapsed by str.split().
 
     Args:
         text: Text to wrap
@@ -697,25 +750,36 @@ def _wrap_text(text: str, font, max_width: int, draw) -> list:
         draw: ImageDraw object for measuring
 
     Returns:
-        List of wrapped lines
+        List of wrapped lines (including blank lines for empty paragraphs)
     """
-    words = text.split()
+    if not text:
+        return ['']
+
+    # Normalize escaped newlines and carriage returns to real '\n'.
+    normalized = text.replace('\\n', '\n').replace('\r\n', '\n').replace('\r', '\n')
+
     lines = []
-    current_line = []
+    for paragraph in normalized.split('\n'):
+        # Preserve intentional blank lines (empty paragraph = one blank line).
+        words = paragraph.split()
+        if not words:
+            lines.append('')
+            continue
 
-    for word in words:
-        test_line = ' '.join(current_line + [word])
-        bbox = draw.textbbox((0, 0), test_line, font=font)
-        line_width = bbox[2] - bbox[0]
+        current_line = []
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            line_width = bbox[2] - bbox[0]
 
-        if line_width <= max_width:
-            current_line.append(word)
-        else:
-            if current_line:
-                lines.append(' '.join(current_line))
-            current_line = [word]
+            if line_width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                current_line = [word]
 
-    if current_line:
-        lines.append(' '.join(current_line))
+        if current_line:
+            lines.append(' '.join(current_line))
 
     return lines if lines else ['']

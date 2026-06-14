@@ -209,29 +209,246 @@ Return ONLY the title:`
   },
 
   'slug-generator': {
-    version: '1.0',
-    description: 'Generates URL-safe slugs from titles or content',
-    lastModified: '2025-10-09',
-    temperature: 0.1,
-    maxTokens: 50,
-    systemPrompt: 'You are a slug generator. Create lowercase, hyphenated identifiers.',
+    version: '2.0',
+    description: 'Generates a short broadcast slug (2-4 words) for a segment from its title + script body. If the current slug is 5+ words it is included so the model shortens it.',
+    lastModified: '2026-06-06',
+    temperature: 0.3,
+    maxTokens: 500,
+    systemPrompt: '',
 
+    // Mirrors the backend default in app/services/slug_gen_service.py
+    // (DEFAULT_SLUG_PROMPT). Keep them in sync. Variables: show_name,
+    // segment_title, segment_content, has_long_slug (bool), long_slug.
     template: (params) => {
-      const { text, maxLength = 50 } = params
+      const showName = params.show_name || 'Disaffected'
+      const title = params.segment_title || ''
+      const content = params.segment_content || ''
+      const longBlock = params.has_long_slug
+        ? `The current slug is too long for broadcast: "${params.long_slug || ''}"\nGenerate a SHORTER replacement.\n`
+        : ''
+      return `You are naming a broadcast segment with a short slug for a rundown.
 
-      return `Generate a URL-safe slug from this text.
+Show: ${showName}
+Segment title: ${title}
+${longBlock}Segment content:
+${content}
+
+Write a slug that:
+- is 2 to 4 words MAX (prefer 2 or 3 words),
+- captures the core topic of the segment,
+- is broadcast-friendly and easy to say,
+- contains no punctuation other than spaces between words.
+
+Output ONLY the slug words, nothing else. No quotes, no preamble, no explanation.
+/no_think`
+    }
+  },
+
+  // ========================================
+  // Segment / Script Generation Prompts
+  // ========================================
+  // These power the Ctrl+Alt+Shift+[1-9] "generate N paragraphs into the
+  // current segment" feature (ContentEditor.generateTestSegment). The keypress
+  // number is the {paragraphs} param. Editable + overridable via the Prompt
+  // Manager (category 'generate'); the templates below are the default fallback.
+  // Variables: paragraphs, duration, segmentType, upcomingSegments.
+
+  'generate-segment-script': {
+    version: '1.0',
+    description: 'Generates a standard podcast segment of N paragraphs for the current rundown item (Ctrl+Alt+Shift+N).',
+    lastModified: '2026-06-06',
+    temperature: 0.7,
+    maxTokens: 2000,
+    systemPrompt: 'You are a broadcast script writer. Write naturally and conversationally.',
+    template: (params) => {
+      const { paragraphs = 3, duration = '3', slug = '', title = '', currentScript = '', otherSegments = '' } = params
+      const titleLine = title ? `\nSegment title: ${title}` : ''
+      const slugLine = slug ? `\nSegment slug: ${slug}` : ''
+      const currentBlock = currentScript
+        ? `\n\nThis segment's current script (continue/expand it; do not repeat it verbatim):\n${currentScript}`
+        : ''
+      return `RUNDOWN ITEM TYPE DEFINITIONS:
+- Cold Open: Opening hook before any intro/music. Grabs attention instantly. 30-90 seconds.
+- Tease: Preview of upcoming segments. Builds curiosity. Brief and energetic.
+- Segment: Main content blocks. In-depth discussion, analysis, storytelling. Conversational. 5-15 minutes.
+
+YOU ARE WRITING: SEGMENT${titleLine}${slugLine}
+
+Write a ${duration}-minute podcast segment for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).${currentBlock}${otherSegments}
+
+Write ${paragraphs} paragraphs.
+
+Style requirements:
+- Speak directly to podcast listeners in a conversational, engaging tone
+- Use real psychological concepts but fictional case examples
+- Include specific manipulation tactics (gaslighting, love-bombing, triangulation, DARVO, hoovering)
+- Reference clinical patterns while remaining accessible
+- Maintain journalistic credibility and empathy for victims
+- DO NOT use real names or identify real cases
+
+CRITICAL FORMATTING:
+- Separate each paragraph with TWO newlines (blank line between paragraphs)
+- Plain paragraph text, ready to paste into script. No titles, no metadata.
+
+DO NOT include any introductory text like "Here is the podcast segment" - start IMMEDIATELY with the first paragraph of actual content.
+
+Generate the segment now:`
+    }
+  },
+
+  'generate-tease-script': {
+    version: '1.0',
+    description: 'Generates a tease/preview of N paragraphs that previews upcoming segments (Ctrl+Alt+Shift+N on a tease).',
+    lastModified: '2026-06-06',
+    temperature: 0.7,
+    maxTokens: 2000,
+    systemPrompt: 'You are a broadcast script writer. Write naturally and conversationally.',
+    template: (params) => {
+      const { paragraphs = 3, duration = '1', upcomingSegments = '', otherSegments = '', title = '' } = params
+      const titleLine = title ? ` (titled "${title}")` : ''
+      // Prefer the tease-specific upcoming list; fall back to the full other-segments list.
+      const context = upcomingSegments || otherSegments
+      return `YOU ARE WRITING: TEASE${titleLine}
+
+Write a ${duration}-minute podcast tease/preview for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).
+
+This tease should hook listeners and preview what's coming up in the show.${context}
+
+Write ${paragraphs} short, punchy paragraphs that build anticipation.
+
+Style requirements:
+- Create urgency and intrigue
+- Tease topics without spoiling details
+- Use vivid, compelling language
+- Keep it brief and energetic
+
+CRITICAL FORMATTING:
+- Separate each paragraph with TWO newlines (blank line between paragraphs)
+- Plain paragraph text, ready to paste into script. No titles, no metadata.
+
+DO NOT include any introductory text like "Here is the tease" - start IMMEDIATELY with the first paragraph of actual content.
+
+Generate the tease now:`
+    }
+  },
+
+  'generate-coldopen-script': {
+    version: '1.0',
+    description: 'Generates a cold-open hook of N paragraphs for the current rundown item (Ctrl+Alt+Shift+N on a cold open).',
+    lastModified: '2026-06-06',
+    temperature: 0.8,
+    maxTokens: 2000,
+    systemPrompt: 'You are a broadcast script writer. Write naturally and conversationally.',
+    template: (params) => {
+      const { paragraphs = 2, duration = '1', otherSegments = '', title = '' } = params
+      const titleLine = title ? ` (titled "${title}")` : ''
+      return `YOU ARE WRITING: COLD OPEN${titleLine}
+
+Write a ${duration}-minute cold open for a true crime podcast that examines manipulation tactics and abuse dynamics common to Cluster B personality disorders (narcissistic, borderline, antisocial, histrionic).
+
+A cold open should immediately grab attention with a compelling hook - a powerful question, shocking statement, or intriguing scenario.${otherSegments}
+
+Write ${paragraphs} paragraphs.
+
+Style requirements:
+- Start with maximum impact - hook listeners instantly
+- Create immediate tension or curiosity
+- Use vivid, cinematic language
+- Set the tone for the episode
+- Don't explain everything - leave them wanting more
+
+CRITICAL FORMATTING:
+- Separate each paragraph with TWO newlines (blank line between paragraphs)
+- Plain paragraph text, ready to paste into script. No titles, no metadata.
+
+DO NOT include any introductory text - start IMMEDIATELY with the hook.
+
+Generate the cold open now:`
+    }
+  },
+
+  // ========================================
+  // Multi-select "Modify with AI" Prompt
+  // ========================================
+  // Powers the multi-select toolbar's Modify with AI. The whole script is sent
+  // as context (line-numbered) but only the SELECTED lines are modified per the
+  // user's instruction/quick-action; the model returns the FULL reworked script
+  // which replaces the current one (one undo step). Editable/overridable via the
+  // Prompt Manager (category 'modify'). Variables: fullSegment, selectedText,
+  // selectedLineNumbers, instruction.
+  'modify-blocks': {
+    version: '2.0',
+    description: 'Rewrite ONLY the selected lines of a script per an instruction, returned per-line (keyed by line number) so each becomes a revision proposal. Powers multi-select Modify with AI.',
+    lastModified: '2026-06-06',
+    temperature: 0.5,
+    maxTokens: 4000,
+    systemPrompt: 'You are a careful broadcast script editor. You rewrite ONLY the specified lines per the instruction and return each rewritten line keyed by its line number.',
+    template: (params) => {
+      const { fullSegment = '', selectedText = '', selectedLineNumbers = '', instruction = '' } = params
+      return `You are editing a broadcast script. Below is the FULL script with line numbers (for context only), then the SELECTED lines to rewrite, then the instruction.
+
+Rewrite ONLY the selected lines per the instruction. Use the full script for context but DO NOT change or output any non-selected line.
+
+INSTRUCTION: ${instruction}
+
+FULL SCRIPT (line-numbered, for context only):
+${fullSegment}
+
+SELECTED LINES TO REWRITE (lines ${selectedLineNumbers}):
+${selectedText}
+
+OUTPUT FORMAT — return ONE line per selected line, each prefixed with its line
+number in square brackets, exactly like the input numbering:
+[12] the rewritten text for line 12
+[13] the rewritten text for line 13
 
 Rules:
-- Lowercase only
-- Hyphens for spaces
-- No special characters
-- Maximum ${maxLength} characters
-- No leading/trailing hyphens
-
-Text: "${text}"
-
-Return ONLY the slug:`
+- Output ONLY the selected lines (the ones listed above), each on its own line, prefixed with [number].
+- Keep the SAME line numbers as the input — do not renumber, add, or drop lines.
+- A line may already be correct/fine for the instruction. If a line needs NO
+  change, return it EXACTLY as it is now (verbatim). Do NOT invent changes just
+  to have something to return — an unchanged line is a valid, expected answer.
+- No commentary, no preamble, no blank lines between entries, no code fences.
+- If a selected line should become empty, output its number with empty text (e.g. "[14] ").`
     }
+  },
+
+  // ── Modify-with-AI quick actions ──────────────────────────────────────────
+  // Each quick-action button (Check grammar / spelling / Shorten / ...) is its
+  // own overridable operation here: its template returns the INSTRUCTION STRING
+  // (no params) that the modal feeds into modify-blocks as {instruction}. So an
+  // admin can view/override exactly what each button tells the LLM, in the
+  // Prompt Manager (category 'modify'). Each instruction explicitly PERMITS
+  // "leave it unchanged if it's already fine" so the LLM doesn't force edits.
+  'modify-grammar': {
+    version: '1.0', description: 'Quick action: fix grammar/punctuation only.',
+    lastModified: '2026-06-06', temperature: 0.3, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Fix grammar and punctuation in the selected lines WITHOUT changing the meaning or voice. If a line is already grammatically correct, leave it exactly as-is — do not rephrase or "improve" lines that are already fine.',
+  },
+  'modify-spelling': {
+    version: '1.0', description: 'Quick action: correct spelling only.',
+    lastModified: '2026-06-06', temperature: 0.2, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Correct ONLY spelling mistakes in the selected lines. Do not change wording, grammar, tone, or meaning. If a line has no misspellings, return it exactly as-is.',
+  },
+  'modify-shorten': {
+    version: '1.0', description: 'Quick action: shorten/tighten.',
+    lastModified: '2026-06-06', temperature: 0.5, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Shorten and tighten the selected lines while preserving their meaning and voice. If a line is already as concise as it can be, leave it unchanged.',
+  },
+  'modify-expand': {
+    version: '1.0', description: 'Quick action: expand/elaborate.',
+    lastModified: '2026-06-06', temperature: 0.7, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Expand and elaborate on the selected lines, adding detail while keeping the same voice. If a line is already sufficiently detailed, leave it unchanged.',
+  },
+  'modify-tone': {
+    version: '1.0', description: 'Quick action: more conversational broadcast tone.',
+    lastModified: '2026-06-06', temperature: 0.6, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Rewrite the selected lines in a more conversational, engaging broadcast tone. If a line already reads well in that tone, leave it unchanged.',
+  },
+  'modify-stub': {
+    version: '1.0', description: 'Quick action: replace with a placeholder stub/outline.',
+    lastModified: '2026-06-06', temperature: 0.5, maxTokens: 4000, systemPrompt: '',
+    template: () => 'Replace the selected lines with a brief placeholder stub/outline — a short skeleton of what this section should cover — for the writer to fill in later.',
   },
 
   // ========================================
@@ -428,6 +645,14 @@ export async function getLLMPrompt(promptId, params = {}, options = {}) {
         })
         result.prompt = customPrompt
       }
+
+      // Propagate the override's model parameters so callers actually honor the
+      // temperature / max_tokens / model the user set in the Prompt Manager.
+      // (== null check: 0 is a valid temperature, so only skip null/undefined.)
+      if (override.temperature != null) result.temperature = override.temperature
+      if (override.max_tokens != null) result.maxTokens = override.max_tokens
+      if (override.suggested_service) result.suggestedService = override.suggested_service
+      if (override.suggested_model) result.suggestedModel = override.suggested_model
 
       result.overridden = true
       result.overrideId = override.id

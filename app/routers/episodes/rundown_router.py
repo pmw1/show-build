@@ -47,6 +47,55 @@ async def regenerate_description(
         raise HTTPException(status_code=500, detail=f"Regeneration failed: {str(e)}")
 
 
+@router.post("/generate-slug")
+async def generate_slug_endpoint(
+    payload: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Generate a short broadcast slug (2-4 words) for a segment from its title +
+    script body. If the existing slug is 5+ words it is included so the model
+    shortens it. Runs inline so the caller gets the new slug back directly.
+    """
+    asset_id = payload.get('asset_id')
+    if not asset_id:
+        raise HTTPException(status_code=400, detail="asset_id is required")
+    try:
+        from services.slug_gen_service import _generate_slug_core
+        from database import SessionLocal
+        _db = SessionLocal()
+        try:
+            slug = _generate_slug_core(_db, asset_id)
+        finally:
+            _db.close()
+        return {"slug": slug}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Slug generation failed for {asset_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Slug generation failed: {str(e)}")
+
+
+@router.post("/regenerate-slug")
+async def regenerate_slug_endpoint(
+    payload: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Regenerate a segment slug with user feedback, using the full slug history."""
+    asset_id = payload.get('asset_id')
+    previous_slug = payload.get('previous_slug', '')
+    feedback = payload.get('feedback', '')
+    if not asset_id:
+        raise HTTPException(status_code=400, detail="asset_id is required")
+    try:
+        from services.slug_gen_service import regenerate_slug
+        return regenerate_slug(asset_id, previous_slug, feedback)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Slug regeneration failed for {asset_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Slug regeneration failed: {str(e)}")
+
+
 @router.post("/rundown/{episode_number}/reorder")
 async def reorder_rundown(
     episode_number: str,
@@ -429,6 +478,19 @@ async def update_rundown_item(
             new_script = item_data['script_content']
             existing_script = item.script_content or ''
 
+            # Server-side Autoscrub: normalize the focused item as it lands
+            # (strip span/div cruft, clean whitespace, flag invalid cues, etc).
+            # This is the "scrub on save" slice — safe because the edit is done.
+            # See docs/AUTOSCRUB_SERVER_REFACTOR_PLAN.md.
+            try:
+                from services.script_scrub_service import scrub_script_content, load_scrub_settings
+                _scrub = scrub_script_content(new_script or '', load_scrub_settings())
+                if _scrub.changed:
+                    new_script = _scrub.content
+                    logger.info(f"Autoscrub normalized {item_id} on save: {', '.join(_scrub.notes)}")
+            except Exception as _e:
+                logger.warning(f"Autoscrub skipped for {item_id}: {_e}")
+
             # Calculate content lengths (strip HTML tags)
             import re
             new_content_length = len(re.sub(r'<[^>]+>', '', new_script or '').strip())
@@ -759,6 +821,46 @@ async def save_rundown_items(
                     # CRITICAL: Only update script_content if explicitly provided
                     # Frontend sends script only for currently edited item
                     if 'script' in item_data:
+                        # SINGLE-WRITER LOCK ENFORCEMENT (todo #41): a script-content
+                        # write is only allowed by the user who holds the LIVE editing
+                        # lock on this item (or when no live lock exists). Server-side
+                        # backstop that makes the #33 concurrent-clobber impossible
+                        # regardless of stale client state. Order/metadata-only saves
+                        # (no 'script' key) are unaffected. API-key callers (no user id)
+                        # bypass the check for service-to-service writes.
+                        try:
+                            from datetime import datetime, timezone
+                            from models_v2 import SegmentLock
+                            current_uid = current_user.get('id') if isinstance(current_user, dict) else None
+                            if current_uid is not None:
+                                lock = db.query(SegmentLock).filter(
+                                    SegmentLock.rundown_item_asset_id == str(asset_id)
+                                ).first()
+                                if lock is not None and lock.user_id != current_uid:
+                                    exp = lock.expires_at
+                                    if exp is not None and exp.tzinfo is None:
+                                        exp = exp.replace(tzinfo=timezone.utc)
+                                    is_live = exp is not None and exp > datetime.now(timezone.utc)
+                                    if is_live:
+                                        from models_user import User as _User
+                                        holder_row = db.query(_User).filter(_User.id == lock.user_id).first()
+                                        holder = holder_row.username if holder_row else None
+                                        raise HTTPException(
+                                            status_code=409,
+                                            detail={
+                                                "error": "segment_locked",
+                                                "message": f"This segment is being edited by {holder or 'another user'}. Your changes were not saved.",
+                                                "rundown_item_asset_id": str(asset_id),
+                                                "holder_username": holder,
+                                                "holder_user_id": lock.user_id,
+                                            },
+                                        )
+                        except HTTPException:
+                            raise
+                        except Exception as lock_err:
+                            # Never let a lock-check bug block a legitimate save; log and proceed.
+                            logger.warning(f"Lock check skipped for {asset_id}: {lock_err}")
+
                         new_script = item_data['script']
                         existing_script = rundown_item.script_content or ''
 
@@ -957,10 +1059,9 @@ async def save_rundown_items(
                 total_duration_seconds += _parse_dur(ri.duration)
             # 2. Embedded cue durations from script_content
             if ri.script_content:
-                cue_blocks = re_mod.findall(
-                    r'<!-- Begin Cue -->(.*?)<!-- End Cue -->',
-                    ri.script_content, re_mod.DOTALL
-                )
+                from services.cue_extractor import CUE_BLOCK_RE
+                # Matches expanded + collapsed cues (group 1 = cue body).
+                cue_blocks = CUE_BLOCK_RE.findall(ri.script_content)
                 for cue_block in cue_blocks:
                     dur_match = re_mod.search(r'\[Duration:\s*([^\]]+)\]', cue_block, re_mod.IGNORECASE)
                     if dur_match:

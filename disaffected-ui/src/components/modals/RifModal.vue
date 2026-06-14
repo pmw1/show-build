@@ -1,7 +1,7 @@
 <template>
   <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="500">
     <v-card class="rif-modal-card">
-      <v-card-title class="rif-modal-header">{{ editCueData ? 'Edit' : 'Add' }} Riff (RIF) Cue</v-card-title>
+      <v-card-title class="rif-modal-header" :style="{ backgroundColor: cueColor }">{{ editCueData ? 'Edit' : 'Add' }} Riff (RIF) Cue</v-card-title>
       <v-card-text>
         <v-text-field
           ref="slugField"
@@ -123,8 +123,10 @@ let keydownHandler = null;
 // Computed
 const duration = computed(() => `${hours.value}:${minutes.value}:${seconds.value}`);
 
-// Mixin-inlined computed: color theming (unused in template but kept for consistency)
-const cueColor = computed(() => { // eslint-disable-line no-unused-vars
+// #39: header color comes from the cue color registry (resolved to a hex), so the
+// RIF modal header matches the toolbar/card/slash-menu instead of a hardcoded
+// indigo in .rif-modal-header.
+const cueColor = computed(() => {
   const colorName = getColorValue(props.cueType.toLowerCase());
   return resolveVuetifyColor(colorName);
 });
@@ -321,7 +323,7 @@ onBeforeUnmount(() => {
 }
 
 .rif-modal-header {
-  background-color: #5C6BC0;
+  /* #39: background now set inline from the cue color registry (cueColor) */
   color: white;
   border-radius: 4px;
   padding: 12px 16px;
