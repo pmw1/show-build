@@ -37,7 +37,9 @@ would have silently erased them. So:
 | `asset_processing.py` | ✅ DONE (`f60a895`) | Union: feat's `generate_fsq_png` regen + live's `_wrap_text`/`generate_gfx_png` blank-line fixes. |
 | `llm_state_router.py` | ✅ DONE (no-op) | feat DELETED the broken endpoint — supersedes live's band-aid. Nothing to port. |
 | `SotModal.vue` | ✅ DONE (`146119c`) | 3-way merge (git merge-file, 0 conflicts): feat UI restructure + live chunked-upload. Lint clean. |
-| **`ffmpeg_tasks.py`** | ❌ **NOT DONE — the hard one** | See below. |
+| `ffmpeg_tasks.py` | ✅ DONE (`3c6540d`) | Ported both live hotfixes onto feat's 3-task chain: frame-accurate trim (sot_prepare Phase 3, both branches) + silent-audio injection (sot_finalize Phase 6, then has_audio=True). py_compile clean. |
+
+**✅ ALL 7 FILES RECONCILED as of `3c6540d`.** Remaining work is build + test + deploy (below).
 
 ---
 
