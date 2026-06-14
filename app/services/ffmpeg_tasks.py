@@ -2278,26 +2278,46 @@ def sot_prepare(
 
             phase3_output = working_dir / f"{temp_job_id}_3_trimmed.mp4"
 
+            # Frame-accurate trim: -ss BEFORE -i fast-seeks to the nearest
+            # keyframe, then re-encoding decodes forward to the EXACT requested
+            # IN/OUT frame. Stream-copy (-c copy) was keyframe-bounded and could
+            # overrun the OUT point by up to one GOP (~8s); re-encoding lands both
+            # ends on the exact requested frame. The full resolution/framerate
+            # normalization still happens later in Phase 6 (sot_finalize) — here
+            # we only re-encode for cut accuracy, so use the same encoder pick.
+            from platform_utils import IS_WINDOWS, has_nvidia_gpu
+            if IS_WINDOWS and has_nvidia_gpu():
+                video_encoder_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18", "-maxrate", "8M", "-bufsize", "16M"]
+            else:
+                video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
+
+            # Audio handling for the trim re-encode. When the source has audio,
+            # re-encode it to AAC alongside the video; when it doesn't, drop it
+            # (the silent track is injected later in Phase 6).
+            trim_audio_args = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"] if has_audio else ["-an"]
+
             if not _is_zero_time(trim_end):
                 start_sec = _timecode_to_seconds(trim_start)
                 end_sec = _timecode_to_seconds(trim_end)
                 trim_duration = end_sec - start_sec
                 phase3_cmd = [
                     ffmpeg, "-y",
-                    "-ss", str(start_sec),
+                    "-ss", str(start_sec),  # fast seek to nearby keyframe
                     "-i", str(input_file),
                     "-t", str(trim_duration),
-                    "-c", "copy",
+                    *video_encoder_args,
+                    *trim_audio_args,
                     str(phase3_output)
                 ]
             else:
-                # Trim from start only
+                # Trim from start only (frame-accurate re-encode; see note above)
                 start_sec = _timecode_to_seconds(trim_start)
                 phase3_cmd = [
                     ffmpeg, "-y",
-                    "-ss", str(start_sec),
+                    "-ss", str(start_sec),  # fast seek to nearby keyframe
                     "-i", str(input_file),
-                    "-c", "copy",
+                    *video_encoder_args,
+                    *trim_audio_args,
                     str(phase3_output)
                 ]
 
@@ -2565,22 +2585,44 @@ def sot_finalize(self, ctx: dict):
         else:
             video_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
 
+        # When the source has NO audio track, synthesize a silent stereo track
+        # (anullsrc) as a second input so the normalized MP4 always carries audio.
+        # Every downstream phase (channel analysis, loudness, MP3 extraction) then
+        # runs unchanged, and the SOT ships WITH a real (silent) audio track
+        # instead of being audio-less — broadcast-safer and consistent across
+        # workers. See MEMORY: project_audioless_sot_silent_inject.
         if has_audio:
-            phase6_audio_args = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+            phase6_cmd = [
+                ffmpeg, "-y",
+                "-i", str(trimmed_file),
+                *video_encoder_args,
+                "-r", "29.97",  # Broadcast standard framerate
+                "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",  # Max width 1920, maintain aspect
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                str(phase6_output)
+            ]
         else:
-            phase6_audio_args = ["-an"]
-
-        phase6_cmd = [
-            ffmpeg, "-y",
-            "-i", str(trimmed_file),
-            *video_encoder_args,
-            "-r", "29.97",  # Broadcast standard framerate
-            "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",  # Max width 1920, maintain aspect
-            *phase6_audio_args,
-            str(phase6_output)
-        ]
+            phase6_cmd = [
+                ffmpeg, "-y",
+                "-i", str(trimmed_file),
+                "-f", "lavfi",
+                "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                *video_encoder_args,
+                "-r", "29.97",  # Broadcast standard framerate
+                "-vf", "scale='if(gt(iw,1920),1920,-2)':'-2'",  # Max width 1920, maintain aspect
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                "-shortest",  # stop at end of video (silent input is infinite)
+                str(phase6_output)
+            ]
         subprocess.run(phase6_cmd, check=True, capture_output=True)
         logger.info(f"Phase 6 complete: {phase6_output}")
+
+        # From here on the normalized file ALWAYS has an audio track (real or the
+        # injected silent one), so let the audio phases (7 channels, 8/9 loudness,
+        # MP3) run normally instead of being skipped.
+        has_audio = True
 
         if asset_id:
             _update_sot_cue_block(episode, slug, asset_id, {
