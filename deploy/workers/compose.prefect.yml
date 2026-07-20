@@ -1,0 +1,77 @@
+# New-stack Celery workers for the PREFECT host (192.168.51.238) — LIVE.
+# Rendered from deploy/workers/workers.yml (prefect entries). Replaces the legacy
+# hand-run worker at /home/kevin/celery-workers (prefect-assets_worker).
+#
+# Code is BAKED into the flavor images at build time (tag tracks main HEAD via
+# build-push.sh) — no /app bind-mount. Only media is bind-mounted: prefect owns
+# the data tree (/data/sync, /data/process), so we bind it straight in and the
+# entrypoint skips its NFS self-mount (NFS_REQUIRED=false + a present bind).
+#
+# Broker DB /0 = LIVE; DB showbuild = LIVE. (DEV uses /1 + showbuild_dev.)
+services:
+  media:
+    image: 192.168.51.206:3000/kevin/worker-media-gpu:latest
+    container_name: prefect-media-worker
+    environment:
+      - TZ=America/New_York
+      - MEDIA_ROOT=/mnt/sync/disaffected
+      - REDIS_URL=redis://:showbuild2025@192.168.51.223:6379/0
+      - DATABASE_URL=postgresql://showbuild:showbuild@192.168.51.238:5433/showbuild
+      - NFS_REQUIRED=false           # bind below provides the share; no self-mount
+      # Run the celery work as uid 1000:gid 1001 — the owner of the episode media
+      # tree (/data/sync ... owned 1000:1001, group perms read-only). The image's
+      # default 'insider' user is 1001, which can READ but not OVERWRITE the
+      # 1000-owned -src.mp4 files → sot_prepare hits PermissionError and its DB
+      # transaction rolls back (reverting cue/script edits made in the same txn).
+      # The legacy worker ran as 1000; match it. gosu accepts uid:gid.
+      - WORKER_USER=1000:1001
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    volumes:
+      - /data/sync:/mnt/sync
+      - /data/process:/mnt/process
+    command: >
+      celery -A celery_app worker
+      -Q media,assets_high,assets,assets_low,fsq
+      --hostname=media@prefect
+      --concurrency=3 --prefetch-multiplier=1 --max-tasks-per-child=25
+      --loglevel=info
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }
+
+  llm-content:
+    image: 192.168.51.206:3000/kevin/worker-base:latest
+    container_name: prefect-llm-content-worker
+    environment:
+      - TZ=America/New_York
+      - MEDIA_ROOT=/mnt/sync/disaffected
+      - REDIS_URL=redis://:showbuild2025@192.168.51.223:6379/0
+      - DATABASE_URL=postgresql://showbuild:showbuild@192.168.51.238:5433/showbuild
+      - NFS_REQUIRED=false
+    volumes:
+      - /data/sync:/mnt/sync
+      # Shares the Fernet key in encryption.key with the server. Without this
+      # the container falls back to a self-generated key and cannot decrypt
+      # api_configs secrets — it then sends ciphertext to Grok as the API key.
+      # api_config resolves key_file relative to the /app workdir, hence the
+      # /app/app/storage destination.
+      - /srv/show-build/app/storage:/app/app/storage
+    command: >
+      celery -A celery_app worker
+      -Q llm_content
+      --hostname=llm-content@prefect
+      --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=25
+      --loglevel=info
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }

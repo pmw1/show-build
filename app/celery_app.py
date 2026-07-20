@@ -46,6 +46,12 @@ celery_app = Celery(
     ]
 )
 
+# Make this the default app so @shared_task binds to it. Workers get this for
+# free via `celery -A celery_app`, but the FastAPI server imports the module
+# directly — without this, shared_task falls back to an unconfigured default
+# app pointing at localhost and dispatch fails with "Connection refused".
+celery_app.set_default()
+
 # Custom task router for priority-based queue selection
 def route_fsq_task(name, args, kwargs, options, task=None, **kw):
     """

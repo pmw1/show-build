@@ -23,6 +23,10 @@ from services.asset_id import AssetIDService
 
 logger = logging.getLogger(__name__)
 
+# Last-resort model when neither the caller nor the Settings -> Meta Extraction
+# config names one. Must be a model actually installed on the Ollama host.
+DEFAULT_OLLAMA_MODEL = "qwen3:8b"
+
 # Default extraction prompt templates
 DEFAULT_SYSTEM_PROMPT = """You are an expert content analyst for broadcast media production. Your task is to extract structured data from segment scripts to support downstream LLM operations like episode descriptions and social media posts.
 
@@ -113,7 +117,9 @@ class SegmentLLMExtractor:
                         "temperature": row[2] or 0.3,
                         "max_tokens": row[3] or 2500,
                         "service": row[4] or "ollama",
-                        "model": row[5] or "qwen2.5:latest"
+                        # Leave unset unless the override pins one, so the
+                        # Settings->Meta Extraction model wins in call_llm().
+                        "model": row[5] or None
                     }
                 )
         except Exception as e:
@@ -127,7 +133,7 @@ class SegmentLLMExtractor:
                 "temperature": 0.3,
                 "max_tokens": 2500,
                 "service": "ollama",
-                "model": "qwen2.5:latest"
+                "model": None
             }
         )
 
@@ -181,16 +187,20 @@ class SegmentLLMExtractor:
     ) -> str:
         """Call LLM API and return response text."""
         service = settings.get("service", "ollama")
-        model = settings.get("model", "mistral:7b")
+        model = settings.get("model")
         temperature = settings.get("temperature", 0.2)
         max_tokens = settings.get("max_tokens", 2000)
 
         if service == "ollama":
             host = SegmentLLMExtractor.get_ollama_host(db)
-            # If caller didn't pin a model, use the configured meta-extraction primary
+            # If caller didn't pin a model, use the configured meta-extraction
+            # primary (Settings -> Meta Extraction). Only fall back to a
+            # literal when the DB has nothing at all.
             _primary, fallback_model = SegmentLLMExtractor.get_meta_extraction_models(db)
-            if not settings.get("model") and _primary:
-                model = _primary
+            if not model:
+                model = _primary or DEFAULT_OLLAMA_MODEL
+            # Record the resolved model so callers can persist what actually ran.
+            settings["resolved_model"] = model
 
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
             candidates = [model]
@@ -207,6 +217,10 @@ class SegmentLLMExtractor:
                             "model": m,
                             "prompt": full_prompt,
                             "stream": False,
+                            # Reasoning models (qwen3, etc.) otherwise return
+                            # an empty "response" with the content stranded in
+                            # a separate "thinking" field, which fails JSON parsing.
+                            "think": False,
                             "options": {
                                 "temperature": temperature,
                                 "num_predict": max_tokens
@@ -217,9 +231,22 @@ class SegmentLLMExtractor:
                     if response.status_code == 404 and idx < len(candidates) - 1:
                         logger.warning(f"meta_extraction: model {m} 404, trying fallback")
                         continue
+                    # Whichever candidate actually answered is the real model.
+                    settings["resolved_model"] = m
                     if response.status_code != 200:
                         raise Exception(f"Ollama returned status {response.status_code}: {last_text}")
-                    return response.json().get("response", "")
+                    body = response.json()
+                    text_out = (body.get("response") or "").strip()
+                    if not text_out:
+                        # Some Ollama builds ignore think=False and strand the
+                        # output in "thinking"; the JSON is still in there.
+                        text_out = (body.get("thinking") or "").strip()
+                    if not text_out:
+                        raise Exception(
+                            f"Ollama model {m} returned an empty response "
+                            f"(done_reason={body.get('done_reason')})"
+                        )
+                    return text_out
             raise Exception(f"Ollama returned status {last_status}: {last_text}")
 
         else:
@@ -349,7 +376,9 @@ class SegmentLLMExtractor:
             existing.key_quotes = extracted.get("key_quotes", [])
 
             existing.source_content_hash = content_hash
-            existing.extraction_model = settings.get("model", "unknown")
+            existing.extraction_model = (
+                settings.get("resolved_model") or settings.get("model") or "unknown"
+            )
             existing.extraction_timestamp = datetime.utcnow()
             existing.confidence_score = extracted.get("confidence", 0.8)
             existing.token_count = len(content.split())  # Approximate
@@ -360,7 +389,7 @@ class SegmentLLMExtractor:
             # Update tier metadata
             existing.tier_metadata = {
                 "tier_1": {
-                    "model": settings.get("model"),
+                    "model": existing.extraction_model,
                     "timestamp": datetime.utcnow().isoformat(),
                     "confidence": extracted.get("confidence", 0.8)
                 }

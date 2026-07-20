@@ -34,6 +34,10 @@ from celery import shared_task
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+# Import for its side effect: celery_app.set_default(), so the shared_task
+# below binds to the configured broker instead of an unconfigured default app.
+import celery_app  # noqa: F401
+
 from database import SessionLocal
 from models_segment_llm import SegmentLLMData
 from models_v2 import RundownItem
