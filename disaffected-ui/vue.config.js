@@ -64,12 +64,20 @@ module.exports = defineConfig({
     host: '0.0.0.0',
     port: 8080,
     allowedHosts: 'all',
-    // Behind the Cloudflare tunnel, Cloudflare was CACHING the dev bundle
+    // SPA history fallback: serve index.html for deep routes so a HARD reload /
+    // bookmark / shared link to e.g. /content-editor/0278 loads the app instead
+    // of 404ing. Without this, F5 on any route other than "/" returns a 404 page
+    // (no editor, no needs-attention highlights) because webpack-dev-server has
+    // no fallback configured by default once devServer is customized.
+    historyApiFallback: true,
+    // Behind the Cloudflare tunnel, Cloudflare was CACHING the bundle
     // (cache-control: max-age=14400) and serving a STALE app.js — including an
     // old HMR client — to browsers regardless of hard-refresh/incognito (edge
     // cache, not browser cache). Send no-store so Cloudflare never caches the
-    // dev server's responses. Only applied for the tunnel dev server.
-    ...(process.env.DEV_API_TARGET
+    // dev server's responses. Applies to BOTH the dev tunnel (DEV_API_TARGET)
+    // and the LIVE tunnel/showbuild.app (DISABLE_HMR) — both are served through
+    // Cloudflare and must not have their bundle edge-cached.
+    ...((process.env.DEV_API_TARGET || process.env.DISABLE_HMR)
       ? {
           headers: {
             'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
@@ -78,15 +86,16 @@ module.exports = defineConfig({
           },
         }
       : {}),
-    // When this dev server runs on the HOST behind the Cloudflare tunnel
-    // (DEV_API_TARGET set, e.g. the migration dev server on :8092), the HMR
-    // websocket can't reach back through the tunnel — its failed reconnects
-    // trigger an endless full-page reload loop ("flashing"). Disable HMR +
-    // live-reload there; a manual refresh after changes is fine. Live/in-docker
-    // (no DEV_API_TARGET) keeps normal hot-reload.
-    hot: process.env.DEV_API_TARGET ? false : true,
-    liveReload: process.env.DEV_API_TARGET ? false : true,
-    client: process.env.DEV_API_TARGET
+    // When this dev server is served through the Cloudflare tunnel (the dev
+    // site via DEV_API_TARGET, OR the LIVE site at showbuild.app — which also
+    // runs this vue-cli dev server behind the tunnel), the HMR websocket can't
+    // reach back through the tunnel. Its failed reconnects trigger an endless
+    // full-page reload loop ("flashing"). Disable HMR + live-reload whenever
+    // EITHER flag is set; a manual refresh after a rebuild is fine. Only a plain
+    // LAN/in-docker dev server (neither flag) keeps normal hot-reload.
+    hot: (process.env.DEV_API_TARGET || process.env.DISABLE_HMR) ? false : true,
+    liveReload: (process.env.DEV_API_TARGET || process.env.DISABLE_HMR) ? false : true,
+    client: (process.env.DEV_API_TARGET || process.env.DISABLE_HMR)
       ? false
       : {
           webSocketURL: 'auto://0.0.0.0:0/ws',
