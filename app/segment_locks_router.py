@@ -5,6 +5,7 @@ Prevents concurrent editing conflicts by locking segments during editing.
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta, timezone
 import logging
 
@@ -261,7 +262,45 @@ async def acquire_lock(
     )
 
     db.add(new_lock)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost the check-then-insert race: another request inserted a lock for
+        # this segment between our SELECT above and this INSERT. The unique
+        # index on rundown_item_asset_id is what turns that silent duplicate
+        # into a catchable error. Re-read the winner and answer as if we had
+        # seen it in the first place.
+        db.rollback()
+        winner = db.query(SegmentLock).filter(
+            SegmentLock.rundown_item_asset_id == asset_id
+        ).first()
+
+        if winner and winner.user_id == current_user_id:
+            # Our own other tab/request won — treat as an extension.
+            winner.expires_at = expires_at
+            winner.last_heartbeat = now
+            db.commit()
+            return {
+                "success": True,
+                "message": "Lock extended",
+                "lock_asset_id": winner.asset_id,
+                "expires_at": expires_at.isoformat()
+            }
+
+        lock_holder = (
+            db.query(User).filter(User.id == winner.user_id).first()
+            if winner else None
+        )
+        raise HTTPException(
+            status_code=423,  # Locked
+            detail={
+                "error": "Segment is locked by another user",
+                "locked_by": get_user_display_name(lock_holder) if lock_holder else "Unknown",
+                "locked_by_id": winner.user_id if winner else None,
+                "locked_at": winner.locked_at.isoformat() if winner and winner.locked_at else None,
+                "expires_at": winner.expires_at.isoformat() if winner and winner.expires_at else None
+            }
+        )
 
     logger.info(f"Lock acquired on {asset_id} by user {current_user_id}")
 
