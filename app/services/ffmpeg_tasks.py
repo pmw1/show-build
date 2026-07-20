@@ -2172,15 +2172,58 @@ def sot_prepare(
         elif file_size_gb > MAX_FILE_SIZE_GB * 0.8:
             validation_warnings.append(f"Large file: {file_size_gb:.2f}GB (may take extended processing time)")
 
-        # 2. Duration check (min 1s, max 1 hour)
+        # 2. Duration check (min 1s, max 1 hour) — validates the EFFECTIVE
+        # duration: when trim points are set, phase 3 trims early and only the
+        # clip is ever fully processed, so a multi-hour full-show recording is
+        # a legitimate source for a short trimmed SOT (the legacy-cue-convert
+        # "FULL VIDEO IS TITLED ..." workflow). The raw-source cap applies
+        # only when no trim is requested.
         MIN_DURATION_SECONDS = 1
         MAX_DURATION_SECONDS = 3600  # 1 hour
-        if duration_seconds < MIN_DURATION_SECONDS:
-            validation_errors.append(f"Video too short: {duration_seconds:.2f}s (min {MIN_DURATION_SECONDS}s)")
-        elif duration_seconds > MAX_DURATION_SECONDS:
-            validation_errors.append(f"Video too long: {duration_formatted} (max 1 hour)")
-        elif duration_seconds > MAX_DURATION_SECONDS * 0.8:
-            validation_warnings.append(f"Long video: {duration_formatted} (may take extended processing time)")
+
+        def _fmt_secs(s: float) -> str:
+            s = max(0, int(s))
+            return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+        has_trim = not _is_zero_time(trim_start) or not _is_zero_time(trim_end)
+        if has_trim:
+            trim_start_sec = _timecode_to_seconds(trim_start)
+            trim_end_sec = (
+                _timecode_to_seconds(trim_end)
+                if not _is_zero_time(trim_end) else duration_seconds
+            )
+            effective_seconds = trim_end_sec - trim_start_sec
+            if trim_start_sec >= duration_seconds:
+                validation_errors.append(
+                    f"Trim start {trim_start} is beyond the end of the video "
+                    f"({duration_formatted})"
+                )
+            elif effective_seconds < MIN_DURATION_SECONDS:
+                validation_errors.append(
+                    f"Trimmed clip too short: {effective_seconds:.2f}s "
+                    f"(trim {trim_start} → {trim_end}, min {MIN_DURATION_SECONDS}s)"
+                )
+            elif effective_seconds > MAX_DURATION_SECONDS:
+                validation_errors.append(
+                    f"Trimmed clip too long: {_fmt_secs(effective_seconds)} (max 1 hour)"
+                )
+            elif effective_seconds > MAX_DURATION_SECONDS * 0.8:
+                validation_warnings.append(
+                    f"Long trimmed clip: {_fmt_secs(effective_seconds)} "
+                    f"(may take extended processing time)"
+                )
+            if duration_seconds > MAX_DURATION_SECONDS:
+                validation_warnings.append(
+                    f"Long source video: {duration_formatted} — only the trimmed "
+                    f"clip ({_fmt_secs(effective_seconds)}) will be processed"
+                )
+        else:
+            if duration_seconds < MIN_DURATION_SECONDS:
+                validation_errors.append(f"Video too short: {duration_seconds:.2f}s (min {MIN_DURATION_SECONDS}s)")
+            elif duration_seconds > MAX_DURATION_SECONDS:
+                validation_errors.append(f"Video too long: {duration_formatted} (max 1 hour)")
+            elif duration_seconds > MAX_DURATION_SECONDS * 0.8:
+                validation_warnings.append(f"Long video: {duration_formatted} (may take extended processing time)")
 
         # 3. Resolution validation
         MIN_WIDTH = 100
@@ -3250,43 +3293,56 @@ def process_sot_video_multi_phase(
 
 def _update_vo_cue_block(episode: str, slug: str, asset_id: str, updates: dict):
     """
-    Update a VO cue block in the database with processing status.
-    Same as SOT cue block update but for VO-type cues.
+    Update a VO cue block in the rundown item's script_content — mirror of
+    _update_sot_cue_block with [Type: VO].
+
+    REWRITTEN 2026-07-18: the previous implementation was pre-DB-first dead
+    code — it looked for cues in a YAML-frontmatter `cues:` metadata list
+    (a format that no longer exists) and filtered on a nonexistent
+    RundownItem.episode_number column, so every VO write-back silently
+    failed and VO cues stayed at 'MediaURL: Processing...' forever.
     """
     try:
-        with db_session() as db:
-            from models_v2 import RundownItem
+        from models_v2 import Rundown, RundownItem, Episode
+        import re
 
-            # Find the rundown item containing this asset_id
-            items = db.query(RundownItem).filter(
-                RundownItem.episode_number == episode,
-                RundownItem.script_content.contains(asset_id)
-            ).all()
+        with db_session() as db:
+            rundown = db.query(Rundown).join(Episode).filter(Episode.episode_number == episode).first()
+            if not rundown:
+                logger.warning(f"No rundown found for episode {episode}")
+                return False
+
+            items = db.query(RundownItem).filter_by(rundown_id=rundown.id).all()
+
+            cue_pattern = re.compile(
+                r'(<!-- Begin Cue(?: collapsed)? -->(?:(?!<!-- End Cue -->).)*?\[Type:\s*VO\](?:(?!<!-- End Cue -->).)*?<!-- End Cue -->)',
+                re.DOTALL | re.IGNORECASE
+            )
+            asset_pattern = re.compile(r'\[Asset\s*[Ii][Dd]:\s*' + re.escape(asset_id) + r'\s*\]', re.IGNORECASE)
 
             for item in items:
                 if not item.script_content:
                     continue
+                for match in cue_pattern.finditer(item.script_content):
+                    cue_block = match.group(1)
+                    if not asset_pattern.search(cue_block):
+                        continue
 
-                import frontmatter
-                try:
-                    parsed = frontmatter.loads(item.script_content)
-                except Exception:
-                    continue
+                    updated_cue = cue_block
+                    for field, value in updates.items():
+                        field_pattern = re.compile(rf'\[{field}:\s*[^\]]*\]', re.IGNORECASE)
+                        if field_pattern.search(updated_cue):
+                            updated_cue = field_pattern.sub(f'[{field}: {value}]', updated_cue)
+                        else:
+                            updated_cue = updated_cue.replace(
+                                '<!-- End Cue -->',
+                                f'[{field}: {value}]\n<!-- End Cue -->'
+                            )
 
-                # Check if this is the right cue block by looking for our asset_id
-                cues = parsed.metadata.get('cues', [])
-                for cue in cues:
-                    if cue.get('AssetID') == asset_id and cue.get('type') == 'vo':
-                        # Update the cue with new values
-                        for key, value in updates.items():
-                            cue[key] = value
-
-                        # Write back
-                        parsed.metadata['cues'] = cues
-                        item.script_content = frontmatter.dumps(parsed)
-                        db.commit()
-                        logger.info(f"✅ Updated VO cue block {asset_id} with {list(updates.keys())}")
-                        return True
+                    item.script_content = item.script_content.replace(cue_block, updated_cue)
+                    db.commit()
+                    logger.info(f"✅ Updated VO cue block in item {item.id} for AssetID {asset_id}")
+                    return True
 
             logger.warning(f"⚠️ VO cue block not found for asset_id={asset_id} in episode={episode}")
             return False
@@ -3510,6 +3566,19 @@ def process_vo_video(
 
             phase1_output = working_dir / f"{temp_job_id}_1_trimmed.mp4"
 
+            # Frame-accurate trim: -ss BEFORE -i fast-seeks to the nearest
+            # keyframe, then re-encoding decodes forward to the EXACT
+            # requested IN/OUT frame. Stream-copy (-c copy) was keyframe-
+            # bounded — on long-GOP sources (surveillance footage) the cut
+            # landed seconds off the requested points. Same fix as the SOT
+            # phase-3 trim (2026-06). Audio (if any) re-encodes to AAC via
+            # the optional 0:a:0? map; audio-less sources pass through.
+            from platform_utils import IS_WINDOWS, has_nvidia_gpu
+            if IS_WINDOWS and has_nvidia_gpu():
+                trim_encoder_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18", "-maxrate", "8M", "-bufsize", "16M"]
+            else:
+                trim_encoder_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
+
             if not is_zero_time(trim_end):
                 start_sec = time_to_seconds(trim_start)
                 end_sec = time_to_seconds(trim_end)
@@ -3520,7 +3589,9 @@ def process_vo_video(
                     "-ss", str(start_sec),
                     "-i", str(current_input),
                     "-t", str(trim_duration),
-                    "-c", "copy",
+                    "-map", "0:v:0", "-map", "0:a:0?",
+                    *trim_encoder_args,
+                    "-c:a", "aac", "-b:a", "192k",
                     str(phase1_output)
                 ]
             else:
@@ -3529,7 +3600,9 @@ def process_vo_video(
                     ffmpeg, "-y",
                     "-ss", str(start_sec),
                     "-i", str(current_input),
-                    "-c", "copy",
+                    "-map", "0:v:0", "-map", "0:a:0?",
+                    *trim_encoder_args,
+                    "-c:a", "aac", "-b:a", "192k",
                     str(phase1_output)
                 ]
 
