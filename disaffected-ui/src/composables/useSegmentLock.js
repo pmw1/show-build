@@ -260,11 +260,26 @@ export function useSegmentLock() {
       console.error('[SegmentLock] Heartbeat failed:', err)
 
       // If heartbeat fails with 404, the lock expired / no longer exists.
+      // The lock is GONE, so the segment is free — not locked-by-someone-else.
+      // Must clear isLocked too; otherwise (isLocked && !isMyLock) keeps the
+      // "Segment Locked" overlay up forever, stranding the editor (and blocking
+      // cue inserts like GFX) behind a phantom lock owned by nobody.
       if (err.response && err.response.status === 404) {
         stopHeartbeat()
+        const expiredAssetId = currentAssetId.value
         isMyLock.value = false
+        isLocked.value = false
         currentAssetId.value = null
+        lockInfo.value = { lockedBy: '', lockedById: null, lockedAt: null, expiresAt: null }
         error.value = 'Lock expired'
+
+        // Our own lock just lapsed (TTL is 30s, heartbeat 15s — a backgrounded
+        // tab or a slow response can expire it). Silently re-acquire so the
+        // user keeps editing seamlessly instead of being locked out of a
+        // segment that is actually free.
+        if (expiredAssetId) {
+          acquireLock(expiredAssetId).catch(() => {})
+        }
       }
     }
   }
