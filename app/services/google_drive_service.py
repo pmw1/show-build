@@ -164,7 +164,8 @@ class GoogleDriveService:
         try:
             file = self.service.files().get(
                 fileId=file_id,
-                fields="id, name, mimeType, size, createdTime, modifiedTime, webViewLink, parents, owners, description"
+                fields="id, name, mimeType, size, createdTime, modifiedTime, webViewLink, parents, owners, description",
+                supportsAllDrives=True
             ).execute()
 
             logger.info(f"📄 Retrieved metadata for: {file.get('name')}")
@@ -191,7 +192,7 @@ class GoogleDriveService:
             file_name = file_metadata.get('name')
 
             # Request file content
-            request = self.service.files().get_media(fileId=file_id)
+            request = self.service.files().get_media(fileId=file_id, supportsAllDrives=True)
 
             # Download to destination
             dest_path = Path(destination_path)
@@ -250,7 +251,8 @@ class GoogleDriveService:
             file = self.service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields='id, name, webViewLink'
+                fields='id, name, webViewLink',
+                supportsAllDrives=True
             ).execute()
 
             logger.info(f"✅ Uploaded: {path.name} → Google Drive (ID: {file.get('id')})")
@@ -284,7 +286,8 @@ class GoogleDriveService:
 
             folder = self.service.files().create(
                 body=file_metadata,
-                fields='id, name, webViewLink'
+                fields='id, name, webViewLink',
+                supportsAllDrives=True
             ).execute()
 
             logger.info(f"✅ Created folder: {folder_name} (ID: {folder.get('id')})")
