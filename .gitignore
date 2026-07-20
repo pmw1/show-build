@@ -71,6 +71,9 @@ disaffected-ui/ssl/
 .cloudflare-token
 *.token
 
+# Separate service with its own deploy + .env; not part of this repo.
+llm-router/
+
 # Database dumps and backups
 migration_db_*/
 *.dump
