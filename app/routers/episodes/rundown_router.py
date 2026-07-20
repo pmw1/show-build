@@ -308,8 +308,16 @@ async def get_episode_rundown(episode_number: str, db: Session = Depends(get_db)
                 # Log but don't fail - content library is optional enhancement
                 logger.warning(f"Could not load content placements: {e}")
 
-        # Sort by order field
-        rundown_items.sort(key=lambda x: x.get('order', 999))
+        # Sort by order field, with a DETERMINISTIC tiebreaker. Two items can
+        # legitimately share the same `order` (e.g. order_in_rundown collisions
+        # after inserts/reorders, or a regular item and a library placement that
+        # landed on the same slot). A bare single-key sort is stable but its tie
+        # resolution then depends on the DB query/append order, which can vary
+        # between requests — so two users would see the tied items (and thus
+        # everything after them) in DIFFERENT positions. db_id (creation order)
+        # is a stable, user-independent secondary key, so ties always resolve
+        # identically for everyone. Library placements carry db_id too.
+        rundown_items.sort(key=lambda x: (x.get('order', 999), x.get('db_id', 0)))
 
         logger.info(f"Retrieved {len(rundown_items)} rundown items from database for episode {episode_number}")
         return {"items": rundown_items}
