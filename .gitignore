@@ -68,6 +68,8 @@ app/app/storage/encryption.key
 app/storage/api_keys.json
 app/storage/users.json
 disaffected-ui/ssl/
+.cloudflare-token
+*.token
 
 # Database dumps and backups
 migration_db_*/
