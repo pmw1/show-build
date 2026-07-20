@@ -167,6 +167,69 @@
     </div>
     </Teleport>
 
+    <!-- Attempt Fix source-video picker: find-media couldn't determine the
+         source, so the user chooses from the episode's candidate files. -->
+    <Teleport to="body">
+      <div v-if="mediaPick" class="rev-diff-overlay" @mousedown.self="cancelMediaPick">
+        <div class="rev-diff-modal">
+          <div class="rev-diff-header">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h5l2 3h9v11H4z"/><path d="M10 13l5 2.5L10 18z"/></svg>
+            <span>Select source video for {{ mediaPick.label }}</span>
+            <button class="rev-diff-close" title="Cancel" @click="cancelMediaPick">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+          <p class="media-pick-intro">
+            No source video could be determined automatically
+            (searched for “{{ mediaPick.slug }}”<template v-if="mediaPick.sourceHint">, hint “{{ mediaPick.sourceHint }}”</template>).
+            Pick the file this cue should use:
+          </p>
+          <div class="media-pick-list">
+            <button
+              v-for="f in mediaPick.files"
+              :key="f.source_dir + '/' + f.filename"
+              class="media-pick-item"
+              @click="chooseMediaFile(f)"
+            >
+              <span class="media-pick-name">{{ f.filename }}</span>
+              <span class="media-pick-meta">{{ f.source_dir }}<template v-if="f.size_bytes"> · {{ formatFileSize(f.size_bytes) }}</template></span>
+            </button>
+          </div>
+          <p class="convert-error-hint">
+            Choosing a file imports it and starts processing with the extracted
+            trim points. Cancel to leave the block flagged.
+          </p>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Attempt Fix error modal: video-cue conversion is all-or-nothing —
+         on failure the block stays flagged and the reasons show here. -->
+    <Teleport to="body">
+      <div v-if="convertError" class="rev-diff-overlay" @mousedown.self="closeConvertError">
+        <div class="rev-diff-modal">
+          <div class="rev-diff-header convert-error-header">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.5"/></svg>
+            <span>Attempt Fix failed — no cue was created</span>
+            <button class="rev-diff-close" title="Close" @click="closeConvertError">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+          <div class="convert-error-list">
+            <div v-for="(f, i) in convertError.failures" :key="i" class="convert-error-item">
+              <strong v-if="f.cue">{{ f.cue }}: </strong>{{ f.reason }}
+            </div>
+          </div>
+          <div class="rev-diff-label">Flagged block</div>
+          <div class="rev-diff-text">{{ convertError.block || '(empty)' }}</div>
+          <p class="convert-error-hint">
+            The block stays flagged. Fix the cause (e.g. drop the media file into the
+            episode's preshow/ folder) and click Attempt Fix again.
+          </p>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Revision diff modal: word-level original-vs-proposed diff. -->
     <Teleport to="body">
       <div v-if="revDiff.open" class="rev-diff-overlay" @mousedown.self="closeRevisionDiff">
@@ -209,6 +272,20 @@ import { buildScriptExtensions } from './prosemirror/extensions.js';
 import { lineNumbersPluginKey } from './prosemirror/LineNumbers.js';
 import { readMultiSelection } from './prosemirror/BlockMultiSelect.js';
 import { markdownToDoc, docToMarkdown, assertNoLoss } from '@/utils/prosemirror/markdown.js';
+import axios from 'axios';
+import { convertLegacyToken, convertVideoBlockWithLLM } from '@/modules/legacyCueConvert/conversion.js';
+import { isPasteInterpretEnabled } from '@/modules/legacyCueConvert/interpretSetting.js';
+import {
+  LEGACY_CUE_REGEX,
+  LEGACY_CUE_FLAG_LABEL,
+  VIDEO_CUE_TOKEN_TYPES,
+  VIDEO_CUE_LOOSE_REGEX,
+  VIDEO_INOUT_REGEX,
+  VIDEO_TECH_LINE_REGEX,
+  VIDEO_BLOCK_MEMBER_FLAG_LABEL,
+  CUE_CONTINUATION_REGEX,
+  normalizeTokenType,
+} from '@/modules/legacyCueConvert/patterns.js';
 import ModifyWithAiModal from './modals/ModifyWithAiModal.vue';
 import { computeDiff } from '@/utils/scriptCompare';
 
@@ -219,6 +296,9 @@ export default {
   components: { EditorContent, ModifyWithAiModal },
   props: {
     scriptContent: { type: String, default: '' },
+    // Episode number (e.g. "0278") — needed by the legacy-cue Convert flow to
+    // generate AssetIDs and look up media in the episode's preshow/ folder.
+    episode: { type: String, default: '' },
     // When false, the editor renders the script with full Script-Mode styling
     // (paragraphs, speakers, cue cards) but is NOT editable — used for the
     // read-only version preview (todo #35). No saves, no cue modals fire.
@@ -237,6 +317,25 @@ export default {
   setup(props, { emit, expose }) {
     const editor = shallowRef(null);
     const isActivelyEditing = ref(false);
+
+    // Last KNOWN-GOOD caret position inside the editor. A cue insert (esp. SOT/VO)
+    // happens AFTER a modal was open + a processing delay, by which point the live
+    // ProseMirror selection has drifted (a blurred editor resolves selection to the
+    // doc end) — so insertCueAtCursor using state.selection would drop the cue at
+    // the END of the script. We instead remember the caret as the user moves it
+    // (only while a real text selection exists) and insert there. Updated on every
+    // transaction that carries a selection inside a top-level block.
+    let lastCaretPos = null;
+
+    // Legacy-cue sweeper state. The old contenteditable Auto Scrub
+    // (EditorPanel, 30s interval) is fully disabled (AUTOSCRUB_DISABLED —
+    // server port pending, todo #31), so without this nothing re-scans
+    // DB-loaded or hand-typed scripts for legacy tokens / host video blocks;
+    // they were only caught at paste time.
+    const SWEEP_MS = 30000;
+    let sweepTimer = null;
+    let lastDocChangeAt = 0;
+    let isConverting = false; // pause sweeping while Attempt Fix is in flight
 
     // Multi-selection summary (count / paragraph-count / bullet state), kept in
     // sync with the BlockMultiSelect plugin via onTransaction so the floating
@@ -358,11 +457,25 @@ export default {
         }),
         content: initial.doc.toJSON(),
         editable: props.editable,
-        onUpdate: () => { if (props.editable) scheduleSave(); },
+        onUpdate: () => {
+          lastDocChangeAt = Date.now();
+          if (props.editable) scheduleSave();
+        },
         // Every transaction (incl. the multi-select plugin's meta-only txns)
         // refreshes the toolbar's selection summary. Cheap: just reads plugin
         // state. Kept separate from onUpdate (which only fires on doc changes).
-        onTransaction: () => { refreshMultiSel(); syncFlagPanelToSelection(); },
+        onTransaction: () => {
+          refreshMultiSel();
+          syncFlagPanelToSelection();
+          // Remember the caret ONLY while the editor actually holds focus — a
+          // blur (e.g. opening the SOT modal) fires a selection transaction that
+          // resolves to the doc end, which we must NOT capture, or the cue would
+          // land at the bottom. While focused, record where the user really is.
+          const ed = editor.value;
+          if (ed && ed.view && ed.view.hasFocus()) {
+            lastCaretPos = ed.state.selection.from;
+          }
+        },
         // Cue cards delete through here, NOT inside the NodeView: the NodeView
         // calls editor.options.onDeleteCue with the cue's data and a removeNode()
         // that drops that exact atom node. We forward it up to EditorPanel so it
@@ -387,6 +500,9 @@ export default {
         // Needs-attention (legacy port): the flag button toggled the attr; this
         // opens/closes the attached note panel for the paragraph at `pos`.
         onFlagParagraph: (pos) => toggleFlagNotePanel(pos),
+        // Legacy-cue Convert ("Fix") button: the paragraph at `pos` contains a
+        // legacy cue token ((TYPE/slug)); convert it to a real cue block.
+        onConvertLegacyCue: (pos) => convertLegacyCueAt(pos),
         // Revision diff button: { original, proposed } -> open the diff modal.
         onShowRevisionDiff: (payload) => openRevisionDiff(payload),
       });
@@ -396,6 +512,10 @@ export default {
       // them. CueNodeView reads editor.storage.collapse.on.
       editor.value.storage.lineNumbers.offset = props.lineNumberOffset || 0;
       editor.value.storage.collapse = { on: props.collapsed };
+
+      // Legacy-cue sweeper: once shortly after load, then on an interval.
+      setTimeout(sweepForLegacyCues, 1500);
+      sweepTimer = setInterval(sweepForLegacyCues, SWEEP_MS);
     });
 
     // Force the line-number decorations to recompute (used when only the offset
@@ -437,6 +557,7 @@ export default {
 
     onBeforeUnmount(() => {
       if (saveTimer) clearTimeout(saveTimer);
+      if (sweepTimer) clearInterval(sweepTimer);
       if (editor.value) editor.value.destroy();
     });
 
@@ -509,14 +630,471 @@ export default {
         if (child.type.name === 'cue') nodes.push(child.toJSON());
       });
       if (nodes.length === 0) return false;
-      // Insert position: end of the top-level block containing the cursor, so the
+      // Insert position: end of the top-level block containing the caret, so the
       // cue drops in right after the current line rather than splitting it.
-      const { $from } = editor.value.state.selection;
-      const insertPos = $from.after(1); // after the depth-1 (top-level) block
+      // Prefer the REMEMBERED caret (lastCaretPos) over the live selection: by the
+      // time a SOT/VO cue is inserted, the modal + processing delay have drifted
+      // the live selection to the doc end, which would append the cue at the
+      // bottom. lastCaretPos is the last place the user actually was while focused.
+      const doc = editor.value.state.doc;
+      let basePos = editor.value.state.selection.from;
+      if (lastCaretPos != null && lastCaretPos >= 0 && lastCaretPos <= doc.content.size) {
+        basePos = lastCaretPos;
+      }
+      const $from = doc.resolve(Math.min(Math.max(basePos, 0), doc.content.size));
+      // $from.after(1) is the end of the depth-1 (top-level) block; if the
+      // resolved pos isn't inside a top-level block (e.g. doc edge), fall back to
+      // the doc end so we still insert something rather than throw.
+      let insertPos;
+      try {
+        insertPos = $from.after(1);
+      } catch (e) {
+        insertPos = doc.content.size;
+      }
       editor.value.chain().focus().insertContentAt(insertPos, nodes).run();
+      // The inserted cue is now the reference point for any follow-up insert.
+      lastCaretPos = insertPos;
       // Flush so the new content serializes back to scriptContent immediately.
       flushPendingChanges();
       return true;
+    }
+
+    // Source-video picker modal. When find-media can't determine a source
+    // for a video cue during Attempt Fix, this lists the episode's candidate
+    // files (preshow/ first, then assets/video) and resolves the pending
+    // conversion with the user's choice. Promise-based: pickMediaForCue is
+    // handed to convertVideoBlockWithLLM as its pickMedia callback and
+    // resolves { filename, source_dir } / null (cancel) / false (no files).
+    const mediaPick = ref(null); // { label, slug, sourceHint, files: [], resolve }
+    async function pickMediaForCue({ label, slug, cueType, sourceHint }) {
+      let files = [];
+      try {
+        const res = await axios.get('/api/legacy-cue-convert/list-media', {
+          params: { episode: props.episode || '', cue_type: cueType },
+        });
+        files = res.data?.files || [];
+      } catch (e) {
+        console.warn('[pickMediaForCue] list-media failed:', e);
+        return false;
+      }
+      if (files.length === 0) return false;
+      return new Promise((resolve) => {
+        mediaPick.value = { label, slug, sourceHint, files, resolve };
+      });
+    }
+    function chooseMediaFile(file) {
+      const p = mediaPick.value;
+      mediaPick.value = null;
+      if (p?.resolve) p.resolve({ filename: file.filename, source_dir: file.source_dir });
+    }
+    function cancelMediaPick() {
+      const p = mediaPick.value;
+      mediaPick.value = null;
+      if (p?.resolve) p.resolve(null);
+    }
+    function formatFileSize(bytes) {
+      if (!bytes) return '';
+      if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+      if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB';
+      return Math.max(1, Math.round(bytes / 1e3)) + ' KB';
+    }
+
+    // Attempt Fix error modal. Video-cue conversion is all-or-nothing; when
+    // it fails, the reasons render here (instead of a transient toast) and
+    // the block stays flagged so the user can fix the cause and retry.
+    const convertError = ref(null); // { failures: [{cue, reason}], block }
+    function openConvertError(e, blockLines) {
+      let failures = Array.isArray(e?.failures) && e.failures.length ? e.failures : null;
+      if (!failures) {
+        let reason = e?.response?.data?.detail || e?.message || 'Unknown error';
+        if (/extracted no cues|no convertible cues/i.test(reason)) {
+          reason = 'The AI could not extract any usable cue data from this block. ' +
+            'Check that the block names a type (SOT/VO/NAT), a slug or title, and try again.';
+        }
+        failures = [{ cue: null, reason }];
+      }
+      convertError.value = { failures, block: (blockLines || []).join('\n') };
+    }
+    function closeConvertError() {
+      convertError.value = null;
+    }
+
+    // ── Legacy-cue sweeper ──────────────────────────────────────────────────
+    // Interval scan over the PM doc (see SWEEP_MS above): flags legacy cue
+    // tokens AND host-pasted video-cue blocks so they get the needs-attention
+    // box + Attempt Fix button even when they arrived via DB load or hand
+    // typing rather than paste.
+    //
+    // Per paragraph (top level only), in document order:
+    //   ANCHOR — strict (TYPE/slug) token, loose/broken video token
+    //   ("( SOT / x"), or an IN/OUT-timecode line with no anchor above it →
+    //   flagNote = LEGACY_CUE_FLAG_LABEL (renders the Attempt Fix button).
+    //   MEMBER — continuation lines (IN/OUT, bare "to", bare quote, bare
+    //   timecode) following a video anchor → flagNote =
+    //   VIDEO_BLOCK_MEMBER_FLAG_LABEL (tint only, no button) so the whole
+    //   block reads as one box. Attempt Fix on the anchor consumes them.
+    //   CLEARED — paragraphs carrying one of OUR two labels that no longer
+    //   match anything (user fixed the text by hand). Manual user flags
+    //   (any other flagNote) are never touched.
+    //
+    // Attr-only transaction, addToHistory:false, no focus steal. Skipped
+    // within 3s of a doc change so it never fights the typist.
+    function sweepForLegacyCues() {
+      const ed = editor.value;
+      if (!ed || !props.editable || isConverting) return;
+      if (Date.now() - lastDocChangeAt < 3000) return;
+
+      const { state } = ed;
+      const updates = []; // { pos, attrs }
+      let inVideoBlock = false;
+
+      // Collect top-level entries first — the classifier needs one-line
+      // lookahead (a tech line directly ABOVE a video token belongs to that
+      // token's block, tint-only; the button stays on the token line and
+      // Attempt Fix gathers the tech line backward into the conversion).
+      const entries = [];
+      state.doc.forEach((node, offset) => entries.push({ node, offset }));
+      const nextRealText = (i) => {
+        for (let j = i + 1; j < entries.length; j++) {
+          const e = entries[j];
+          if (e.node.type.name !== 'paragraph') return null;
+          const t = (e.node.textContent || '').trim();
+          if (t) return t;
+        }
+        return null;
+      };
+      const isVideoAnchorText = (t) => {
+        const s = t.match(LEGACY_CUE_REGEX);
+        if (s) return VIDEO_CUE_TOKEN_TYPES.has(normalizeTokenType(s[1]));
+        return VIDEO_CUE_LOOSE_REGEX.test(t);
+      };
+
+      // "Interpret cues & media from pasted script" setting: when OFF, only
+      // strict {TYPE/slug} tokens keep their validity flag — the video-block
+      // flavors (loose tokens, IN/OUT lines, tech lines) neither anchor nor
+      // tint, and any flags we previously set on them fall into the clear
+      // branch below and get removed.
+      const interpret = isPasteInterpretEnabled();
+
+      entries.forEach(({ node, offset }, i) => {
+        if (node.type.name !== 'paragraph') {
+          inVideoBlock = false; // a cue card or other block ends the run
+          return;
+        }
+        const text = (node.textContent || '').trim();
+        if (!text) return; // blank line inside a block: keep the run alive
+
+        const strict = text.match(LEGACY_CUE_REGEX);
+        const strictType = strict ? normalizeTokenType(strict[1]) : null;
+        const isTech = interpret && VIDEO_TECH_LINE_REGEX.test(text);
+        // Tech line directly above a video token anchor → member of THAT
+        // block (tint, no second button).
+        const techAboveAnchor = isTech && !strict && !inVideoBlock &&
+          (() => { const nxt = nextRealText(i); return !!(nxt && isVideoAnchorText(nxt)); })();
+        // Tokenless anchors: a loose/broken video token, or — when no block
+        // is already open above — an IN/OUT timecode line or a technical
+        // "FULL VIDEO IS TITLED '…'" line (both can START a host cue block).
+        const isVideoAnchor =
+          (strictType && VIDEO_CUE_TOKEN_TYPES.has(strictType)) ||
+          (interpret && !strictType && !techAboveAnchor && (VIDEO_CUE_LOOSE_REGEX.test(text) ||
+            (!inVideoBlock && (VIDEO_INOUT_REGEX.test(text) || isTech))));
+        const isAnchor = !!strict || isVideoAnchor;
+        const isMember = !isAnchor && (techAboveAnchor || (interpret && inVideoBlock &&
+          (CUE_CONTINUATION_REGEX.test(text) || VIDEO_INOUT_REGEX.test(text) || isTech)));
+
+        let wantNote = null;
+        if (isAnchor) wantNote = LEGACY_CUE_FLAG_LABEL;
+        else if (isMember) wantNote = VIDEO_BLOCK_MEMBER_FLAG_LABEL;
+        inVideoBlock = isVideoAnchor || (isMember && inVideoBlock);
+
+        const cur = node.attrs;
+        if (wantNote) {
+          if (!cur.needsAttention || cur.flagNote !== wantNote) {
+            // Don't overwrite a user's own note — only claim unflagged
+            // paragraphs or ones already carrying one of our labels.
+            const ours = !cur.flagNote || cur.flagNote === LEGACY_CUE_FLAG_LABEL ||
+              cur.flagNote === VIDEO_BLOCK_MEMBER_FLAG_LABEL;
+            if (ours) {
+              updates.push({ pos: offset, attrs: { ...cur, needsAttention: true, flagNote: wantNote } });
+            }
+          }
+        } else if (
+          cur.needsAttention &&
+          (cur.flagNote === LEGACY_CUE_FLAG_LABEL || cur.flagNote === VIDEO_BLOCK_MEMBER_FLAG_LABEL)
+        ) {
+          // Our flag, but the offending pattern is gone — clear it (mirrors
+          // the old Auto Scrub step 3c).
+          updates.push({ pos: offset, attrs: { ...cur, needsAttention: false, flagNote: '' } });
+        }
+      });
+
+      if (updates.length === 0) return;
+      let tr = state.tr;
+      for (const u of updates) {
+        tr = tr.setNodeMarkup(u.pos, undefined, u.attrs);
+      }
+      tr.setMeta('addToHistory', false);
+      ed.view.dispatch(tr);
+    }
+
+    // Legacy-cue Convert ("Fix"): the paragraph at `pos` was flagged by the
+    // PasteHandler because it contains a legacy cue token ((TYPE/slug)).
+    //
+    // Two conversion paths:
+    //   VIDEO types (SOT/VO/NAT) → LLM extraction. Hosts paste these as
+    //   multi-line blocks (token line + IN-/OUT- timecode lines with quoted
+    //   in/out cues, random whitespace), and Josh often notes the source
+    //   file nearby — so we gather the anchor paragraph PLUS its
+    //   continuation lines plus surrounding context and let the local LLM
+    //   (extract-cue endpoint) pull out type/slug/trims/cues/source. The
+    //   whole block is replaced by the resulting cue block(s), and the
+    //   matched media is submitted to the SOT/VO Celery pipeline with the
+    //   extracted trim points. Falls back to the regex path on LLM failure.
+    //
+    //   Everything else → convertLegacyToken (regex), anchor paragraph only.
+    //
+    // On a hard failure or when nothing converted, leave the flag in place
+    // so the user can retry, and surface a non-fatal notice.
+    async function convertLegacyCueAt(pos) {
+      if (!editor.value) return;
+      const { state } = editor.value;
+      // Resolve the flagged paragraph node + its range from pos, tracking
+      // top-level order so we can walk neighbors for the block + context.
+      const topNodes = [];
+      let para = null;
+      let paraIndex = -1;
+      state.doc.forEach((node, offset, index) => {
+        topNodes.push({ node, offset, index });
+        if (!para && node.type.name === 'paragraph' && pos >= offset && pos < offset + node.nodeSize) {
+          para = { node, from: offset, to: offset + node.nodeSize };
+          paraIndex = index;
+        }
+      });
+      if (!para) return;
+
+      const paragraphText = para.node.textContent || '';
+      const speaker = para.node.attrs.speaker || 'josh';
+      const notify = (msg, color, ms) => {
+        if (window.notifyUserStandard) window.notifyUserStandard(msg, color, ms);
+      };
+
+      // Path decision: strict token whose type is video, or a loose/broken
+      // video token anchor (e.g. "( SOT / keysha eight" missing the bracket).
+      const tokenMatch = paragraphText.match(LEGACY_CUE_REGEX);
+      const tokenType = tokenMatch ? normalizeTokenType(tokenMatch[1]) : null;
+      // Video path: strict video token, loose/broken token, a bare
+      // IN/OUT-timecode anchor, or a technical "FULL VIDEO IS TITLED '…'"
+      // line (sweeper-flagged blocks with no token at all — the LLM derives
+      // type/slug/source file from the block + surrounding context).
+      const isVideoBlock = tokenType
+        ? VIDEO_CUE_TOKEN_TYPES.has(tokenType)
+        : (VIDEO_CUE_LOOSE_REGEX.test(paragraphText) ||
+           VIDEO_INOUT_REGEX.test(paragraphText) ||
+           VIDEO_TECH_LINE_REGEX.test(paragraphText));
+
+      // Gather the block: anchor + following continuation paragraphs
+      // (IN-/OUT-/to/quote/timecode lines). Blank paragraphs inside the
+      // block are tolerated (random whitespace) but only committed when a
+      // real continuation line follows them.
+      let blockFrom = para.from;
+      let blockTo = para.to;
+      let firstBlockIndex = paraIndex;
+      let lastBlockIndex = paraIndex;
+      const blockLines = [paragraphText];
+      if (isVideoBlock) {
+        // Backward: technical lines directly ABOVE the anchor ("FROM FULL
+        // SURVEILLANCE VIDEO" over a (VO/…) token) belong to this cue —
+        // include them so the conversion consumes them AND the LLM sees
+        // their filename data in the block itself.
+        for (let i = paraIndex - 1; i >= 0; i--) {
+          const { node, offset } = topNodes[i];
+          if (node.type.name !== 'paragraph') break;
+          const txt = (node.textContent || '').trim();
+          if (!txt) continue; // blank between tech line and anchor is fine
+          if (!VIDEO_TECH_LINE_REGEX.test(txt)) break;
+          blockLines.unshift(txt);
+          blockFrom = offset;
+          firstBlockIndex = i;
+        }
+        // Forward: IN/OUT/to/quote/timecode continuation lines (and any
+        // further tech lines) with random whitespace tolerated.
+        let pendingBlankEnd = null;
+        for (let i = paraIndex + 1; i < topNodes.length; i++) {
+          const { node, offset } = topNodes[i];
+          if (node.type.name !== 'paragraph') break;
+          const txt = (node.textContent || '').trim();
+          if (!txt) {
+            pendingBlankEnd = offset + node.nodeSize;
+            continue;
+          }
+          if (!CUE_CONTINUATION_REGEX.test(txt) && !VIDEO_INOUT_REGEX.test(txt) &&
+              !VIDEO_TECH_LINE_REGEX.test(txt)) break;
+          blockLines.push(txt);
+          blockTo = offset + node.nodeSize;
+          lastBlockIndex = i;
+          pendingBlankEnd = null;
+        }
+        void pendingBlankEnd; // trailing blanks stay out of the replacement
+      }
+
+      // Context for source-file hints: a few top-level nodes on each side
+      // of the block. Paragraphs contribute their text; cues contribute a
+      // compact "[TYPE: slug-or-note]" line (Josh's notes are often NOTE
+      // cues or nearby prose).
+      const contextOf = (entry) => {
+        const { node } = entry;
+        if (node.type.name === 'paragraph') {
+          const t = (node.textContent || '').trim();
+          // Exclude OTHER cue blocks' data lines (tokens, IN/OUT lines,
+          // continuations, tech lines) — context is for source-file hints
+          // from prose/notes only. Leaked neighbor-block data makes the
+          // LLM emit spurious cues / wrong trims (seen live on ep 0283).
+          if (
+            LEGACY_CUE_REGEX.test(t) || VIDEO_CUE_LOOSE_REGEX.test(t) ||
+            CUE_CONTINUATION_REGEX.test(t) || VIDEO_INOUT_REGEX.test(t) ||
+            VIDEO_TECH_LINE_REGEX.test(t)
+          ) return '';
+          return t;
+        }
+        if (node.type.name === 'cue') {
+          const f = node.attrs.fields || {};
+          const detail = f.slug || f.noteText || f.mediaUrl || '';
+          return `[${node.attrs.cueType || 'CUE'}: ${detail}]`;
+        }
+        return '';
+      };
+      const contextText = [
+        ...topNodes.slice(Math.max(0, firstBlockIndex - 4), firstBlockIndex),
+        ...topNodes.slice(lastBlockIndex + 1, lastBlockIndex + 5),
+      ].map(contextOf).filter(Boolean).join('\n');
+
+      let result = null;
+      isConverting = true; // pause the sweeper until the replacement lands
+      try {
+        if (isVideoBlock) {
+          notify('Extracting cue data with AI…', '#7e57c2', 2500);
+          try {
+            result = await convertVideoBlockWithLLM({
+              blockText: blockLines.join('\n'),
+              contextText,
+              episode: props.episode || '',
+              speaker,
+              segmentId: null,
+              pickMedia: pickMediaForCue,
+            });
+          } catch (e) {
+            // Video conversion is ALL-OR-NOTHING (per user direction): either
+            // a complete cue block lands (AssetID + media + pipeline
+            // dispatched) or the error pops in a modal and the block stays
+            // flagged for retry. No regex fallback — it would produce a
+            // half-filled cue. Exception: if every failure is a deliberate
+            // picker cancel, a quiet toast beats stacking a second modal.
+            console.warn('[convertLegacyCue] video conversion failed:', e);
+            const fails = Array.isArray(e?.failures) ? e.failures : [];
+            if (fails.length > 0 && fails.every((f) => f.cancelled)) {
+              notify('Conversion cancelled — block left flagged.', '#ff9800', 3000);
+            } else {
+              openConvertError(e, blockLines);
+            }
+            return;
+          }
+        }
+
+        if (!result) {
+          try {
+            result = await convertLegacyToken({
+              paragraphSegment: { content: paragraphText, speaker },
+              episode: props.episode || '',
+              segmentId: null,
+            });
+          } catch (e) {
+            console.warn('[convertLegacyCue] conversion failed:', e);
+            notify('Could not convert this cue token — leaving it flagged.', '#f44336', 4000);
+            return; // leave flag set for retry
+          }
+        }
+
+      const segs = (result && result.replacementSegments) || [];
+      if (segs.length === 0) {
+        notify('Nothing to convert in this paragraph.', '#ff9800', 3000);
+        return;
+      }
+
+      // Reassemble the replacement region as markdown: text segments become
+      // plain paragraphs, cue segments use their rawContent (the cue block md).
+      const md = segs
+        .map((s) => (s.type === 'cue' ? (s.rawContent || '') : (s.content || '')))
+        .filter((chunk) => chunk && chunk.trim())
+        .join('\n\n');
+
+      const { doc: parsed } = markdownToDoc(md || '');
+      const nodes = [];
+      parsed.forEach((child) => {
+        // Skip the trailing empty placeholder paragraph markdownToDoc may add.
+        if (child.type.name === 'paragraph' && child.content.size === 0) return;
+        nodes.push(child.toJSON());
+      });
+      if (nodes.length === 0) {
+        notify('Conversion produced no content — leaving it flagged.', '#f44336', 4000);
+        return;
+      }
+
+      // Replace the flagged block (gathered tech lines above + anchor
+      // paragraph + continuation lines below) with the resolved nodes
+      // (one undo step).
+      editor.value
+        .chain()
+        .focus()
+        .insertContentAt({ from: blockFrom, to: blockTo }, nodes)
+        .run();
+      // Persist the conversion. (See #convert-undo below for the history note.)
+      flushPendingChanges();
+
+      // ALSO persist server-side, immediately. The editor save path above is
+      // a browser-session concern and can silently fail (frozen autosave,
+      // 2026-07-18: every conversion orphaned — pipelines completed against
+      // cue blocks that only existed in memory, and a reload reverted the
+      // script). The backend locates the flagged block by its text and does
+      // the same replacement directly in script_content, so a reload after
+      // conversion shows the cue block, and the pipeline's completion
+      // write-back always finds its cue. Editor save remains as redundancy.
+      try {
+        const persistRes = await axios.post('/api/legacy-cue-convert/persist-conversion', {
+          episode: props.episode || '',
+          speaker,
+          block_lines: blockLines,
+          segments: segs.map((s) => ({
+            type: s.type === 'cue' ? 'cue' : 'text',
+            content: s.type === 'cue' ? (s.rawContent || '') : (s.content || ''),
+          })),
+        });
+        if (!persistRes.data?.persisted) {
+          console.warn('[convertLegacyCue] server-side persist declined:', persistRes.data?.reason);
+          notify('Cue converted — server-side save skipped (' + (persistRes.data?.reason || 'unknown') + '); editor save will cover it.', '#ff9800', 4000);
+        }
+      } catch (e) {
+        console.warn('[convertLegacyCue] server-side persist failed (editor save will cover):', e);
+      }
+
+      // Report whether media matched (audit carries mediaMatched per cue)
+      // and whether the SOT/VO pipeline was dispatched.
+      const audit = (result && result.audit) || [];
+      const matched = audit.filter((a) => a.mediaMatched).length;
+      const dispatched = audit.filter((a) => a.processingJobId).length;
+      const viaLLM = audit.some((a) => a.llmExtracted);
+      const cues = audit.filter((a) => a.to).length;
+      if (cues > 0) {
+        notify(
+          `${viaLLM ? 'AI-extracted' : 'Converted'} ${cues} cue${cues > 1 ? 's' : ''}` +
+            (matched > 0 ? ` — ${matched} with media` : ' (no media matched)') +
+            (dispatched > 0 ? `, processing started` : ''),
+          matched > 0 ? '#43a047' : '#ff9800',
+          5000
+        );
+      }
+      } finally {
+        isConverting = false;
+      }
     }
 
     // ── Multi-select toolbar actions ─────────────────────────────────────────
@@ -1008,6 +1586,14 @@ export default {
       revPopupInput,
       commitRevisionPopup,
       cancelRevisionPopup,
+      // Attempt Fix error modal
+      convertError,
+      closeConvertError,
+      // Attempt Fix source-video picker
+      mediaPick,
+      chooseMediaFile,
+      cancelMediaPick,
+      formatFileSize,
       // Needs-attention note panel
       flagPanel,
       flagNoteInput,
@@ -1084,12 +1670,22 @@ export default {
 .rev-popup-btn.cancel { background: rgba(244, 67, 54, 0.3); color: #c62828; }
 .rev-popup-btn.cancel:hover { background: rgba(244, 67, 54, 0.55); }
 .script-editor-host {
-  flex: 1 1 auto;
-  overflow-y: auto;
+  /* SCROLL OWNERSHIP: the editor lives inside a PAGE-scrolled column
+     (.script-mode-container is height:auto / overflow:visible so its sticky
+     toolbars stay pinned; an outer ancestor owns the scroll). The host must
+     therefore NOT be its own scroll container, or two scrollers fight: the
+     ancestor chain's min-height (calc(100vh - …) on .script-content-container
+     and .visual-script-container) pins the host to roughly one viewport, so
+     with overflow-y:auto the host clamps its own scroll range to ~1 screen —
+     once the page is scrolled past that, the wheel hits the host (tiny range)
+     and the page underneath stops moving. That is the "lost mouse scroll while
+     editing" regression. overflow:visible hands scrolling back to the page,
+     exactly like the legacy contenteditable list it replaced. */
+  flex: 0 0 auto;
+  overflow: visible;
   /* Extra RIGHT padding creates a gutter for the per-paragraph hover controls
-     (flag/delete) + the needs-attention flag. overflow-y:auto clips the x-axis,
-     so the controls must live INSIDE this padding to be fully visible — they
-     can't sit past the host edge. */
+     (flag/delete) + the needs-attention flag. With overflow:visible the
+     controls can also extend slightly past this padding without being clipped. */
   padding: 12px 3.2em 12px 16px;
 }
 
@@ -1147,7 +1743,10 @@ export default {
 /* ProseMirror baseline so the editable area behaves like a document. */
 .script-editor-host :deep(.ProseMirror) {
   outline: none;
-  min-height: 100%;
+  /* Fill at least the visible area so clicking the empty space below the last
+     paragraph still lands the caret. Viewport-relative (not 100%) because the
+     host is no longer a definite-height scroller — see .script-editor-host. */
+  min-height: calc(100vh - 250px);
 }
 .script-editor-host :deep(.ProseMirror p) {
   margin: 0 0 0.6em;
@@ -1338,6 +1937,36 @@ export default {
 }
 .script-editor-host :deep(na-btn.na-delete:hover) { color: #e53935; background: rgba(229, 57, 53, 0.14); }
 
+/* "Attempt Fix" overlay button — for paragraphs flagged as legacy cue tokens.
+   Always visible while flagged (not hover-gated), positioned over the RIGHT
+   EDGE of the flagged row itself so it's a quick, obvious one-click resolve.
+   Sits above the red tint; clicking converts the token to a cue block. */
+.script-editor-host :deep(na-fix) {
+  position: absolute;
+  right: 0.4em;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.18em 0.6em;
+  font-size: calc(var(--editor-script-font-size, 16px) * 0.82);
+  font-weight: 600;
+  line-height: 1.2;
+  color: #fff;
+  background: #e53935;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  z-index: 65;             /* above na-controls (60) and the row tint */
+  transition: background 0.12s ease;
+}
+.script-editor-host :deep(na-fix:hover) { background: #c62828; }
+.script-editor-host :deep(na-fix svg) { width: 1.15em; height: 1.15em; }
+.script-editor-host :deep(na-fix .na-fix-label) { pointer-events: none; }
+
 /* Flag note panel (attached to the right of a flagged paragraph). */
 .flag-note-panel {
   /* Teleported to <body> with viewport (fixed) coords, so it floats OVER the
@@ -1436,6 +2065,71 @@ export default {
   border-radius: 8px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
   padding: 16px;
+}
+
+/* Attempt Fix error modal (reuses the rev-diff shell) */
+.convert-error-header {
+  color: #c62828;
+}
+.convert-error-list {
+  margin: 10px 0 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.convert-error-item {
+  background: #fdecea;
+  border-left: 3px solid #c62828;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  color: #5f2120;
+  border-radius: 0 4px 4px 0;
+}
+.convert-error-hint {
+  margin: 10px 0 0 0;
+  font-size: 0.78rem;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+/* Attempt Fix source-video picker */
+.media-pick-intro {
+  margin: 10px 0 8px 0;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.7);
+}
+.media-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+.media-pick-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  background: #fafafa;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: 0.85rem;
+}
+.media-pick-item:hover {
+  background: #e3f2fd;
+  border-color: #1565c0;
+}
+.media-pick-name {
+  font-weight: 500;
+  word-break: break-all;
+}
+.media-pick-meta {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: rgba(0, 0, 0, 0.5);
 }
 .rev-diff-header {
   display: flex;

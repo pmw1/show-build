@@ -28,6 +28,8 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { LEGACY_CUE_FLAG_LABEL } from '@/modules/legacyCueConvert/patterns.js';
+import { isPasteInterpretEnabled } from '@/modules/legacyCueConvert/interpretSetting.js';
 
 export const needsAttentionKey = new PluginKey('needsAttention');
 
@@ -182,12 +184,30 @@ export const NeedsAttention = Extension.create({
                   ignoreSelection: true,
                 })
               );
+              // "Attempt Fix" button — only for paragraphs flagged because they
+              // contain a legacy cue token. It overlays the right edge of the
+              // flagged row (always visible, not hover-only) so the user can
+              // resolve it in one click. Clicking converts the token to a cue
+              // block (host's onConvertLegacyCue), which replaces this row.
+              // Gated by the "Interpret cues & media from pasted script"
+              // setting — when OFF, no Attempt Fix renders anywhere (the red
+              // flag itself stays, as a validity warning).
+              if (node.attrs.flagNote === LEGACY_CUE_FLAG_LABEL && isPasteInterpretEnabled()) {
+                decos.push(
+                  Decoration.widget(offset + 1, () => buildAttemptFix(offset), {
+                    side: -1,
+                    key: `na-fix-${offset}`,
+                    ignoreSelection: true,
+                  })
+                );
+              }
             });
             return DecorationSet.create(state.doc, decos);
           },
           handleDOMEvents: {
             mousedown: (view, event) => {
-              const btn = event.target?.closest?.('na-btn');
+              // na-btn = flag/delete cluster; na-fix = the Attempt Fix overlay.
+              const btn = event.target?.closest?.('na-btn, na-fix');
               if (!btn) return false;
               event.preventDefault();
               event.stopPropagation();
@@ -207,6 +227,15 @@ export const NeedsAttention = Extension.create({
                 if (typeof fn === 'function') fn(pos, !wasFlagged);
               } else if (action === 'delete') {
                 animateDeleteAt(view, pos);
+              } else if (action === 'convert') {
+                // Legacy-cue Convert ("Fix") button: hand the paragraph pos up
+                // to the host (ScriptEditor), which calls convertLegacyToken and
+                // replaces the paragraph with the resolved cue block(s).
+                // Re-check the setting — a stale widget can outlive a toggle
+                // (decorations only rebuild on the next transaction).
+                if (!isPasteInterpretEnabled()) return true;
+                const fn = editor.options.onConvertLegacyCue;
+                if (typeof fn === 'function') fn(pos);
               }
               return true;
             },
@@ -310,6 +339,23 @@ function buildControls(node, pos) {
   return wrap;
 }
 
+/**
+ * Build the "Attempt Fix" overlay button for a legacy-cue-flagged paragraph.
+ * Rendered as a widget that absolutely-positions itself over the right edge of
+ * the flagged row (see ScriptEditor.vue CSS for .na-fix). Always visible while
+ * flagged. mousedown dispatches the 'convert' action (handled by the plugin's
+ * delegated mousedown handler → onConvertLegacyCue).
+ */
+function buildAttemptFix(pos) {
+  const btn = document.createElement('na-fix');
+  btn.setAttribute('data-na-action', 'convert');
+  btn.setAttribute('data-na-pos', String(pos));
+  btn.setAttribute('contenteditable', 'false');
+  btn.setAttribute('title', 'Look for matching media in preshow/ and assets/, and build the cue');
+  btn.innerHTML = `${WRENCH_SVG}<span class="na-fix-label">Attempt Fix</span>`;
+  return btn;
+}
+
 // Crisp inline SVGs (24x24, currentColor) — nicer than the legacy mdi-flag /
 // mdi-close glyphs: a pennant flag and a rounded trash can.
 const FLAG_OUTLINE_SVG =
@@ -318,5 +364,7 @@ const FLAG_FILLED_SVG =
   '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5z"/></svg>';
 const TRASH_SVG =
   '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M10 11v6M14 11v6"/></svg>';
+const WRENCH_SVG =
+  '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2l-5.6 5.6a1.4 1.4 0 0 0 2 2l5.6-5.6a4 4 0 0 0 5.2-5.4l-2.5 2.5-2.1-.4-.4-2.1z"/></svg>';
 
 export default NeedsAttention;

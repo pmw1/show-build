@@ -26,6 +26,7 @@ import { LineNumbers } from './LineNumbers.js';
 import { CollapseSummary } from './CollapseSummary.js';
 import { SpeakerHeaders } from './SpeakerHeaders.js';
 import { NeedsAttention } from './NeedsAttention.js';
+import { PasteHandler } from './PasteHandler.js';
 
 /**
  * @param {object} [opts]
@@ -61,6 +62,11 @@ export function buildScriptExtensions(opts = {}) {
     // paragraphs, red-tint background while flagged; the note panel is rendered
     // by the host (ScriptEditor) via the onFlagParagraph bridge.
     NeedsAttention,
+    // Paste pipeline (port of the legacy editor): cleans Google-Docs HTML on
+    // paste and red-flags any paragraph containing a legacy cue token
+    // ((TYPE/slug)) with flagNote 'Invalid cue code' so the NeedsAttention
+    // Convert button appears. Conversion is user-triggered, not on paste.
+    PasteHandler,
     UndoRedo,
   ];
 }

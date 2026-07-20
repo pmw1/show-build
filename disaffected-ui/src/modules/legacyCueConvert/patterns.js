@@ -28,10 +28,128 @@
  * The /i flag makes the type group case-insensitive so `{sot/foo}`
  * still matches — that's important because legacy scripts vary in case.
  */
-export const LEGACY_CUE_REGEX = /[{(](SOT|VO|VOT|NAT|FSQ|FS\s*QUOTE|GFX|IMG|PKG|DIR|BUMP|STING|VOX|MUS|LIVE|RIF|CUE)\s*\/([^})]+)[})]/i
+export const LEGACY_CUE_REGEX = /[{(]\s*(SOT|VO|VOT|NAT|FSQ|FS\s*QUOTE|GFX|IMG|PKG|DIR|BUMP|STING|VOX|MUS|LIVE|RIF|CUE)\s*\/([^})]+)[})]/i
 
 /** Same pattern with /g for `matchAll()` over multi-token paragraphs. */
 export const LEGACY_CUE_REGEX_GLOBAL = new RegExp(LEGACY_CUE_REGEX.source, 'gi')
+
+/**
+ * Video cue types (token forms) that route through the LLM extraction
+ * path on Attempt Fix instead of the pure-regex conversion. Hosts paste
+ * these as multi-line blocks — token line + IN/OUT timecode lines with
+ * in-cue/out-cue quotes — that the regex path would discard as prose.
+ */
+export const VIDEO_CUE_TOKEN_TYPES = new Set(['SOT', 'VO', 'VOT', 'NAT'])
+
+/**
+ * Looser anchor for video blocks whose token line is malformed (missing
+ * the closing bracket, stray spaces): `( SOT / keysha eight`. Used for
+ * paste-time flagging and for deciding the LLM path — NOT for extraction
+ * (the LLM does that).
+ */
+export const VIDEO_CUE_LOOSE_REGEX = /[{(]\s*(SOT|VO|VOT|NAT)\s*[/:]/i
+
+/**
+ * A paragraph that CONTINUES a pasted video-cue block. Hosts spread one
+ * cue over several short lines with random whitespace:
+ *
+ *   (SOT/keysha eight)
+ *   IN-02:54:58 "do you think"
+ *   to
+ *   OUT-02:57:31 "too tripped up in his lies"
+ *
+ * Matched (case-insensitive, liberal whitespace):
+ *   - IN/OUT followed by a timecode (any of - – — : as separator)
+ *   - a bare "to" line
+ *   - a line that is just a quoted phrase
+ *   - a bare timecode line
+ */
+/**
+ * IN/OUT timecode marker ANYWHERE in a paragraph (`IN-02:54:58`,
+ * `OUT: 2:05`). Used by the ScriptEditor sweeper to catch video-cue
+ * blocks whose token anchor is missing entirely — the IN/OUT line itself
+ * becomes the Attempt Fix anchor and the LLM derives type/slug from
+ * the surrounding context.
+ *
+ * Deliberately CASE-SENSITIVE (uppercase IN/OUT only), unlike the
+ * line-anchored CUE_CONTINUATION_REGEX: this one matches mid-prose, and
+ * lowercase would false-positive on things like "tune in: 8:30 tonight"
+ * — which the sweeper would then re-flag every 30s.
+ */
+// Separator after IN/OUT is OPTIONAL (per host practice): `IN-02:54:58`,
+// `OUT: 2:05`, and bare `IN 29:14` all match.
+export const VIDEO_INOUT_REGEX = /\b(IN|OUT)\s*[-–—:]*\s*\d{1,2}:\d{2}/
+
+/**
+ * Technical production line inside (or starting) a host video-cue block:
+ * the "FULL VIDEO IS TITLED '…'" source-file line, or a generic all-caps
+ * production note ("GRAB THE FULL YOUTUBE UPLOAD"). Consumed by
+ * PasteHandler flagging and the ScriptEditor sweeper, where it can
+ * anchor a block (when no token/IN-OUT anchor is open above) or join
+ * one as a member line.
+ *
+ * Deliberately CASE-SENSITIVE like VIDEO_INOUT_REGEX: the all-caps
+ * alternative works by requiring the absence of lowercase letters, and
+ * an /i flag would make the [a-z]/[A-Z] classes meaningless. Hosts type
+ * these notes in caps to set them off from prose; a lowercase "full
+ * video is titled" will not match — accepted trade-off so ordinary
+ * prose never flags.
+ *
+ * The all-caps alternative requires two capital words and ≥10 chars so
+ * bare "OK", one-word shouts, and timecode fragments don't flag. The
+ * TITLED alternative is separate because its quoted title tail is
+ * usually mixed-case.
+ *
+ * FROM lines: hosts also name a cue's source video as `FROM: <title>` or
+ * `FROM '<title>'` (e.g. `FROM '33LaKeyshaKeysha'`). The title is a fuzzy
+ * reference — usually no file extension, casing/wording may drift from the
+ * actual filename. Matching here makes the sweeper flag the line as
+ * "Video cue data" AND puts it in the gathered block, so the extract-cue
+ * LLM sees it and resolves it against the preshow file list. Uppercase
+ * FROM + (colon or opening quote) is required so prose sentences starting
+ * with "From ..." never flag; a bare all-caps `FROM FULL SURVEILLANCE
+ * VIDEO` already matches the generic all-caps alternative.
+ */
+export const VIDEO_TECH_LINE_REGEX = new RegExp(
+  [
+    // "FULL VIDEO IS TITLED 'Mixed Case Title'"
+    String.raw`^\s*FULL\s+VIDEO\s+IS\s+TITLED\b`,
+    // "FROM: title" / "From: title" — colon form, any tail. Title-case
+    // "From" is accepted ONLY with the colon (seen live: "From:
+    // 32LaKeyshaKeysha"); prose sentences ("From here we see...") have
+    // no colon and stay unflagged.
+    String.raw`^\s*F(?:ROM|rom)\s*:`,
+    // "FROM 'title'" / "FROM "title"" — quoted-title form
+    String.raw`^\s*FROM\s+['"‘“]`,
+    // bare "FROM 33LaKeyshaKeysha" — no colon, no quotes. Uppercase FROM
+    // at line start distinguishes a production note from prose ("From
+    // here we see..."); the ≤6-token tail keeps long prose lines out.
+    String.raw`^\s*FROM\s+\S+(?:\s+\S+){0,5}\s*$`,
+    // generic all-caps production note: no lowercase anywhere, at least
+    // two 2+-letter capital words, at least 10 chars total
+    String.raw`^(?!.*[a-z])(?=.*[A-Z]{2}.*\s.*[A-Z]{2}).{10,}$`,
+  ].join('|')
+)
+
+/**
+ * Flag note for NON-anchor lines of a detected video-cue block (the
+ * IN/OUT/to/quote continuation lines). They get the needs-attention
+ * tint so the whole block reads as one box, but NOT the Attempt Fix
+ * button (that renders only for LEGACY_CUE_FLAG_LABEL, on the anchor).
+ * The sweeper owns this label — it sets and clears it; never set it
+ * manually.
+ */
+export const VIDEO_BLOCK_MEMBER_FLAG_LABEL = 'Video cue data'
+
+export const CUE_CONTINUATION_REGEX = new RegExp(
+  [
+    String.raw`^\s*(IN|OUT)\s*[-–—:]*\s*\d{1,2}:\d{2}`,
+    String.raw`^\s*to\s*$`,
+    String.raw`^\s*["“'][^"”']*["”']\s*$`,
+    String.raw`^\s*\d{1,2}:\d{2}(:\d{2})?\s*$`,
+  ].join('|'),
+  'i'
+)
 
 /**
  * The exact string Auto Scrub writes to `data-flag-note` on flagged

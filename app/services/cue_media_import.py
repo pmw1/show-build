@@ -55,6 +55,8 @@ def start_sot_processing_from_path(
     episode: str,
     slug: str,
     asset_id: Optional[str] = None,
+    trim_start: str = "00:00:00",
+    trim_end: str = "00:00:00",
 ) -> dict:
     """
     Mirror of /api/sot/upload/background + /api/sot/process/multi-phase
@@ -117,8 +119,8 @@ def start_sot_processing_from_path(
             temp_job_id,
             episode,
             slug,
-            "00:00:00",  # trim_start
-            "00:00:00",  # trim_end
+            trim_start or "00:00:00",
+            trim_end or "00:00:00",
             "full_process",
             None,        # clips
             asset_id,
@@ -149,6 +151,8 @@ def start_vo_processing_from_path(
     episode: str,
     slug: str,
     asset_id: Optional[str] = None,
+    trim_start: str = "00:00:00",
+    trim_end: str = "00:00:00",
 ) -> dict:
     """
     Mirror of /api/vo/upload/background + /api/vo/process for a file
@@ -190,7 +194,7 @@ def start_vo_processing_from_path(
     # Mirror vo_router.py:229 — process_vo_video.apply_async with positional args.
     # Signature: (temp_job_id, episode, slug, trim_start, trim_end, asset_id)
     task = process_vo_video.apply_async(
-        args=[temp_job_id, episode, slug, "00:00:00", "00:00:00", asset_id],
+        args=[temp_job_id, episode, slug, trim_start or "00:00:00", trim_end or "00:00:00", asset_id],
         queue='media',
         routing_key='media',
         exchange='media',

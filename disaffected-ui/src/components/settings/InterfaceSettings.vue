@@ -335,6 +335,27 @@
               />
             </div>
 
+            <p class="text-body-2 mt-4 mb-1" style="color: rgba(0,0,0,0.6);">
+              <strong>Interpret cues &amp; media from pasted script</strong> — detects
+              host-pasted video cue blocks beyond strict tokens: multi-line
+              <code>IN-02:54:58 … OUT-02:57:31</code> blocks, broken tokens like
+              <code>( SOT / slug</code>, and technical lines such as
+              <code>FULL VIDEO IS TITLED '…'</code> or all-caps production notes. Flagged
+              blocks get a box and an <strong>Attempt Fix</strong> button that runs a local
+              LLM to extract type, slug, trim points, in/out cues, and the source file,
+              then creates the cue and starts SOT/VO processing. When off, no Attempt Fix
+              button is offered anywhere and only strict tokens keep their validity flag.
+            </p>
+            <div class="setting-row">
+              <v-switch
+                v-model="interfaceSettings.pasteCueInterpretEnabled"
+                label="Interpret cues &amp; media from pasted script"
+                color="primary"
+                class="setting-row-control"
+                hide-details
+              />
+            </div>
+
             <div class="mt-4">
               <div class="d-flex align-center mb-1">
                 <label class="text-body-2 font-weight-medium">Media-match LLM prompt:</label>
@@ -735,6 +756,27 @@ watch(
   (v) => {
     try {
       localStorage.setItem(LEGACY_CUE_CONVERT_LS_KEY, v ? 'true' : 'false')
+    } catch (_e) { /* ignore */ }
+  }
+)
+
+// Interpret cues & media from pasted script: same localStorage-mirror
+// pattern. Read at run time by interpretSetting.js consumers (PasteHandler,
+// the ScriptEditor sweeper, and NeedsAttention's Attempt Fix button).
+const PASTE_INTERPRET_LS_KEY = 'show-build:pasteCueInterpretEnabled'
+if (typeof interfaceSettings.value.pasteCueInterpretEnabled === 'undefined') {
+  try {
+    const ls = localStorage.getItem(PASTE_INTERPRET_LS_KEY)
+    interfaceSettings.value.pasteCueInterpretEnabled = ls === null ? true : ls === 'true'
+  } catch (_e) {
+    interfaceSettings.value.pasteCueInterpretEnabled = true
+  }
+}
+watch(
+  () => interfaceSettings.value.pasteCueInterpretEnabled,
+  (v) => {
+    try {
+      localStorage.setItem(PASTE_INTERPRET_LS_KEY, v ? 'true' : 'false')
     } catch (_e) { /* ignore */ }
   }
 )

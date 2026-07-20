@@ -195,26 +195,35 @@ def get_segment_prompt_template():
 # Ollama caller
 # ---------------------------------------------------------------------------
 
-def call_ollama(host, model, prompt, temperature=0.2, max_tokens=500, timeout=600, fallback_model=None):
+def call_ollama(host, model, prompt, temperature=0.2, max_tokens=500, timeout=600, fallback_model=None, think=None):
     """Synchronous Ollama /api/generate call. Returns the response text.
-    If `fallback_model` is provided and the primary model 404s, retries once with the fallback."""
+    If `fallback_model` is provided and the primary model 404s, retries once with the fallback.
+
+    `think=False` disables the thinking phase on reasoning models (qwen3
+    etc., Ollama >= 0.9). IMPORTANT for structured-output calls: thinking
+    tokens count against num_predict, so a reasoning model can burn the
+    whole budget thinking and return an EMPTY response — that's exactly
+    what broke extract-cue on real-sized prompts. None omits the field."""
     candidates = [model]
     if fallback_model and fallback_model != model:
         candidates.append(fallback_model)
     last_exc = None
     for idx, m in enumerate(candidates):
         try:
+            payload = {
+                "model": m,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": max_tokens
+                }
+            }
+            if think is not None:
+                payload["think"] = think
             resp = requests.post(
                 f"{host}/api/generate",
-                json={
-                    "model": m,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": temperature,
-                        "num_predict": max_tokens
-                    }
-                },
+                json=payload,
                 timeout=timeout
             )
             if resp.status_code == 404 and idx < len(candidates) - 1:

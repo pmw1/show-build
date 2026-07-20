@@ -331,6 +331,7 @@
                 v-if="useProseMirrorEditor"
                 ref="scriptEditorRef"
                 :script-content="props.scriptContent"
+                :episode="currentEpisode"
                 :collapsed="collapseMode"
                 :show-line-numbers="showLineNumbers"
                 :line-number-offset="lineNumberOffset"
@@ -2213,9 +2214,13 @@ const calculatedItemDuration = computed(function calculatedItemDuration() {
       if (parts.length >= 3) {
         totalSeconds += (parseInt(parts[0]) || 0) * 3600 + (parseInt(parts[1]) || 0) * 60 + (parseInt(parts[2]) || 0);
       }
-    } else if (!cueMatch && !line.match(/^```/) && !line.match(/^\s*\w+\s*:/)) {
-      // Regular text line — accumulate for word count
-      textBuffer += ' ' + line;
+    } else if (!cueMatch && !line.match(/^```/) && !line.match(/^\s*\w+\s*:/) && !line.match(/^\s*<!--/)) {
+      // Regular text line — strip HTML tags and entities BEFORE counting, so
+      // empty paragraphs (<p class="josh"></p>) and markup contribute ZERO
+      // words. Without this, every empty <p> counted as 2 "words" and each
+      // cue's <!-- Begin/End Cue --> markers as 4, inflating empty segments
+      // and ads to 1-4 phantom seconds (the stored 00:00:01:00 durations).
+      textBuffer += ' ' + line.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ');
     }
   }
 

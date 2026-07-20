@@ -25,6 +25,7 @@ import {
   DEFAULT_DURATION_BY_TYPE,
   LEGACY_CUE_REGEX_GLOBAL,
   MEDIA_BEARING_TYPES,
+  VIDEO_CUE_LOOSE_REGEX,
   normalizeTokenType,
   sanitizeSlug,
 } from './patterns'
@@ -223,6 +224,318 @@ export async function convertLegacyToken({ paragraphSegment, episode, segmentId 
 }
 
 /**
+ * convertVideoBlockWithLLM — LLM-extraction path for host-pasted VIDEO cue
+ * blocks (SOT/VO/NAT). Hosts paste multi-line blocks with random whitespace:
+ *
+ *   (SOT/keysha eight)
+ *   IN-02:54:58 "do you think"
+ *   to
+ *   OUT-02:57:31 "too tripped up in his lies"
+ *
+ * The regex path (convertLegacyToken) would convert the token but discard
+ * the IN/OUT/quote data as prose. This path sends the WHOLE block plus
+ * surrounding script context (Josh often notes the source file nearby) to
+ * POST /api/legacy-cue-convert/extract-cue (local Ollama), then for each
+ * extracted cue: AssetID → find-media (with the extracted source-file hint)
+ * → import-media (with the extracted trim points, so the SOT/VO Celery
+ * pipeline on the media queue trims to the host's in/out) → cue block md.
+ *
+ * Returns the same { replacementSegments, audit } shape as
+ * convertLegacyToken so ScriptEditor handles both paths identically.
+ * Throws when the LLM extracts nothing — callers should fall back to
+ * convertLegacyToken.
+ */
+/**
+ * Optional `pickMedia` callback (provided by ScriptEditor): invoked when
+ * find-media cannot determine a source video for a cue. Receives
+ * { label, slug, cueType, sourceHint } and must return:
+ *   { filename, source_dir }  — the user picked a file (proceed with it)
+ *   null                      — the user cancelled (cue fails, cancelled:true)
+ *   false                     — no candidate files exist for this episode
+ */
+export async function convertVideoBlockWithLLM({ blockText, contextText = '', episode, speaker = 'josh', segmentId = null, pickMedia = null }) {
+  const stripped = (blockText || '').replace(/^\s*\*\*\*\s*/, '').trim()
+  if (!stripped) {
+    throw new Error('convertVideoBlockWithLLM: empty block text')
+  }
+
+  const res = await axios.post('/api/legacy-cue-convert/extract-cue', {
+    episode,
+    block_text: stripped,
+    context_text: contextText || '',
+  })
+  const cues = res.data?.cues || []
+  if (cues.length === 0) {
+    throw new Error('convertVideoBlockWithLLM: LLM extracted no cues')
+  }
+
+  const replacementSegments = []
+  const audit = []
+
+  // Preserve any prose BEFORE the first token on the anchor line — the
+  // block gatherer hands us whole paragraphs, and a host sometimes leads
+  // with a sentence before the (SOT/...) token.
+  const tokenMatch = stripped.match(VIDEO_CUE_LOOSE_REGEX)
+  if (tokenMatch && tokenMatch.index > 0) {
+    const lead = stripped.slice(0, tokenMatch.index).trim()
+    if (lead) {
+      replacementSegments.push({
+        type: 'text',
+        content: lead,
+        speaker,
+        needsParagraphTags: true,
+        needsAttention: false,
+        flagNote: '',
+      })
+    }
+  }
+
+  const firstLine = stripped.split('\n')[0].slice(0, 120)
+
+  // ALL-OR-NOTHING (per user direction): the conversion either produces a
+  // COMPLETE cue block for every extracted cue — AssetID issued, media
+  // matched, and (for SOT/VO) the Celery pipeline dispatched — or it throws
+  // a structured error (err.failures) that the editor surfaces in a modal,
+  // leaving the block flagged for retry. No partial/half-filled cues land.
+  const failures = []
+
+  for (const cue of cues) {
+    const canonicalType = cue.type // backend already normalized to SOT/VO/NAT
+    const label = `${canonicalType}/${cue.slug}`
+    const slug = sanitizeSlug(cue.slug)
+    if (!slug) {
+      failures.push({ cue: label, reason: 'Could not derive a usable slug from the extracted data.' })
+      continue
+    }
+
+    const assetIdResult = await generateAssetId({
+      type: canonicalType,
+      slug,
+      episode,
+      segmentId,
+      originalToken: firstLine,
+    })
+    if (assetIdResult.pending) {
+      failures.push({ cue: label, reason: 'AssetID generation failed (server unreachable or errored).' })
+      continue
+    }
+
+    // Source-video resolution. The extract-cue LLM now sees the episode's
+    // full (recursive) preshow file list and picks each cue's source video
+    // itself: a VERIFIED pick (backend confirmed the file exists) imports
+    // directly with no fuzzy matching. Otherwise fall back to find-media
+    // (deterministic + LLM tiebreaker) with the unverified name as a hint,
+    // then the manual picker.
+    let mediaUrl = null
+    let processingJobId = null
+    let importMethod = null
+    try {
+      let filename = null
+      let sourceDir = 'preshow'
+      let candidatesConsidered = 0
+      if (cue.source_file_verified && cue.source_file) {
+        filename = cue.source_file
+      } else {
+        const found = await axios.post('/api/legacy-cue-convert/find-media', {
+          episode,
+          slug,
+          cue_type: canonicalType,
+          filename_hint: cue.source_file || null,
+          // With trims present the backend searches preshow/ ONLY — the
+          // source must be a recording, never a finished assets/ clip.
+          trim_start: cue.in_point || null,
+          trim_end: cue.out_point || null,
+        })
+        filename = found.data?.matched_filename
+        sourceDir = found.data?.source_dir || 'preshow'
+        candidatesConsidered = found.data?.candidates_considered ?? 0
+      }
+
+      // No automatic match → let the user pick the source video from the
+      // episode's preshow folder (per user direction). Cancel = this cue
+      // fails with a cancelled marker; no candidates at all = plain failure.
+      if (!filename && typeof pickMedia === 'function') {
+        const choice = await pickMedia({
+          label,
+          slug,
+          cueType: canonicalType,
+          sourceHint: cue.source_file || null,
+        })
+        if (choice === null) {
+          failures.push({ cue: label, reason: 'No source video selected (picker cancelled).', cancelled: true })
+          continue
+        }
+        if (choice === false) {
+          failures.push({
+            cue: label,
+            reason: `No matching media found, and the episode has no ${canonicalType} ` +
+              `candidate files in preshow/ or assets/video to choose from.`,
+          })
+          continue
+        }
+        filename = choice.filename
+        sourceDir = choice.source_dir || 'preshow'
+      }
+
+      if (!filename) {
+        // Lead with the LLM's own verdict when it looked at the episode's
+        // file list and reported it could not identify the source video.
+        const llmVerdict = cue.source_file_error
+          ? `The AI was ${cue.source_file_error} among the episode's preshow files. `
+          : ''
+        failures.push({
+          cue: label,
+          reason: `${llmVerdict}No matching media found in preshow/ or assets/video ` +
+            `(searched for "${slug}"${cue.source_file ? ` and source hint "${cue.source_file}"` : ''}, ` +
+            `${candidatesConsidered} candidate file(s) considered).`,
+        })
+        continue
+      }
+      const placed = await axios.post('/api/legacy-cue-convert/import-media', {
+        episode,
+        slug,
+        cue_type: canonicalType,
+        source_filename: filename,
+        source_dir: sourceDir,
+        asset_id: assetIdResult.assetId,
+        trim_start: cue.in_point || null,
+        trim_end: cue.out_point || null,
+      })
+      mediaUrl = placed.data?.media_url || null
+      processingJobId = placed.data?.processing_job_id || null
+      importMethod = placed.data?.method || null
+    } catch (err) {
+      failures.push({
+        cue: label,
+        reason: `Media import failed: ${err.response?.data?.detail || err.message}`,
+      })
+      continue
+    }
+
+    // SOT/VO must have actually dispatched the processing pipeline; NAT has
+    // no pipeline (preshow_link) so a MediaURL alone is complete for it.
+    const needsPipeline = canonicalType === 'SOT' || canonicalType === 'VO'
+    if (needsPipeline && !processingJobId) {
+      failures.push({
+        cue: label,
+        reason: `Media matched but the ${canonicalType} processing pipeline was not dispatched (import method: ${importMethod || 'unknown'}).`,
+      })
+      continue
+    }
+    if (!needsPipeline && !mediaUrl) {
+      failures.push({ cue: label, reason: 'Media matched but no MediaURL was returned.' })
+      continue
+    }
+
+    const cueBlockMd = buildVideoCueBlock({
+      canonicalType,
+      assetId: assetIdResult.assetId,
+      slug,
+      cue,
+      mediaUrl,
+      processingJobId,
+      originalToken: firstLine,
+    })
+
+    replacementSegments.push({
+      type: 'cue',
+      cueType: canonicalType,
+      data: { rawData: parseCueBlockToRawData(cueBlockMd) },
+      rawContent: cueBlockMd,
+    })
+
+    audit.push({
+      from: firstLine,
+      to: cueBlockMd,
+      assetId: assetIdResult.assetId,
+      pending: false,
+      mediaMatched: true,
+      processingJobId,
+      llmExtracted: true,
+    })
+  }
+
+  if (failures.length > 0) {
+    const err = new Error(
+      `convertVideoBlockWithLLM: ${failures.length} of ${cues.length} cue(s) could not be completed`
+    )
+    err.failures = failures
+    err.extractedCount = cues.length
+    throw err
+  }
+
+  return { replacementSegments, audit }
+}
+
+/**
+ * COMPLETE cue-block markdown for an LLM-extracted video cue — mirrors the
+ * fieldset ContentEditor.submitMultipleSots writes on a manual SOT modal
+ * submit, so the converted cue renders and tracks exactly like a manually
+ * created one (PlaceholderCueCard processing state, SourceJobId linkage,
+ * pipeline field updates by AssetID).
+ *
+ * SOT/VO (pipeline dispatched): MediaURL/Duration/Transcription carry the
+ * "Processing..." placeholders the pipeline overwrites on completion, plus
+ * [SourceJobId] and [ProcessingStatus: Queued].
+ * NAT (no pipeline): real MediaURL (preshow link) + computed/default
+ * Duration — complete as-is.
+ */
+function buildVideoCueBlock({ canonicalType, assetId, slug, cue, mediaUrl, processingJobId, originalToken }) {
+  const trimStart = cue.in_point || '00:00:00'
+  const trimEnd = cue.out_point || '00:00:00'
+  const hasTrims = !!(cue.in_point || cue.out_point)
+  const pipeline = !!processingJobId && (canonicalType === 'SOT' || canonicalType === 'VO')
+
+  let md = '<!-- Begin Cue -->\n'
+  md += `[Type: ${canonicalType}]\n`
+  md += `[AssetID: ${assetId}]\n`
+  md += `[Slug: ${slug}]\n`
+  md += `[Description: ]\n`
+  if (pipeline) {
+    md += '[MediaURL: Processing...]\n'
+    md += '[Duration: Calculating...]\n'
+  } else {
+    md += `[MediaURL: ${mediaUrl || ''}]\n`
+    const duration = computeDuration(cue.in_point, cue.out_point) || DEFAULT_DURATION_BY_TYPE[canonicalType]
+    md += `[Duration: ${duration}]\n`
+  }
+  md += `[TrimStart: ${trimStart}]\n`
+  md += `[TrimEnd: ${trimEnd}]\n`
+  if (hasTrims) md += '[ClippingMethod: single-trim]\n'
+  if (pipeline) {
+    md += `[SourceJobId: ${processingJobId}]\n`
+    md += `[OriginalTrimStart: ${trimStart}]\n`
+    md += `[OriginalTrimEnd: ${trimEnd}]\n`
+    md += '[Transcription: Processing...]\n'
+    md += '[ThumbnailURL: ]\n'
+  }
+  if (cue.in_cue) md += `[Incue: ${cue.in_cue}]\n`
+  if (cue.out_cue) md += `[Outcue: ${cue.out_cue}]\n`
+  if (cue.source_url) md += `[SourceURL: ${cue.source_url}]\n`
+  md += '[Credits: {}]\n'
+  if (pipeline) md += '[ProcessingStatus: Queued]\n'
+  md += `[ConvertedFrom: ${originalToken}]\n`
+  md += '<!-- End Cue -->'
+  return md
+}
+
+/** 'HH:MM:SS' in/out → 'HH:MM:SS:00' duration, or null when not computable. */
+function computeDuration(inPoint, outPoint) {
+  const toSecs = (tc) => {
+    const m = /^(\d{1,2}):(\d{2}):(\d{2})$/.exec(tc || '')
+    return m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : null
+  }
+  const a = toSecs(inPoint)
+  const b = toSecs(outPoint)
+  if (a === null || b === null || b <= a) return null
+  const d = b - a
+  const h = String(Math.floor(d / 3600)).padStart(2, '0')
+  const mn = String(Math.floor((d % 3600) / 60)).padStart(2, '0')
+  const s = String(d % 60).padStart(2, '0')
+  return `${h}:${mn}:${s}:00`
+}
+
+/**
  * Generate a properly-typed AssetID via the modern endpoint. On any
  * failure (network, non-2xx, missing field) returns { assetId: 'pending',
  * pending: true } — the cue still lands with [AssetID: pending] so the
@@ -274,12 +587,16 @@ async function findAndImportMedia({ episode, slug, cueType, assetId }) {
     })
     const filename = found.data?.matched_filename
     if (!filename) return { mediaUrl: null, processingJobId: null }
+    // find-media now searches preshow/ AND assets/{subdir}; pass the source_dir
+    // it reported through so import-media reads from the right folder.
+    const sourceDir = found.data?.source_dir || 'preshow'
 
     const placed = await axios.post('/api/legacy-cue-convert/import-media', {
       episode,
       slug,
       cue_type: cueType,
       source_filename: filename,
+      source_dir: sourceDir,
       asset_id: assetId,
     })
     return {
