@@ -98,20 +98,6 @@
             </v-tooltip>
           </v-btn>
 
-          <!-- View Regions Toggle Button -->
-          <v-btn
-            size="x-small"
-            variant="outlined"
-            @click="toggleRegionsVisibility"
-            :class="['toolbar-btn-tile', showRegions ? 'toolbar-btn-info' : 'toolbar-btn-grey']"
-          >
-            <v-icon size="small">{{ showRegions ? 'mdi-view-grid' : 'mdi-view-list' }}</v-icon>
-            <span class="btn-text-tiny">Regions</span>
-            <v-tooltip activator="parent" location="bottom">
-              {{ showRegions ? 'Hide Regions (Alt+Shift+R)' : 'Show Regions (Alt+Shift+R)' }}
-            </v-tooltip>
-          </v-btn>
-
           <!-- Options Menu -->
           <v-menu>
             <template v-slot:activator="{ props }">
@@ -197,7 +183,24 @@
         </div>
 
       </div>
-      
+
+      <!-- View-mode row: Regions / Blocks / List (Alt+Shift+R cycles).
+           The active mode renders color-INVERTED (filled) for weight. -->
+      <div class="view-mode-row">
+        <v-btn
+          v-for="m in viewModes"
+          :key="m.key"
+          size="x-small"
+          variant="outlined"
+          :class="['view-mode-btn', { 'view-mode-active': displayMode === m.key }]"
+          @click="setDisplayMode(m.key)"
+        >
+          <v-icon size="small">{{ m.icon }}</v-icon>
+          <span class="btn-text-tiny">{{ m.label }}</span>
+          <v-tooltip activator="parent" location="bottom">{{ m.tip }}</v-tooltip>
+        </v-btn>
+      </div>
+
       <v-card-text class="pa-1 rundown-content">
         <!-- List View -->
         <div class="list-view">
@@ -233,6 +236,7 @@
                   'region-break': region.type === 'break',
                   'region-selected': selectedRegionId === region.id,
                   'region-collapsed': shouldCollapseRegion(region),
+                  'region-blocks-collapsed': displayMode === 'blocks' && region.type === 'break' && shouldCollapseRegion(region),
                   'regions-hidden': !showRegions
                 }"
                 :style="{
@@ -1171,6 +1175,47 @@ const clearRundownInProgress = ref(false)
 const _userPrefs = useUserPrefs()
 const showRegions = ref(_userPrefs.get('rundown.showRegions', true))
 
+// Display mode: 'regions' (grouped, breaks expandable), 'blocks' (grouped,
+// ALL breaks stay collapsed at half height — dblclick expands one), 'list'
+// (flat, no region chrome). Migrates from the legacy showRegions boolean
+// when no displayMode pref is stored yet.
+const displayMode = ref(_userPrefs.get(
+  'rundown.displayMode',
+  _userPrefs.get('rundown.showRegions', true) ? 'regions' : 'list'
+))
+showRegions.value = displayMode.value !== 'list'
+
+// Break regions the user explicitly expanded (dblclick) while in Blocks
+// mode. `regions` is a computed rebuilt on every items change, so a
+// per-object isCollapsed flag would not survive; this id-keyed Set does.
+// Cleared on entering Blocks mode so every break starts collapsed.
+const expandedBreakIds = ref(new Set())
+
+const viewModes = [
+  { key: 'regions', icon: 'mdi-view-grid', label: 'Regions', tip: 'Grouped by region; breaks expand/collapse freely' },
+  { key: 'blocks', icon: 'mdi-view-agenda', label: 'Blocks', tip: 'Blocks only — breaks stay collapsed at half height; double-click a break to expand it' },
+  { key: 'list', icon: 'mdi-view-list', label: 'List', tip: 'Flat list, no region grouping' },
+]
+
+function setDisplayMode(mode) {
+  if (displayMode.value === mode) return
+  displayMode.value = mode
+  if (mode === 'blocks') expandedBreakIds.value = new Set()
+  showRegions.value = mode !== 'list'
+}
+
+watch(displayMode, (v) => {
+  _userPrefs.set('rundown.displayMode', v)
+})
+// Late prefs-cache hydration (fresh login mid-session), same pattern as
+// the showRegions watcher below.
+watch(() => _userPrefs.cache.value['rundown.displayMode'], (v) => {
+  if (typeof v === 'string' && v !== displayMode.value) {
+    displayMode.value = v
+    showRegions.value = v !== 'list'
+  }
+})
+
 // ──────────────────────────────────────────────────────────────────
 // Public presence — show avatars on rundown items other users are
 // currently editing. Source of truth: /api/users (polled in App.vue).
@@ -1628,10 +1673,12 @@ function parseDurationToSeconds(duration) {
   return 0
 }
 
-// Region visibility toggle
+// Region visibility toggle (Alt+Shift+R) — cycles the three view modes.
 function toggleRegionsVisibility() {
-  showRegions.value = !showRegions.value
-  console.log(`Regions ${showRegions.value ? 'shown' : 'hidden'}`)
+  const order = ['regions', 'blocks', 'list']
+  const next = order[(order.indexOf(displayMode.value) + 1) % order.length]
+  setDisplayMode(next)
+  console.log(`Rundown view mode: ${next}`)
 }
 
 // Handle refresh with flash message
@@ -1668,6 +1715,12 @@ function calculateRegionDuration(region) {
 }
 
 function shouldCollapseRegion(region) {
+  // Blocks mode: breaks are ALWAYS collapsed unless individually expanded
+  // via double-click (tracked in expandedBreakIds — survives the regions
+  // computed rebuilding its objects).
+  if (displayMode.value === 'blocks' && region.type === 'break') {
+    return !expandedBreakIds.value.has(region.id)
+  }
   // All regions (including break regions) follow their isCollapsed state
   // Break regions stay expanded once opened until explicitly collapsed
   return region.isCollapsed
@@ -2368,6 +2421,21 @@ function handleItemDoubleClick(element) {
 }
 
 function handleRegionDoubleClick(element) {
+  // Break regions: double-click toggles expansion. In Blocks mode the
+  // expansion lives in expandedBreakIds (per-object isCollapsed doesn't
+  // survive the regions computed rebuilding); elsewhere it's isCollapsed.
+  if (element?.type === 'break') {
+    if (displayMode.value === 'blocks') {
+      const next = new Set(expandedBreakIds.value)
+      if (next.has(element.id)) next.delete(element.id)
+      else next.add(element.id)
+      expandedBreakIds.value = next
+    } else {
+      element.isCollapsed = !element.isCollapsed
+    }
+    return
+  }
+
   const regionName = getRegionHeaderName(element)
   const rId = getRegionIdForItem(element)
 
@@ -2464,15 +2532,17 @@ function handleRegionSelect(region, event) {
     if (selectedRegionId.value === region.id) {
       selectedRegionId.value = null
       emit('select-region', null) // Emit deselection
-      // For break regions, toggle collapsed state when clicking on selected region
-      if (region.type === 'break') {
+      // For break regions, toggle collapsed state when clicking on selected
+      // region. NOT in Blocks mode — there breaks stay collapsed and only
+      // double-click expands one.
+      if (region.type === 'break' && displayMode.value !== 'blocks') {
         region.isCollapsed = !region.isCollapsed
       }
     } else {
       selectedRegionId.value = region.id
       emit('select-region', region) // Emit selection with region data
-      // For break regions, expand when selected
-      if (region.type === 'break') {
+      // For break regions, expand when selected (again, not in Blocks mode)
+      if (region.type === 'break' && displayMode.value !== 'blocks') {
         region.isCollapsed = false
       }
     }
@@ -4137,6 +4207,39 @@ defineExpose({
   border-color: #616161 !important;
 }
 
+/* View-mode row (Regions / Blocks / List) — its own row under the toolbar.
+   The ACTIVE mode is color-inverted (filled dark, light text) for weight. */
+.view-mode-row {
+  display: flex;
+  gap: 2px;
+  padding: 2px 4px 3px 4px;
+  background-color: rgb(var(--v-theme-surface));
+}
+.view-mode-btn {
+  border-radius: 0 !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  font-size: 10px !important;
+  flex: 1;
+  padding: 1px 6px !important;
+  gap: 4px;
+  background-color: #ffffff !important;
+  border-color: #607d8b !important;
+  color: #455a64 !important;
+  border-width: 1.5px !important;
+}
+.view-mode-btn:hover {
+  background-color: #eceff1 !important;
+}
+.view-mode-btn.view-mode-active {
+  background-color: #455a64 !important;
+  border-color: #455a64 !important;
+  color: #ffffff !important;
+}
+.view-mode-btn.view-mode-active:hover {
+  background-color: #37474f !important;
+}
+
 .toolbar-btn-warning {
   border-color: #ff9800 !important;
   color: #e65100 !important;
@@ -4649,6 +4752,16 @@ defineExpose({
 .region-container.region-break.region-collapsed .region-header {
   padding: 0.15rem 1rem; /* Further reduced padding for collapsed break regions */
   min-height: 0.7rem; /* 50% of 1.4rem for collapsed break regions */
+}
+
+/* Blocks-only view: collapsed breaks shrink to HALF their normal collapsed
+   height — a thin strip. Double-click expands one (removes this class). */
+.region-container.region-blocks-collapsed .region-header {
+  padding: 0.02rem 1rem !important;
+  min-height: 0.35rem !important;
+  font-size: 0.65rem !important;
+  line-height: 1 !important;
+  opacity: 0.85;
 }
 
 .region-header-left {
