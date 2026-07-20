@@ -19,7 +19,15 @@
               <v-icon start size="small">{{ toolIcon(t.tool) }}</v-icon>
               {{ t.tool }}
               <v-spacer />
-              <v-icon v-if="health[t.tool]" :color="health[t.tool].reachable ? 'success' : 'error'" size="small">
+              <!-- Throbber while a probe is in flight, OR while the node is
+                   reachable-but-rejecting-login (it keeps re-attempting). -->
+              <v-progress-circular
+                v-if="probing === t.tool || (health[t.tool] && health[t.tool].auth_failed)"
+                :color="probing === t.tool ? 'primary' : 'warning'"
+                indeterminate size="18" width="2" />
+              <v-icon
+                v-else-if="health[t.tool]"
+                :color="health[t.tool].reachable ? 'success' : 'error'" size="small">
                 {{ health[t.tool].reachable ? 'mdi-check-circle' : 'mdi-alert-circle' }}
               </v-icon>
             </v-card-title>
@@ -35,10 +43,8 @@
                 </v-btn>
               </div>
               <div v-if="health[t.tool]" class="text-caption mt-1"
-                   :class="health[t.tool].reachable ? 'text-success' : 'text-error'">
-                {{ health[t.tool].reachable
-                    ? ('reachable (' + (health[t.tool].status_code || '') + ' ' + (health[t.tool].probe || '') + ')')
-                    : ('unreachable: ' + (health[t.tool].detail || '')) }}
+                   :class="statusClass(health[t.tool])">
+                {{ statusText(health[t.tool]) }}
               </div>
             </v-card-text>
             <v-card-actions>
@@ -60,10 +66,38 @@ import { api } from '@/utils/apiHelpers'
 export default {
   name: 'SiblingToolSettings',
   data () {
-    return { tools: [], health: {}, saving: null, probing: null }
+    return { tools: [], health: {}, saving: null, probing: null, pollTimer: null }
   },
-  mounted () { this.load() },
+  async mounted () {
+    await this.load()
+    await this.probeAll()
+    // Auto-poll node health while this panel is mounted; cleared on unmount.
+    this.pollTimer = setInterval(() => this.probeAll(), 10000)
+  },
+  beforeUnmount () {
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null }
+  },
   methods: {
+    statusClass (h) {
+      if (h.auth_failed) return 'text-warning'
+      return h.reachable ? 'text-success' : 'text-error'
+    },
+    statusText (h) {
+      if (h.auth_failed) {
+        return 'login failing: ' + (h.detail || ('rejected ' + (h.status_code || '')))
+      }
+      return h.reachable
+        ? ('reachable (' + (h.status_code || '') + ' ' + (h.probe || '') + ')')
+        : ('unreachable: ' + (h.detail || ''))
+    },
+    async probeAll () {
+      // Probe every enabled tool concurrently; skip ones already probing.
+      await Promise.all(
+        this.tools
+          .filter(t => t.tool !== this.probing)
+          .map(t => this.probe(t, true)),
+      )
+    },
     toolIcon (t) {
       return {
         showtime: 'mdi-record-circle',
@@ -88,15 +122,20 @@ export default {
         this.saving = null
       }
     },
-    async probe (t) {
-      this.probing = t.tool
+    async probe (t, silent = false) {
+      // silent probes (auto-poll) don't drive the manual Test button throbber;
+      // the in-flight throbber for those is the status-icon spinner instead.
+      if (!silent) this.probing = t.tool
       try {
         const h = await api(`/settings/tools/${t.tool}/health`)
         this.health = { ...this.health, [t.tool]: h }
       } catch (e) {
-        this.health = { ...this.health, [t.tool]: { reachable: false, detail: String(e) } }
+        this.health = {
+          ...this.health,
+          [t.tool]: { reachable: false, auth_failed: false, detail: String(e) },
+        }
       } finally {
-        this.probing = null
+        if (!silent) this.probing = null
       }
     },
   },

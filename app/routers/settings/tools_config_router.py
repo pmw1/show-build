@@ -94,13 +94,26 @@ async def tool_health(tool: str, db: Session = Depends(get_db)) -> Dict[str, Any
     if not url:
         return {"tool": tool, "reachable": False, "detail": "no base_url configured"}
     import httpx
+    # Track an auth failure separately: a node that answers but rejects login
+    # (401/403) is "reachable but not authorized" — a distinct state from
+    # plain unreachable, surfaced to the UI as its own (throbbing) status.
+    auth_failed = None
     for path in ("/health", "/api/health", "/"):
         try:
             with httpx.Client(timeout=3.0, verify=False) as client:
                 r = client.get(url.rstrip("/") + path)
+                if r.status_code in (401, 403):
+                    auth_failed = {"tool": tool, "reachable": True,
+                                   "auth_failed": True, "status_code": r.status_code,
+                                   "probe": path,
+                                   "detail": f"login rejected ({r.status_code})"}
+                    continue
                 if r.status_code < 500:
-                    return {"tool": tool, "reachable": True,
+                    return {"tool": tool, "reachable": True, "auth_failed": False,
                             "status_code": r.status_code, "probe": path}
         except Exception:  # noqa: BLE001
             continue
-    return {"tool": tool, "reachable": False, "detail": "no successful probe"}
+    if auth_failed is not None:
+        return auth_failed
+    return {"tool": tool, "reachable": False, "auth_failed": False,
+            "detail": "no successful probe"}
