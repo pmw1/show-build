@@ -281,6 +281,7 @@ async def health():
         ping_results = inspect.ping() or {}
         stats_results = inspect.stats() or {}
         active_results = inspect.active() or {}
+        queue_results = inspect.active_queues() or {}
 
         # Union of every worker name we saw across the three probes
         all_names = set(ping_results) | set(stats_results) | set(active_results)
@@ -308,6 +309,13 @@ async def health():
                 worker_status = "degraded"
                 error = "Ping ok but stats unavailable"
 
+            # Which queues this worker actually consumes. A worker can be fully
+            # healthy and still leave a queue with zero consumers — that outage
+            # is invisible in a worker count, so report it per queue.
+            worker_queues = sorted({
+                q.get("name") for q in (queue_results.get(name) or []) if q.get("name")
+            })
+
             worker_details.append({
                 "name": name,
                 "status": worker_status,
@@ -315,6 +323,7 @@ async def health():
                 "active_tasks": len(active_results.get(name) or []),
                 "completed_total": sum(total.values()) if isinstance(total, dict) else 0,
                 "pool_processes": len(pool.get("processes") or []) if isinstance(pool, dict) else 0,
+                "queues": worker_queues,
                 "error": error,
             })
 
@@ -333,6 +342,23 @@ async def health():
                 w["name"] for w in worker_details
             ]
             health_status["services"]["celery"]["worker_details"] = worker_details
+
+        # Per-queue consumer counts. Seed from the app's configured queues so a
+        # queue with NO consumer still shows up (at zero) rather than vanishing
+        # from the report entirely — that silent absence is the failure mode.
+        configured = celery_app.conf.task_queues or {}
+        coverage = {name: 0 for name in configured}
+        for worker in worker_details:
+            for queue_name in worker.get("queues") or []:
+                coverage[queue_name] = coverage.get(queue_name, 0) + 1
+
+        health_status["services"]["celery"]["queues"] = [
+            {"name": name, "consumers": count}
+            for name, count in sorted(coverage.items())
+        ]
+        uncovered = [name for name, count in coverage.items() if count == 0]
+        if uncovered:
+            health_status["services"]["celery"]["uncovered_queues"] = sorted(uncovered)
 
     except Exception as e:
         health_status["services"]["celery"]["status"] = "error"

@@ -545,3 +545,144 @@ async def get_episode_statistics(episode_number: str, db: Session = Depends(get_
     except Exception as e:
         logger.error(f"Error retrieving statistics for episode {episode_number}: {e}")
         raise HTTPException(status_code=500, detail="Error retrieving episode statistics")
+
+
+# Rundown item durations are stored as strings in two shapes: "HH:MM:SS" and
+# the frame-accurate "HH:MM:SS:FF". Anything else (or all-zero) counts as unset.
+def _duration_to_seconds(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    parts = value.strip().split(":")
+    if len(parts) not in (3, 4) or not all(p.isdigit() for p in parts):
+        return None
+    hours, minutes, seconds = (int(p) for p in parts[:3])
+    return hours * 3600 + minutes * 60 + seconds
+
+
+# A segment counts as "written" once it holds more than a stub of markdown.
+# Empty strings, whitespace, and a bare heading are all effectively unwritten.
+_MIN_SCRIPT_CHARS = 20
+
+
+@router.get("/{episode_number}/readiness")
+async def get_episode_readiness(episode_number: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """
+    Per-stage readiness for one episode — the "can we air tonight" summary.
+
+    Aggregates state that already exists across rundown_items, sot_processing_jobs
+    and celery_job_log into one payload so the dashboard makes a single request
+    instead of fanning out. Every stage reports {done, total, blocked} so the
+    caller can render a meter without knowing the underlying tables.
+    """
+    from models_v2 import Episode, Rundown, RundownItem
+    from models.jobs import SOTProcessingJob, CeleryJobLog
+
+    try:
+        episode_num_int = int(episode_number)
+        episode = db.query(Episode).filter(Episode.episode_number == episode_num_int).first()
+        if not episode:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+
+        rundown_ids = [
+            r.id for r in db.query(Rundown).filter(Rundown.episode_id == episode.id).all()
+        ]
+        items = (
+            db.query(RundownItem).filter(RundownItem.rundown_id.in_(rundown_ids)).all()
+            if rundown_ids else []
+        )
+
+        # --- Rundown + scripts -------------------------------------------------
+        # Only content items need a script; ads and breaks legitimately have none.
+        scriptable = [i for i in items if (i.item_type or "") not in ("ad", "break", "transition")]
+        written = [
+            i for i in scriptable
+            if i.script_content and len(i.script_content.strip()) >= _MIN_SCRIPT_CHARS
+        ]
+        timed = [i for i in items if _duration_to_seconds(i.duration)]
+
+        # --- SOT ingest --------------------------------------------------------
+        # `episode` on the job table is the zero-padded string form.
+        sot_jobs = (
+            db.query(SOTProcessingJob)
+            .filter(SOTProcessingJob.episode == episode_number)
+            .all()
+        )
+        sot_done = [j for j in sot_jobs if j.status == "completed"]
+        sot_failed = [j for j in sot_jobs if j.status == "failed"]
+
+        # --- Graphics / other async work --------------------------------------
+        jobs = (
+            db.query(CeleryJobLog)
+            .filter(CeleryJobLog.episode == episode_number)
+            .all()
+        )
+        gfx = [j for j in jobs if j.category in ("fsq", "gfx")]
+        gfx_done = [j for j in gfx if j.status == "completed"]
+        gfx_failed = [j for j in gfx if j.status == "failed"]
+        active_jobs = [j for j in jobs if j.status in ("pending", "running")]
+
+        total_seconds = sum(_duration_to_seconds(i.duration) or 0 for i in items)
+
+        # Blockers are the actionable subset: things a human must go fix.
+        blockers = []
+        if len(written) < len(scriptable):
+            blockers.append({
+                "stage": "scripts",
+                "severity": "warn",
+                "count": len(scriptable) - len(written),
+                "message": f"{len(scriptable) - len(written)} item(s) have no script",
+            })
+        if sot_failed:
+            blockers.append({
+                "stage": "sots",
+                "severity": "fault",
+                "count": len(sot_failed),
+                "message": f"{len(sot_failed)} SOT job(s) failed",
+            })
+        if gfx_failed:
+            blockers.append({
+                "stage": "graphics",
+                "severity": "fault",
+                "count": len(gfx_failed),
+                "message": f"{len(gfx_failed)} graphics job(s) failed",
+            })
+        if items and len(timed) < len(items):
+            blockers.append({
+                "stage": "timing",
+                "severity": "warn",
+                "count": len(items) - len(timed),
+                "message": f"{len(items) - len(timed)} item(s) have no duration",
+            })
+
+        return {
+            "episode": episode_number,
+            "title": episode.title,
+            "status": episode.status,
+            "air_date": episode.air_date.isoformat() if episode.air_date else None,
+            "total_duration_seconds": total_seconds,
+            "stages": {
+                "rundown": {"done": len(items), "total": len(items), "blocked": 0},
+                "scripts": {"done": len(written), "total": len(scriptable), "blocked": 0},
+                "sots": {
+                    "done": len(sot_done),
+                    "total": len(sot_jobs),
+                    "blocked": len(sot_failed),
+                },
+                "graphics": {
+                    "done": len(gfx_done),
+                    "total": len(gfx),
+                    "blocked": len(gfx_failed),
+                },
+                "timing": {"done": len(timed), "total": len(items), "blocked": 0},
+            },
+            "active_jobs": len(active_jobs),
+            "blockers": blockers,
+        }
+
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid episode number format")
+    except Exception as e:
+        logger.error(f"Error retrieving readiness for episode {episode_number}: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving episode readiness")

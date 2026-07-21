@@ -1,5 +1,8 @@
 <template>
   <v-container fluid class="pa-2">
+    <!-- On-air rail: fixed at the top, never draggable. Answers "are we ready". -->
+    <OnAirRail :episode="railEpisodeNumber" />
+
     <!-- iPad Script Mode Banner - Production episode (primary) -->
     <v-card
       v-if="productionEpisode"
@@ -54,127 +57,127 @@
           </v-btn>
         </div>
 
-        <!-- Draggable block columns (headers are drag handles) -->
-        <div class="dashboard-columns dashboard-compact">
-          <div
-            v-for="(col, colIndex) in columns"
-            :key="`col-wrap-${colIndex}`"
-            class="dashboard-column"
+        <!-- Three fixed zones ordered by urgency. Blocks reorder freely WITHIN a
+             zone (drag group is per-zone), so the thing you need in a hurry never
+             migrates somewhere unexpected. -->
+        <div class="dashboard-zones dashboard-compact">
+          <section
+            v-for="zone in ZONES"
+            :key="zone.id"
+            class="zone"
+            :class="`zone-${zone.id}`"
           >
-            <!-- Next Show Panel pinned at top of first column (not draggable) -->
-            <NextShowPanel v-if="colIndex === 0" />
+            <header class="zone-header">
+              <span class="zone-name">{{ zone.label }}</span>
+              <span class="zone-hint">{{ zone.hint }}</span>
+            </header>
 
-          <draggable
-            :list="col"
-            group="dashboard-blocks"
-            :item-key="el => el"
-            class="dashboard-column-inner"
-            handle=".dash-drag-handle"
-            animation="180"
-            ghost-class="drag-ghost"
-            @end="saveLayout"
-          >
-            <template #item="{ element }">
-              <div class="block-wrap" :class="`block-${BLOCK_COLORS[element] || 'grey'}`">
+            <!-- Zone 1 leads with the panels that answer "are we ready", pinned
+                 ahead of anything draggable. -->
+            <div v-if="zone.id === 'tonight'" class="zone-pinned">
+              <CurrentShowPanel />
+              <BlockersPanel :episode="railEpisodeNumber" />
+              <NextShowPanel />
+            </div>
 
-                <!-- Current Show (in-production episode) -->
-                <CurrentShowPanel v-if="element === 'current-show'" class="dash-drag-handle-wrap" />
+            <draggable
+              :list="layout[zone.id]"
+              :group="`zone-${zone.id}`"
+              :item-key="el => el"
+              class="zone-grid"
+              handle=".dash-drag-handle"
+              animation="180"
+              ghost-class="drag-ghost"
+              @end="saveLayout"
+            >
+              <template #item="{ element }">
+                <div class="block-wrap">
 
-                <!-- Tools & Actions (merged Active Tools + Quick Actions) -->
-                <v-card v-else-if="element === 'tools-actions'" elevation="2">
-                  <v-card-title class="dash-title dash-drag-handle">
-                    <v-icon size="small" class="me-2">mdi-lightning-bolt</v-icon>
-                    <span>Tools &amp; Actions</span>
-                  </v-card-title>
-                  <v-card-text class="pa-2">
-                    <v-btn block variant="outlined" class="dash-row-btn mb-1" @click="createNewEpisode">
-                      <v-icon start size="small">mdi-plus-circle</v-icon>
-                      New Episode
-                    </v-btn>
-                    <v-btn block variant="outlined" class="dash-row-btn mb-1" @click="$router.push('/consolidation')">
-                      <v-icon start size="small">mdi-folder-sync</v-icon>
-                      Episode Consolidation
-                    </v-btn>
-                    <v-btn block variant="outlined" class="dash-row-btn mb-1" to="/assets">
-                      <v-icon start size="small">mdi-cloud-upload</v-icon>
-                      Upload Assets
-                    </v-btn>
-                    <v-btn block variant="outlined" class="dash-row-btn mb-1" to="/templates">
-                      <v-icon start size="small">mdi-file-document</v-icon>
-                      Manage Templates
-                    </v-btn>
-                    <v-btn block variant="outlined" class="dash-row-btn mb-1" @click="openVoiceTest">
-                      <v-icon start size="small">mdi-microphone</v-icon>
-                      Test Voice Synthesis
-                    </v-btn>
-                    <v-btn block variant="outlined" class="dash-row-btn mb-1" @click="exportData">
-                      <v-icon start size="small">mdi-download</v-icon>
-                      Export Data
-                    </v-btn>
-                    <v-btn block variant="outlined" class="dash-row-btn mb-1" to="/settings">
-                      <v-icon start size="small">mdi-cog</v-icon>
-                      System Settings
-                    </v-btn>
-                    <v-btn block variant="outlined" class="dash-row-btn" @click="$router.push('/tools')">
-                      <v-icon start size="small">mdi-dots-horizontal-circle-outline</v-icon>
-                      More Tools
-                    </v-btn>
-                  </v-card-text>
-                </v-card>
+                  <!-- Job feed -->
+                  <JobFeedPanel v-if="element === 'job-feed'" class="dash-drag-handle-wrap" />
 
-                <!-- Announcements -->
-                <AnnouncementsPanel v-else-if="element === 'announcements'" class="dash-drag-handle-wrap" />
+                  <!-- Announcements -->
+                  <AnnouncementsPanel v-else-if="element === 'announcements'" class="dash-drag-handle-wrap" />
 
-                <!-- Todo Panel -->
-                <TodoPanel v-else-if="element === 'todo'" class="dash-drag-handle-wrap" />
+                  <!-- Todo Panel -->
+                  <TodoPanel v-else-if="element === 'todo'" class="dash-drag-handle-wrap" />
 
-                <!-- Preproduction -->
-                <v-card v-else-if="element === 'preproduction'" elevation="2">
-                  <v-card-title class="dash-title dash-drag-handle">
-                    <v-icon size="small" class="me-2">mdi-lightbulb-on</v-icon>
-                    <span>Preproduction</span>
-                  </v-card-title>
-                  <v-card-text class="pa-2">
-                    <v-btn block variant="outlined" color="purple" class="dash-row-btn mb-1" @click="$router.push('/whiteboard')">
-                      <v-icon start size="small">mdi-notebook-edit</v-icon>
-                      Whiteboard
-                    </v-btn>
-                    <v-btn block variant="outlined" color="purple" class="dash-row-btn mb-1" @click="$router.push('/generator')">
-                      <v-icon start size="small">mdi-creation</v-icon>
-                      Generator
-                    </v-btn>
-                    <v-btn block variant="outlined" color="purple" class="dash-row-btn" @click="$router.push('/voice-meeting')">
-                      <v-icon start size="small">mdi-microphone</v-icon>
-                      Production Meeting
-                    </v-btn>
-                  </v-card-text>
-                </v-card>
+                  <!-- Shortcuts: what survives of the old Tools & Actions and
+                       Preproduction button walls. Three destinations, not eleven —
+                       the sidebar already covers navigation. -->
+                  <v-card v-else-if="element === 'shortcuts'" elevation="2">
+                    <v-card-title class="dash-title dash-drag-handle">
+                      <v-icon size="small" class="me-2">mdi-lightning-bolt</v-icon>
+                      <span>Shortcuts</span>
+                    </v-card-title>
+                    <v-card-text class="pa-2">
+                      <v-btn block variant="outlined" class="dash-row-btn mb-1" @click="createNewEpisode">
+                        <v-icon start size="small">mdi-plus-circle</v-icon>
+                        New Episode
+                      </v-btn>
+                      <v-btn block variant="outlined" class="dash-row-btn mb-1" to="/assets">
+                        <v-icon start size="small">mdi-cloud-upload</v-icon>
+                        Upload Assets
+                      </v-btn>
+                      <v-btn block variant="outlined" class="dash-row-btn" @click="$router.push('/consolidation')">
+                        <v-icon start size="small">mdi-folder-sync</v-icon>
+                        Episode Consolidation
+                      </v-btn>
+                    </v-card-text>
+                  </v-card>
 
-                <!-- System Health -->
-                <v-card v-else-if="element === 'system-health'" elevation="2">
-                  <v-card-title class="dash-title dash-drag-handle">
-                    <v-icon size="small" class="me-2">mdi-heart-pulse</v-icon>
-                    <span>System Health</span>
-                  </v-card-title>
-                  <v-card-text class="pa-2">
-                    <div class="health-grid">
-                      <div
-                        v-for="row in healthRows"
-                        :key="row.key"
-                        class="health-row"
-                        :class="row.healthy ? 'health-row-ok' : 'health-row-error'"
-                      >
-                        <v-icon size="small" class="me-1">{{ row.icon }}</v-icon>
-                        <span class="health-label">{{ row.label }}</span>
+                  <!-- Queue coverage: consumers per queue. Catches the failure
+                       worker-count can't — every worker up, nobody on `fsq`. -->
+                  <v-card v-else-if="element === 'queue-coverage'" elevation="2">
+                    <v-card-title class="dash-title dash-drag-handle">
+                      <v-icon size="small" class="me-2">mdi-tray-full</v-icon>
+                      <span>Queue Coverage</span>
+                    </v-card-title>
+                    <v-card-text class="pa-2">
+                      <div v-if="!queueRows.length" class="text-caption text-grey">
+                        No queue data reported
                       </div>
-                    </div>
-                  </v-card-text>
-                </v-card>
+                      <div v-else class="health-grid">
+                        <div
+                          v-for="q in queueRows"
+                          :key="q.name"
+                          class="health-row"
+                          :class="q.consumers > 0 ? 'health-row-ok' : 'health-row-error'"
+                          :title="`${q.name}: ${q.consumers} consumer(s)`"
+                        >
+                          <span class="health-label">{{ q.name }}</span>
+                          <span class="health-count">{{ q.consumers }}</span>
+                        </div>
+                      </div>
+                    </v-card-text>
+                  </v-card>
 
-              </div>
-            </template>
-          </draggable>
-          </div>
+                  <!-- System Health -->
+                  <v-card v-else-if="element === 'system-health'" elevation="2">
+                    <v-card-title class="dash-title dash-drag-handle">
+                      <v-icon size="small" class="me-2">mdi-heart-pulse</v-icon>
+                      <span>Services</span>
+                    </v-card-title>
+                    <v-card-text class="pa-2">
+                      <div class="health-grid">
+                        <div
+                          v-for="row in healthRows"
+                          :key="row.key"
+                          class="health-row"
+                          :class="row.healthy ? 'health-row-ok' : 'health-row-error'"
+                          :title="`${row.label}: ${row.status}`"
+                        >
+                          <v-icon size="small" class="me-1">{{ row.icon }}</v-icon>
+                          <span class="health-label">{{ row.label }}</span>
+                        </div>
+                      </div>
+                    </v-card-text>
+                  </v-card>
+
+                </div>
+              </template>
+            </draggable>
+          </section>
         </div>
       </v-col>
     </v-row>
@@ -186,7 +189,6 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import axios from 'axios'
 import draggable from 'vuedraggable'
 import { useSystemHealth } from '@/composables/useSystemHealth'
@@ -196,75 +198,89 @@ import TodoPanel from '@/components/TodoPanel.vue'
 import NextShowPanel from '@/components/NextShowPanel.vue'
 import CurrentShowPanel from '@/components/CurrentShowPanel.vue'
 import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'
+import OnAirRail from '@/components/OnAirRail.vue'
+import BlockersPanel from '@/components/BlockersPanel.vue'
+import JobFeedPanel from '@/components/JobFeedPanel.vue'
 
-const router = useRouter()
-
-// ===== Draggable dashboard layout =====
-// Each block has a stable id and a color name used for the header background.
-const BLOCK_COLORS = {
-  'current-show': 'orange',
-  'tools-actions': 'deep-purple',
-  'announcements': 'amber',
-  'todo': 'teal',
-  'preproduction': 'purple',
-  'system-health': 'green'
-}
-
-const DEFAULT_LAYOUT = [
-  ['current-show', 'tools-actions'],
-  ['announcements', 'preproduction'],
-  ['todo', 'system-health']
+// ===== Zone-based dashboard layout =====
+// Zones are fixed and ordered by urgency; only their contents rearrange. A new
+// panel joins by naming its zone here — no per-panel layout code.
+const ZONES = [
+  { id: 'tonight', label: 'Tonight', hint: 'the on-air episode' },
+  { id: 'pipeline', label: 'Pipeline', hint: 'work in flight' },
+  { id: 'system', label: 'System', hint: 'infrastructure' }
 ]
 
-// Per-user pref key for the persisted layout. Legacy localStorage key is
-// still read once for migration; new writes go to /api/user/prefs.
-const PREF_KEY = 'dashboard.layout'
+const DEFAULT_LAYOUT = {
+  tonight: [],
+  pipeline: ['job-feed', 'todo', 'announcements'],
+  system: ['queue-coverage', 'system-health', 'shortcuts']
+}
+
+const KNOWN_BLOCKS = Object.values(DEFAULT_LAYOUT).flat()
+
+// Blocks retired in the zone redesign. Old persisted layouts still name them,
+// so drop them on load rather than rendering an empty slot.
+const RETIRED_BLOCKS = ['current-show', 'tools-actions', 'preproduction']
+
+// Per-user pref key for the persisted layout. Bumped from `dashboard.layout`
+// because the stored shape changed from an array of columns to a zone map.
+const PREF_KEY = 'dashboard.zones'
 const LEGACY_LAYOUT_KEY = 'dashboard-layout-v3'
 
 const userPrefs = useUserPrefs()
-const columns = ref(structuredClone(DEFAULT_LAYOUT))
+const layout = ref(structuredClone(DEFAULT_LAYOUT))
 
+// Accepts only the zone-map shape. Unknown/retired ids are dropped and any
+// block missing entirely is appended to its default zone, so adding a block in
+// a later release doesn't leave existing users unable to see it.
 function _validateAndApply(parsed) {
-  if (!Array.isArray(parsed) || !parsed.every(Array.isArray)) return false
-  const known = Object.keys(BLOCK_COLORS)
-  const flat = parsed.flat()
-  const missing = known.filter(k => !flat.includes(k))
-  if (missing.length > 0) parsed[0].push(...missing)
-  columns.value = parsed.map(col => col.filter(id => known.includes(id)))
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
+  if (!ZONES.some(z => Array.isArray(parsed[z.id]))) return false
+
+  const next = {}
+  const placed = new Set()
+  for (const zone of ZONES) {
+    next[zone.id] = (parsed[zone.id] || []).filter(id => {
+      if (!KNOWN_BLOCKS.includes(id) || RETIRED_BLOCKS.includes(id)) return false
+      if (placed.has(id)) return false  // guard against a block duplicated across zones
+      placed.add(id)
+      return true
+    })
+  }
+  for (const [zoneId, blocks] of Object.entries(DEFAULT_LAYOUT)) {
+    for (const id of blocks) {
+      if (!placed.has(id)) next[zoneId].push(id)
+    }
+  }
+  layout.value = next
   return true
 }
 
 function loadLayout() {
-  // 1. Per-user pref (DB) wins.
   const userValue = userPrefs.get(PREF_KEY, null)
   if (userValue && _validateAndApply(structuredClone(userValue))) return
 
-  // 2. Fall back to legacy localStorage (and migrate forward).
+  // Pre-zone layouts were an array of columns with no zone information, so
+  // there's nothing meaningful to carry forward — start from the defaults and
+  // clear the stale key.
   try {
-    const saved = localStorage.getItem(LEGACY_LAYOUT_KEY)
-    if (!saved) return
-    const parsed = JSON.parse(saved)
-    if (_validateAndApply(parsed)) {
-      // Persist to user prefs so future loads are DB-backed.
-      userPrefs.set(PREF_KEY, columns.value)
-    }
+    localStorage.removeItem(LEGACY_LAYOUT_KEY)
   } catch (e) {
-    console.warn('Failed to load dashboard layout:', e)
+    console.warn('Failed to clear legacy dashboard layout:', e)
   }
 }
 
 function saveLayout() {
   try {
-    localStorage.setItem(LEGACY_LAYOUT_KEY, JSON.stringify(columns.value))  // offline fallback
-    userPrefs.set(PREF_KEY, columns.value)
+    userPrefs.set(PREF_KEY, layout.value)
   } catch (e) {
     console.warn('Failed to save dashboard layout:', e)
   }
 }
 
 function resetLayout() {
-  columns.value = structuredClone(DEFAULT_LAYOUT)
-  localStorage.removeItem(LEGACY_LAYOUT_KEY)
+  layout.value = structuredClone(DEFAULT_LAYOUT)
   userPrefs.remove(PREF_KEY)
 }
 
@@ -339,17 +355,45 @@ const healthRows = computed(() => {
   return rows
 })
 
+// Per-queue consumer counts. A queue at zero consumers is the outage a worker
+// count can't show, so those sort to the front.
+const queueRows = computed(() => {
+  const queues = health.value?.services?.celery?.queues || []
+  return [...queues].sort((a, b) => (a.consumers > 0) - (b.consumers > 0))
+})
+
 // Reactive data
 const latestEpisodeNumber = ref(null)
 const productionEpisode = ref(null)
+
+// The rail tracks whatever is on air now, falling back to the newest episode so
+// it still reports something useful between productions.
+const railEpisodeNumber = computed(
+  () => productionEpisode.value?.episode_number || latestEpisodeNumber.value || null
+)
+
+// Episode numbers arrive zero-padded ("0283"), so compare them numerically —
+// string subtraction happens to coerce today but breaks on any non-numeric id.
+const episodeSortKey = (ep) => parseInt(ep?.episode_number ?? ep?.number, 10) || 0
+
+// The list endpoint spells the air date `airdate` and flags test rows as
+// `is_dummy`; other callers use `air_date`/`is_test_data`. Normalize once here
+// so the rest of this view can read a single shape (matches NextShowPanel).
+const normalizeEpisode = (ep) => ({
+  ...ep,
+  air_date: ep.air_date || ep.airdate,
+  number: ep.episode_number || ep.number
+})
+
+const isTestEpisode = (ep) => Boolean(ep?.is_dummy ?? ep?.is_test_data)
 
 // Fetch production episode and latest episode for iPad mode buttons
 const fetchLatestEpisode = async () => {
   try {
     const response = await axios.get('/api/episodes')
-    const episodes = response.data || []
+    const episodes = response.data?.episodes || response.data || []
     if (episodes.length > 0) {
-      const real = episodes.filter(e => !e.is_test_data)
+      const real = episodes.filter(e => !isTestEpisode(e)).map(normalizeEpisode)
 
       // Find the episode currently in production
       const inProduction = real.find(e => e.status === 'production')
@@ -358,7 +402,7 @@ const fetchLatestEpisode = async () => {
       }
 
       // Sort by episode number descending, pick the highest as fallback
-      const sorted = [...real].sort((a, b) => (b.episode_number || 0) - (a.episode_number || 0))
+      const sorted = [...real].sort((a, b) => episodeSortKey(b) - episodeSortKey(a))
       if (sorted.length > 0) {
         latestEpisodeNumber.value = sorted[0].episode_number
       }
@@ -381,16 +425,6 @@ const onEpisodeCreated = (episode) => {
   console.log('Episode created:', episode)
   // Refresh latest-episode info for the iPad banner
   fetchLatestEpisode()
-}
-
-const openVoiceTest = () => {
-  router.push('/settings?tab=voice')
-  // TODO: Open voice test modal directly
-}
-
-const exportData = () => {
-  // TODO: Implement export functionality
-  console.log('Export data functionality to be implemented')
 }
 
 // Load data on component mount
@@ -507,30 +541,70 @@ onMounted(() => {
   text-transform: lowercase;
 }
 
-/* ===== Draggable column layout ===== */
-.dashboard-columns {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-}
-
-.dashboard-column {
-  flex: 1;
-  min-width: 0;
+/* ===== Zone layout ===== */
+.dashboard-zones {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 18px;
 }
 
-.dashboard-column-inner {
+.zone-header {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
   gap: 10px;
-  min-height: 60px; /* allow drop into empty columns */
+  padding-bottom: 5px;
+  margin-bottom: 9px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.28);
+}
+
+.zone-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+}
+
+.zone-hint {
+  font-size: 0.7rem;
+  opacity: 0.6;
+}
+
+/* Panels tile across the zone and wrap, so a zone grows downward as blocks are
+   added rather than forcing a fixed column count. */
+.zone-pinned,
+.zone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+/* Only separate the pinned row from draggable blocks when there actually are
+   some — Tonight has none today, and the gap would otherwise read as a bug. */
+.zone-pinned:not(:last-child) {
+  margin-bottom: 10px;
+}
+
+/* A zone with no draggable blocks (Tonight, today) must not reserve height —
+   :empty collapses it, while a zone the user has dragged empty keeps a drop
+   target because vuedraggable leaves whitespace/comment nodes behind. */
+.zone-grid {
+  min-height: 40px; /* allow drop into an emptied zone */
+}
+
+.zone-grid:empty {
+  min-height: 0;
+  display: none;
 }
 
 .block-wrap {
   width: 100%;
+}
+
+.health-count {
+  margin-left: auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Drag handle cursor on headers */
@@ -587,26 +661,12 @@ onMounted(() => {
   color: #ffffff !important;
 }
 
-/* Responsive: collapse columns on smaller screens */
-@media (max-width: 1264px) {
-  .dashboard-columns {
-    flex-wrap: wrap;
-  }
-  .dashboard-column {
-    flex: 1 1 calc(33.333% - 10px);
-    min-width: 220px;
-  }
-}
-
-@media (max-width: 960px) {
-  .dashboard-column {
-    flex: 1 1 calc(50% - 10px);
-  }
-}
-
+/* The zone grids are auto-fit, so they reflow without breakpoints. Below the
+   minmax floor, drop to a single column. */
 @media (max-width: 600px) {
-  .dashboard-column {
-    flex: 1 1 100%;
+  .zone-pinned,
+  .zone-grid {
+    grid-template-columns: 1fr;
   }
 }
 
