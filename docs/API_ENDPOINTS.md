@@ -64,6 +64,47 @@ Complete reference for all API endpoints in the Show-Build broadcast content man
 - `GET /episodes/{episode_id}/quotes` - Get extracted quotes 🔒
 - `GET /episodes/{episode_id}/assets/{asset_type}` - List episode assets 🔒📁
 
+### Episode Progress (`routers/episodes/metadata_router.py`)
+- `GET /episodes/{episode_number}/statistics` - Rundown item counts by status and type
+- `GET /episodes/{episode_number}/readiness` - **Per-stage "can we air" summary**
+
+  Aggregates state that already lives in `rundown_items`, `sot_processing_jobs`
+  and `celery_job_log` into a single payload, so the dashboard makes one request
+  instead of fanning out. Every stage reports the same
+  `{done, total, blocked}` shape, letting a caller render a meter without
+  knowing the underlying tables:
+
+  ```json
+  {
+    "episode": "0283",
+    "title": "The Karmelo Conspiracy",
+    "status": "production",
+    "air_date": "2026-07-19T00:00:00",
+    "total_duration_seconds": 4130,
+    "stages": {
+      "rundown":  {"done": 11, "total": 11, "blocked": 0},
+      "scripts":  {"done": 9,  "total": 9,  "blocked": 0},
+      "sots":     {"done": 48, "total": 54, "blocked": 6},
+      "graphics": {"done": 0,  "total": 0,  "blocked": 0},
+      "timing":   {"done": 10, "total": 11, "blocked": 0}
+    },
+    "active_jobs": 0,
+    "blockers": [
+      {"stage": "sots", "severity": "fault", "count": 6,
+       "message": "6 SOT job(s) failed"}
+    ]
+  }
+  ```
+
+  Notes for callers:
+  - `blockers` is the actionable subset — things a human must go fix. Severity
+    is `fault` (something failed) or `warn` (something is merely incomplete).
+  - Only content items count toward `scripts`; `ad`, `break` and `transition`
+    items legitimately carry no script and are excluded from the total.
+  - A stage with `total: 0` has nothing to do and should render as absent
+    rather than as a completed stage.
+  - Durations are parsed from both `HH:MM:SS` and frame-accurate `HH:MM:SS:FF`.
+
 ### Rundown Management (File-Based)
 - `POST /rundown/{episode}/normalize` - **Normalize rundown order/index numbers** 🔒📁
   - Rounds non-multiple-of-10 indexes to next multiple of 10

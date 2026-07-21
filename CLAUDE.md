@@ -81,6 +81,11 @@ not in the todo description.
   alone is the biggest UX win. Touch this if you're already working in
   `useJobMonitor.js`, `useSOTProcessing.js`, `PlaceholderCueCard.vue`, or
   any of the Celery task state-update paths.
+  **Dashboard adds three more pollers** (`OnAirRail` + `BlockersPanel` at 30s,
+  `JobFeedPanel` at 15s while jobs are active). They are deliberately
+  zone-scoped so the cadence lives in one place per zone — converting them is
+  a zone-level change, not three rewrites. See
+  [`DASHBOARD_ARCHITECTURE.md`](docs/DASHBOARD_ARCHITECTURE.md#room-to-grow).
 
 - **#25 — Unify modal ESC behavior across all 27 modals**
   ([plan](docs/MODAL_ESC_UNIFICATION_PLAN.md)). Foundation already landed:
@@ -178,6 +183,7 @@ Show-Build is a **database-first broadcast production platform** for the Disaffe
 - [`docs/EPISODE_DIRECTORY_STANDARD.md`](docs/EPISODE_DIRECTORY_STANDARD.md) — Per-episode media asset organization (authoritative)
 - [`docs/MEDIA_POOL_STANDARD.md`](docs/MEDIA_POOL_STANDARD.md) — Unbound media pool (`media_assets/pool/`) layout + helpers (authoritative)
 - [`docs/RBAC_AUTHENTICATION_GUIDE.md`](docs/RBAC_AUTHENTICATION_GUIDE.md) — Complete RBAC reference
+- [`docs/DASHBOARD_ARCHITECTURE.md`](docs/DASHBOARD_ARCHITECTURE.md) — **READ BEFORE adding a dashboard panel.** Zones, `/readiness`, tally semantics
 - [`docs/DASHBOARD_ANNOUNCEMENTS.md`](docs/DASHBOARD_ANNOUNCEMENTS.md) — Dashboard announcement creation
 - [`docs/X_API_COMPLETE_REFERENCE.md`](docs/X_API_COMPLETE_REFERENCE.md) — X/Twitter API v2 reference
 - [`docs/KEYBOARD_SHORTCUTS.md`](docs/KEYBOARD_SHORTCUTS.md) — Master keyboard shortcut reference. Runtime data lives in `disaffected-ui/src/data/keyboardShortcuts.js`; in-app help modal opens with `?` or `F1`. **When adding/changing a shortcut, update both the `.js` file and the `.md` file.**

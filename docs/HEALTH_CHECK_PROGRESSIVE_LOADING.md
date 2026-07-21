@@ -124,6 +124,45 @@ Reduced timeouts for faster failure detection:
 
 **File**: `app/routers/health_router.py` (health endpoints moved from `main.py` during modularization)
 
+### Celery Queue Coverage
+
+`services.celery` reports **per-queue consumer counts**, not just a worker list:
+
+```json
+"celery": {
+  "status": "connected",
+  "workers": ["media@prefect", "whisper@whisperbox-live", "..."],
+  "worker_details": [
+    {"name": "media@prefect", "status": "ok", "queues": ["media", "fsq"], "...": "..."}
+  ],
+  "queues": [
+    {"name": "assets", "consumers": 1},
+    {"name": "compilation", "consumers": 0},
+    {"name": "fsq", "consumers": 1}
+  ],
+  "uncovered_queues": ["compilation", "quotes"]
+}
+```
+
+**Why this exists.** A worker count cannot express the failure mode that
+actually bites: every worker healthy and green, but *nobody consuming a
+queue*. That is exactly the 2026-06-21 FSQ outage — five workers up, zero on
+the `fsq` queue, so PNGs silently never rendered while the dashboard showed
+all-green.
+
+The coverage map is seeded from `celery_app.conf.task_queues`, so a queue with
+no consumer still appears (at zero) instead of vanishing from the report. That
+silent absence *is* the bug — a missing key reads as "fine" to every consumer.
+
+`uncovered_queues` is present only when at least one queue is at zero, making
+it a cheap thing to alert on. Note this reports *consumer presence*, not queue
+depth or throughput.
+
+**Consumers**: the dashboard's Queue Coverage panel (Zone 3) renders each queue
+red at zero consumers, green otherwise. Because it comes from the full `health()`
+logic, the data arrives via `/health/secondary`, i.e. in Phase 2 — a caller that
+only reads `/health/critical` will not see it.
+
 ## User Experience Flow
 
 ### Before (Sequential Loading)

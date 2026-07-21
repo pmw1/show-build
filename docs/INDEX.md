@@ -38,8 +38,13 @@
 - [`TEST_DATA_MANAGEMENT.md`](TEST_DATA_MANAGEMENT.md) - Test data vs production data separation
 
 ### Feature Guides
+- **[`DASHBOARD_ARCHITECTURE.md`](DASHBOARD_ARCHITECTURE.md)** - Dashboard zones & readiness (**read before adding a dashboard panel**)
+  - Three fixed zones (Tonight / Pipeline / System), drag scoped per zone
+  - `/readiness` per-stage aggregation behind the on-air rail
+  - Tally-light semantics and the async-prop gotcha
 - [`CUE_BLOCK_INSERTION_PROTOCOL.md`](CUE_BLOCK_INSERTION_PROTOCOL.md) - Cue insertion UX (implemented)
 - [`HEALTH_CHECK_PROGRESSIVE_LOADING.md`](HEALTH_CHECK_PROGRESSIVE_LOADING.md) - Progressive health check system (implemented)
+  - Includes per-queue Celery consumer coverage (`uncovered_queues`)
 - **[`PROMPT_OVERRIDE_SYSTEM.md`](PROMPT_OVERRIDE_SYSTEM.md)** - LLM Prompt Override System
   - Customize LLM prompts without modifying code
   - Database-backed override management
