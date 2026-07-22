@@ -18,8 +18,18 @@
           <!-- Black bar overlay - reactive to box height/opacity sliders -->
           <div class="fsq-preview-black-bar" :style="gfxBlackBarStyle"></div>
 
-          <!-- XPOST content overlay -->
-          <div v-if="cueData.gfxType === 'xpost'" class="xpost-preview-overlay">
+          <!-- XPOST: once the tweet-card PNG has been rendered, show the
+               ACTUAL render keyed over the background — pixel-faithful, no
+               HTML recreation. The recreation below only serves cues whose
+               PNG hasn't been generated yet. -->
+          <img
+            v-if="cueData.gfxType === 'xpost' && hasGfxAsset && gfxImageUrl"
+            :src="gfxImageUrl"
+            class="gfx-rendered-png"
+            alt="X post render"
+            draggable="false"
+          />
+          <div v-else-if="cueData.gfxType === 'xpost'" class="xpost-preview-overlay">
             <div class="xpost-author-row">
               <v-avatar v-if="xpostData.profilePhoto" size="28" class="mr-2">
                 <v-img :src="xpostData.profilePhoto" />
@@ -117,6 +127,19 @@
           >
             <v-icon size="large">mdi-download</v-icon>
             <v-tooltip activator="parent" location="top">{{ hasGfxAsset ? 'Download PNG' : 'No PNG to download yet' }}</v-tooltip>
+          </v-btn>
+
+          <v-btn
+            size="large"
+            variant="tonal"
+            color="primary"
+            icon
+            :disabled="!hasGfxAsset"
+            @click.stop="$emit('open-gfx-preview')"
+            class="gfx-action-btn"
+          >
+            <v-icon size="large">mdi-television-play</v-icon>
+            <v-tooltip activator="parent" location="top">{{ hasGfxAsset ? 'Preview over background' : 'Generate the PNG first' }}</v-tooltip>
           </v-btn>
 
           <v-btn
@@ -402,13 +425,18 @@ const props = defineProps({
     type: Object,
     default: () => ({})
   },
+  // Resolved URL of the rendered GFX PNG (parent computes fallbacks).
+  gfxImageUrl: {
+    type: String,
+    default: ''
+  },
   gfxActiveListItems: {
     type: Array,
     default: () => []
   }
 });
 
-const emit = defineEmits(['edit-gfx', 'delete', 'generate-gfx', 'download-gfx-png', 'update-meta', 'apply-all-gfx']);
+const emit = defineEmits(['edit-gfx', 'delete', 'generate-gfx', 'download-gfx-png', 'open-gfx-preview', 'update-meta', 'apply-all-gfx']);
 
 // Collapsible adjustments panel
 const adjustmentsOpen = ref(false);
@@ -612,6 +640,17 @@ defineExpose({
   z-index: 4;
   font-size: 10px;
   color: #4caf50;
+}
+
+/* The actual rendered PNG, keyed over the background video. */
+.gfx-rendered-png {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 3;
+  pointer-events: none;
 }
 
 /* XPOST Preview Overlay */
