@@ -288,6 +288,7 @@ import {
 } from '@/modules/legacyCueConvert/patterns.js';
 import ModifyWithAiModal from './modals/ModifyWithAiModal.vue';
 import { computeDiff } from '@/utils/scriptCompare';
+import { WB_DRAG_MIME } from '@/composables/useCueTranslation';
 
 const SAVE_DEBOUNCE_MS = 1500;
 
@@ -313,7 +314,7 @@ export default {
     // Settings → Interface → "Line numbers" toggle (editor.lineNumbers).
     showLineNumbers: { type: Boolean, default: true },
   },
-  emits: ['update:scriptContent', 'save-current', 'save-all', 'insert-cue', 'delete-cue', 'edit-cue', 'bulk-change-speaker'],
+  emits: ['update:scriptContent', 'save-current', 'save-all', 'insert-cue', 'delete-cue', 'edit-cue', 'bulk-change-speaker', 'whiteboard-drop'],
   setup(props, { emit, expose }) {
     const editor = shallowRef(null);
     const isActivelyEditing = ref(false);
@@ -457,6 +458,25 @@ export default {
         }),
         content: initial.doc.toJSON(),
         editable: props.editable,
+        editorProps: {
+          // Whiteboard item dragged in from the AssetPoolPanel: remember the
+          // drop point as the caret (the same lastCaretPos the cue inserter
+          // uses), then hand the item up — ContentEditor opens the matching
+          // cue modal and the eventual insert lands where the user dropped.
+          // Returning true stops ProseMirror from pasting the payload as text.
+          handleDrop: (view, event) => {
+            const raw = event.dataTransfer && event.dataTransfer.getData(WB_DRAG_MIME);
+            if (!raw) return false;
+            event.preventDefault();
+            if (!props.editable) return true;
+            let item = null;
+            try { item = JSON.parse(raw); } catch (e) { return true; }
+            const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
+            if (coords) lastCaretPos = coords.pos;
+            emit('whiteboard-drop', item);
+            return true;
+          },
+        },
         onUpdate: () => {
           lastDocChangeAt = Date.now();
           if (props.editable) scheduleSave();
@@ -655,6 +675,36 @@ export default {
       // The inserted cue is now the reference point for any follow-up insert.
       lastCaretPos = insertPos;
       // Flush so the new content serializes back to scriptContent immediately.
+      flushPendingChanges();
+      return true;
+    }
+
+    // Insert plain script text (one or more paragraphs, NOT a cue block) after
+    // the block holding the remembered caret. Mirrors insertCueAtCursor but
+    // keeps non-cue nodes instead — used by the whiteboard "Script Paragraph"
+    // insert (text card → script body).
+    function insertParagraphAtCursor(text) {
+      if (!editor.value || !text || !text.trim()) return false;
+      const { doc: parsed } = markdownToDoc(text);
+      const nodes = [];
+      parsed.forEach((child) => {
+        if (child.type.name !== 'cue' && child.textContent.trim()) nodes.push(child.toJSON());
+      });
+      if (nodes.length === 0) return false;
+      const doc = editor.value.state.doc;
+      let basePos = editor.value.state.selection.from;
+      if (lastCaretPos != null && lastCaretPos >= 0 && lastCaretPos <= doc.content.size) {
+        basePos = lastCaretPos;
+      }
+      const $from = doc.resolve(Math.min(Math.max(basePos, 0), doc.content.size));
+      let insertPos;
+      try {
+        insertPos = $from.after(1);
+      } catch (e) {
+        insertPos = doc.content.size;
+      }
+      editor.value.chain().focus().insertContentAt(insertPos, nodes).run();
+      lastCaretPos = insertPos;
       flushPendingChanges();
       return true;
     }
@@ -1553,6 +1603,7 @@ export default {
       flushPendingChanges,
       isActivelyEditing,
       insertCueAtCursor,
+      insertParagraphAtCursor,
       applyBulkSpeaker,
       saveCurrent: () => {
         flushPendingChanges();

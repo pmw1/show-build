@@ -342,6 +342,7 @@
                 @delete-cue="handlePmDeleteCue"
                 @edit-cue="handlePmEditCue"
                 @bulk-change-speaker="openSpeakerSelectorForPmSelection"
+                @whiteboard-drop="(item) => emit('whiteboard-drop', item)"
               />
 
               <draggable
@@ -1689,6 +1690,7 @@ const emit = defineEmits([
     'asset-drop',
     'metadata-change',
     'insert-cue',
+    'whiteboard-drop',
     'show-img-modal',
     'show-gfx-modal',
     'show-fsq-modal',
@@ -7270,6 +7272,21 @@ function insertCueAtCursor(cueContent) {
   console.log('✅ Cue inserted at cursor position');
 }
 
+// Insert plain script text (one or more paragraphs, NOT a cue) at the caret.
+// PM path delegates to the ScriptEditor (which uses its remembered caret /
+// drop position); legacy path appends to the raw script. Used by the
+// whiteboard "Script Paragraph" insert.
+function insertParagraphAtCursor(text) {
+  if (!text || !text.trim()) return false;
+  if (useProseMirrorEditor.value && scriptEditorRef.value?.insertParagraphAtCursor) {
+    return scriptEditorRef.value.insertParagraphAtCursor(text);
+  }
+  const current = rawScriptContent.value || '';
+  const sep = current && !current.endsWith('\n') ? '\n\n' : '';
+  rawScriptContent.value = `${current}${sep}${text.trim()}\n`;
+  return true;
+}
+
 // Unified cue insertion using snapshotted position (survives modal interaction)
 function insertCueAtSnapshotPosition(cueContent) {
   // When the ProseMirror editor is active, the legacy scriptSegments path below
@@ -11321,6 +11338,7 @@ defineExpose({
   handleVoCueSubmit,
   hasLocalUnsavedChanges,
   insertCueAtSnapshotPosition,
+  insertParagraphAtCursor,
   isActivelyEditing,
   isReadingScript,
   isTtsConfigured,

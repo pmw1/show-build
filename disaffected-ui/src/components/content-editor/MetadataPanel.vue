@@ -278,7 +278,7 @@
                     </template>
                   </v-expansion-panel-title>
                   <v-expansion-panel-text>
-                    <AssetPoolPanel :episode-number="episodeNumber" :rundown-items="rundownItems" :panel-width="panelWidth" :selected-item-label="selectedItemLabel" @place-item="$emit('place-library-item', $event)" @create-new-item="$emit('create-new-library-item', $event)" @reinsert-pool-media="$emit('reinsert-pool-media', $event)" />
+                    <AssetPoolPanel :episode-number="episodeNumber" :rundown-items="rundownItems" :panel-width="panelWidth" :selected-item-label="selectedItemLabel" @place-item="$emit('place-library-item', $event)" @create-new-item="$emit('create-new-library-item', $event)" @reinsert-pool-media="$emit('reinsert-pool-media', $event)" @insert-whiteboard-cue="$emit('insert-whiteboard-cue', $event)" />
                   </v-expansion-panel-text>
                 </v-expansion-panel>
               </v-expansion-panels>
@@ -709,6 +709,7 @@ const emit = defineEmits([
   'place-library-item',
   'create-new-library-item',
   'reinsert-pool-media',
+  'insert-whiteboard-cue',
   'update-segment-field',
   'scripts-updated',
   'reset-fields'

@@ -680,7 +680,10 @@ const props = defineProps({
   currentEpisode: { type: String, default: '' },
   speakerWpm: { type: Number, default: 150 },
   editMode: { type: Boolean, default: false },
-  initialData: { type: Object, default: null }
+  initialData: { type: Object, default: null },
+  // Non-edit prefill (e.g. whiteboard text card → FSQ): seeds the quote and
+  // attribution on open without flipping the modal into edit mode.
+  prefillData: { type: Object, default: null }
 })
 
 const emit = defineEmits(['update:show', 'submit'])
@@ -2156,6 +2159,11 @@ watch(() => props.show, async (newVal) => {
     if (props.editMode && props.initialData) {
       console.log('\uD83D\uDCDD Loading FSQ for editing:', props.initialData)
       loadInitialData()
+    } else if (props.prefillData?.quote) {
+      // Whiteboard/text prefill: seed the quote (and attribution when given)
+      // but stay in insert mode.
+      quote.value = props.prefillData.quote
+      if (props.prefillData.attribution) source.value = props.prefillData.attribution
     } else if (!source.value) {
       if (lastSubmittedSource.value) {
         source.value = lastSubmittedSource.value

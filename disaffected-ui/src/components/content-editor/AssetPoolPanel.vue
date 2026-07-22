@@ -92,6 +92,28 @@
                 @dragend="onDragEnd"
               >
                 <v-icon size="x-small" class="drag-handle mr-1">mdi-drag-vertical</v-icon>
+                <v-menu v-if="insertOptionsFor(child).length > 1" location="start">
+                  <template #activator="{ props: menuProps }">
+                    <v-btn v-bind="menuProps" icon size="x-small" variant="tonal" color="success" class="wb-insert-btn mr-1" @click.stop>
+                      <v-icon size="small">mdi-plus</v-icon>
+                      <v-tooltip activator="parent" location="left">Insert into script as…</v-tooltip>
+                    </v-btn>
+                  </template>
+                  <v-list density="compact">
+                    <v-list-item v-for="opt in insertOptionsFor(child)" :key="opt.key" @click="emitWhiteboardInsert(child, opt)">
+                      <template #prepend><v-icon size="small">{{ opt.icon }}</v-icon></template>
+                      <v-list-item-title class="text-caption">{{ opt.label }}</v-list-item-title>
+                    </v-list-item>
+                  </v-list>
+                </v-menu>
+                <v-btn
+                  v-else-if="insertOptionsFor(child).length"
+                  icon size="x-small" variant="tonal" color="success" class="wb-insert-btn mr-1"
+                  @click.stop="emitWhiteboardInsert(child, insertOptionsFor(child)[0])"
+                >
+                  <v-icon size="small">mdi-plus</v-icon>
+                  <v-tooltip activator="parent" location="left">{{ insertTooltip(insertOptionsFor(child)[0]) }}</v-tooltip>
+                </v-btn>
                 <span class="wb-type-badge" :style="{ background: resolveBadgeBg(child), color: resolveBadgeFg(child) }">
                   <v-icon size="x-small" class="wb-badge-icon">{{ resolveBadgeIcon(child) }}</v-icon>
                   {{ resolveBadgeLabel(child) }}
@@ -112,6 +134,28 @@
               @dragend="onDragEnd"
             >
               <v-icon size="x-small" class="drag-handle mr-1">mdi-drag-vertical</v-icon>
+              <v-menu v-if="insertOptionsFor(node).length > 1" location="start">
+                <template #activator="{ props: menuProps }">
+                  <v-btn v-bind="menuProps" icon size="x-small" variant="tonal" color="success" class="wb-insert-btn mr-1" @click.stop>
+                    <v-icon size="small">mdi-plus</v-icon>
+                    <v-tooltip activator="parent" location="left">Insert into script as…</v-tooltip>
+                  </v-btn>
+                </template>
+                <v-list density="compact">
+                  <v-list-item v-for="opt in insertOptionsFor(node)" :key="opt.key" @click="emitWhiteboardInsert(node, opt)">
+                    <template #prepend><v-icon size="small">{{ opt.icon }}</v-icon></template>
+                    <v-list-item-title class="text-caption">{{ opt.label }}</v-list-item-title>
+                  </v-list-item>
+                </v-list>
+              </v-menu>
+              <v-btn
+                v-else-if="insertOptionsFor(node).length"
+                icon size="x-small" variant="tonal" color="success" class="wb-insert-btn mr-1"
+                @click.stop="emitWhiteboardInsert(node, insertOptionsFor(node)[0])"
+              >
+                <v-icon size="small">mdi-plus</v-icon>
+                <v-tooltip activator="parent" location="left">{{ insertTooltip(insertOptionsFor(node)[0]) }}</v-tooltip>
+              </v-btn>
               <span class="wb-type-badge" :style="{ background: resolveBadgeBg(node), color: resolveBadgeFg(node) }">
                 <v-icon size="x-small" class="wb-badge-icon">{{ resolveBadgeIcon(node) }}</v-icon>
                 {{ resolveBadgeLabel(node) }}
@@ -377,6 +421,7 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
 import { fetchJson } from '@/utils/apiHelpers'
+import { getExtractionOptions, flattenExtractionOptions, WB_DRAG_MIME } from '@/composables/useCueTranslation'
 
 const props = defineProps({
   episodeNumber: {
@@ -399,7 +444,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['place-item', 'create-new-item', 'reinsert-pool-media'])
+const emit = defineEmits(['place-item', 'create-new-item', 'reinsert-pool-media', 'insert-whiteboard-cue'])
 
 // "Add to {selected rundown item type}" — falls back to a generic label when
 // no item is selected.
@@ -862,8 +907,32 @@ function transformItem(item) {
     url: item.url,
     media_url: item.media_url,
     asset_id: item.media_asset_id,
+    // Carried through for cue prefills (FSQ quote text / paragraph insert /
+    // IMG caption) — buildModalPrefill reads these off the item.
+    text_content: item.text_content,
+    caption: item.caption,
     social_metadata: sm
   }
+}
+
+// ── Insert-into-script (plus button / drag-to-editor) ──
+
+// Cue-type choices for a whiteboard leaf item, flattened for a one-level menu.
+// Empty for parents and un-insertable types (code, html) — no plus rendered.
+function insertOptionsFor(item) {
+  if (!item || item.isParent) return []
+  return flattenExtractionOptions(getExtractionOptions(item))
+}
+
+function insertTooltip(option) {
+  if (!option) return 'Insert into script'
+  return option.cueType === 'PARAGRAPH'
+    ? 'Insert as script paragraph'
+    : `Insert as ${option.cueType} cue`
+}
+
+function emitWhiteboardInsert(item, option) {
+  emit('insert-whiteboard-cue', { item, option })
 }
 
 function toggleParentExpand(parentId) {
@@ -874,7 +943,18 @@ function toggleParentExpand(parentId) {
 
 function onDragStart(event, level, index, parentId, node) {
   dragSource.value = { level, index, parentId, node }
-  event.dataTransfer.effectAllowed = 'move'
+  // Leaf items double as an external drag source: the script editor reads
+  // this payload (WB_DRAG_MIME) and inserts the item as a cue at the drop
+  // point. The in-tree reorder/reparent drop handlers keep using dragSource
+  // state and ignore the payload.
+  if (node && !node.isParent) {
+    event.dataTransfer.effectAllowed = 'copyMove'
+    try {
+      event.dataTransfer.setData(WB_DRAG_MIME, JSON.stringify(node))
+    } catch (e) { /* dataTransfer unavailable in some test envs */ }
+  } else {
+    event.dataTransfer.effectAllowed = 'move'
+  }
   event.target.classList.add('dragging')
 }
 
@@ -1464,6 +1544,14 @@ defineExpose({ refreshCategory, refreshScripts })
 .place-btn {
   width: 22px !important;
   height: 22px !important;
+}
+
+/* Whiteboard-row insert button (plus): same footprint as .place-btn but on
+   the compact tree rows. */
+.wb-insert-btn {
+  width: 20px !important;
+  height: 20px !important;
+  flex-shrink: 0;
 }
 
 .placed-chip {

@@ -5,6 +5,11 @@
  * modal prefill data for each extraction choice.
  */
 
+// dataTransfer MIME type for dragging a whiteboard item (AssetPoolPanel row)
+// into the script editor. The payload is the JSON of the panel's transformed
+// item (id, item_type, url, media_url, asset_id, social_metadata, title, ...).
+export const WB_DRAG_MIME = 'application/x-showbuild-whiteboard-item'
+
 /**
  * Determine the social platform from a whiteboard item
  */
@@ -81,7 +86,20 @@ export function getExtractionOptions(item) {
       icon: 'mdi-video',
       cueType: 'SOT'
     })
-  } else if (type === 'text') {
+  } else if (type === 'audio') {
+    options.push({
+      key: 'audio-vo',
+      label: 'As VO',
+      icon: 'mdi-microphone',
+      cueType: 'VO'
+    })
+    options.push({
+      key: 'audio-nat',
+      label: 'As NAT',
+      icon: 'mdi-volume-high',
+      cueType: 'NAT'
+    })
+  } else if (type === 'text' || type === 'markdown') {
     options.push({
       key: 'fsq',
       label: 'Full Screen Quote',
@@ -109,6 +127,26 @@ export function getExtractionOptions(item) {
 }
 
 /**
+ * Flatten extraction options into a single-level list: submenu children are
+ * promoted with a combined label ("Media from Post — As IMG"). Used where a
+ * nested menu can't render (drop-time cue-type picker) and by the panel's
+ * plus-button menu.
+ */
+export function flattenExtractionOptions(options) {
+  const flat = []
+  for (const opt of options || []) {
+    if (opt.children && opt.children.length) {
+      for (const child of opt.children) {
+        flat.push({ ...child, label: `${opt.label} — ${child.label}` })
+      }
+    } else {
+      flat.push(opt)
+    }
+  }
+  return flat
+}
+
+/**
  * Build modal prefill data from a whiteboard item and chosen option.
  */
 export function buildModalPrefill(item, option) {
@@ -123,7 +161,9 @@ export function buildModalPrefill(item, option) {
       }
 
     case 'media-img': {
-      const mediaUrl = (sm.media_urls && sm.media_urls[0]) || item.media_url
+      // Local-first: the whiteboard downloads post media to the pool
+      // (item.media_url); the remote sm.media_urls entry is the fallback.
+      const mediaUrl = item.media_url || (sm.media_urls && sm.media_urls[0])
       return {
         type: 'img',
         mediaUrl,
@@ -135,12 +175,17 @@ export function buildModalPrefill(item, option) {
     case 'media-sot':
     case 'media-vo':
     case 'media-nat':
+    case 'audio-vo':
+    case 'audio-nat':
     case 'tiktok-video':
     case 'video': {
-      const mediaUrl = (sm.media_urls && sm.media_urls[0]) || item.media_url || item.url
+      // Local-first (same rationale as media-img): remote twimg entries can
+      // be preview images rather than the actual video file.
+      const mediaUrl = item.media_url || (sm.media_urls && sm.media_urls[0]) || item.url
       return {
         type: option.cueType.toLowerCase(),
         mediaUrl,
+        assetId: item.asset_id,
         title: sm.author_handle ? `@${sm.author_handle}` : item.title || ''
       }
     }
