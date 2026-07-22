@@ -3,7 +3,7 @@ Whiteboard Models
 Database models for brainstorm whiteboard items and asset pool
 """
 from sqlalchemy import Column, Integer, String, Text, Float, ForeignKey, DateTime, Boolean, BigInteger
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -86,6 +86,11 @@ class WhiteboardItem(Base):
     media_asset_id = Column(String(50), nullable=True, index=True)  # AssetID used as filename stem
     media_path = Column(Text, nullable=True)  # Relative path within repo/whiteboard/{episode}/
     media_fallback_url = Column(Text, nullable=True)  # Fallback URI/URL for off-site media
+    # Extracted image metadata: intrinsic (format/dimensions/bytes), EXIF when
+    # present, and page-level metadata for web-dragged images. See g023.
+    media_metadata = Column(JSONB, nullable=True)
+    # Per-node user comments: [{id, author, text, ts}]. See g024.
+    comments = Column(JSONB, nullable=True)
 
     # Additional media types (new columns)
     video_url = Column(Text, nullable=True)

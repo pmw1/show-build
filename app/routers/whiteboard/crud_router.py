@@ -13,10 +13,25 @@ from models_whiteboard import Whiteboard, WhiteboardItem, WhiteboardNodeLink
 from services.asset_id import AssetIDService
 from ._shared import (
     WhiteboardItemCreate, WhiteboardItemResponse, WhiteboardResponse,
-    WhiteboardSaveRequest, _save_media_to_filesystem,
+    WhiteboardSaveRequest, _save_media_to_filesystem, extract_image_metadata,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_media_metadata(media_path: str) -> Dict[str, Any]:
+    """
+    Read metadata for a stored whiteboard image, given its pool-relative path.
+    Returns {} on any failure — metadata is decorative and must never break a save.
+    """
+    try:
+        from core.paths import paths as path_manager
+        # media_path is "whiteboard/{episode}/{filename}", relative to the pool root.
+        full_path = path_manager.get_pool_root() / media_path
+        return extract_image_metadata(full_path)
+    except Exception as e:
+        logger.debug(f"Metadata extraction skipped for {media_path}: {e}")
+        return {}
 
 router = APIRouter(tags=["whiteboard"])
 
@@ -208,29 +223,49 @@ async def save_whiteboard(
         media_asset_id = item_data.media_asset_id
         media_path = None
         saved_image_data = None
+        # Client-supplied metadata (e.g. source page title/description for a
+        # web-dragged image) is preserved; intrinsic + EXIF fields are merged in
+        # below once the file is on disk.
+        media_metadata = dict(item_data.media_metadata or {})
 
-        # If base64 image_data is provided, extract to filesystem
-        if item_data.image_data and episode_num:
+        # If base64 image_data is provided, extract to filesystem.
+        # Guard against a already-persisted media reference being sent back as
+        # image_data (e.g. a "/pool/..." serving URL). That is not base64, so the
+        # decode below would fail and — before this guard — the except branch
+        # dropped media_asset_id, orphaning the file on disk and leaving a blank
+        # card. Such a value means "media already on disk", so fall through to
+        # the re-link branch instead of trying to re-save it.
+        incoming_image_data = item_data.image_data
+        if incoming_image_data and not incoming_image_data.startswith("data:"):
+            logger.info(
+                "Ignoring non-base64 image_data for whiteboard item "
+                f"(media_asset_id={media_asset_id!r}); treating as existing media reference"
+            )
+            incoming_image_data = None
+
+        if incoming_image_data and episode_num:
             # Generate AssetID for this media if not already assigned
             if not media_asset_id:
                 media_asset_id = AssetIDService.generate("whiteboard_media")
 
             try:
                 media_info = _save_media_to_filesystem(
-                    item_data.image_data, episode_num, media_asset_id
+                    incoming_image_data, episode_num, media_asset_id
                 )
                 media_path = media_info["media_path"]
                 # Don't store base64 in database
                 saved_image_data = None
+                media_metadata.update(_extract_media_metadata(media_path))
             except Exception as e:
+                # Keep media_asset_id: nulling it here orphans any file already
+                # written under that ID and permanently unlinks the card.
                 logger.warning(f"Failed to save media to filesystem, falling back to base64: {e}")
-                saved_image_data = item_data.image_data
-                media_asset_id = None
+                saved_image_data = incoming_image_data
                 media_path = None
-        elif item_data.image_data and not episode_num:
+        elif incoming_image_data and not episode_num:
             # Standalone workspace - keep base64 for now (no episode directory)
-            saved_image_data = item_data.image_data
-        elif media_asset_id and episode_num and not item_data.image_data:
+            saved_image_data = incoming_image_data
+        elif media_asset_id and episode_num and not incoming_image_data:
             # Re-saving existing media card — reconstruct media_path from asset ID
             # The file already exists on disk, we just need to find it
             from core.paths import paths as path_manager
@@ -242,6 +277,9 @@ async def save_whiteboard(
                     from pathlib import Path
                     filename = Path(matches[0]).name
                     media_path = f"whiteboard/{episode_num}/{filename}"
+                    # Backfill metadata for cards saved before extraction existed.
+                    if not media_metadata:
+                        media_metadata = _extract_media_metadata(media_path)
 
         item = WhiteboardItem(
             whiteboard_id=whiteboard.id,
@@ -255,6 +293,8 @@ async def save_whiteboard(
             image_data=saved_image_data,
             media_asset_id=media_asset_id,
             media_path=media_path,
+            media_metadata=media_metadata or None,
+            comments=item_data.comments or None,
             caption=item_data.caption,
             width=item_data.width,
             z_index=item_data.z_index,
