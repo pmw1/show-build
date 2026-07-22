@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: system-ui, sans-serif; width: 340px; margin: 0; padding: 0.75rem; color: #222; }
+    h1 { font-size: 1rem; margin: 0 0 0.5rem; }
+    .row { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.6rem; }
+    select { flex: 1; padding: 0.3rem; }
+    button { padding: 0.35rem 0.6rem; cursor: pointer; }
+    #captures { max-height: 260px; overflow-y: auto; border-top: 1px solid #ddd; margin-top: 0.4rem; }
+    .cap { display: flex; gap: 0.5rem; align-items: center; padding: 0.35rem 0; border-bottom: 1px solid #f0f0f0; font-size: 0.82rem; }
+    .cap .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chip { font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 8px; white-space: nowrap; }
+    .chip.pending { background: #fff3e0; color: #e65100; }
+    .chip.processing { background: #e3f2fd; color: #1565c0; }
+    .chip.placed { background: #e8f5e9; color: #2e7d32; }
+    .chip.dismissed { background: #eee; color: #777; }
+    .chip.failed { background: #ffebee; color: #b71c1c; }
+    #queueRow { font-size: 0.8rem; color: #e65100; margin-top: 0.4rem; display: none; }
+    #msg { font-size: 0.8rem; color: #666; margin-top: 0.4rem; min-height: 1em; }
+    a { color: #1565c0; }
+  </style>
+</head>
+<body>
+  <h1>Show-Build Capture</h1>
+  <div class="row">
+    <select id="episodeSel"></select>
+    <button id="refreshBtn" title="Refresh episode list">⟳</button>
+  </div>
+  <div class="row">
+    <button id="capturePageBtn">Capture this page</button>
+    <button id="screenshotBtn">Screenshot</button>
+    <button id="optionsBtn" title="Options">⚙</button>
+  </div>
+  <div id="queueRow"><span id="queueCount"></span> queued — <a href="#" id="retryLink">retry now</a></div>
+  <div id="msg"></div>
+  <div id="captures"></div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
