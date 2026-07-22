@@ -132,23 +132,23 @@
         size="small"
         variant="text"
         icon="mdi-magnify-plus"
-        :disabled="zoomLevel >= 5.0"
-        @click="zoomIn"
+        :disabled="zoomPct >= 400"
+        @click="zoomIn({ duration: 150 })"
       ></v-btn>
       <v-chip
         size="small"
         variant="outlined"
         class="mx-1"
         style="cursor: pointer;"
-        @click="zoomLevel = 1.0; panX = 0; panY = 0"
+        @click="setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 300 })"
         title="Reset zoom & pan"
-      >{{ Math.round(zoomLevel * 100) }}%</v-chip>
+      >{{ zoomPct }}%</v-chip>
       <v-btn
         size="small"
         variant="text"
         icon="mdi-magnify-minus"
-        :disabled="zoomLevel <= 0.1"
-        @click="zoomOut"
+        :disabled="zoomPct <= 5"
+        @click="zoomOut({ duration: 150 })"
       ></v-btn>
 
       <v-divider vertical class="mx-2"></v-divider>
@@ -311,19 +311,16 @@
       class="whiteboard-canvas"
       :class="{
         'canvas-disabled': !currentEpisode,
-        'canvas-dragging-connection': isDragging
+        'canvas-dragging-connection': connecting,
+        'layout-animating': autoArranging || layoutAnimating
       }"
-      @click="handleCanvasClick"
-      @dblclick="handleCanvasDblClick"
-      @mousedown="handleCanvasMouseDown"
-      @mousemove="handleCanvasMouseMove"
-      @mouseup="handleCanvasMouseUp"
-      @mouseleave="handleCanvasMouseUp"
+      @dblclick="handlePaneDblClick"
       @paste="currentEpisode ? handlePaste($event) : null"
+      @dragstart="handleCanvasDragStart"
+      @dragend="internalDragActive = false"
       @dragover.prevent
       @drop="currentEpisode ? handleDrop($event) : null"
       @keydown="currentEpisode ? handleKeyDown($event) : null"
-      @wheel.prevent="handleCanvasWheel"
       tabindex="0"
     >
       <!-- Floating Options Menu (top-left of canvas, OUTSIDE zoom wrapper) -->
@@ -384,6 +381,45 @@
               <span class="flyout-label">Refresh</span>
             </div>
 
+            <!-- Visualizer: hovering reveals the layout modes -->
+            <div
+              class="flyout-action-wrapper visualizer-wrapper"
+              @mouseenter="visualizerMenuOpen = true"
+              @mouseleave="visualizerMenuOpen = false"
+            >
+              <v-btn
+                icon
+                size="48"
+                variant="elevated"
+                color="white"
+                elevation="3"
+                class="flyout-action"
+              >
+                <v-icon size="24" color="primary">{{ currentVisualizer.icon }}</v-icon>
+              </v-btn>
+              <span class="flyout-label">Visualizer</span>
+
+              <!-- Pop-down options -->
+              <transition name="visualizer-drop">
+                <div v-if="visualizerMenuOpen" class="visualizer-menu">
+                  <div
+                    v-for="viz in VISUALIZERS"
+                    :key="viz.key"
+                    class="visualizer-option"
+                    :class="{ 'visualizer-option-active': activeVisualizer === viz.key }"
+                    @click.stop="setVisualizer(viz.key)"
+                  >
+                    <v-icon size="18" class="me-2" :color="activeVisualizer === viz.key ? 'primary' : 'grey-darken-1'">{{ viz.icon }}</v-icon>
+                    <div class="visualizer-option-body">
+                      <span class="visualizer-option-label">{{ viz.label }}</span>
+                      <span class="visualizer-option-desc">{{ viz.description }}</span>
+                    </div>
+                    <v-icon v-if="activeVisualizer === viz.key" size="16" color="primary">mdi-check</v-icon>
+                  </div>
+                </div>
+              </transition>
+            </div>
+
             <div
               class="flyout-action-wrapper"
               @click="handleMenuSave(); floatingMenuOpen = false"
@@ -408,137 +444,190 @@
       </div>
 
       <!-- Drag-to-connect Indicator -->
-      <div v-if="isDragging" class="connection-mode-banner">
+      <div v-if="connecting" class="connection-mode-banner">
         <v-icon size="small" class="me-1">mdi-vector-line</v-icon>
-        <span>Drag to another card's border to connect, or click empty space to spawn a new card</span>
-        <v-btn size="x-small" variant="text" class="ms-2" @click="cancelDrag">
-          <kbd>Esc</kbd> Cancel
-        </v-btn>
+        <span>Release on another card to connect, or on empty space to spawn a new card</span>
       </div>
 
-      <!-- Zoom Wrapper -->
-      <div
-        class="zoom-wrapper"
-        :style="{
-          transform: `translate(${panX}px, ${panY}px) scale(${zoomLevel})`,
-          transformOrigin: '0 0',
-          position: 'relative'
-        }"
-      >
-        <!-- SVG Connection Layer -->
-        <svg class="connection-layer" :style="{ width: '100%', height: '100%' }">
-          <!-- Rendered connection lines -->
-          <g v-for="link in renderedLinks" :key="link.id">
-            <!-- Invisible wider hit area for hover -->
-            <path
-              :d="link.path"
-              fill="none"
-              stroke="transparent"
-              stroke-width="16"
-              style="cursor: pointer; pointer-events: stroke;"
-              @mouseenter="hoveredLinkId = link.id"
-              @mouseleave="hoveredLinkId = null"
-            />
-            <!-- Visible line -->
-            <path
-              :d="link.path"
-              fill="none"
-              :stroke="link.color || '#1976d2'"
-              stroke-width="2.5"
-              style="pointer-events: none;"
-              :style="{ opacity: hoveredLinkId === link.id ? 1 : 0.7 }"
-            />
-            <!-- Endpoint dots (clickable — opens endpoint popup) -->
-            <circle
-              :cx="link.x1" :cy="link.y1" r="7"
-              :fill="link.color || '#1976d2'"
-              stroke="white" stroke-width="2"
-              style="cursor: pointer; pointer-events: all;"
-              @click.stop="openEndpointPopup(link.id, 'source', link.x1, link.y1)"
-            />
-            <circle
-              :cx="link.x2" :cy="link.y2" r="7"
-              :fill="link.color || '#1976d2'"
-              stroke="white" stroke-width="2"
-              style="cursor: pointer; pointer-events: all;"
-              @click.stop="openEndpointPopup(link.id, 'target', link.x2, link.y2)"
-            />
-            <!-- Label at midpoint -->
-            <text
-              v-if="link.label"
-              :x="link.mx"
-              :y="link.my - 10"
-              text-anchor="middle"
-              class="connection-label"
-              :fill="link.color || '#1976d2'"
-            >{{ link.label }}</text>
-            <!-- Delete button at midpoint (on hover) -->
-            <g
-              v-if="hoveredLinkId === link.id"
-              :transform="`translate(${link.mx}, ${link.my})`"
-              style="cursor: pointer; pointer-events: all;"
-              @click.stop="deleteLink(link.id)"
+      <!-- Current view indicator / selector (top-right of the canvas) -->
+      <div class="view-indicator" @click.stop>
+        <!-- One-shot tidy-up: solves positions, animates, stays in free web. -->
+        <div
+          class="view-indicator-chip collapse-all-chip"
+          :class="{ 'view-chip-disabled': !cards.length || autoArranging }"
+          title="Auto-arrange nodes (stays editable — you can still drag them)"
+          @click="cards.length && autoArrange()"
+        >
+          <v-icon size="16" color="primary" class="me-2">{{ autoArranging ? 'mdi-loading mdi-spin' : 'mdi-auto-fix' }}</v-icon>
+          <span class="view-indicator-label">Arrange</span>
+        </div>
+
+        <!-- Frame all nodes in the viewport. Same chip styling. -->
+        <div
+          class="view-indicator-chip collapse-all-chip"
+          :class="{ 'view-chip-disabled': !cards.length }"
+          title="Fit all nodes to the screen"
+          @click="cards.length && fitBoard()"
+        >
+          <v-icon size="16" color="primary" class="me-2">mdi-fit-to-screen-outline</v-icon>
+          <span class="view-indicator-label">Fit</span>
+        </div>
+
+        <!-- Collapse / expand every node. Same chip styling as the view selector. -->
+        <div
+          class="view-indicator-chip collapse-all-chip"
+          :class="{ 'view-chip-disabled': !cards.length }"
+          :title="allCollapsed ? 'Expand all nodes' : 'Collapse all nodes'"
+          @click="cards.length && toggleCollapseAll()"
+        >
+          <v-icon size="16" color="primary" class="me-2">{{ allCollapsed ? 'mdi-arrow-expand-vertical' : 'mdi-arrow-collapse-vertical' }}</v-icon>
+          <span class="view-indicator-label">{{ allCollapsed ? 'Expand All' : 'Collapse All' }}</span>
+        </div>
+
+        <!-- Auto Center toggle. When ON: selecting a card pans it to the middle
+             of the viewport (zoom untouched), and double-clicking a card
+             redistributes the whole board around it as the centre of the
+             universe. When OFF, double-click keeps its zoom-to-read behaviour. -->
+        <div
+          class="view-indicator-chip collapse-all-chip"
+          :class="{ 'view-chip-active': autoCenter }"
+          :title="autoCenter
+            ? 'Auto Center is ON — selecting a card centers it; double-click redistributes the board around it. Click to turn off.'
+            : 'Auto Center is OFF — click to turn on'"
+          @click="autoCenter = !autoCenter"
+        >
+          <v-icon size="16" :color="autoCenter ? 'white' : 'primary'" class="me-2">mdi-image-filter-center-focus</v-icon>
+          <span class="view-indicator-label">Auto Center</span>
+        </div>
+
+        <!-- Auto Condense toggle. When ON and the board is viewed below the
+             compact tier, rendered positions contract uniformly toward the
+             board centre — as tight as possible without cards touching — so
+             zoomed-out views waste far less white space. View-only: stored
+             positions are never modified, and zooming back in restores the
+             true arrangement. -->
+        <div
+          class="view-indicator-chip collapse-all-chip"
+          :class="{ 'view-chip-active': autoCondense }"
+          :title="autoCondense
+            ? 'Auto Condense is ON — zoomed-out views compress empty space (positions are not changed). Click to turn off.'
+            : 'Auto Condense is OFF — click to compress white space at zoomed-out levels'"
+          @click="autoCondense = !autoCondense"
+        >
+          <v-icon size="16" :color="autoCondense ? 'white' : 'primary'" class="me-2">mdi-arrow-collapse-all</v-icon>
+          <span class="view-indicator-label">Auto Condense</span>
+        </div>
+
+        <div class="view-selector-anchor">
+        <div
+          class="view-indicator-chip"
+          :class="{ 'view-indicator-open': viewSelectorOpen }"
+          @click="viewSelectorOpen = !viewSelectorOpen"
+        >
+          <v-icon size="16" color="primary" class="me-2">{{ currentVisualizer.icon }}</v-icon>
+          <span class="view-indicator-label">{{ currentVisualizer.label }}</span>
+          <v-icon size="16" class="ms-1 view-indicator-caret">mdi-chevron-down</v-icon>
+        </div>
+
+        <transition name="view-drop">
+          <div v-if="viewSelectorOpen" class="view-indicator-menu">
+            <div
+              v-for="viz in VISUALIZERS"
+              :key="viz.key"
+              class="visualizer-option"
+              :class="{ 'visualizer-option-active': activeVisualizer === viz.key }"
+              @click.stop="setVisualizer(viz.key); viewSelectorOpen = false"
             >
-              <circle r="12" fill="white" stroke="#e53935" stroke-width="2" />
-              <text x="0" y="4" text-anchor="middle" fill="#e53935" font-size="14" font-weight="bold">x</text>
-            </g>
-          </g>
+              <v-icon size="18" class="me-2" :color="activeVisualizer === viz.key ? 'primary' : 'grey-darken-1'">{{ viz.icon }}</v-icon>
+              <div class="visualizer-option-body">
+                <span class="visualizer-option-label">{{ viz.label }}</span>
+                <span class="visualizer-option-desc">{{ viz.description }}</span>
+              </div>
+              <v-icon v-if="activeVisualizer === viz.key" size="16" color="primary">mdi-check</v-icon>
+            </div>
+          </div>
+        </transition>
+        </div><!-- /view-selector-anchor -->
+      </div>
 
-          <!-- Source anchor dot (concretized, yellow, stays visible during drag) -->
-          <circle
-            v-if="dragAnchor"
-            :cx="dragAnchor.x"
-            :cy="dragAnchor.y"
-            r="14"
-            fill="#FFC107"
-            stroke="white"
-            stroke-width="2"
-            style="pointer-events: none;"
-          />
+      <!-- Zoom level (bottom-right of the canvas). Also names the current detail
+           tier, since that is what governs how much of each card renders. -->
+      <div
+        v-if="currentEpisode"
+        class="zoom-readout"
+        :class="{ 'zoom-readout-active': zoomPct !== 100 }"
+        title="Click to reset zoom to 100%"
+        @click.stop="zoomTo(1, { duration: 250 })"
+      >
+        <v-icon size="14" class="me-1">mdi-magnify</v-icon>
+        <span class="zoom-readout-value">{{ zoomPct }}%</span>
+        <span class="zoom-readout-tier">{{ zoomTier }}</span>
+      </div>
 
-          <!-- Rubber-band line from anchor to mouse/target (yellow dashed) -->
-          <line
-            v-if="rubberBandLine"
-            :x1="rubberBandLine.x1"
-            :y1="rubberBandLine.y1"
-            :x2="rubberBandLine.x2"
-            :y2="rubberBandLine.y2"
-            stroke="#FFC107"
-            stroke-width="3.5"
-            stroke-dasharray="8,5"
-            style="pointer-events: none; opacity: 0.85;"
-          />
+      <!-- Vue Flow canvas: owns the viewport (pan/zoom via d3-zoom), node
+           positioning/dragging, edges, and drag-to-connect. Card content renders
+           through the #node-card slot below, so every template and handler in this
+           component keeps working unchanged. -->
+      <VueFlow
+        class="whiteboard-flow"
+        :min-zoom="0.05"
+        :max-zoom="4"
+        :zoom-on-double-click="false"
+        :nodes-draggable="nodesDraggable"
+        :edges-updatable="false"
+        :delete-key-code="null"
+        :connection-radius="34"
+        :connection-mode="'loose'"
+        :is-valid-connection="isValidConnection"
+        :elevate-nodes-on-select="true"
+        @node-double-click="onFlowNodeDblClick"
+        @node-click="onFlowNodeClick"
+        @node-drag-start="onFlowNodeDragStart"
+        @node-drag="onFlowNodeDrag"
+        @node-drag-stop="onFlowNodeDragStop"
+        @edge-mouse-enter="hoveredLinkId = $event.edge.data.link.id"
+        @edge-mouse-leave="hoveredLinkId = null"
+        @connect-start="onConnectStart"
+        @connect="onConnect"
+        @connect-end="onConnectEnd"
+        @pane-click="onPaneClick"
+        @move-start="onViewportMoveStart"
+      >
+        <!-- Dot grid scales with the canvas — a real zoom cue, unlike the old
+             fixed-size CSS gradient grid. -->
+        <Background pattern-color="#bdbdbd" :gap="28" :size="1.5" />
+        <MiniMap
+          v-if="cards.length > 1"
+          pannable
+          zoomable
+          position="bottom-left"
+          :node-color="minimapNodeColor"
+        />
 
-          <!-- Target dot (on target card border during drag, yellow) -->
-          <circle
-            v-if="dragTargetDot"
-            :cx="dragTargetDot.x"
-            :cy="dragTargetDot.y"
-            r="14"
-            fill="#FFC107"
-            stroke="white"
-            stroke-width="2"
-            style="pointer-events: none;"
-          />
+        <!-- Hub labels: screen-space, constant-size badges for parent nodes,
+             shown whenever the in-circle text would be too small to read
+             (below the compact tier). Like map landmark labels: the hub disc
+             scales geometrically with the canvas, its label stays readable at
+             any zoom. pointer-events: none — purely visual, all interaction
+             passes through to the node underneath. -->
+        <div v-if="showHubLabels" class="hub-label-layer">
+          <div
+            v-for="hub in hubLabels"
+            :key="'hub-' + hub.id"
+            class="hub-label"
+            :style="[hub.style, { background: hub.color }]"
+          >
+            <span class="hub-label-type">{{ hub.type }}</span>
+            <span v-if="hub.title" class="hub-label-title">{{ hub.title }}</span>
+          </div>
+        </div>
 
-          <!-- Hover dot (before first click, tracking on border) -->
-          <circle
-            v-if="hoverDot && !isDragging"
-            :cx="hoverDot.x"
-            :cy="hoverDot.y"
-            r="10"
-            fill="#1976d2"
-            stroke="white"
-            stroke-width="2"
-            style="pointer-events: none; opacity: 0.85;"
-          />
-        </svg>
-
-        <!-- Endpoint popup (click on connection endpoint dot) -->
+        <!-- Endpoint popup (click on a connection endpoint dot). Screen-space
+             overlay — constant size at every zoom, no counter-scaling. -->
         <div
           v-if="endpointPopup"
           class="endpoint-popup"
-          :style="{ left: endpointPopup.x + 'px', top: endpointPopup.y + 'px' }"
+          :style="endpointPopupStyle"
           @click.stop
         >
           <v-card elevation="8" width="190" class="endpoint-popup-card">
@@ -566,9 +655,10 @@
             <strong>Quick actions:</strong><br>
             • Press <kbd>T</kbd> text, <kbd>L</kbd> link, <kbd>I</kbd> image, <kbd>V</kbd> video, <kbd>A</kbd> audio<br>
             • Press <kbd>H</kbd> HTML, <kbd>C</kbd> code, <kbd>M</kbd> markdown<br>
-            • Press <kbd>P</kbd> parent node • Hover card edge to connect<br>
+            • Press <kbd>K</kbd> contact, <kbd>Q</kbd> question<br>
+            • Press <kbd>P</kbd> parent node • Drag a border dot to connect<br>
             • Paste images, URLs, or text (<kbd>Ctrl+V</kbd>)<br>
-            • <kbd>Ctrl+Scroll</kbd> to zoom • Drag items to reposition
+            • <kbd>Scroll</kbd> to zoom • <kbd>F</kbd> fit to screen • Drag items to reposition
           </p>
         </div>
 
@@ -576,7 +666,7 @@
         <div
           v-if="showDropMenu"
           class="drop-spawn-menu"
-          :style="{ left: dropMenuPos.x + 'px', top: dropMenuPos.y + 'px' }"
+          :style="dropMenuStyle"
           @click.stop
         >
           <v-card elevation="8" width="180" class="drop-menu-card">
@@ -589,6 +679,8 @@
               <v-list-item @click="spawnFromDrop('html')" prepend-icon="mdi-code-tags" title="HTML"></v-list-item>
               <v-list-item @click="spawnFromDrop('code')" prepend-icon="mdi-code-braces" title="Code"></v-list-item>
               <v-list-item @click="spawnFromDrop('markdown')" prepend-icon="mdi-language-markdown" title="Markdown"></v-list-item>
+              <v-list-item @click="spawnFromDrop('contact')" prepend-icon="mdi-account-box" title="Contact"></v-list-item>
+              <v-list-item @click="spawnFromDrop('question')" prepend-icon="mdi-help-circle" title="Question"></v-list-item>
               <v-divider></v-divider>
               <v-list-item
                 v-for="pt in parentNodeTypes"
@@ -607,39 +699,189 @@
           </v-card>
         </div>
 
-        <!-- Cards -->
+        <!-- Card nodes. Every card template renders inside this slot — same
+             component scope, so all handlers and helpers work unchanged.
+
+             CONSTANT-FOOTPRINT RULE: a card occupies the same canvas-space box at
+             every zoom level. The zoom tier only changes what is drawn INSIDE that
+             box (full card → header+body → summary → plate). Geometric zoom then
+             handles all sizing and spacing proportionally — no counter-scaled
+             fonts, no position spreading, no per-zoom size math. -->
+        <template #node-card="{ data: { card } }">
         <div
-          v-for="card in cards"
-          :key="card.id"
           :ref="el => { if (el) cardElements[card.id] = el }"
-          :style="{
-            position: 'absolute',
-            left: card.x + 'px',
-            top: card.y + 'px',
-            zIndex: card.id === activeCardId ? 1000 : 1
-          }"
+          class="card-node"
           :class="{
-            'card-border-glow': hoverCardId === card.id && !isDragging && card.type !== 'parent',
-            'card-border-glow-yellow': dragTargetDot?.cardId === card.id && card.type !== 'parent',
             'card-flash-blue': flashingCards.has(card.id) && card.type !== 'parent',
-            'card-is-drag-source': dragAnchor?.cardId === card.id && card.type !== 'parent',
-            'parent-glow-blue': hoverCardId === card.id && !isDragging && card.type === 'parent',
-            'parent-glow-yellow': (dragTargetDot?.cardId === card.id || dragAnchor?.cardId === card.id) && card.type === 'parent',
-            'parent-flash-blue': flashingCards.has(card.id) && card.type === 'parent'
+            'parent-flash-blue': flashingCards.has(card.id) && card.type === 'parent',
+            'reparent-target': reparentDrag?.targetId === card.id,
+            'reparent-source': reparentDrag?.cardId === card.id,
+            'subtree-member': subtreeDrag && subtreeDrag.offsets.some(o => o.id === card.id)
           }"
-          @mousedown="startDrag($event, card)"
+          @mousedown.capture="maybeBlockNodeDrag"
+          @mousemove="trackConnectDot($event, card)"
+          @mouseleave="clearConnectDot"
         >
+        <!-- Connection affordance. The .connect-band is a generous invisible hot
+             zone extending well past the card edge; while the pointer is inside
+             it (or within the inner rim of the card), a single connection dot
+             clings to the nearest point on the border and FOLLOWS the mouse —
+             press it and drag to draw a link. The dot is a real Vue Flow source
+             Handle, so the drag hands straight off to Vue Flow's connection
+             machinery. The full-card target surface only accepts events while a
+             connection is in flight (drop anywhere on a card to connect). -->
+        <div class="connect-band connect-band-top" :style="connectBandStyle"></div>
+        <div class="connect-band connect-band-bottom" :style="connectBandStyle"></div>
+        <div class="connect-band connect-band-left" :style="connectBandStyle"></div>
+        <div class="connect-band connect-band-right" :style="connectBandStyle"></div>
+        <Handle
+          v-if="liveDot && liveDot.cardId === card.id"
+          id="live"
+          type="source"
+          :position="Position.Top"
+          class="connect-dot-live"
+          :style="{
+            left: liveDot.x + 'px',
+            top: liveDot.y + 'px',
+            width: liveDot.size + 'px',
+            height: liveDot.size + 'px',
+            borderWidth: Math.max(2, Math.round(liveDot.size / 9)) + 'px'
+          }"
+        />
+        <Handle id="target" type="target" :position="Position.Top" class="connect-target-surface" />
+
+        <!-- MARKER tier (zoomed far out): a type-coloured plate filling the card's
+             own footprint. It scales down geometrically with the zoom — at this
+             range the board is read by colour and structure, not text.
+             PARENTS render as a solid-colour hub disc at BOTH summary and marker
+             tiers (never the generic summary card) — they are the board's
+             landmarks, and their readable text rides in the screen-space hub
+             label layer so it stays legible at any zoom. -->
+        <div
+          v-if="(card.type === 'parent' ? !showCompact : !showSummary) && activeVisualizer !== 'hierarchical'"
+          class="zoom-marker"
+          :class="{ 'zoom-marker-parent': card.type === 'parent' }"
+          :style="{
+            background: card.type === 'parent' ? nodeType(card).color : nodeType(card).tint,
+            borderColor: card.type === 'parent' ? 'rgba(255, 255, 255, 0.55)' : nodeType(card).color,
+            width: lodBoxWidth(card) + 'px',
+            height: lodBoxHeight(card) + 'px'
+          }"
+          :title="collapsedLabel(card) || nodeType(card).label"
+        >
+          <v-icon
+            :size="Math.round(lodBoxHeight(card) * (card.type === 'parent' ? 0.3 : 0.4))"
+            :color="card.type === 'parent' ? 'rgba(255,255,255,0.9)' : nodeType(card).color"
+          >{{ nodeType(card).icon }}</v-icon>
+          <span
+            v-if="nodeType(card).label"
+            class="zoom-marker-label"
+            :style="{ color: nodeType(card).color }"
+          >{{ nodeType(card).label }}</span>
+          <span
+            v-if="collapsedLabel(card) || card.title"
+            class="zoom-marker-title"
+          >{{ collapsedLabel(card) || card.title }}</span>
+        </div>
+
+        <!-- SUMMARY tier: thumbnail + type + title in the card's own footprint.
+             Text sizes are fixed in canvas units and scale with the zoom like
+             everything else. -->
+        <v-card
+          v-else-if="!showCompact"
+          :width="summaryCardWidth(card)"
+          class="card-item zoom-summary-card"
+          :class="{ 'zoom-summary-wide': activeVisualizer === 'hierarchical' }"
+          :style="{ borderTopColor: nodeType(card).color }"
+          elevation="2"
+        >
+          <div class="zoom-summary-inner">
+            <img
+              v-if="rowMedia(card)"
+              :src="rowMedia(card)"
+              class="zoom-summary-thumb"
+              draggable="false"
+              @error="$event.target.style.display = 'none'"
+            />
+            <v-icon
+              v-else
+              class="zoom-summary-icon"
+              :size="64"
+              :color="nodeType(card).color"
+            >{{ nodeType(card).icon }}</v-icon>
+            <div class="zoom-summary-body">
+              <span
+                v-if="nodeType(card).label"
+                class="zoom-summary-type"
+                :style="{ color: nodeType(card).color }"
+              >{{ nodeType(card).label }}</span>
+              <span class="zoom-summary-title">{{ collapsedLabel(card) || card.title || nodeType(card).label }}</span>
+              <span
+                v-if="activeVisualizer === 'hierarchical' && summaryPreview(card)"
+                class="zoom-summary-preview"
+              >{{ summaryPreview(card) }}</span>
+            </div>
+          </div>
+        </v-card>
+
+        <!-- Collapsed ROW (hierarchical view): one wide line per node —
+             type marker, media thumb, editable title. Replaces the per-type
+             card entirely while collapsed in this view. -->
+        <v-card
+          v-if="isCollapsedRow(card) && showCompact"
+          :width="collapsedRowWidth(card)"
+          class="card-item collapsed-row"
+          :style="{ borderLeftColor: nodeType(card).color }"
+          elevation="2"
+          @dblclick.stop="handleCardDblClick(card)"
+        >
+          <div class="collapsed-row-inner">
+            <v-icon size="18" :color="nodeType(card).color" class="collapsed-row-icon">{{ nodeType(card).icon }}</v-icon>
+            <span class="type-chip collapsed-row-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
+
+            <img
+              v-if="rowMedia(card)"
+              :src="rowMedia(card)"
+              class="collapsed-row-thumb"
+              draggable="false"
+              @error="$event.target.style.display = 'none'"
+            />
+
+            <v-text-field
+              v-model="card.title"
+              variant="plain"
+              density="compact"
+              hide-details
+              :placeholder="titlePlaceholder(card)"
+              class="text-caption editable-title collapsed-row-title"
+              :style="titleFieldStyle(card)"
+              @focus="activeCardId = card.id"
+              @click.stop
+            ></v-text-field>
+
+            <span class="collapsed-row-summary">{{ collapsedLabel(card) }}</span>
+
+            <v-spacer></v-spacer>
+            <v-btn
+              size="x-small"
+              icon="mdi-chevron-down"
+              variant="text"
+              @click.stop="toggleCollapse(card)"
+            ></v-btn>
+          </div>
+        </v-card>
+
         <!-- Text Card -->
         <v-card
-          v-if="card.type === 'text'"
-          :width="card.collapsed ? 220 : (card.width || 500)"
+          v-if="card.type === 'text' && !isCollapsedRow(card) && showCompact"
+          :width="treeCardWidth(card, 220, 500)"
           class="card-item text-card"
           :class="{ 'warning-card': card.isWarning }"
           :style="card.cardStyle || {}"
           elevation="2"
         >
           <!-- Collapsed State -->
-          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="toggleCollapse(card)" :style="card.isWarning ? 'border-color: #ff4444; background: #2d1010;' : 'border-color: #FFA726; background: #fffbcc;'">
+          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="handleCardDblClick(card)" :style="card.isWarning ? 'border-color: #ff4444; background: #2d1010;' : 'border-color: #FFA726; background: #fffbcc;'">
             <v-icon size="small" :color="card.isWarning ? 'red' : 'amber-darken-2'" class="collapsed-pill-icon">{{ card.isWarning ? 'mdi-alert' : 'mdi-text' }}</v-icon>
             <div class="collapsed-pill-body">
               <span class="collapsed-pill-type" :style="card.isWarning ? 'color: #ff4444;' : 'color: #FFA726;'">{{ card.isWarning ? 'WARNING' : 'TEXT' }}</span>
@@ -649,19 +891,21 @@
 
           <!-- Expanded State -->
           <template v-else>
+            <div class="type-accent" :style="{ background: nodeType(card).color }"></div>
             <v-card-title
-              :class="card.isWarning ? 'pa-2 d-flex align-center' : 'pa-2 d-flex align-center bg-amber-lighten-4'"
-              :style="card.isWarning ? 'cursor: pointer; background-color: #4a1010; color: #ff6666;' : 'cursor: pointer;'"
-              @dblclick.stop="toggleCollapse(card)"
+              class="pa-2 d-flex align-center node-header"
+              :style="card.isWarning ? 'background-color: #4a1010; color: #ff6666;' : ''"
+              @dblclick.stop="handleCardDblClick(card)"
             >
-              <v-icon size="small" class="me-2" :color="card.isWarning ? 'red' : undefined">{{ card.isWarning ? 'mdi-alert-circle' : 'mdi-text' }}</v-icon>
+              <v-icon size="small" class="me-1" :color="nodeType(card).color">{{ nodeType(card).icon }}</v-icon>
+              <span v-if="nodeType(card).label" class="type-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
               <v-text-field
                 v-model="card.title"
                 variant="plain"
                 density="compact"
                 hide-details
                 placeholder="Text Note"
-                class="text-caption editable-title"
+                class="text-caption editable-title" :style="titleFieldStyle(card)"
                 @focus="activeCardId = card.id"
                 @click.stop
               ></v-text-field>
@@ -670,7 +914,7 @@
                 size="x-small"
                 icon="mdi-chevron-up"
                 variant="text"
-                @dblclick.stop="toggleCollapse(card)"
+                @dblclick.stop="handleCardDblClick(card)"
               ></v-btn>
             </v-card-title>
             <v-card-text class="pa-3 pb-2">
@@ -685,22 +929,57 @@
                 @focus="activeCardId = card.id"
               ></v-textarea>
             </v-card-text>
-            <v-card-actions class="pa-2 pt-0">
+            <!-- User comments (every node type) -->
+            <div v-if="showDetail" class="node-comments">
+              <div v-if="card.comments && card.comments.length" class="node-comment-list">
+                <div v-for="c in card.comments" :key="c.id" class="node-comment">
+                  <span class="comment-chip">{{ c.author }}</span>
+                  <span class="comment-text">{{ c.text }}</span>
+                  <span class="comment-ts">{{ commentTimestamp(c.ts) }}</span>
+                  <v-icon
+                    v-if="canDeleteComment(c)"
+                    size="13"
+                    class="comment-delete"
+                    @click.stop="deleteComment(card, c.id)"
+                  >mdi-close</v-icon>
+                </div>
+              </div>
+              <div class="node-comment-entry">
+                <span class="comment-chip comment-chip-me">{{ commentAuthor() }}</span>
+                <input
+                  v-model="commentDrafts[card.id]"
+                  class="comment-input"
+                  type="text"
+                  placeholder="Add a comment…"
+                  @keydown.enter.stop="addComment(card)"
+                  @click.stop
+                  @focus="activeCardId = card.id"
+                />
+                <v-icon
+                  v-if="(commentDrafts[card.id] || '').trim()"
+                  size="16"
+                  color="primary"
+                  class="comment-send"
+                  @click.stop="addComment(card)"
+                >mdi-send</v-icon>
+              </div>
+            </div>
+            <v-card-actions v-if="showDetail" class="pa-2 pt-0">
               <v-spacer></v-spacer>
-              <v-btn size="x-small" variant="text" class="delete-text-btn" @click.stop="confirmDelete(card.id)">[DELETE]</v-btn>
+              <v-btn size="x-small" variant="flat" class="delete-text-btn" @click.stop="confirmDelete(card.id)">DELETE</v-btn>
             </v-card-actions>
           </template>
         </v-card>
 
         <!-- Link Card -->
         <v-card
-          v-if="card.type === 'link'"
-          :width="card.collapsed ? (card.socialMetadata ? 300 : 260) : (card.width || 500)"
+          v-if="card.type === 'link' && !isCollapsedRow(card) && showCompact"
+          :width="treeCardWidth(card, card.socialMetadata ? 300 : 260, 500)"
           class="card-item link-card"
           elevation="2"
         >
           <!-- Collapsed State -->
-          <div v-if="card.collapsed" class="collapsed-pill collapsed-pill-tall" @dblclick.stop="toggleCollapse(card)" :style="{ borderColor: card.socialMetadata ? '#000' : '#1976D2', background: '#e3f2fd' }">
+          <div v-if="card.collapsed" class="collapsed-pill collapsed-pill-tall" @dblclick.stop="handleCardDblClick(card)" :style="{ borderColor: card.socialMetadata ? '#000' : '#1976D2', background: '#e3f2fd' }">
             <img
               v-if="collapsedThumb(card)"
               :src="collapsedThumb(card)"
@@ -717,19 +996,21 @@
 
           <!-- Expanded State: Full Card -->
           <template v-else>
+            <div class="type-accent" :style="{ background: nodeType(card).color }"></div>
             <v-card-title
-              class="pa-2 d-flex align-center bg-blue-lighten-5"
-              @dblclick.stop="toggleCollapse(card)"
+              class="pa-2 d-flex align-center node-header"
+              @dblclick.stop="handleCardDblClick(card)"
               style="cursor: pointer;"
             >
-              <v-icon size="small" class="me-2">mdi-link</v-icon>
+              <v-icon size="small" class="me-1" :color="nodeType(card).color">{{ nodeType(card).icon }}</v-icon>
+              <span v-if="nodeType(card).label" class="type-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
               <v-text-field
                 v-model="card.title"
                 variant="plain"
                 density="compact"
                 hide-details
                 :placeholder="card.previewTitle || card.url || 'Link'"
-                class="text-caption editable-title"
+                class="text-caption editable-title" :style="titleFieldStyle(card)"
                 @focus="activeCardId = card.id"
                 @click.stop
               ></v-text-field>
@@ -744,10 +1025,16 @@
                 size="x-small"
                 icon="mdi-chevron-up"
                 variant="text"
-                @dblclick.stop="toggleCollapse(card)"
+                @dblclick.stop="handleCardDblClick(card)"
               ></v-btn>
             </v-card-title>
-            <v-card-text class="pa-3 pb-2" :class="{ 'link-card-content': card.socialMetadata }">
+            <v-card-text
+              class="pa-3 pb-2"
+              :class="{
+                'link-card-content': card.socialMetadata,
+                'tree-wide-body': activeVisualizer === 'hierarchical'
+              }"
+            >
             <v-text-field
               v-model="card.url"
               variant="plain"
@@ -760,28 +1047,38 @@
 
             <!-- Rich Social Media Preview (Twitter, TikTok, YouTube, etc.) -->
             <div v-if="card.socialMetadata" class="twitter-preview-box mb-2">
-              <div class="twitter-header pa-3 pb-2">
+              <div class="twitter-header pa-4 pb-2">
                 <div class="d-flex align-center">
                   <v-avatar
                     v-if="card.socialMetadata.author_avatar"
                     size="48"
-                    class="me-3"
+                    class="me-3 tweet-avatar"
                   >
                     <v-img :src="card.socialMetadata.author_avatar" />
                   </v-avatar>
                   <div class="flex-grow-1">
-                    <div class="text-subtitle-2 font-weight-bold">
+                    <div class="tweet-author">
                       {{ card.socialMetadata.author_name || 'Unknown Author' }}
                     </div>
-                    <div class="text-caption text-grey">
+                    <div class="tweet-handle">
                       <span v-if="card.socialMetadata.author_handle">@{{ card.socialMetadata.author_handle }}</span>
                       <span v-else-if="card.socialMetadata.username_from_url">@{{ card.socialMetadata.username_from_url }}</span>
                       <span v-if="card.socialMetadata.published_time" class="ms-2">
-                        • {{ formatDate(card.socialMetadata.published_time) }}
+                        · {{ formatDate(card.socialMetadata.published_time) }}
                       </span>
                     </div>
                   </div>
-                  <div class="d-flex gap-1">
+                  <div class="d-flex gap-1 align-start">
+                    <!-- The X logo, like a real embedded post. Inline SVG — the
+                         pinned @mdi/font 5.9 has no X-brand glyph. -->
+                    <svg
+                      v-if="card.socialMetadata.platform === 'x' || card.socialMetadata.platform === 'twitter'"
+                      class="x-logo"
+                      viewBox="0 0 24 24"
+                      width="22"
+                      height="22"
+                      aria-label="X"
+                    ><path fill="currentColor" d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/></svg>
                     <!-- Cached Badge (only if _cached flag is true) -->
                     <v-menu v-if="card._cached" open-on-hover location="bottom">
                       <template v-slot:activator="{ props }">
@@ -824,6 +1121,7 @@
                       Local
                     </v-chip>
                     <v-chip
+                      v-if="card.socialMetadata.platform !== 'x' && card.socialMetadata.platform !== 'twitter'"
                       size="x-small"
                       :color="socialPlatformChip(card.socialMetadata.platform).color"
                       variant="tonal"
@@ -836,8 +1134,8 @@
               </div>
 
               <!-- Post text (tweet_text for Twitter, post_text for others) -->
-              <div v-if="card.socialMetadata.tweet_text || card.socialMetadata.post_text" class="pa-3 pt-2">
-                <div class="text-body-2">{{ card.socialMetadata.tweet_text || card.socialMetadata.post_text }}</div>
+              <div v-if="card.socialMetadata.tweet_text || card.socialMetadata.post_text" class="px-4 pt-2 pb-3">
+                <div class="tweet-text">{{ card.socialMetadata.tweet_text || card.socialMetadata.post_text }}</div>
               </div>
 
               <!-- TikTok: Sound/music info -->
@@ -857,7 +1155,7 @@
 
               <!-- Thumbnail (TikTok/YouTube - shown when no media_urls) -->
               <div v-if="card.socialMetadata.thumbnail_url && (!card.socialMetadata.media_urls || card.socialMetadata.media_urls.length === 0)" class="twitter-media twitter-media-single">
-                <img :src="card.socialMetadata.thumbnail_url" class="twitter-media-image" style="height: 250px" loading="eager" @error="$event.target.style.display='none'" />
+                <img :src="card.socialMetadata.thumbnail_url" class="twitter-media-image" loading="eager" @error="$event.target.style.display='none'" />
               </div>
 
               <!-- Media -->
@@ -867,7 +1165,7 @@
                   :key="idx"
                   :src="mediaUrl"
                   class="twitter-media-image"
-                  :style="{ height: (card.socialMetadata.media_urls.length === 1 ? '250px' : '150px') }"
+                  :style="card.socialMetadata.media_urls.length === 1 ? {} : { height: '170px' }"
                   referrerpolicy="no-referrer"
                   loading="eager"
                   @error="$event.target.style.display='none'"
@@ -1041,9 +1339,9 @@
                     height="20"
                     class="me-2"
                   />
-                  <v-chip size="small" color="black" variant="flat">
-                    <v-icon size="small" start>mdi-twitter</v-icon>
-                    <span style="color: white;">Twitter/X Media</span>
+                  <v-chip size="small" variant="outlined" class="tweet-media-chip">
+                    <svg class="x-logo me-1" viewBox="0 0 24 24" width="14" height="14" aria-label="X"><path fill="currentColor" d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/></svg>
+                    Media
                   </v-chip>
                   <v-spacer></v-spacer>
                   <v-chip
@@ -1127,45 +1425,47 @@
               </v-btn>
             </div>
           </v-card-text>
-          <v-card-actions class="pa-2 pt-0">
+          <v-card-actions v-if="showDetail" class="pa-2 pt-0">
             <v-spacer></v-spacer>
-            <v-btn size="x-small" variant="text" class="delete-text-btn" @click.stop="confirmDelete(card.id)">[DELETE]</v-btn>
+            <v-btn size="x-small" variant="flat" class="delete-text-btn" @click.stop="confirmDelete(card.id)">DELETE</v-btn>
           </v-card-actions>
           </template>
         </v-card>
 
         <!-- Image Card -->
         <v-card
-          v-if="card.type === 'image'"
-          :width="card.collapsed ? 240 : (card.width || 600)"
+          v-if="card.type === 'image' && !isCollapsedRow(card) && showCompact"
+          :width="treeCardWidth(card, 240, 600)"
           class="card-item image-card"
           elevation="2"
         >
           <!-- Collapsed State -->
-          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="toggleCollapse(card)" style="border-color: #757575; background: white;">
+          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="handleCardDblClick(card)" :style="{ borderColor: nodeType(card).color, background: nodeType(card).tint }">
             <v-img v-if="card.imageUrl" :src="card.imageUrl" width="48" height="48" cover class="collapsed-pill-thumb"></v-img>
-            <v-icon v-else size="small" color="grey-darken-2" class="collapsed-pill-icon">mdi-image</v-icon>
+            <v-icon v-else size="small" :color="nodeType(card).color" class="collapsed-pill-icon">{{ nodeType(card).icon }}</v-icon>
             <div class="collapsed-pill-body">
-              <span class="collapsed-pill-type" style="color: #757575;">IMAGE</span>
+              <span class="collapsed-pill-type" :style="{ color: nodeType(card).color }">{{ nodeType(card).label }}</span>
               <span class="collapsed-pill-label">{{ collapsedLabel(card) }}</span>
             </div>
           </div>
 
           <!-- Expanded State -->
           <template v-else>
+            <div class="type-accent" :style="{ background: nodeType(card).color }"></div>
             <v-card-title
-              class="pa-2 d-flex align-center bg-grey-lighten-4"
-              @dblclick.stop="toggleCollapse(card)"
+              class="pa-2 d-flex align-center node-header"
+              @dblclick.stop="handleCardDblClick(card)"
               style="cursor: pointer;"
             >
-              <v-icon size="small" class="me-2">mdi-image</v-icon>
+              <v-icon size="small" class="me-1" :color="nodeType(card).color">{{ nodeType(card).icon }}</v-icon>
+              <span v-if="nodeType(card).label" class="type-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
               <v-text-field
                 v-model="card.title"
                 variant="plain"
                 density="compact"
                 hide-details
                 :placeholder="card.caption || 'Image'"
-                class="text-caption editable-title"
+                class="text-caption editable-title" :style="titleFieldStyle(card)"
                 @focus="activeCardId = card.id"
                 @click.stop
               ></v-text-field>
@@ -1174,7 +1474,7 @@
                 size="x-small"
                 icon="mdi-chevron-up"
                 variant="text"
-                @dblclick.stop="toggleCollapse(card)"
+                @dblclick.stop="handleCardDblClick(card)"
               ></v-btn>
             </v-card-title>
             <div>
@@ -1182,8 +1482,19 @@
                 :src="card.imageUrl"
                 :max-width="600"
                 cover
+                draggable="false"
               ></v-img>
-              <v-card-text class="pa-3">
+              <!-- Compact metadata line: format · dimensions · size · source -->
+              <div v-if="showDetail && imageMetaLine(card)" class="image-meta-line">
+                {{ imageMetaLine(card) }}
+              </div>
+              <div v-if="showDetail && imageExifLine(card)" class="image-meta-line image-meta-exif">
+                <v-icon size="10" class="me-1">mdi-camera</v-icon>{{ imageExifLine(card) }}<span v-if="imageTakenAt(card)"> · {{ imageTakenAt(card) }}</span>
+              </div>
+              <div v-if="showDetail && card.mediaMetadata?.source_title" class="image-meta-source">
+                {{ card.mediaMetadata.source_title }}
+              </div>
+              <v-card-text class="pa-3" :class="{ 'tree-wide-body': activeVisualizer === 'hierarchical' }">
                 <v-text-field
                   v-model="card.caption"
                   variant="outlined"
@@ -1203,226 +1514,627 @@
                   placeholder="Add notes about this image..."
                   @focus="activeCardId = card.id"
                 ></v-textarea>
+                <!-- Source URL, present when the image was dragged in from the web -->
+                <div v-if="card.url" class="image-source-row mt-2">
+                  <v-icon size="x-small" class="me-1" color="grey-darken-1">mdi-link-variant</v-icon>
+                  <a
+                    :href="card.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="image-source-link"
+                    :title="card.url"
+                    @click.stop
+                    @mousedown.stop
+                  >{{ card.url }}</a>
+                </div>
               </v-card-text>
             </div>
-            <v-card-actions class="pa-2 pt-0">
+            <!-- User comments (every node type) -->
+            <div v-if="showDetail" class="node-comments">
+              <div v-if="card.comments && card.comments.length" class="node-comment-list">
+                <div v-for="c in card.comments" :key="c.id" class="node-comment">
+                  <span class="comment-chip">{{ c.author }}</span>
+                  <span class="comment-text">{{ c.text }}</span>
+                  <span class="comment-ts">{{ commentTimestamp(c.ts) }}</span>
+                  <v-icon
+                    v-if="canDeleteComment(c)"
+                    size="13"
+                    class="comment-delete"
+                    @click.stop="deleteComment(card, c.id)"
+                  >mdi-close</v-icon>
+                </div>
+              </div>
+              <div class="node-comment-entry">
+                <span class="comment-chip comment-chip-me">{{ commentAuthor() }}</span>
+                <input
+                  v-model="commentDrafts[card.id]"
+                  class="comment-input"
+                  type="text"
+                  placeholder="Add a comment…"
+                  @keydown.enter.stop="addComment(card)"
+                  @click.stop
+                  @focus="activeCardId = card.id"
+                />
+                <v-icon
+                  v-if="(commentDrafts[card.id] || '').trim()"
+                  size="16"
+                  color="primary"
+                  class="comment-send"
+                  @click.stop="addComment(card)"
+                >mdi-send</v-icon>
+              </div>
+            </div>
+            <v-card-actions v-if="showDetail" class="pa-2 pt-0">
+              <v-btn
+                v-if="card.url"
+                size="x-small"
+                variant="text"
+                prepend-icon="mdi-link-variant"
+                @click.stop="convertImageToLinkCard(card)"
+              >Make link card</v-btn>
               <v-spacer></v-spacer>
-              <v-btn size="x-small" variant="text" class="delete-text-btn" @click.stop="confirmDelete(card.id)">[DELETE]</v-btn>
+              <v-btn size="x-small" variant="flat" class="delete-text-btn" @click.stop="confirmDelete(card.id)">DELETE</v-btn>
             </v-card-actions>
           </template>
         </v-card>
 
         <!-- Video Card -->
         <v-card
-          v-if="card.type === 'video'"
-          :width="card.collapsed ? 220 : (card.width || 640)"
+          v-if="card.type === 'video' && !isCollapsedRow(card) && showCompact"
+          :width="treeCardWidth(card, 220, 640)"
           class="card-item video-card"
           elevation="2"
         >
           <!-- Collapsed State -->
-          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="toggleCollapse(card)" style="border-color: #E53935; background: #FFEBEE;">
+          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="handleCardDblClick(card)" :style="{ borderColor: nodeType(card).color, background: nodeType(card).tint }">
             <v-icon size="small" color="red-darken-1" class="collapsed-pill-icon">mdi-video</v-icon>
             <div class="collapsed-pill-body">
-              <span class="collapsed-pill-type" style="color: #E53935;">VIDEO</span>
+              <span class="collapsed-pill-type" :style="{ color: nodeType(card).color }">{{ nodeType(card).label }}</span>
               <span class="collapsed-pill-label">{{ collapsedLabel(card) }}</span>
             </div>
           </div>
 
           <!-- Expanded State -->
           <template v-else>
-            <v-card-title class="pa-2 d-flex align-center bg-red-lighten-5" @dblclick.stop="toggleCollapse(card)" style="cursor: pointer;">
-              <v-icon size="small" class="me-2">mdi-video</v-icon>
-              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="Video" class="text-caption editable-title" @focus="activeCardId = card.id" @click.stop></v-text-field>
+            <div class="type-accent" :style="{ background: nodeType(card).color }"></div>
+            <v-card-title class="pa-2 d-flex align-center node-header" @dblclick.stop="handleCardDblClick(card)" style="cursor: pointer;">
+              <v-icon size="small" class="me-1" :color="nodeType(card).color">{{ nodeType(card).icon }}</v-icon>
+              <span v-if="nodeType(card).label" class="type-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
+              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="Video" class="text-caption editable-title" :style="titleFieldStyle(card)" @focus="activeCardId = card.id" @click.stop></v-text-field>
               <v-spacer></v-spacer>
-              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="toggleCollapse(card)"></v-btn>
+              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="handleCardDblClick(card)"></v-btn>
             </v-card-title>
             <div>
               <video v-if="card.videoUrl" :src="card.videoUrl" controls style="width: 100%; max-height: 400px;"></video>
-              <v-card-text class="pa-3">
+              <v-card-text class="pa-3" :class="{ 'tree-wide-body': activeVisualizer === 'hierarchical' }">
                 <v-textarea v-model="card.notes" variant="outlined" label="Notes" auto-grow rows="2" hide-details placeholder="Add notes..." @focus="activeCardId = card.id"></v-textarea>
               </v-card-text>
             </div>
-            <v-card-actions class="pa-2 pt-0">
+            <!-- User comments (every node type) -->
+            <div v-if="showDetail" class="node-comments">
+              <div v-if="card.comments && card.comments.length" class="node-comment-list">
+                <div v-for="c in card.comments" :key="c.id" class="node-comment">
+                  <span class="comment-chip">{{ c.author }}</span>
+                  <span class="comment-text">{{ c.text }}</span>
+                  <span class="comment-ts">{{ commentTimestamp(c.ts) }}</span>
+                  <v-icon
+                    v-if="canDeleteComment(c)"
+                    size="13"
+                    class="comment-delete"
+                    @click.stop="deleteComment(card, c.id)"
+                  >mdi-close</v-icon>
+                </div>
+              </div>
+              <div class="node-comment-entry">
+                <span class="comment-chip comment-chip-me">{{ commentAuthor() }}</span>
+                <input
+                  v-model="commentDrafts[card.id]"
+                  class="comment-input"
+                  type="text"
+                  placeholder="Add a comment…"
+                  @keydown.enter.stop="addComment(card)"
+                  @click.stop
+                  @focus="activeCardId = card.id"
+                />
+                <v-icon
+                  v-if="(commentDrafts[card.id] || '').trim()"
+                  size="16"
+                  color="primary"
+                  class="comment-send"
+                  @click.stop="addComment(card)"
+                >mdi-send</v-icon>
+              </div>
+            </div>
+            <v-card-actions v-if="showDetail" class="pa-2 pt-0">
               <v-chip v-if="card.assetId" size="x-small" variant="outlined">{{ card.assetId }}</v-chip>
               <v-spacer></v-spacer>
-              <v-btn size="x-small" variant="text" class="delete-text-btn" @click.stop="confirmDelete(card.id)">[DELETE]</v-btn>
+              <v-btn size="x-small" variant="flat" class="delete-text-btn" @click.stop="confirmDelete(card.id)">DELETE</v-btn>
             </v-card-actions>
           </template>
         </v-card>
 
         <!-- Audio Card -->
         <v-card
-          v-if="card.type === 'audio'"
-          :width="card.collapsed ? 220 : (card.width || 500)"
+          v-if="card.type === 'audio' && !isCollapsedRow(card) && showCompact"
+          :width="treeCardWidth(card, 220, 500)"
           class="card-item audio-card"
           elevation="2"
         >
           <!-- Collapsed State -->
-          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="toggleCollapse(card)" style="border-color: #8E24AA; background: #F3E5F5;">
+          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="handleCardDblClick(card)" :style="{ borderColor: nodeType(card).color, background: nodeType(card).tint }">
             <v-icon size="small" color="purple-darken-1" class="collapsed-pill-icon">mdi-music-note</v-icon>
             <div class="collapsed-pill-body">
-              <span class="collapsed-pill-type" style="color: #8E24AA;">AUDIO</span>
+              <span class="collapsed-pill-type" :style="{ color: nodeType(card).color }">{{ nodeType(card).label }}</span>
               <span class="collapsed-pill-label">{{ collapsedLabel(card) }}</span>
             </div>
           </div>
 
           <!-- Expanded State -->
           <template v-else>
-            <v-card-title class="pa-2 d-flex align-center bg-purple-lighten-5" @dblclick.stop="toggleCollapse(card)" style="cursor: pointer;">
-              <v-icon size="small" class="me-2">mdi-music-note</v-icon>
-              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="Audio" class="text-caption editable-title" @focus="activeCardId = card.id" @click.stop></v-text-field>
+            <div class="type-accent" :style="{ background: nodeType(card).color }"></div>
+            <v-card-title class="pa-2 d-flex align-center node-header" @dblclick.stop="handleCardDblClick(card)" style="cursor: pointer;">
+              <v-icon size="small" class="me-1" :color="nodeType(card).color">{{ nodeType(card).icon }}</v-icon>
+              <span v-if="nodeType(card).label" class="type-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
+              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="Audio" class="text-caption editable-title" :style="titleFieldStyle(card)" @focus="activeCardId = card.id" @click.stop></v-text-field>
               <v-spacer></v-spacer>
-              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="toggleCollapse(card)"></v-btn>
+              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="handleCardDblClick(card)"></v-btn>
             </v-card-title>
             <div>
               <audio v-if="card.audioUrl" :src="card.audioUrl" controls style="width: 100%;"></audio>
-              <v-card-text class="pa-3">
+              <v-card-text class="pa-3" :class="{ 'tree-wide-body': activeVisualizer === 'hierarchical' }">
                 <v-textarea v-model="card.notes" variant="outlined" label="Notes" auto-grow rows="2" hide-details placeholder="Add notes..." @focus="activeCardId = card.id"></v-textarea>
               </v-card-text>
             </div>
-            <v-card-actions class="pa-2 pt-0">
+            <!-- User comments (every node type) -->
+            <div v-if="showDetail" class="node-comments">
+              <div v-if="card.comments && card.comments.length" class="node-comment-list">
+                <div v-for="c in card.comments" :key="c.id" class="node-comment">
+                  <span class="comment-chip">{{ c.author }}</span>
+                  <span class="comment-text">{{ c.text }}</span>
+                  <span class="comment-ts">{{ commentTimestamp(c.ts) }}</span>
+                  <v-icon
+                    v-if="canDeleteComment(c)"
+                    size="13"
+                    class="comment-delete"
+                    @click.stop="deleteComment(card, c.id)"
+                  >mdi-close</v-icon>
+                </div>
+              </div>
+              <div class="node-comment-entry">
+                <span class="comment-chip comment-chip-me">{{ commentAuthor() }}</span>
+                <input
+                  v-model="commentDrafts[card.id]"
+                  class="comment-input"
+                  type="text"
+                  placeholder="Add a comment…"
+                  @keydown.enter.stop="addComment(card)"
+                  @click.stop
+                  @focus="activeCardId = card.id"
+                />
+                <v-icon
+                  v-if="(commentDrafts[card.id] || '').trim()"
+                  size="16"
+                  color="primary"
+                  class="comment-send"
+                  @click.stop="addComment(card)"
+                >mdi-send</v-icon>
+              </div>
+            </div>
+            <v-card-actions v-if="showDetail" class="pa-2 pt-0">
               <v-chip v-if="card.assetId" size="x-small" variant="outlined">{{ card.assetId }}</v-chip>
               <v-spacer></v-spacer>
-              <v-btn size="x-small" variant="text" class="delete-text-btn" @click.stop="confirmDelete(card.id)">[DELETE]</v-btn>
+              <v-btn size="x-small" variant="flat" class="delete-text-btn" @click.stop="confirmDelete(card.id)">DELETE</v-btn>
             </v-card-actions>
           </template>
         </v-card>
 
         <!-- HTML Card -->
         <v-card
-          v-if="card.type === 'html'"
-          :width="card.collapsed ? 220 : (card.width || 600)"
+          v-if="card.type === 'html' && !isCollapsedRow(card) && showCompact"
+          :width="treeCardWidth(card, 220, 600)"
           class="card-item html-card"
           elevation="2"
         >
           <!-- Collapsed State -->
-          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="toggleCollapse(card)" style="border-color: #F57C00; background: #FFF3E0;">
+          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="handleCardDblClick(card)" :style="{ borderColor: nodeType(card).color, background: nodeType(card).tint }">
             <v-icon size="small" color="orange-darken-1" class="collapsed-pill-icon">mdi-code-tags</v-icon>
             <div class="collapsed-pill-body">
-              <span class="collapsed-pill-type" style="color: #F57C00;">HTML</span>
+              <span class="collapsed-pill-type" :style="{ color: nodeType(card).color }">{{ nodeType(card).label }}</span>
               <span class="collapsed-pill-label">{{ collapsedLabel(card) }}</span>
             </div>
           </div>
 
           <!-- Expanded State -->
           <template v-else>
-            <v-card-title class="pa-2 d-flex align-center bg-orange-lighten-5" @dblclick.stop="toggleCollapse(card)" style="cursor: pointer;">
-              <v-icon size="small" class="me-2">mdi-code-tags</v-icon>
-              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="HTML" class="text-caption editable-title" @focus="activeCardId = card.id" @click.stop></v-text-field>
+            <div class="type-accent" :style="{ background: nodeType(card).color }"></div>
+            <v-card-title class="pa-2 d-flex align-center node-header" @dblclick.stop="handleCardDblClick(card)" style="cursor: pointer;">
+              <v-icon size="small" class="me-1" :color="nodeType(card).color">{{ nodeType(card).icon }}</v-icon>
+              <span v-if="nodeType(card).label" class="type-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
+              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="HTML" class="text-caption editable-title" :style="titleFieldStyle(card)" @focus="activeCardId = card.id" @click.stop></v-text-field>
               <v-spacer></v-spacer>
-              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="toggleCollapse(card)"></v-btn>
+              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="handleCardDblClick(card)"></v-btn>
             </v-card-title>
             <div>
-              <v-card-text class="pa-3">
+              <v-card-text class="pa-3" :class="{ 'tree-wide-body': activeVisualizer === 'hierarchical' }">
                 <v-textarea v-model="card.htmlContent" variant="outlined" label="HTML Content" auto-grow rows="8" hide-details placeholder="<div>Paste HTML here...</div>" font-family="monospace" @focus="activeCardId = card.id"></v-textarea>
                 <div v-if="card.htmlContent" class="mt-3 pa-3 bg-grey-lighten-4 rounded" style="max-height: 300px; overflow: auto;">
                   <div v-html="card.htmlContent"></div>
                 </div>
               </v-card-text>
             </div>
-            <v-card-actions class="pa-2 pt-0">
+            <!-- User comments (every node type) -->
+            <div v-if="showDetail" class="node-comments">
+              <div v-if="card.comments && card.comments.length" class="node-comment-list">
+                <div v-for="c in card.comments" :key="c.id" class="node-comment">
+                  <span class="comment-chip">{{ c.author }}</span>
+                  <span class="comment-text">{{ c.text }}</span>
+                  <span class="comment-ts">{{ commentTimestamp(c.ts) }}</span>
+                  <v-icon
+                    v-if="canDeleteComment(c)"
+                    size="13"
+                    class="comment-delete"
+                    @click.stop="deleteComment(card, c.id)"
+                  >mdi-close</v-icon>
+                </div>
+              </div>
+              <div class="node-comment-entry">
+                <span class="comment-chip comment-chip-me">{{ commentAuthor() }}</span>
+                <input
+                  v-model="commentDrafts[card.id]"
+                  class="comment-input"
+                  type="text"
+                  placeholder="Add a comment…"
+                  @keydown.enter.stop="addComment(card)"
+                  @click.stop
+                  @focus="activeCardId = card.id"
+                />
+                <v-icon
+                  v-if="(commentDrafts[card.id] || '').trim()"
+                  size="16"
+                  color="primary"
+                  class="comment-send"
+                  @click.stop="addComment(card)"
+                >mdi-send</v-icon>
+              </div>
+            </div>
+            <v-card-actions v-if="showDetail" class="pa-2 pt-0">
               <v-spacer></v-spacer>
-              <v-btn size="x-small" variant="text" class="delete-text-btn" @click.stop="confirmDelete(card.id)">[DELETE]</v-btn>
+              <v-btn size="x-small" variant="flat" class="delete-text-btn" @click.stop="confirmDelete(card.id)">DELETE</v-btn>
             </v-card-actions>
           </template>
         </v-card>
 
         <!-- Code Card -->
         <v-card
-          v-if="card.type === 'code'"
-          :width="card.collapsed ? 220 : (card.width || 700)"
+          v-if="card.type === 'code' && !isCollapsedRow(card) && showCompact"
+          :width="treeCardWidth(card, 220, 700)"
           class="card-item code-card"
           elevation="2"
         >
           <!-- Collapsed State -->
-          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="toggleCollapse(card)" style="border-color: #43A047; background: #E8F5E9;">
+          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="handleCardDblClick(card)" :style="{ borderColor: nodeType(card).color, background: nodeType(card).tint }">
             <v-icon size="small" color="green-darken-1" class="collapsed-pill-icon">mdi-code-braces</v-icon>
             <div class="collapsed-pill-body">
-              <span class="collapsed-pill-type" style="color: #43A047;">CODE</span>
+              <span class="collapsed-pill-type" :style="{ color: nodeType(card).color }">{{ nodeType(card).label }}</span>
               <span class="collapsed-pill-label">{{ collapsedLabel(card) }}</span>
             </div>
           </div>
 
           <!-- Expanded State -->
           <template v-else>
-            <v-card-title class="pa-2 d-flex align-center bg-green-lighten-5" @dblclick.stop="toggleCollapse(card)" style="cursor: pointer;">
-              <v-icon size="small" class="me-2">mdi-code-braces</v-icon>
-              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="Code Snippet" class="text-caption editable-title" @focus="activeCardId = card.id" @click.stop></v-text-field>
+            <div class="type-accent" :style="{ background: nodeType(card).color }"></div>
+            <v-card-title class="pa-2 d-flex align-center node-header" @dblclick.stop="handleCardDblClick(card)" style="cursor: pointer;">
+              <v-icon size="small" class="me-1" :color="nodeType(card).color">{{ nodeType(card).icon }}</v-icon>
+              <span v-if="nodeType(card).label" class="type-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
+              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="Code Snippet" class="text-caption editable-title" :style="titleFieldStyle(card)" @focus="activeCardId = card.id" @click.stop></v-text-field>
               <v-select v-model="card.codeLanguage" :items="['javascript', 'python', 'html', 'css', 'json', 'bash', 'sql']" variant="outlined" density="compact" hide-details class="ms-2" style="max-width: 120px;" @click.stop></v-select>
               <v-spacer></v-spacer>
-              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="toggleCollapse(card)"></v-btn>
+              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="handleCardDblClick(card)"></v-btn>
             </v-card-title>
             <div>
-              <v-card-text class="pa-3">
+              <v-card-text class="pa-3" :class="{ 'tree-wide-body': activeVisualizer === 'hierarchical' }">
                 <v-textarea v-model="card.codeContent" variant="outlined" label="Code" auto-grow rows="12" hide-details placeholder="// Paste code here..." font-family="monospace" @focus="activeCardId = card.id"></v-textarea>
               </v-card-text>
             </div>
-            <v-card-actions class="pa-2 pt-0">
+            <!-- User comments (every node type) -->
+            <div v-if="showDetail" class="node-comments">
+              <div v-if="card.comments && card.comments.length" class="node-comment-list">
+                <div v-for="c in card.comments" :key="c.id" class="node-comment">
+                  <span class="comment-chip">{{ c.author }}</span>
+                  <span class="comment-text">{{ c.text }}</span>
+                  <span class="comment-ts">{{ commentTimestamp(c.ts) }}</span>
+                  <v-icon
+                    v-if="canDeleteComment(c)"
+                    size="13"
+                    class="comment-delete"
+                    @click.stop="deleteComment(card, c.id)"
+                  >mdi-close</v-icon>
+                </div>
+              </div>
+              <div class="node-comment-entry">
+                <span class="comment-chip comment-chip-me">{{ commentAuthor() }}</span>
+                <input
+                  v-model="commentDrafts[card.id]"
+                  class="comment-input"
+                  type="text"
+                  placeholder="Add a comment…"
+                  @keydown.enter.stop="addComment(card)"
+                  @click.stop
+                  @focus="activeCardId = card.id"
+                />
+                <v-icon
+                  v-if="(commentDrafts[card.id] || '').trim()"
+                  size="16"
+                  color="primary"
+                  class="comment-send"
+                  @click.stop="addComment(card)"
+                >mdi-send</v-icon>
+              </div>
+            </div>
+            <v-card-actions v-if="showDetail" class="pa-2 pt-0">
               <v-spacer></v-spacer>
-              <v-btn size="x-small" variant="text" class="delete-text-btn" @click.stop="confirmDelete(card.id)">[DELETE]</v-btn>
+              <v-btn size="x-small" variant="flat" class="delete-text-btn" @click.stop="confirmDelete(card.id)">DELETE</v-btn>
             </v-card-actions>
           </template>
         </v-card>
 
         <!-- Markdown Card -->
         <v-card
-          v-if="card.type === 'markdown'"
-          :width="card.collapsed ? 220 : (card.width || 600)"
+          v-if="card.type === 'markdown' && !isCollapsedRow(card) && showCompact"
+          :width="treeCardWidth(card, 220, 600)"
           class="card-item markdown-card"
           elevation="2"
         >
           <!-- Collapsed State -->
-          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="toggleCollapse(card)" style="border-color: #3949AB; background: #E8EAF6;">
+          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="handleCardDblClick(card)" :style="{ borderColor: nodeType(card).color, background: nodeType(card).tint }">
             <v-icon size="small" color="indigo-darken-1" class="collapsed-pill-icon">mdi-language-markdown</v-icon>
             <div class="collapsed-pill-body">
-              <span class="collapsed-pill-type" style="color: #3949AB;">MD</span>
+              <span class="collapsed-pill-type" :style="{ color: nodeType(card).color }">{{ nodeType(card).label }}</span>
               <span class="collapsed-pill-label">{{ collapsedLabel(card) }}</span>
             </div>
           </div>
 
           <!-- Expanded State -->
           <template v-else>
-            <v-card-title class="pa-2 d-flex align-center bg-indigo-lighten-5" @dblclick.stop="toggleCollapse(card)" style="cursor: pointer;">
-              <v-icon size="small" class="me-2">mdi-language-markdown</v-icon>
-              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="Markdown" class="text-caption editable-title" @focus="activeCardId = card.id" @click.stop></v-text-field>
+            <div class="type-accent" :style="{ background: nodeType(card).color }"></div>
+            <v-card-title class="pa-2 d-flex align-center node-header" @dblclick.stop="handleCardDblClick(card)" style="cursor: pointer;">
+              <v-icon size="small" class="me-1" :color="nodeType(card).color">{{ nodeType(card).icon }}</v-icon>
+              <span v-if="nodeType(card).label" class="type-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
+              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="Markdown" class="text-caption editable-title" :style="titleFieldStyle(card)" @focus="activeCardId = card.id" @click.stop></v-text-field>
               <v-spacer></v-spacer>
-              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="toggleCollapse(card)"></v-btn>
+              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="handleCardDblClick(card)"></v-btn>
             </v-card-title>
             <div>
-              <v-card-text class="pa-3">
+              <v-card-text class="pa-3" :class="{ 'tree-wide-body': activeVisualizer === 'hierarchical' }">
                 <v-textarea v-model="card.markdownContent" variant="outlined" label="Markdown" auto-grow rows="10" hide-details placeholder="# Paste markdown here..." @focus="activeCardId = card.id"></v-textarea>
               </v-card-text>
             </div>
-            <v-card-actions class="pa-2 pt-0">
+            <!-- User comments (every node type) -->
+            <div v-if="showDetail" class="node-comments">
+              <div v-if="card.comments && card.comments.length" class="node-comment-list">
+                <div v-for="c in card.comments" :key="c.id" class="node-comment">
+                  <span class="comment-chip">{{ c.author }}</span>
+                  <span class="comment-text">{{ c.text }}</span>
+                  <span class="comment-ts">{{ commentTimestamp(c.ts) }}</span>
+                  <v-icon
+                    v-if="canDeleteComment(c)"
+                    size="13"
+                    class="comment-delete"
+                    @click.stop="deleteComment(card, c.id)"
+                  >mdi-close</v-icon>
+                </div>
+              </div>
+              <div class="node-comment-entry">
+                <span class="comment-chip comment-chip-me">{{ commentAuthor() }}</span>
+                <input
+                  v-model="commentDrafts[card.id]"
+                  class="comment-input"
+                  type="text"
+                  placeholder="Add a comment…"
+                  @keydown.enter.stop="addComment(card)"
+                  @click.stop
+                  @focus="activeCardId = card.id"
+                />
+                <v-icon
+                  v-if="(commentDrafts[card.id] || '').trim()"
+                  size="16"
+                  color="primary"
+                  class="comment-send"
+                  @click.stop="addComment(card)"
+                >mdi-send</v-icon>
+              </div>
+            </div>
+            <v-card-actions v-if="showDetail" class="pa-2 pt-0">
               <v-spacer></v-spacer>
-              <v-btn size="x-small" variant="text" class="delete-text-btn" @click.stop="confirmDelete(card.id)">[DELETE]</v-btn>
+              <v-btn size="x-small" variant="flat" class="delete-text-btn" @click.stop="confirmDelete(card.id)">DELETE</v-btn>
+            </v-card-actions>
+          </template>
+        </v-card>
+
+        <!-- Contact Card -->
+        <v-card
+          v-if="card.type === 'contact' && !isCollapsedRow(card) && showCompact"
+          :width="treeCardWidth(card, 220, 460)"
+          class="card-item contact-card"
+          elevation="2"
+        >
+          <!-- Collapsed State -->
+          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="handleCardDblClick(card)" :style="{ borderColor: nodeType(card).color, background: nodeType(card).tint }">
+            <v-icon size="small" :color="nodeType(card).color" class="collapsed-pill-icon">{{ nodeType(card).icon }}</v-icon>
+            <div class="collapsed-pill-body">
+              <span class="collapsed-pill-type" :style="{ color: nodeType(card).color }">{{ nodeType(card).label }}</span>
+              <span class="collapsed-pill-label">{{ collapsedLabel(card) }}</span>
+            </div>
+          </div>
+
+          <!-- Expanded State -->
+          <template v-else>
+            <div class="type-accent" :style="{ background: nodeType(card).color }"></div>
+            <v-card-title class="pa-2 d-flex align-center node-header" @dblclick.stop="handleCardDblClick(card)" style="cursor: pointer;">
+              <v-icon size="small" class="me-1" :color="nodeType(card).color">{{ nodeType(card).icon }}</v-icon>
+              <span v-if="nodeType(card).label" class="type-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
+              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="Name" class="text-caption editable-title" :style="titleFieldStyle(card)" @focus="activeCardId = card.id" @click.stop></v-text-field>
+              <v-spacer></v-spacer>
+              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="handleCardDblClick(card)"></v-btn>
+            </v-card-title>
+            <v-card-text class="pa-3" :class="{ 'tree-wide-body': activeVisualizer === 'hierarchical' }">
+              <v-text-field v-model="card.contactRole" variant="outlined" label="Role / Title" density="compact" hide-details class="mb-2" @focus="activeCardId = card.id"></v-text-field>
+              <v-text-field v-model="card.contactOrg" variant="outlined" label="Organization" density="compact" hide-details class="mb-2" @focus="activeCardId = card.id"></v-text-field>
+              <v-text-field v-model="card.contactPhone" variant="outlined" label="Phone" density="compact" hide-details class="mb-2" prepend-inner-icon="mdi-phone" @focus="activeCardId = card.id"></v-text-field>
+              <v-text-field v-model="card.contactEmail" variant="outlined" label="Email" density="compact" hide-details class="mb-2" prepend-inner-icon="mdi-email" @focus="activeCardId = card.id"></v-text-field>
+              <v-textarea v-model="card.notes" variant="outlined" label="Notes" auto-grow rows="2" hide-details placeholder="Booking notes, availability, background..." @focus="activeCardId = card.id"></v-textarea>
+            </v-card-text>
+            <!-- User comments (every node type) -->
+            <div v-if="showDetail" class="node-comments">
+              <div v-if="card.comments && card.comments.length" class="node-comment-list">
+                <div v-for="c in card.comments" :key="c.id" class="node-comment">
+                  <span class="comment-chip">{{ c.author }}</span>
+                  <span class="comment-text">{{ c.text }}</span>
+                  <span class="comment-ts">{{ commentTimestamp(c.ts) }}</span>
+                  <v-icon
+                    v-if="canDeleteComment(c)"
+                    size="13"
+                    class="comment-delete"
+                    @click.stop="deleteComment(card, c.id)"
+                  >mdi-close</v-icon>
+                </div>
+              </div>
+              <div class="node-comment-entry">
+                <span class="comment-chip comment-chip-me">{{ commentAuthor() }}</span>
+                <input
+                  v-model="commentDrafts[card.id]"
+                  class="comment-input"
+                  type="text"
+                  placeholder="Add a comment…"
+                  @keydown.enter.stop="addComment(card)"
+                  @click.stop
+                  @focus="activeCardId = card.id"
+                />
+                <v-icon
+                  v-if="(commentDrafts[card.id] || '').trim()"
+                  size="16"
+                  color="primary"
+                  class="comment-send"
+                  @click.stop="addComment(card)"
+                >mdi-send</v-icon>
+              </div>
+            </div>
+            <v-card-actions v-if="showDetail" class="pa-2 pt-0">
+              <v-btn v-if="card.contactEmail" size="x-small" variant="text" prepend-icon="mdi-email-fast" :href="`mailto:${card.contactEmail}`" @click.stop>Email</v-btn>
+              <v-spacer></v-spacer>
+              <v-btn size="x-small" variant="flat" class="delete-text-btn" @click.stop="confirmDelete(card.id)">DELETE</v-btn>
+            </v-card-actions>
+          </template>
+        </v-card>
+
+        <!-- Question Card -->
+        <v-card
+          v-if="card.type === 'question' && !isCollapsedRow(card) && showCompact"
+          :width="treeCardWidth(card, 220, 500)"
+          class="card-item question-card"
+          :class="{ 'question-answered': card.questionAnswered }"
+          elevation="2"
+        >
+          <!-- Collapsed State -->
+          <div v-if="card.collapsed" class="collapsed-pill" @dblclick.stop="handleCardDblClick(card)" :style="{ borderColor: nodeType(card).color, background: nodeType(card).tint }">
+            <v-icon size="small" :color="nodeType(card).color" class="collapsed-pill-icon">{{ nodeType(card).icon }}</v-icon>
+            <div class="collapsed-pill-body">
+              <span class="collapsed-pill-type" :style="{ color: nodeType(card).color }">{{ nodeType(card).label }}</span>
+              <span class="collapsed-pill-label">{{ collapsedLabel(card) }}</span>
+            </div>
+          </div>
+
+          <!-- Expanded State -->
+          <template v-else>
+            <div class="type-accent" :style="{ background: nodeType(card).color }"></div>
+            <v-card-title class="pa-2 d-flex align-center node-header" @dblclick.stop="handleCardDblClick(card)" style="cursor: pointer;">
+              <v-icon size="small" class="me-1" :color="nodeType(card).color">{{ nodeType(card).icon }}</v-icon>
+              <span v-if="nodeType(card).label" class="type-chip" :style="{ color: nodeType(card).color, borderColor: nodeType(card).color }">{{ nodeType(card).label }}</span>
+              <v-text-field v-model="card.title" variant="plain" density="compact" hide-details placeholder="Question" class="text-caption editable-title" :style="titleFieldStyle(card)" @focus="activeCardId = card.id" @click.stop></v-text-field>
+              <v-spacer></v-spacer>
+              <v-tooltip location="top" text="Mark answered">
+                <template v-slot:activator="{ props }">
+                  <v-btn
+                    v-bind="props"
+                    size="x-small"
+                    variant="text"
+                    :icon="card.questionAnswered ? 'mdi-check-circle' : 'mdi-check-circle-outline'"
+                    :color="card.questionAnswered ? 'success' : undefined"
+                    @click.stop="card.questionAnswered = !card.questionAnswered"
+                  ></v-btn>
+                </template>
+              </v-tooltip>
+              <v-btn size="x-small" icon="mdi-chevron-up" variant="text" @dblclick.stop="handleCardDblClick(card)"></v-btn>
+            </v-card-title>
+            <v-card-text class="pa-3" :class="{ 'tree-wide-body': activeVisualizer === 'hierarchical' }">
+              <v-textarea v-model="card.content" variant="outlined" label="Question" auto-grow rows="2" hide-details class="mb-2" placeholder="What do we still need to find out?" @focus="activeCardId = card.id"></v-textarea>
+              <v-textarea v-model="card.questionAnswer" variant="outlined" label="Answer" auto-grow rows="3" hide-details placeholder="Answer / findings..." @focus="activeCardId = card.id"></v-textarea>
+            </v-card-text>
+            <!-- User comments (every node type) -->
+            <div v-if="showDetail" class="node-comments">
+              <div v-if="card.comments && card.comments.length" class="node-comment-list">
+                <div v-for="c in card.comments" :key="c.id" class="node-comment">
+                  <span class="comment-chip">{{ c.author }}</span>
+                  <span class="comment-text">{{ c.text }}</span>
+                  <span class="comment-ts">{{ commentTimestamp(c.ts) }}</span>
+                  <v-icon
+                    v-if="canDeleteComment(c)"
+                    size="13"
+                    class="comment-delete"
+                    @click.stop="deleteComment(card, c.id)"
+                  >mdi-close</v-icon>
+                </div>
+              </div>
+              <div class="node-comment-entry">
+                <span class="comment-chip comment-chip-me">{{ commentAuthor() }}</span>
+                <input
+                  v-model="commentDrafts[card.id]"
+                  class="comment-input"
+                  type="text"
+                  placeholder="Add a comment…"
+                  @keydown.enter.stop="addComment(card)"
+                  @click.stop
+                  @focus="activeCardId = card.id"
+                />
+                <v-icon
+                  v-if="(commentDrafts[card.id] || '').trim()"
+                  size="16"
+                  color="primary"
+                  class="comment-send"
+                  @click.stop="addComment(card)"
+                >mdi-send</v-icon>
+              </div>
+            </div>
+            <v-card-actions v-if="showDetail" class="pa-2 pt-0">
+              <v-spacer></v-spacer>
+              <v-btn size="x-small" variant="flat" class="delete-text-btn" @click.stop="confirmDelete(card.id)">DELETE</v-btn>
             </v-card-actions>
           </template>
         </v-card>
 
         <!-- Parent Node Card (Round dark-blue circle) -->
         <div
-          v-if="card.type === 'parent'"
+          v-if="card.type === 'parent' && !isCollapsedRow(card) && showCompact"
           class="parent-node-circle"
           :style="{
-            width: (card.collapsed ? '140px' : '240px'),
-            height: (card.collapsed ? '140px' : '240px'),
+            width: parentNodeSize(card),
+            height: parentNodeSize(card),
             background: card.socialMetadata?.parentNodeColor || '#1565C0',
             boxShadow: '0 4px 16px ' + (card.socialMetadata?.parentNodeColor || '#1565C0') + '66'
           }"
-          @dblclick.stop="toggleCollapse(card)"
+          @dblclick.stop="handleCardDblClick(card)"
         >
           <!-- Collapsed State -->
           <template v-if="card.collapsed">
-            <v-icon size="20" color="white" class="mb-1">{{ card.socialMetadata?.parentNodeIcon || 'mdi-hub' }}</v-icon>
-            <span class="parent-node-type">{{ (card.socialMetadata?.parentNodeType || 'PARENT').toUpperCase() }}</span>
+            <v-icon size="40" color="rgba(255,255,255,0.9)" class="mb-1">{{ card.socialMetadata?.parentNodeIcon || 'mdi-file-tree' }}</v-icon>
+            <span class="parent-node-type">{{ (card.socialMetadata?.parentNodeType || 'Node').toUpperCase() }}</span>
             <span v-if="card.title" class="parent-node-slug">{{ card.title }}</span>
           </template>
 
           <!-- Expanded State -->
           <template v-else>
-            <v-icon size="22" color="white" class="mb-1">{{ card.socialMetadata?.parentNodeIcon || 'mdi-hub' }}</v-icon>
-            <span class="parent-node-type">{{ (card.socialMetadata?.parentNodeType || 'PARENT').toUpperCase() }}</span>
+            <v-icon size="48" color="rgba(255,255,255,0.9)" class="mb-1">{{ card.socialMetadata?.parentNodeIcon || 'mdi-file-tree' }}</v-icon>
+            <span class="parent-node-type">{{ (card.socialMetadata?.parentNodeType || 'Node').toUpperCase() }}</span>
             <input
               v-model="card.title"
               type="text"
@@ -1450,11 +2162,93 @@
             <span
               class="parent-node-delete"
               @click.stop="confirmDelete(card.id)"
-            >[DELETE]</span>
+            >DELETE</span>
           </template>
         </div>
-      </div>
-      </div><!-- /zoom-wrapper -->
+        </div><!-- /card-node -->
+        </template>
+
+        <!-- Connection edges. Straight centre-to-centre lines in the web views
+             (the nodes are painted on top, so the line reads as joining node to
+             node); elbow routing in the hierarchical tree. Endpoint dots, the
+             label, and the delete affordance render in the label layer so they
+             stay above the cards and clickable. -->
+        <template #edge-link="edgeProps">
+          <!-- Single-item v-for: binds the computed geometry to a local name. -->
+          <!-- eslint-disable-next-line vue/valid-v-for -->
+          <template v-for="geo in [edgeGeometry(edgeProps)]" :key="edgeProps.id">
+            <g v-if="geo">
+              <BaseEdge
+                :path="geo.path"
+                :interaction-width="24"
+                :style="{
+                  stroke: edgeProps.data.link.color || '#1976d2',
+                  strokeWidth: hoveredLinkId === edgeProps.data.link.id ? 7 : 5,
+                  opacity: hoveredLinkId === edgeProps.data.link.id ? 1 : 0.85
+                }"
+              />
+              <EdgeLabelRenderer>
+                <!-- Endpoint dots: sit where the line meets each node's perimeter.
+                     Click to open the endpoint menu. Ends anchored at a parent
+                     hub's CENTRE get no dot — it would be invisible under the
+                     disc and would steal clicks meant for the hub itself. -->
+                <div
+                  v-if="!geo.srcIsParent"
+                  class="edge-endpoint"
+                  :style="{
+                    transform: `translate(-50%, -50%) translate(${geo.x1}px, ${geo.y1}px)`,
+                    background: edgeProps.data.link.color || '#1976d2'
+                  }"
+                  @mouseenter="hoveredLinkId = edgeProps.data.link.id"
+                  @mouseleave="hoveredLinkId = null"
+                  @click.stop="openEndpointPopup(edgeProps.data.link.id, 'source', geo.x1, geo.y1)"
+                ></div>
+                <div
+                  v-if="!geo.tgtIsParent"
+                  class="edge-endpoint"
+                  :style="{
+                    transform: `translate(-50%, -50%) translate(${geo.x2}px, ${geo.y2}px)`,
+                    background: edgeProps.data.link.color || '#1976d2'
+                  }"
+                  @mouseenter="hoveredLinkId = edgeProps.data.link.id"
+                  @mouseleave="hoveredLinkId = null"
+                  @click.stop="openEndpointPopup(edgeProps.data.link.id, 'target', geo.x2, geo.y2)"
+                ></div>
+                <!-- Label at the midpoint of the exposed span -->
+                <div
+                  v-if="edgeProps.data.link.label"
+                  class="edge-label"
+                  :style="{
+                    transform: `translate(-50%, -100%) translate(${geo.mx}px, ${geo.my - 14}px)`,
+                    color: edgeProps.data.link.color || '#1976d2'
+                  }"
+                >{{ edgeProps.data.link.label }}</div>
+                <!-- Delete button at midpoint (on hover) -->
+                <div
+                  v-if="hoveredLinkId === edgeProps.data.link.id"
+                  class="edge-delete"
+                  :style="{ transform: `translate(-50%, -50%) translate(${geo.mx}px, ${geo.my}px)` }"
+                  @mouseenter="hoveredLinkId = edgeProps.data.link.id"
+                  @mouseleave="hoveredLinkId = null"
+                  @click.stop="deleteLink(edgeProps.data.link.id)"
+                >×</div>
+              </EdgeLabelRenderer>
+            </g>
+          </template>
+        </template>
+
+        <!-- Rubber band while aiming a new connection -->
+        <template #connection-line="{ sourceX, sourceY, targetX, targetY }">
+          <g>
+            <line
+              :x1="sourceX" :y1="sourceY" :x2="targetX" :y2="targetY"
+              class="connection-rubber-band"
+            />
+            <circle :cx="sourceX" :cy="sourceY" r="16" class="connection-rubber-dot" />
+            <circle :cx="targetX" :cy="targetY" r="16" class="connection-rubber-dot" />
+          </g>
+        </template>
+      </VueFlow>
     </div>
 
     <!-- Status Bar -->
@@ -1464,7 +2258,7 @@
         <span v-if="nodeLinks.length > 0" class="ms-2">
           | {{ nodeLinks.length }} connection{{ nodeLinks.length !== 1 ? 's' : '' }}
         </span>
-        <span v-if="isDragging" class="ms-2 text-primary font-weight-bold">
+        <span v-if="connecting" class="ms-2 text-primary font-weight-bold">
           | CONNECTING...
         </span>
         <span v-if="saving" class="ms-4 text-primary">
@@ -1474,8 +2268,8 @@
         <span v-else-if="lastSaved" class="ms-4">
           Last saved: {{ formatTime(lastSaved) }}
         </span>
-        <span v-if="zoomLevel !== 1" class="ms-4">
-          Zoom: {{ Math.round(zoomLevel * 100) }}%
+        <span v-if="zoomPct !== 100" class="ms-4">
+          Zoom: {{ zoomPct }}%
         </span>
         <span v-if="!currentEpisode" class="ms-4 text-warning">
           No episode selected
@@ -1486,10 +2280,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed, nextTick, toRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { VueFlow, Handle, Position, BaseEdge, EdgeLabelRenderer, useVueFlow } from '@vue-flow/core'
+import { Background } from '@vue-flow/background'
+import { MiniMap } from '@vue-flow/minimap'
+import '@vue-flow/core/dist/style.css'
+import '@vue-flow/minimap/dist/style.css'
 import { useStandardNotification, NOTIFICATION_COLORS } from '@/composables/useStandardNotification'
-import { useWhiteboardConnections } from '@/composables/useWhiteboardConnections'
+import { useWhiteboardConnections, borderIntersection } from '@/composables/useWhiteboardConnections'
+import { useAuth } from '@/composables/useAuth'
 import { fetchJson } from '@/utils/apiHelpers'
 import axios from 'axios'
 import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'
@@ -1527,36 +2327,89 @@ const currentEpisode = computed(() => {
   return sessionStorage.getItem('currentEpisode') || route.query.episode || null
 })
 
-// Connections composable
+// Current user — drives the author chip on node comments.
+const { currentUser } = useAuth()
+
+// Connections composable — the persisted link store. All connection
+// INTERACTION (dragging a new link, hit-testing, the rubber band) is Vue Flow's.
 const {
   nodeLinks,
   loadLinks,
+  createLink,
   deleteLink,
+  triggerFlash,
   deleteLinksForCard,
-  getLineCoords,
   getLinksForSave,
-  // Border hover
-  hoverCardId,
-  hoverDot,
-  // Drag-to-connect
-  isDragging,
-  dragAnchor,
-  dragTargetDot,
-  rubberBandLine,
-  handleMouseMove,
-  handleBorderClick,
-  cancelDrag,
-  // Drop menu
-  showDropMenu,
-  dropMenuPos,
-  completeDropConnection,
-  forceCompleteConnection,
-  // Flash
-  flashingCards,
-  // Existing link hover
-  hoveredLinkId,
-  disconnectEnd
-} = useWhiteboardConnections(cards)
+  flashingCards
+} = useWhiteboardConnections()
+
+// ─── Vue Flow: viewport, nodes, edges ───
+const {
+  fitView,
+  zoomIn,
+  zoomOut,
+  zoomTo,
+  setViewport,
+  viewport,
+  setNodes,
+  setEdges,
+  updateNode,
+  updateNodeInternals,
+  findNode,
+  onNodesInitialized
+} = useVueFlow()
+
+// The board-open fit must wait until Vue Flow has MEASURED the nodes — framing
+// against unmeasured (zero-size) nodes lands at an arbitrary viewport. Set by
+// loadBoard, consumed by the nodes-initialized hook.
+let pendingInitialFit = false
+
+onNodesInitialized(() => {
+  if (!pendingInitialFit) return
+  pendingInitialFit = false
+  // Positions may still be settling (overlap separation ran this tick).
+  nextTick(() => { fitBoard() })
+})
+
+// nodesInitialized does not reliably re-fire when the node set is REPLACED
+// (episode switch): without a fallback the viewport stays parked at the old
+// board's coordinates and the new board loads off-screen.
+function scheduleFitFallback() {
+  setTimeout(() => {
+    if (pendingInitialFit) {
+      pendingInitialFit = false
+      fitBoard()
+    }
+  }, 350)
+}
+
+// Hovered link (midpoint delete affordance + endpoint dot emphasis)
+const hoveredLinkId = ref(null)
+
+// True while the user is dragging a new connection out of a handle.
+const connecting = ref(false)
+// The node a pending connection started from — consumed by the spawn menu when
+// the user releases over empty canvas.
+const pendingConnectSource = ref(null)
+// Set by onConnect so onConnectEnd can tell "landed on a card" from "landed on
+// empty canvas".
+let connectDidComplete = false
+
+// Drop-into-empty-space spawn menu. Position is kept in FLOW coordinates (that
+// is where the new card goes); the on-screen anchor is derived from the live
+// viewport, so the menu stays glued to its canvas point at constant size.
+const showDropMenu = ref(false)
+const dropMenuPos = ref({ x: 0, y: 0 })
+
+// Transient glide when a computed layout is applied or the view switches.
+const layoutAnimating = ref(false)
+let layoutAnimatingTimer = null
+
+function glideLayout() {
+  layoutAnimating.value = true
+  if (layoutAnimatingTimer) clearTimeout(layoutAnimatingTimer)
+  layoutAnimatingTimer = setTimeout(() => { layoutAnimating.value = false }, 700)
+}
 
 // Card element refs for measuring dimensions
 const cardElements = ref({})
@@ -1567,13 +2420,9 @@ const collapseGeneration = ref(0)
 // Endpoint popup state (click on connection endpoint dot)
 const endpointPopup = ref(null) // { linkId, end: 'source'|'target', x, y }
 
-// Zoom & pan state (infinite canvas)
-const zoomLevel = ref(1.0)
-const panX = ref(0)
-const panY = ref(0)
-const isPanning = ref(false)
-const wasPanning = ref(false) // true briefly after a pan ends, to suppress click
-const panStart = ref({ x: 0, y: 0, panX: 0, panY: 0 })
+// Zoom is owned by Vue Flow's viewport. Boards open with a fit-to-content frame
+// (see loadBoard), so the whole structure is visible on load.
+const zoomPct = computed(() => Math.round((viewport.value?.zoom || 1) * 100))
 
 // Parent node types (default set, overridden by settings)
 const parentNodeTypes = ref([
@@ -1588,10 +2437,18 @@ const showParentMenu = ref(false)
 const showDeleteConfirm = ref(false)
 const deleteTargetId = ref(null)
 
-// Drag state
-const dragging = ref(false)
+// Drag state. Vue Flow owns the drag mechanics; these track the gesture's
+// MEANING (which card, subtree membership, tree reparent target).
 const dragCard = ref(null)
-const dragOffset = ref({ x: 0, y: 0 })
+// Live reparent state while dragging a row in the hierarchical view:
+// {cardId, targetId|null}. Applied on release.
+const reparentDrag = ref(null)
+// Ctrl-drag state: {tighten, offsets:[{id, dx, dy}]} — followers that travel
+// with the grabbed node.
+const subtreeDrag = ref(null)
+// True while a native HTML5 drag that began inside the canvas is in flight.
+// Plain let (not a ref) — nothing renders from it.
+let internalDragActive = false
 
 // Card ID counter
 let nextId = 1
@@ -1619,16 +2476,15 @@ onMounted(async () => {
   canvas.value?.focus()
 })
 
-// Load whiteboard settings from API
+// Load whiteboard settings from API. The old default_zoom setting no longer
+// applies — boards always open framed to their content (fitView), which is
+// strictly more useful than a fixed zoom.
 async function loadWhiteboardSettings() {
   try {
     const response = await fetchJson('/api/settings/api-configs')
     if (response?.success && response?.data?.whiteboard) {
       const wb = response.data.whiteboard
       if (wb.parent_node_types) parentNodeTypes.value = wb.parent_node_types
-      if (wb.default_zoom) {
-        if (wb.default_zoom) zoomLevel.value = wb.default_zoom
-      }
     }
   } catch {
     // Use defaults silently
@@ -1653,24 +2509,53 @@ watch(cards, () => {
 
 // Watch for episode changes and reload board
 watch(currentEpisode, async (newEpisode, oldEpisode) => {
-  if (newEpisode !== oldEpisode) {
-    // Save current board before switching
-    if (oldEpisode) {
-      await saveBoard()
-    }
-    // Load new episode's board
-    await loadBoard()
+  if (newEpisode === oldEpisode) return
+  // The dialog flow orchestrates its own save/load ordering.
+  if (switchingViaDialog) return
+  // Save the OUTGOING board under the OLD episode. Passing the episode
+  // explicitly is essential: currentEpisode has already flipped to the new
+  // value by the time this watcher runs, and an unqualified saveBoard() here
+  // used to overwrite the TARGET episode's board with the previous episode's
+  // content — which then loaded back as "the board didn't change".
+  if (saveTimeout) clearTimeout(saveTimeout)
+  if (oldEpisode && boardLoaded && cards.value.length > 0) {
+    await saveBoard(oldEpisode)
   }
+  await loadBoard()
 })
+
+// True while confirmEpisodeSelection is orchestrating a switch, so the
+// currentEpisode watcher doesn't run a second, racing save/load.
+let switchingViaDialog = false
+
+// Convert client (screen) coordinates to flow/canvas coordinates.
+function toFlow(clientX, clientY) {
+  const rect = canvas.value?.getBoundingClientRect()
+  const vp = viewport.value || { x: 0, y: 0, zoom: 1 }
+  if (!rect) return { x: clientX, y: clientY }
+  return {
+    x: (clientX - rect.left - vp.x) / vp.zoom,
+    y: (clientY - rect.top - vp.y) / vp.zoom
+  }
+}
+
+// Convert flow/canvas coordinates to a position relative to the canvas element,
+// for anchoring screen-space overlays (spawn menu, endpoint popup) to a canvas
+// point. Reads the live viewport, so overlays track pan/zoom.
+function toScreen(flowX, flowY) {
+  const vp = viewport.value || { x: 0, y: 0, zoom: 1 }
+  return {
+    x: flowX * vp.zoom + vp.x,
+    y: flowY * vp.zoom + vp.y
+  }
+}
 
 // Helper: get center of visible canvas area in canvas coordinates
 function getCanvasCenter(offsetX = 0, offsetY = 0) {
   const rect = canvas.value?.getBoundingClientRect()
   if (!rect) return { x: 100 + offsetX, y: 100 + offsetY }
-  return {
-    x: (rect.width / 2 - panX.value) / zoomLevel.value + offsetX,
-    y: (rect.height / 2 - panY.value) / zoomLevel.value + offsetY
-  }
+  const center = toFlow(rect.left + rect.width / 2, rect.top + rect.height / 2)
+  return { x: center.x + offsetX, y: center.y + offsetY }
 }
 
 // Add text card
@@ -1726,7 +2611,6 @@ function handleImageUpload(event) {
   Array.from(files).forEach((file, index) => {
     const reader = new FileReader()
     reader.onload = (e) => {
-      const rect = canvas.value?.getBoundingClientRect()
       cards.value.push({
         id: nextId++,
         type: 'image',
@@ -1734,8 +2618,8 @@ function handleImageUpload(event) {
         caption: '',
         notes: '',
         title: '',
-        x: (rect ? rect.width / 2 - 300 : 100) + (index * 20),
-        y: (rect ? rect.height / 2 - 150 : 100) + (index * 20),
+        x: getCanvasCenter(-300, 0).x + (index * 20),
+        y: getCanvasCenter(0, -150).y + (index * 20),
         width: 600,
         collapsed: false
       })
@@ -1769,7 +2653,6 @@ async function handleVideoUpload(event) {
         body: formData
       })
 
-      const rect = canvas.value?.getBoundingClientRect()
       cards.value.push({
         id: nextId++,
         type: 'video',
@@ -1777,8 +2660,8 @@ async function handleVideoUpload(event) {
         assetId: response.asset_id,
         title: file.name,
         notes: '',
-        x: rect ? rect.width / 2 - 320 : 100,
-        y: rect ? rect.height / 2 - 150 : 100,
+        x: getCanvasCenter(-320, 0).x,
+        y: getCanvasCenter(0, -150).y,
         width: 640,
         collapsed: false
       })
@@ -1815,7 +2698,6 @@ async function handleAudioUpload(event) {
         body: formData
       })
 
-      const rect = canvas.value?.getBoundingClientRect()
       cards.value.push({
         id: nextId++,
         type: 'audio',
@@ -1823,8 +2705,8 @@ async function handleAudioUpload(event) {
         assetId: response.asset_id,
         title: file.name,
         notes: '',
-        x: rect ? rect.width / 2 - 250 : 100,
-        y: rect ? rect.height / 2 - 100 : 100,
+        x: getCanvasCenter(-250, 0).x,
+        y: getCanvasCenter(0, -100).y,
         width: 500,
         collapsed: false
       })
@@ -1841,14 +2723,13 @@ async function handleAudioUpload(event) {
 
 // Add HTML card
 function addHtmlCard() {
-  const rect = canvas.value?.getBoundingClientRect()
   cards.value.push({
     id: nextId++,
     type: 'html',
     htmlContent: '',
     title: '',
-    x: rect ? rect.width / 2 - 300 : 100,
-    y: rect ? rect.height / 2 - 100 : 100,
+    x: getCanvasCenter(-300, 0).x,
+    y: getCanvasCenter(0, -100).y,
     width: 600,
     collapsed: false
   })
@@ -1856,15 +2737,14 @@ function addHtmlCard() {
 
 // Add code card
 function addCodeCard() {
-  const rect = canvas.value?.getBoundingClientRect()
   cards.value.push({
     id: nextId++,
     type: 'code',
     codeContent: '',
     codeLanguage: 'javascript',
     title: '',
-    x: rect ? rect.width / 2 - 350 : 100,
-    y: rect ? rect.height / 2 - 150 : 100,
+    x: getCanvasCenter(-350, 0).x,
+    y: getCanvasCenter(0, -150).y,
     width: 700,
     collapsed: false
   })
@@ -1872,17 +2752,255 @@ function addCodeCard() {
 
 // Add markdown card
 function addMarkdownCard() {
-  const rect = canvas.value?.getBoundingClientRect()
   cards.value.push({
     id: nextId++,
     type: 'markdown',
     markdownContent: '',
     title: '',
-    x: rect ? rect.width / 2 - 300 : 100,
-    y: rect ? rect.height / 2 - 100 : 100,
+    x: getCanvasCenter(-300, 0).x,
+    y: getCanvasCenter(0, -100).y,
     width: 600,
     collapsed: false
   })
+}
+
+function addContactCard() {
+  const center = getCanvasCenter(-230, -140)
+  cards.value.push({
+    id: nextId++,
+    type: 'contact',
+    title: '',
+    contactRole: '',
+    contactOrg: '',
+    contactPhone: '',
+    contactEmail: '',
+    notes: '',
+    x: center.x,
+    y: center.y,
+    width: 460,
+    collapsed: false
+  })
+}
+
+function addQuestionCard() {
+  const center = getCanvasCenter(-250, -120)
+  cards.value.push({
+    id: nextId++,
+    type: 'question',
+    title: '',
+    content: '',
+    questionAnswer: '',
+    questionAnswered: false,
+    x: center.x,
+    y: center.y,
+    width: 500,
+    collapsed: false
+  })
+}
+
+/**
+ * Double-click a node (or its media): zoom in to read it.
+ *
+ * Expands the card, brings the canvas to 80% zoom, and centres that card. Replaces
+ * the old plain collapse-toggle on double-click — at low zoom "collapse this" was
+ * rarely what was wanted, whereas "let me actually read this one" always is.
+ *
+ * A double-click on an ALREADY expanded card at reading zoom falls back to
+ * collapsing it, so the gesture stays reversible.
+ */
+const FOCUS_ZOOM = 0.8
+
+async function focusCard(card) {
+  if (!card) return
+
+  const z = viewport.value?.zoom || 1
+  const alreadyReadable = z >= FOCUS_ZOOM - 0.01 && !card.collapsed
+  if (alreadyReadable) {
+    // Nothing to zoom into — treat it as the collapse toggle it used to be.
+    toggleCollapse(card)
+    return
+  }
+
+  if (card.collapsed) {
+    card.collapsed = false
+  }
+
+  // Wait for the expanded card to lay out, so the frame fits its real size,
+  // then glide the viewport to it (smooth animated zoom-and-pan via d3).
+  await nextTick()
+  collapseGeneration.value++
+  await nextTick()
+
+  const rect = canvas.value?.getBoundingClientRect()
+  if (!rect) return
+  const pos = cardPosition(card)
+  const node = findNode(String(card.id))
+  const w = node?.dimensions?.width || card.width || 300
+  const h = node?.dimensions?.height || 200
+
+  // Frame the card: read at FOCUS_ZOOM, or lower if it doesn't fit.
+  const zoom = Math.min(
+    FOCUS_ZOOM,
+    (rect.width * 0.85) / Math.max(w, 1),
+    (rect.height * 0.85) / Math.max(h, 1)
+  )
+  setViewport({
+    x: rect.width / 2 - (pos.x + w / 2) * zoom,
+    y: rect.height / 2 - (pos.y + h / 2) * zoom,
+    zoom
+  }, { duration: 500 })
+}
+
+// ─── Auto Center ───
+//
+// Toggle in the top-right chip row. When ON:
+//   • selecting a card (click, or focusing one of its fields) pans the viewport
+//     so that card sits dead centre — the zoom is NEVER touched;
+//   • double-clicking a card redistributes the whole board around it as the
+//     centre of the universe (linked cards ringed by graph distance, unlinked
+//     ones on the outermost ring), then centres it. Again: no zoom change.
+// When OFF, double-click keeps the original zoom-to-read behaviour (focusCard).
+// Persisted per browser so the preference survives reloads.
+const autoCenter = ref(localStorage.getItem('wb-auto-center') === '1')
+watch(autoCenter, v => localStorage.setItem('wb-auto-center', v ? '1' : '0'))
+
+// Pan (never zoom) so the card sits in the middle of the viewport.
+function centerOnCard(card, duration = 400) {
+  const rect = canvas.value?.getBoundingClientRect()
+  if (!rect || !card) return
+  const vp = viewport.value || { x: 0, y: 0, zoom: 1 }
+  const node = findNode(String(card.id))
+  const pos = cardPosition(card)
+  const w = node?.dimensions?.width || card.width || 300
+  const h = node?.dimensions?.height || 200
+  setViewport({
+    x: rect.width / 2 - (pos.x + w / 2) * vp.zoom,
+    y: rect.height / 2 - (pos.y + h / 2) * vp.zoom,
+    zoom: vp.zoom
+  }, { duration })
+}
+
+// Recentre whenever a card becomes the active one. Skipped mid-gesture: a node
+// drag sets the active card at press time, and panning the canvas out from
+// under an in-flight drag or connection would fight the pointer.
+watch(activeCardId, (id) => {
+  if (!autoCenter.value || id == null) return
+  if (dragCard.value || connecting.value) return
+  const card = cards.value.find(c => c.id === id)
+  if (card) centerOnCard(card)
+})
+
+// Double-click dispatcher for the card templates (headers, pills, media).
+function handleCardDblClick(card) {
+  if (autoCenter.value) {
+    redistributeAroundCard(card)
+  } else {
+    focusCard(card)
+  }
+}
+
+/**
+ * Redistribute the whole board around `focal` — it stays exactly where it is
+ * and becomes the centre of the universe: directly linked cards on the first
+ * ring, their neighbours on the next, and cards with no path to it on the
+ * outermost ring. Positions are real free-web coordinates (this is a user
+ * action, like Auto Arrange), so the result persists; if invoked from a
+ * computed layout view it switches to free-web first for the same reason
+ * autoArrange does. The viewport then pans to centre the focal card — the
+ * zoom is left completely alone.
+ */
+async function redistributeAroundCard(focal) {
+  if (!focal || cards.value.length < 2) {
+    centerOnCard(focal)
+    return
+  }
+  if (activeVisualizer.value !== 'free-web') {
+    activeVisualizer.value = 'free-web'
+    await nextTick()
+  }
+
+  // Graph distance from the focal card over the link graph.
+  const adjacency = new Map(cards.value.map(c => [c.id, []]))
+  for (const link of nodeLinks.value) {
+    if (!adjacency.has(link.sourceCardId) || !adjacency.has(link.targetCardId)) continue
+    adjacency.get(link.sourceCardId).push(link.targetCardId)
+    adjacency.get(link.targetCardId).push(link.sourceCardId)
+  }
+  const depth = new Map([[focal.id, 0]])
+  const queue = [focal.id]
+  while (queue.length) {
+    const id = queue.shift()
+    for (const next of adjacency.get(id) || []) {
+      if (!depth.has(next)) {
+        depth.set(next, depth.get(id) + 1)
+        queue.push(next)
+      }
+    }
+  }
+  const maxDepth = Math.max(...depth.values())
+
+  // Group every OTHER card by ring; unreachable cards form the outermost ring.
+  const byDepth = new Map()
+  for (const c of cards.value) {
+    if (c.id === focal.id) continue
+    const d = depth.get(c.id) ?? maxDepth + 1
+    if (!byDepth.has(d)) byDepth.set(d, [])
+    byDepth.get(d).push(c.id)
+  }
+
+  // Glide the moves like Auto Arrange does.
+  autoArranging.value = true
+  await nextTick()
+
+  const focalBox = cardBox(focal)
+  const cx = focal.x + focalBox.w / 2
+  const cy = focal.y + focalBox.h / 2
+  const placed = [{ x: focal.x, y: focal.y, ...focalBox }]
+
+  const fits = (x, y, box) => {
+    for (const p of placed) {
+      const ox = x < p.x + p.w + SNAP_GAP && x + box.w + SNAP_GAP > p.x
+      const oy = y < p.y + p.h + SNAP_GAP && y + box.h + SNAP_GAP > p.y
+      if (ox && oy) return false
+    }
+    return true
+  }
+
+  for (const d of [...byDepth.keys()].sort((a, b) => a - b)) {
+    const ids = byDepth.get(d)
+    // More candidates on crowded rings, so big boards still resolve.
+    const sweep = Math.max(12, ids.length * 3)
+    ids.forEach((id, i) => {
+      const card = cards.value.find(c => c.id === id)
+      if (!card) return
+      const box = cardBox(card)
+      const baseRadius = (Math.hypot(focalBox.w, focalBox.h) + Math.hypot(box.w, box.h)) / 2 + SNAP_GAP
+      const startAngle = (i / ids.length) * Math.PI * 2
+      for (let expand = 0; expand < 8; expand++) {
+        const radius = baseRadius * (d + expand * 0.45)
+        for (let k = 0; k < sweep; k++) {
+          const angle = startAngle + (k / sweep) * Math.PI * 2
+          const x = Math.round(cx + Math.cos(angle) * radius - box.w / 2)
+          const y = Math.round(cy + Math.sin(angle) * radius - box.h / 2)
+          if (fits(x, y, box)) {
+            card.x = x
+            card.y = y
+            placed.push({ x, y, ...box })
+            return
+          }
+        }
+      }
+    })
+  }
+
+  // Positions changed — connection geometry and layouts must re-measure.
+  nextTick(() => { collapseGeneration.value++ })
+  setTimeout(() => {
+    autoArranging.value = false
+    collapseGeneration.value++
+  }, AUTO_ARRANGE_DURATION)
+
+  centerOnCard(focal, 500)
 }
 
 // Toggle card collapse
@@ -1896,6 +3014,16 @@ function toggleCollapse(card) {
 
 // Get display label for collapsed card
 function collapsedLabel(card) {
+  // Typed cards summarise themselves — checked first, because their fields ride in
+  // social_metadata and would otherwise fall into the social-post branches below.
+  if (card.type === 'contact') {
+    return [card.title, card.contactOrg || card.contactRole].filter(Boolean).join(' · ') || 'Contact'
+  }
+  if (card.type === 'question') {
+    const q = card.title || card.content || 'Question'
+    return (card.questionAnswered ? '✓ ' : '') + q.substring(0, 46)
+  }
+
   // For tweets: show the actual username (prefer handle > username_from_url > author_name)
   if (card.socialMetadata?.author_handle) return '@' + card.socialMetadata.author_handle
   if (card.socialMetadata?.username_from_url) return '@' + card.socialMetadata.username_from_url
@@ -1922,87 +3050,54 @@ function collapsedThumb(card) {
   return null
 }
 
-// Handle canvas mousedown - catches clicks on card outline/border area (outside card div)
-function handleCanvasMouseDown(event) {
-  // If the hover dot is showing on a card border, initiate a connection.
-  // This catches clicks on the CSS outline zone which is painted outside the card div,
-  // so the card's own @mousedown doesn't fire for those clicks.
-  if (!isDragging.value && hoverCardId.value && hoverDot.value) {
-    event.stopPropagation()
-    event.preventDefault()
-    handleBorderClick()
-    return
-  }
-
-  // If dragging a connection, also check: the user may have clicked on a target card's
-  // outline area. In that case dragTargetDot is set, so complete the connection.
-  if (isDragging.value && dragTargetDot.value) {
-    event.stopPropagation()
-    event.preventDefault()
-    handleBorderClick()
-    return
-  }
-
-  // Start panning on whitespace mousedown (not on cards, not during connection drag)
-  if (!isDragging.value && (event.target === canvas.value || event.target.classList.contains('zoom-wrapper'))) {
-    isPanning.value = true
-    panStart.value = { x: event.clientX, y: event.clientY, panX: panX.value, panY: panY.value }
-    event.preventDefault()
-  }
-}
-
-// Handle canvas click - focus, or handle connection border click / drop into empty space
-function handleCanvasClick(event) {
-  // Close endpoint popup on any canvas click
+// Click on empty canvas: dismiss menus and deselect.
+function onPaneClick() {
   endpointPopup.value = null
-
-  // Suppress click after panning
-  if (wasPanning.value) return
-
-  // If drop menu is open and user clicks outside it, close it and cancel
+  viewSelectorOpen.value = false
+  floatingMenuOpen.value = false
   if (showDropMenu.value) {
-    cancelDrag()
+    closeDropMenu()
     return
   }
-
-  // If dragging a connection line and clicking empty canvas space -> show drop menu
-  if (isDragging.value && !dragTargetDot.value) {
-    const pos = screenToCanvas(event.clientX, event.clientY)
-    dropMenuPos.value = { x: pos.x, y: pos.y }
-    showDropMenu.value = true
-    return
-  }
-
-  if (event.target === canvas.value || event.target.classList.contains('zoom-wrapper')) {
-    canvas.value?.focus()
-    activeCardId.value = null
-    floatingMenuOpen.value = false
-    endpointPopup.value = null
-  }
+  canvas.value?.focus()
+  activeCardId.value = null
 }
 
-// Handle canvas double-click — open spawn menu at click position (same as connection drop menu)
-function handleCanvasDblClick(event) {
+// Double-click on empty canvas — open the spawn menu at the click position.
+// Attached on the wrapper (zoom-on-double-click is disabled) and filtered to the
+// pane so double-clicks on cards keep their own meaning (focusCard).
+function handlePaneDblClick(event) {
   if (!currentEpisode.value) return
-  if (isDragging.value || showDropMenu.value || wasPanning.value) return
-  // Only trigger on empty canvas / zoom wrapper (not on cards)
-  if (event.target !== canvas.value && !event.target.classList.contains('zoom-wrapper')) return
-  const pos = screenToCanvas(event.clientX, event.clientY)
-  dropMenuPos.value = { x: pos.x, y: pos.y }
+  if (connecting.value || showDropMenu.value) return
+  if (!event.target.closest('.vue-flow__pane')) return
+  if (event.target.closest('.vue-flow__node')) return
+  dropMenuPos.value = toFlow(event.clientX, event.clientY)
   showDropMenu.value = true
 }
 
-// Open endpoint popup on connection endpoint dot click
+// Pan/zoom started: screen-anchored popups would drift, so close them.
+function onViewportMoveStart() {
+  endpointPopup.value = null
+}
+
+// Close the spawn menu and clear any pending connection source.
+function closeDropMenu() {
+  showDropMenu.value = false
+  pendingConnectSource.value = null
+}
+
+// Open endpoint popup on connection endpoint dot click. x/y are FLOW coords;
+// the overlay derives its screen anchor from the live viewport.
 function openEndpointPopup(linkId, end, x, y) {
   endpointPopup.value = { linkId, end, x, y }
 }
 
-// Handle "Disconnect this end" from endpoint popup
+// Handle "Disconnect this end" from endpoint popup. With Vue Flow owning
+// connection dragging there is no re-aim-in-flight mode any more, so
+// disconnecting an end simply removes the link — draw a new one from a border
+// dot to reconnect elsewhere.
 function handleDisconnectEnd() {
-  if (!endpointPopup.value) return
-  const { linkId, end } = endpointPopup.value
-  endpointPopup.value = null
-  disconnectEnd(linkId, end, cardElements.value)
+  handleDestroyConnection()
 }
 
 // Handle "Destroy connection" from endpoint popup
@@ -2011,10 +3106,7 @@ function handleDestroyConnection() {
   const { linkId } = endpointPopup.value
   endpointPopup.value = null
   deleteLink(linkId)
-  // Fully exit connection mode — clear all drag/hover state
-  cancelDrag()
-  hoverCardId.value = null
-  hoverDot.value = null
+  hoveredLinkId.value = null
 }
 
 // Handle paste
@@ -2035,7 +3127,6 @@ function handlePaste(event) {
       const blob = item.getAsFile()
       const reader = new FileReader()
       reader.onload = (e) => {
-        const rect = canvas.value?.getBoundingClientRect()
         cards.value.push({
           id: nextId++,
           type: 'image',
@@ -2043,8 +3134,8 @@ function handlePaste(event) {
           caption: '',
           notes: '',
           title: '',
-          x: rect ? rect.width / 2 - 300 : 100,
-          y: rect ? rect.height / 2 - 150 : 100,
+          x: getCanvasCenter(-300, 0).x,
+          y: getCanvasCenter(0, -150).y,
           width: 600,
           collapsed: false
         })
@@ -2060,14 +3151,13 @@ function handlePaste(event) {
     for (const item of items) {
       if (item.type === 'text/html') {
         item.getAsString((text) => {
-          const rect = canvas.value?.getBoundingClientRect()
           cards.value.push({
             id: nextId++,
             type: 'html',
             htmlContent: text,
             title: '',
-            x: rect ? rect.width / 2 - 300 : 100,
-            y: rect ? rect.height / 2 - 100 : 100,
+            x: getCanvasCenter(-300, 0).x,
+            y: getCanvasCenter(0, -100).y,
             width: 600,
             collapsed: false
           })
@@ -2083,7 +3173,6 @@ function handlePaste(event) {
     for (const item of items) {
       if (item.type === 'text/plain') {
         item.getAsString(async (text) => {
-          const rect = canvas.value?.getBoundingClientRect()
 
           // Detect HTML tags in plain text
           if (text.match(/<[a-z][\s\S]*>/i)) {
@@ -2092,8 +3181,8 @@ function handlePaste(event) {
               type: 'html',
               htmlContent: text,
               title: '',
-              x: rect ? rect.width / 2 - 300 : 100,
-              y: rect ? rect.height / 2 - 100 : 100,
+              x: getCanvasCenter(-300, 0).x,
+              y: getCanvasCenter(0, -100).y,
               width: 600,
               collapsed: false
             })
@@ -2105,8 +3194,8 @@ function handlePaste(event) {
               type: 'link',
               url: text,
               notes: '',
-              x: rect ? rect.width / 2 - 250 : 100,
-              y: rect ? rect.height / 2 - 100 : 100,
+              x: getCanvasCenter(-250, 0).x,
+              y: getCanvasCenter(0, -100).y,
               width: 500,
               collapsed: false,
               previewTitle: null,
@@ -2254,8 +3343,8 @@ function handlePaste(event) {
               type: 'markdown',
               markdownContent: text,
               title: '',
-              x: rect ? rect.width / 2 - 300 : 100,
-              y: rect ? rect.height / 2 - 100 : 100,
+              x: getCanvasCenter(-300, 0).x,
+              y: getCanvasCenter(0, -100).y,
               width: 600,
               collapsed: false
             })
@@ -2271,8 +3360,8 @@ function handlePaste(event) {
               codeContent: text,
               codeLanguage: lang,
               title: '',
-              x: rect ? rect.width / 2 - 350 : 100,
-              y: rect ? rect.height / 2 - 150 : 100,
+              x: getCanvasCenter(-350, 0).x,
+              y: getCanvasCenter(0, -150).y,
               width: 700,
               collapsed: false
             })
@@ -2284,8 +3373,8 @@ function handlePaste(event) {
               type: 'text',
               content: text,
               title: '',
-              x: rect ? rect.width / 2 - 250 : 100,
-              y: rect ? rect.height / 2 - 100 : 100,
+              x: getCanvasCenter(-250, 0).x,
+              y: getCanvasCenter(0, -100).y,
               width: 500,
               collapsed: false
             })
@@ -2302,13 +3391,40 @@ function handlePaste(event) {
   }
 }
 
+// Block the browser's native image drag anywhere on the canvas.
+// Images (and links) are natively draggable. Starting a native drag on a card's
+// image suppresses mousemove — so the card never follows the cursor — and the
+// release then fires handleDrop, spawning a duplicate card, while the drag ghost
+// keeps trailing the mouse. Cancelling dragstart keeps mousedown-based card
+// dragging in charge. This is done in JS rather than CSS because the <img> lives
+// inside Vuetify's v-img, which scoped styles can't reach.
+function handleCanvasDragStart(event) {
+  // Mark this drag as originating inside the canvas, so a drop that slips
+  // through (browser variance) is still rejected by handleDrop.
+  internalDragActive = true
+  event.preventDefault()
+}
+
 // Handle drop
 function handleDrop(event) {
   event.preventDefault()
 
-  const files = event.dataTransfer.files
+  // Belt-and-braces: a drop whose drag started inside the canvas (a native image
+  // drag that escaped handleCanvasDragStart) must never spawn a card — that is
+  // the "dragging a node duplicates it" bug. Native drags suppress the mouse
+  // events, so check the dragstart flag rather than the node-drag state.
+  if (internalDragActive || dragCard.value) {
+    internalDragActive = false
+    return
+  }
+
+  const dt = event.dataTransfer
+  const dropPos = toFlow(event.clientX, event.clientY)
+
+  // 1. Local files dragged from the desktop — read as data URLs. The backend
+  // extracts these to the filesystem on save (media_asset_id + media_path).
+  const files = dt.files
   if (files && files.length > 0) {
-    const rect = canvas.value.getBoundingClientRect()
     Array.from(files).forEach((file, index) => {
       if (file.type.startsWith('image/')) {
         const reader = new FileReader()
@@ -2320,16 +3436,85 @@ function handleDrop(event) {
             caption: '',
             notes: '',
             title: '',
-            x: event.clientX - rect.left - 300 + (index * 20),
-            y: event.clientY - rect.top - 150 + (index * 20),
+            x: dropPos.x - 300 + (index * 20),
+            y: dropPos.y - 150 + (index * 20),
             width: 600,
-            collapsed: false
+            collapsed: false,
+            // Remember where this came from, so the card can offer the source link.
+            url: null
           })
         }
         reader.readAsDataURL(file)
       }
     })
+    return
   }
+
+  // 2. Dragged from a web page. Chrome gives us text/uri-list (the image's own
+  // URL) and text/html (the <img> element, whose src is the same). The page the
+  // image lives on is NOT in the drag payload — only the image URL is.
+  const uriList = dt.getData('text/uri-list')
+  const plain = dt.getData('text/plain')
+  const html = dt.getData('text/html')
+
+  let imageSrc = null
+  if (html) {
+    const m = html.match(/<img[^>]+src=["']([^"']+)["']/i)
+    if (m) imageSrc = m[1]
+  }
+
+  const droppedUrl = [uriList, plain, imageSrc]
+    .find(u => u && /^https?:\/\//.test(u.trim()))
+  if (!droppedUrl) return
+  const url = droppedUrl.trim()
+
+  // An image URL becomes an image card that remembers its source URL; anything
+  // else becomes a link card with a fetched preview.
+  const looksLikeImage = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|#|$)/i.test(url) || !!imageSrc
+
+  if (looksLikeImage) {
+    let sourceSite = null
+    try { sourceSite = new URL(url).hostname.replace(/^www\./, '') } catch { /* not parseable */ }
+    const imageCard = {
+      id: nextId++,
+      type: 'image',
+      imageUrl: url,
+      caption: '',
+      notes: '',
+      title: '',
+      x: dropPos.x - 300,
+      y: dropPos.y - 150,
+      width: 600,
+      collapsed: false,
+      url: url,
+      // Seed source info; the backend merges in format/dimensions/EXIF on save.
+      mediaMetadata: sourceSite ? { source_url: url, source_site: sourceSite } : null
+    }
+    cards.value.push(imageCard)
+    fetchImagePageMetadata(imageCard)
+    return
+  }
+
+  const newCard = {
+    id: nextId++,
+    type: 'link',
+    url,
+    notes: '',
+    title: '',
+    x: dropPos.x - 250,
+    y: dropPos.y - 100,
+    width: 500,
+    collapsed: false,
+    previewTitle: null,
+    previewDescription: null,
+    previewImage: null,
+    previewDomain: null,
+    previewFavicon: null,
+    fetchingPreview: false,
+    socialMetadata: null
+  }
+  cards.value.push(newCard)
+  fetchLinkPreview(newCard)
 }
 
 // Handle keyboard shortcuts
@@ -2370,15 +3555,23 @@ function handleKeyDown(event) {
   } else if (event.key === 'm' || event.key === 'M') {
     event.preventDefault()
     addMarkdownCard()
+  } else if (event.key === 'f' || event.key === 'F') {
+    event.preventDefault()
+    fitBoard()
+  } else if (event.key === 'k' || event.key === 'K') {
+    // 'k' for kontact — 'c' is taken by code.
+    event.preventDefault()
+    addContactCard()
+  } else if (event.key === 'q' || event.key === 'Q') {
+    event.preventDefault()
+    addQuestionCard()
   } else if (event.key === 'p' || event.key === 'P') {
     event.preventDefault()
     showParentMenu.value = !showParentMenu.value
   } else if (event.key === 'Escape') {
     event.preventDefault()
-    // Fully exit connection mode and any popups
-    cancelDrag()
-    hoverCardId.value = null
-    hoverDot.value = null
+    // Close popups and cancel a pending spawn.
+    closeDropMenu()
     endpointPopup.value = null
     showParentMenu.value = false
   } else if (event.key === 'Delete' && activeCardId.value) {
@@ -2387,150 +3580,499 @@ function handleKeyDown(event) {
   }
 }
 
-// Convert screen coordinates to canvas coordinates (accounting for zoom and pan)
-function screenToCanvas(clientX, clientY) {
-  const rect = canvas.value?.getBoundingClientRect()
-  if (!rect) return { x: clientX, y: clientY }
-  return {
-    x: (clientX - rect.left - panX.value) / zoomLevel.value,
-    y: (clientY - rect.top - panY.value) / zoomLevel.value
-  }
-}
-
-// Track mouse position on canvas for border detection and rubber-band line
-function handleCanvasMouseMove(event) {
-  // Handle panning
-  if (isPanning.value) {
-    const dx = event.clientX - panStart.value.x
-    const dy = event.clientY - panStart.value.y
-    panX.value = panStart.value.panX + dx
-    panY.value = panStart.value.panY + dy
-    return
-  }
-  const pos = screenToCanvas(event.clientX, event.clientY)
-  handleMouseMove(pos.x, pos.y, cardElements.value)
-}
-
-// Stop panning
-function handleCanvasMouseUp() {
-  if (isPanning.value) {
-    // Check if we actually moved (not just a click)
-    const dx = Math.abs(panX.value - panStart.value.panX)
-    const dy = Math.abs(panY.value - panStart.value.panY)
-    if (dx > 3 || dy > 3) {
-      wasPanning.value = true
-      setTimeout(() => { wasPanning.value = false }, 50)
-    }
-  }
-  isPanning.value = false
-}
-
 // Start dragging
-function startDrag(event, card) {
-  // Don't drag if clicking on input fields
-  if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-    return
-  }
+/**
+ * Vue Flow node drag lifecycle.
+ *
+ * Free web: dragging moves the node live (Vue Flow internal); the stored
+ * card.x/card.y are written ONCE at drag stop — the only place a visualizer-
+ * rendered position is ever persisted back onto a card.
+ *
+ * Hierarchical: the row is dragged vertically only (X is pinned by a node
+ * extent set at drag start); the Y picks the prospective new parent, applied at
+ * release. Balanced/waterfall: nodes are not draggable at all (layout owns
+ * positions), enforced via the global nodes-draggable prop.
+ *
+ * Ctrl-drag carries the whole linked subtree; adding Shift packs it into a tidy
+ * cluster on release. Ctrl can be pressed mid-drag (document keydown listener —
+ * mousemove only reports modifiers when the mouse moves).
+ */
+// Clicking a node makes it the active card (keyboard Delete target, z-order).
+function onFlowNodeClick({ node }) {
+  const card = node.data?.card
+  if (card) activeCardId.value = card.id
+}
 
-  // Check if we're near a card border (connection dot is visible)
-  // If so, start a connection instead of dragging the card.
-  if (hoverCardId.value === card.id && hoverDot.value) {
-    event.stopPropagation()
-    event.preventDefault()
-    handleBorderClick()
-    return
-  }
+// Double-click a node: with Auto Center ON, redistribute the board around it
+// (centre of the universe, zoom untouched); otherwise zoom in to read it.
+function onFlowNodeDblClick({ node }) {
+  const card = node.data?.card
+  if (card) handleCardDblClick(card)
+}
 
-  // If dragging a connection and clicking on ANY card (not the source),
-  // force-complete the connection by computing the border point at click time.
-  // This is more forgiving than requiring the mouse to be exactly on the border zone.
-  if (isDragging.value && dragAnchor.value && card.id !== dragAnchor.value.cardId) {
-    event.stopPropagation()
-    event.preventDefault()
-    forceCompleteConnection(card.id, cardElements.value)
-    return
-  }
-
-  dragging.value = true
+function onFlowNodeDragStart({ event, node }) {
+  const card = node.data?.card
+  if (!card) return
   dragCard.value = card
   activeCardId.value = card.id
+  internalDragActive = false
 
-  const rect = event.currentTarget.getBoundingClientRect()
-  dragOffset.value = {
-    x: (event.clientX - rect.left) / zoomLevel.value,
-    y: (event.clientY - rect.top) / zoomLevel.value
+  // Hierarchical: pin X for the whole gesture — the drag is vertical-only.
+  if (activeVisualizer.value === 'hierarchical') {
+    updateNode(node.id, {
+      extent: [[node.position.x, -1e9], [node.position.x, 1e9]]
+    })
   }
 
-  document.addEventListener('mousemove', onDrag)
-  document.addEventListener('mouseup', stopDrag)
+  subtreeDrag.value = null
+  if (activeVisualizer.value === 'free-web' && (event.ctrlKey || event.metaKey)) {
+    attachSubtreeToDrag(card, event.shiftKey)
+  }
+
+  document.addEventListener('keydown', onDragModifierKey)
+  document.addEventListener('keyup', onDragModifierKey)
 }
 
-// Drag
-function onDrag(event) {
-  if (!dragging.value || !dragCard.value) return
+function onFlowNodeDrag({ node }) {
+  const card = node.data?.card
+  if (!card) return
 
-  const pos = screenToCanvas(event.clientX, event.clientY)
-  dragCard.value.x = pos.x - dragOffset.value.x
-  dragCard.value.y = pos.y - dragOffset.value.y
-}
-
-// Stop dragging
-function stopDrag() {
-  dragging.value = false
-  dragCard.value = null
-  document.removeEventListener('mousemove', onDrag)
-  document.removeEventListener('mouseup', stopDrag)
-}
-
-// Zoom in/out (continuous, centered on mouse or viewport center)
-function zoomIn() {
-  zoomAtPoint(zoomLevel.value * 1.15, null)
-}
-
-function zoomOut() {
-  zoomAtPoint(zoomLevel.value / 1.15, null)
-}
-
-// Zoom toward a specific screen point (or viewport center if null)
-function zoomAtPoint(newZoom, screenPoint) {
-  const minZoom = 0.1
-  const maxZoom = 5.0
-  newZoom = Math.max(minZoom, Math.min(maxZoom, newZoom))
-
-  const rect = canvas.value?.getBoundingClientRect()
-  if (!rect) {
-    zoomLevel.value = newZoom
+  // Hierarchical view: Y picks which row the node is being moved onto, which
+  // becomes its new parent. Applied in onFlowNodeDragStop().
+  if (activeVisualizer.value === 'hierarchical') {
+    const el = cardElements.value[card.id]
+    const h = el?.offsetHeight || 46
+    const midY = node.position.y + h / 2
+    reparentDrag.value = {
+      cardId: card.id,
+      targetId: hierarchyRowAtY(midY, card.id)
+    }
     return
   }
 
-  // Zoom toward the mouse position (or viewport center)
-  const px = screenPoint ? screenPoint.x - rect.left : rect.width / 2
-  const py = screenPoint ? screenPoint.y - rect.top : rect.height / 2
-
-  // The canvas point under the cursor before zoom
-  const canvasX = (px - panX.value) / zoomLevel.value
-  const canvasY = (py - panY.value) / zoomLevel.value
-
-  // After zoom, that same canvas point should stay under the cursor
-  panX.value = px - canvasX * newZoom
-  panY.value = py - canvasY * newZoom
-  zoomLevel.value = newZoom
+  // Ctrl-drag: the subtree travels with the grabbed node, holding formation.
+  if (subtreeDrag.value) {
+    for (const follower of subtreeDrag.value.offsets) {
+      const followerNode = findNode(String(follower.id))
+      if (followerNode) {
+        followerNode.position = {
+          x: node.position.x + follower.dx,
+          y: node.position.y + follower.dy
+        }
+      }
+    }
+  }
 }
 
-// Mouse wheel for zoom (no modifier key needed)
-function handleCanvasWheel(event) {
-  event.preventDefault()
-  const factor = event.deltaY < 0 ? 1.08 : 1 / 1.08
-  zoomAtPoint(zoomLevel.value * factor, { x: event.clientX, y: event.clientY })
+function onFlowNodeDragStop({ node }) {
+  const card = node.data?.card
+  document.removeEventListener('keydown', onDragModifierKey)
+  document.removeEventListener('keyup', onDragModifierKey)
+  if (!card) { dragCard.value = null; return }
+
+  if (activeVisualizer.value === 'hierarchical') {
+    // Commit the pending reparent (null target = become a root), then let the
+    // layout re-solve pull the row back into its computed slot.
+    updateNode(node.id, { extent: undefined })
+    if (reparentDrag.value) {
+      applyReparent(reparentDrag.value.cardId, reparentDrag.value.targetId)
+    }
+    reparentDrag.value = null
+    dragCard.value = null
+    nextTick(() => { collapseGeneration.value++ })
+    return
+  }
+
+  if (activeVisualizer.value === 'free-web') {
+    // Persist the final positions: the dragged card, and any subtree
+    // followers. Rendered coords go back through the inverse of the Auto
+    // Condense transform (identity when it is off), so stored positions stay
+    // in true coordinate space.
+    const t = condenseTransform.value
+    const toRaw = (nx, ny, w, h) => {
+      if (!t) return { x: nx, y: ny }
+      const rcx = t.cx + ((nx + w / 2) - t.cx) / t.k
+      const rcy = t.cy + ((ny + h / 2) - t.cy) / t.k
+      return { x: rcx - w / 2, y: rcy - h / 2 }
+    }
+    const w = node.dimensions?.width || card.width || 300
+    const h = node.dimensions?.height || 200
+    const raw = toRaw(node.position.x, node.position.y, w, h)
+    card.x = Math.round(raw.x)
+    card.y = Math.round(raw.y)
+    const state = subtreeDrag.value
+    if (state) {
+      for (const follower of state.offsets) {
+        const c = cards.value.find(x => x.id === follower.id)
+        const fn = c && findNode(String(c.id))
+        if (c && fn) {
+          const fw = fn.dimensions?.width || c.width || 300
+          const fh = fn.dimensions?.height || 200
+          const fraw = toRaw(fn.position.x, fn.position.y, fw, fh)
+          c.x = Math.round(fraw.x)
+          c.y = Math.round(fraw.y)
+        }
+      }
+      // Ctrl+Shift: pack the subtree into concentric rings on release.
+      if (state.tighten) {
+        applyTightenGlide(card, state.offsets.map(o => o.id))
+      }
+    }
+  }
+
+  subtreeDrag.value = null
+  dragCard.value = null
 }
+
+// ─── Border-tracking connection dot ───
+//
+// One dot per hovered card, clinging to the nearest point on the card's
+// perimeter and following the mouse while it is inside the hot band (a
+// generous ring past the card edge, plus a thin rim inside it). The dot is a
+// live Vue Flow source Handle, so pressing and dragging it starts a real
+// connection. Node-internals are refreshed (rAF-throttled) as the dot moves so
+// Vue Flow's rubber band anchors exactly where the user grabbed.
+const liveDot = ref(null) // { cardId, x, y, size } — node-local canvas px
+
+// Hot band, in SCREEN pixels (converted per event): how far outside the edge
+// the zone reaches. The band exists ONLY outside the card — over the card
+// itself there is never a dot, so dragging the card is never stolen.
+const CONNECT_BAND_OUT_PX = 52
+// On-screen dot diameter, likewise constant.
+const CONNECT_DOT_PX = 30
+
+// Canvas-space ceiling for the band thickness: without it, far-out zooms
+// would create enormous invisible frames overlapping neighbouring cards and
+// stealing their presses.
+const CONNECT_BAND_MAX_CANVAS = 120
+
+function connectBandCanvas() {
+  const z = viewport.value?.zoom || 1
+  return Math.min(CONNECT_BAND_OUT_PX / z, CONNECT_BAND_MAX_CANVAS)
+}
+
+// The band strips reach CONNECT_BAND_OUT_PX on screen (capped in canvas units).
+const connectBandStyle = computed(() => {
+  void viewport.value?.zoom
+  return { '--band': `${Math.round(connectBandCanvas())}px` }
+})
+
+let dotInternalsRaf = null
+
+function trackConnectDot(event, card) {
+  // While a connection is in flight the anchor is fixed — don't move it.
+  if (connecting.value) return
+  const el = cardElements.value[card.id]
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  const z = viewport.value?.zoom || 1
+  const bandOut = connectBandCanvas()
+  const px = (event.clientX - r.left) / z
+  const py = (event.clientY - r.top) / z
+  const w = r.width / z
+  const h = r.height / z
+
+  // The dot exists only while the pointer is OUTSIDE the card, within the
+  // band. Over the card itself: no dot — the whole surface drags the card.
+  const inside = px > 0 && px < w && py > 0 && py < h
+  if (inside) { clearConnectDot(); return }
+
+  // Nearest point on the perimeter, and the pointer's distance to it.
+  const x = Math.max(0, Math.min(w, px))
+  const y = Math.max(0, Math.min(h, py))
+  if (Math.hypot(px - x, py - y) > bandOut) { clearConnectDot(); return }
+
+  liveDot.value = {
+    cardId: card.id,
+    x: Math.round(x),
+    y: Math.round(y),
+    size: Math.round(CONNECT_DOT_PX / z)
+  }
+
+  // Refresh this node's handle bounds so a press on the dot anchors the
+  // connection at the dot's CURRENT spot, not where it was last measured.
+  if (!dotInternalsRaf) {
+    dotInternalsRaf = requestAnimationFrame(() => {
+      dotInternalsRaf = null
+      updateNodeInternals([String(card.id)])
+    })
+  }
+}
+
+function clearConnectDot() {
+  if (connecting.value) return
+  liveDot.value = null
+}
+
+// Block a node drag when the press lands on a real interaction surface (text
+// entry, media controls, links). One capture-phase guard on the card root
+// replaces per-element opt-outs: stopping propagation here means Vue Flow's
+// drag handler on the node wrapper never sees the press, while the element
+// itself behaves natively.
+function maybeBlockNodeDrag(event) {
+  const t = event.target
+  if (!t || !t.closest) return
+  if (t.closest('input, textarea, select, video, audio, a, [contenteditable="true"], .v-select, .v-field__input')) {
+    event.stopPropagation()
+  }
+}
+
+// Which row is under this canvas point? Used as the prospective parent while
+// dragging in the hierarchical view. Excludes the dragged card and any of its own
+// descendants — reparenting a node under its own child would orphan the subtree.
+/**
+ * Which row is at this Y? Used while dragging in the tree, where movement is
+ * vertical only so the X coordinate carries no information.
+ *
+ * Excludes the dragged node and its own descendants — reparenting a node under its
+ * own child would orphan the subtree.
+ */
+function hierarchyRowAtY(y, draggedId) {
+  const layout = hierarchyLayout.value
+  if (!layout) return null
+
+  const banned = descendantsOf(draggedId)
+  banned.add(draggedId)
+
+  for (const card of cards.value) {
+    if (banned.has(card.id)) continue
+    const pos = layout.get(card.id)
+    if (!pos) continue
+    const el = cardElements.value[card.id]
+    const h = el?.offsetHeight || pos.height || 46
+    if (y >= pos.y && y <= pos.y + h) return card.id
+  }
+  return null
+}
+
+// Offsets of every subtree member relative to an origin point, as they stand now.
+function captureSubtreeOffsets(origin, memberIds) {
+  return memberIds.map(id => {
+    const c = cards.value.find(x => x.id === id)
+    return c ? { id, dx: c.x - origin.x, dy: c.y - origin.y } : null
+  }).filter(Boolean)
+}
+
+/**
+ * Attach the grabbed card's linked subtree to the in-flight drag.
+ *
+ * Offsets are relative to the dragged NODE's current position (which equals the
+ * card's stored position at drag start), so followers hold their present
+ * formation. With `tighten` set, the cluster is packed into concentric rings on
+ * RELEASE (see onFlowNodeDragStop).
+ */
+function attachSubtreeToDrag(card, tighten) {
+  const members = linkedSubtreeOf(card.id)
+  if (!members.size) return false
+  const node = findNode(String(card.id))
+  const origin = node ? node.position : { x: card.x, y: card.y }
+  subtreeDrag.value = {
+    tighten: !!tighten,
+    offsets: captureSubtreeOffsets(origin, [...members])
+  }
+  return true
+}
+
+// Pack the subtree with the transient glide (shared by drag release and any
+// direct callers).
+function applyTightenGlide(card, memberIds) {
+  autoArranging.value = true
+  tightenSubtree(card, memberIds)
+  setTimeout(() => {
+    autoArranging.value = false
+    collapseGeneration.value++
+  }, AUTO_ARRANGE_DURATION)
+}
+
+/**
+ * Ctrl / Shift pressed (or released) while a node drag is already running.
+ *
+ * Ctrl is LATCHED: once it attaches the subtree, releasing the key does not
+ * detach it — a slipped finger mid-drag shouldn't silently abandon the subtree.
+ * Shift toggles whether the cluster is packed on release. Escape drops the
+ * subtree from the drag and puts the follower nodes back.
+ */
+function onDragModifierKey(event) {
+  if (!dragCard.value) return
+  if (activeVisualizer.value !== 'free-web') return
+
+  if (event.key === 'Escape') {
+    // Followers were only moved as NODES (cards untouched until release), so
+    // putting them back is just re-syncing node positions from the cards.
+    if (subtreeDrag.value) {
+      for (const follower of subtreeDrag.value.offsets) {
+        const c = cards.value.find(x => x.id === follower.id)
+        const n = c && findNode(String(c.id))
+        if (n) n.position = { x: c.x, y: c.y }
+      }
+      subtreeDrag.value = null
+    }
+    return
+  }
+
+  const ctrl = event.ctrlKey || event.metaKey
+  const state = subtreeDrag.value
+
+  if (ctrl && !state) {
+    // Attach mid-drag, from the CURRENT positions, so followers keep their
+    // present spacing rather than snapping to where they sat at mousedown.
+    attachSubtreeToDrag(dragCard.value, event.shiftKey)
+    return
+  }
+  if (!state) return
+
+  // Shift is read live: it decides whether the cluster packs on release.
+  state.tighten = event.shiftKey
+  // Ctrl itself stays latched — releasing it keeps the subtree attached.
+}
+
+/**
+ * Every node hanging off `rootId`, derived from the LINK GRAPH rather than the
+ * hierarchical layout — so it works in any view.
+ *
+ * Links are undirected, so "child" means "reachable without passing back through
+ * the root". Breadth-first from the root's neighbours; the visited set (seeded with
+ * the root) both breaks cycles and stops the walk escaping back up through it.
+ */
+function linkedSubtreeOf(rootId) {
+  const adjacency = new Map(cards.value.map(c => [c.id, []]))
+  for (const link of nodeLinks.value) {
+    if (!adjacency.has(link.sourceCardId) || !adjacency.has(link.targetCardId)) continue
+    adjacency.get(link.sourceCardId).push(link.targetCardId)
+    adjacency.get(link.targetCardId).push(link.sourceCardId)
+  }
+
+  const visited = new Set([rootId])
+  const out = new Set()
+  const queue = [...(adjacency.get(rootId) || [])]
+
+  while (queue.length) {
+    const id = queue.shift()
+    if (visited.has(id)) continue
+    visited.add(id)
+    out.add(id)
+    for (const next of adjacency.get(id) || []) {
+      if (!visited.has(next)) queue.push(next)
+    }
+  }
+  return out
+}
+
+function descendantsOf(rootId) {
+  const out = new Set()
+  const layout = hierarchyLayout.value
+  if (!layout) return out
+  // layout entries carry parentId, so walk the map repeatedly until stable.
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const [id, pos] of layout) {
+      if (out.has(id)) continue
+      if (pos.parentId === rootId || out.has(pos.parentId)) {
+        out.add(id)
+        grew = true
+      }
+    }
+  }
+  return out
+}
+
+// Apply a hierarchical reparent: drop onto a row to become its child, or onto
+// empty space to become a root. Implemented by rewriting links, since the tree is
+// derived from the link graph rather than stored parent pointers.
+function applyReparent(cardId, newParentId) {
+  const layout = hierarchyLayout.value
+  const currentParent = layout?.get(cardId)?.parentId ?? null
+  if (currentParent === newParentId) return
+
+  // Drop the link to the old parent, if there is one.
+  if (currentParent != null) {
+    const stale = nodeLinks.value.find(
+      l => (l.sourceCardId === currentParent && l.targetCardId === cardId) ||
+           (l.sourceCardId === cardId && l.targetCardId === currentParent)
+    )
+    if (stale) deleteLink(stale.id)
+  }
+
+  if (newParentId != null) {
+    createLink(newParentId, cardId)
+    triggerFlash(newParentId)
+  }
+  triggerFlash(cardId)
+  balancedWebEpoch.value++   // tree changed; force dependent layouts to re-solve
+}
+
+// ─── Vue Flow connection lifecycle (drag a border dot to link) ───
+
+// Reject self-links and duplicates while the user is still aiming, so invalid
+// targets don't light up as connectable.
+//
+// CAUTION: Vue Flow runs this against EVERY edge passed to setEdges as well,
+// not just interactive connection attempts — so a persisted link re-presenting
+// itself (same id) must count as valid, or no stored edge ever renders.
+function isValidConnection(connection) {
+  const s = Number(connection.source)
+  const t = Number(connection.target)
+  if (!Number.isFinite(s) || !Number.isFinite(t) || s === t) return false
+  const existing = nodeLinks.value.find(
+    l => (l.sourceCardId === s && l.targetCardId === t) ||
+         (l.sourceCardId === t && l.targetCardId === s)
+  )
+  if (!existing) return true
+  return String(existing.id) === String(connection.id ?? '')
+}
+
+function onConnectStart(params) {
+  connecting.value = true
+  connectDidComplete = false
+  pendingConnectSource.value = params?.nodeId ? Number(params.nodeId) : null
+}
+
+function onConnect(connection) {
+  const s = Number(connection.source)
+  const t = Number(connection.target)
+  connectDidComplete = true
+  if (createLink(s, t)) {
+    triggerFlash(s)
+    triggerFlash(t)
+    // A first connection pulls a lone node in next to its anchor (see the
+    // nodeLinks watcher) — same behaviour as before.
+  }
+}
+
+// Release: over a card, onConnect already made the link. Over empty canvas,
+// open the spawn menu there — choosing a type creates the card AND the link
+// back to the source node (see spawnFromDrop).
+function onConnectEnd(event) {
+  connecting.value = false
+  liveDot.value = null
+  if (connectDidComplete) {
+    pendingConnectSource.value = null
+    return
+  }
+  const clientX = event?.clientX ?? event?.changedTouches?.[0]?.clientX
+  const clientY = event?.clientY ?? event?.changedTouches?.[0]?.clientY
+  const onPane = event?.target?.classList?.contains('vue-flow__pane')
+  if (onPane && clientX != null && pendingConnectSource.value != null) {
+    dropMenuPos.value = toFlow(clientX, clientY)
+    showDropMenu.value = true
+    // pendingConnectSource stays set — consumed by spawnFromDrop.
+  } else {
+    pendingConnectSource.value = null
+  }
+}
+
+// ─── Zoom actions ───
+
+// Frame every card in the viewport (F key / Fit chip / board open).
+function fitBoard() {
+  fitView({ padding: 0.12, maxZoom: 1, duration: 400 })
+}
+
 
 // Add parent node card
 function addParentNode(parentType) {
-  const rect = canvas.value?.getBoundingClientRect()
-  const pos = rect ? {
-    x: (rect.width / 2 - panX.value) / zoomLevel.value - 90,
-    y: (rect.height / 2 - panY.value) / zoomLevel.value - 90
-  } : { x: 100, y: 100 }
+  const pos = getCanvasCenter(-90, -90)
 
   cards.value.push({
     id: nextId++,
@@ -2605,6 +4147,18 @@ function spawnFromDrop(type, parentType = null) {
   } else if (type === 'markdown') {
     newCard.markdownContent = ''
     newCard.width = 600
+  } else if (type === 'contact') {
+    newCard.contactRole = ''
+    newCard.contactOrg = ''
+    newCard.contactPhone = ''
+    newCard.contactEmail = ''
+    newCard.notes = ''
+    newCard.width = 460
+  } else if (type === 'question') {
+    newCard.content = ''
+    newCard.questionAnswer = ''
+    newCard.questionAnswered = false
+    newCard.width = 500
   } else if (type === 'parent' && parentType) {
     newCard.content = ''
     newCard.width = 300
@@ -2617,12 +4171,24 @@ function spawnFromDrop(type, parentType = null) {
   }
 
   cards.value.push(newCard)
-  completeDropConnection(newCard.id)
+  // If this spawn ended a connection drag, link the new card back to its source.
+  const sourceId = pendingConnectSource.value
+  if (sourceId != null && createLink(sourceId, newCard.id)) {
+    triggerFlash(sourceId)
+    triggerFlash(newCard.id)
+  }
+  closeDropMenu()
+  // The drop point is wherever the user released, which may overlap existing
+  // cards. Nudge the new node clear while keeping it near its parent.
+  nextTick(() => {
+    const anchor = cards.value.find(c => c.id === sourceId)
+    if (anchor) ensureSpawnClear(newCard, anchor)
+  })
 }
 
 // Handle Ctrl+V while drop menu is open -> paste content and auto-link
 function handleDropPaste(event) {
-  if (!showDropMenu.value || !isDragging.value) return false
+  if (!showDropMenu.value) return false
 
   const items = event.clipboardData?.items
   if (!items) return false
@@ -2650,7 +4216,16 @@ function handleDropPaste(event) {
           collapsed: false
         }
         cards.value.push(newCard)
-        completeDropConnection(newCard.id)
+        const pastedAnchorId = pendingConnectSource.value
+        if (pastedAnchorId != null && createLink(pastedAnchorId, newCard.id)) {
+          triggerFlash(pastedAnchorId)
+          triggerFlash(newCard.id)
+        }
+        closeDropMenu()
+        nextTick(() => {
+          const anchor = cards.value.find(c => c.id === pastedAnchorId)
+          if (anchor) ensureSpawnClear(newCard, anchor)
+        })
       }
       reader.readAsDataURL(blob)
       return true
@@ -2716,7 +4291,16 @@ function handleDropPaste(event) {
           }
         }
         cards.value.push(newCard)
-        completeDropConnection(newCard.id)
+        const pastedAnchorId = pendingConnectSource.value
+        if (pastedAnchorId != null && createLink(pastedAnchorId, newCard.id)) {
+          triggerFlash(pastedAnchorId)
+          triggerFlash(newCard.id)
+        }
+        closeDropMenu()
+        nextTick(() => {
+          const anchor = cards.value.find(c => c.id === pastedAnchorId)
+          if (anchor) ensureSpawnClear(newCard, anchor)
+        })
 
         // Auto-fetch link preview if link
         if (newCard.type === 'link') {
@@ -2729,17 +4313,6 @@ function handleDropPaste(event) {
 
   return false
 }
-
-// Computed: rendered link lines with coordinates
-// Depends on collapseGeneration to recompute when cards collapse/expand (changes DOM dimensions)
-const renderedLinks = computed(() => {
-  void collapseGeneration.value // reactive dependency — forces recompute on collapse/expand
-  return nodeLinks.value.map(link => {
-    const coords = getLineCoords(link, cardElements.value)
-    if (!coords) return null
-    return { ...link, ...coords }
-  }).filter(Boolean)
-})
 
 // Confirm delete (shows dialog)
 function confirmDelete(id) {
@@ -2788,8 +4361,9 @@ function debouncedSave() {
 }
 
 // Save whiteboard
-async function saveBoard() {
-  if (!currentEpisode.value) {
+async function saveBoard(episodeOverride = null) {
+  const targetEpisode = episodeOverride || currentEpisode.value
+  if (!targetEpisode) {
     // No episode selected, use localStorage only
     try {
       localStorage.setItem('whiteboard-cards', JSON.stringify(cards.value))
@@ -2814,7 +4388,15 @@ async function saveBoard() {
       text_content: card.content || null,
       url: card.url || null,
       notes: card.notes || null,
-      image_data: card.imageUrl || null,
+      // Only send image_data for genuinely new base64 payloads. Once media lives
+      // on the filesystem, imageUrl is a /pool/... path — sending that as
+      // image_data fails the backend's base64 decode, which nulls media_asset_id
+      // and orphans the file. Send media_asset_id instead so it re-links.
+      image_data: (card.imageUrl && card.imageUrl.startsWith('data:')) ? card.imageUrl : null,
+      media_asset_id: card.mediaAssetId || null,
+      // Client-side additions (e.g. source page metadata) are merged with the
+      // backend's intrinsic/EXIF extraction on save.
+      media_metadata: card.mediaMetadata || null,
       caption: card.caption || null,
       width: card.width || null,
       z_index: card.id === activeCardId.value ? 1000 : 1,
@@ -2826,13 +4408,16 @@ async function saveBoard() {
       preview_domain: card.previewDomain || null,
       preview_favicon: card.previewFavicon || null,
       // Social media metadata
-      social_metadata: card.socialMetadata || null
+      // Contact and question cards keep their structured fields in social_metadata
+      // (already a JSON grab-bag) rather than needing new columns per type.
+      social_metadata: typeFieldsForSave(card),
+      comments: Array.isArray(card.comments) && card.comments.length ? card.comments : null
     }))
 
     // Prepare node links for save (map card IDs to array indices)
     const node_links = getLinksForSave(cards.value)
 
-    const response = await fetchJson(`/api/whiteboard/${currentEpisode.value}/save`, {
+    const response = await fetchJson(`/api/whiteboard/${targetEpisode}/save`, {
       method: 'POST',
       body: JSON.stringify({ items, node_links })
     })
@@ -2864,6 +4449,10 @@ async function loadBoard() {
       console.error('Failed to load from localStorage:', error)
     } finally {
       boardLoaded = true
+      await nextTick()
+      separateOverlappingCards()
+      pendingInitialFit = cards.value.length > 0
+      scheduleFitFallback()
     }
     return
   }
@@ -2882,7 +4471,9 @@ async function loadBoard() {
         x: item.x_position,
         y: item.y_position,
         width: item.width,
-        collapsed: item.collapsed || false
+        collapsed: item.collapsed || false,
+        // Comments exist on every node type, so they live on the base card.
+        comments: Array.isArray(item.comments) ? item.comments : []
       }
 
       if (item.item_type === 'text') {
@@ -2905,9 +4496,15 @@ async function loadBoard() {
         // Restore local cache status (Twitter media stored on filesystem)
         card._locallyCached = item.social_metadata?._locally_cached || false
       } else if (item.item_type === 'image') {
-        card.imageUrl = item.image_data
+        // Filesystem-backed media serves via media_url (/pool/...); image_data is
+        // only populated for legacy/standalone base64 cards. Prefer media_url.
+        card.imageUrl = item.media_url || item.image_data || ''
+        card.mediaAssetId = item.media_asset_id || null
+        card.mediaMetadata = item.media_metadata || null
         card.caption = item.caption || ''
         card.notes = item.notes || ''
+        // Source URL for images dragged in from a web page (blank for local files)
+        card.url = item.url || ''
       } else if (item.item_type === 'video') {
         card.videoUrl = item.video_url || item.url || ''
         card.assetId = item.asset_id || ''
@@ -2925,12 +4522,29 @@ async function loadBoard() {
         card.markdownContent = item.markdown_content || item.text_content || ''
       } else if (item.item_type === 'parent') {
         card.content = item.text_content || ''
+      } else if (item.item_type === 'contact') {
+        // Structured fields ride in social_metadata — see typeFieldsForSave().
+        const meta = item.social_metadata || {}
+        card.contactRole = meta.contactRole || ''
+        card.contactOrg = meta.contactOrg || ''
+        card.contactPhone = meta.contactPhone || ''
+        card.contactEmail = meta.contactEmail || ''
+        card.notes = item.notes || ''
+      } else if (item.item_type === 'question') {
+        const meta = item.social_metadata || {}
+        card.content = item.text_content || ''
+        card.questionAnswer = meta.questionAnswer || ''
+        card.questionAnswered = !!meta.questionAnswered
       }
 
       return card
     })
 
-    // Load node links (map DB indices back to client card IDs)
+    // Load node links (map DB indices back to client card IDs). Reset the
+    // snap-watcher's memory first, or every link of the incoming board reads
+    // as "newly created" after an episode switch and the first-connection
+    // snap starts rearranging freshly loaded cards.
+    knownLinkIds = new Set()
     if (response.node_links) {
       loadLinks(response.node_links, cards.value)
     }
@@ -2940,7 +4554,93 @@ async function loadBoard() {
     notifyUserStandard('Failed to load whiteboard', NOTIFICATION_COLORS.ERROR, 3000)
   } finally {
     boardLoaded = true
+    // Stored positions can leave cards overlapping — from older boards, from
+    // hand-dragging, or simply from being saved at a different zoom. Separate them
+    // once the DOM has measured, so a freshly loaded board is always readable.
+    await nextTick()
+    separateOverlappingCards()
+    // Open framed to the content — the whole structure visible, at whatever
+    // zoom that takes. Deferred to nodes-initialized so the frame measures the
+    // real card sizes.
+    pendingInitialFit = cards.value.length > 0
+    scheduleFitFallback()
   }
+}
+
+/**
+ * Guarantee no card overlaps another, by EXPANDING THE WHOLE BOARD.
+ *
+ * Pairwise nudging was tried first and does not work: pushing two cards apart just
+ * shoves each into its neighbours, so it oscillates and plateaus around 8-12
+ * residual overlaps no matter how many passes run (measured 66 -> 12 at 8 passes,
+ * and still 8 at 120). Biasing the push direction only collapses the board into a
+ * line (a 15789x56 bounding box in testing).
+ *
+ * Scaling every position outward from the centroid resolves it completely, because
+ * gaps grow while card sizes stay fixed. It also preserves the arrangement and the
+ * board's shape — measured 66 -> 0, 435 -> 0 and 1200 -> 0, with aspect ratios
+ * staying between 1.3 and 3.0.
+ *
+ * A board with no overlaps is left byte-identical.
+ */
+function separateOverlappingCards() {
+  const list = cards.value
+  if (list.length < 2) return
+
+  const GAP = 60
+  const box = card => {
+    const el = cardElements.value[card.id]
+    return {
+      w: el?.offsetWidth || (card.collapsed ? 220 : (card.width || 300)),
+      h: el?.offsetHeight || (card.collapsed ? 46 : 200)
+    }
+  }
+
+  const positioned = list.filter(c => Number.isFinite(c.x) && Number.isFinite(c.y))
+  if (positioned.length < 2) return
+
+  const anyOverlap = () => {
+    for (let i = 0; i < positioned.length; i++) {
+      for (let j = i + 1; j < positioned.length; j++) {
+        const a = positioned[i], b = positioned[j]
+        const ba = box(a), bb = box(b)
+        const overlapX = a.x < b.x + bb.w + GAP && a.x + ba.w + GAP > b.x
+        const overlapY = a.y < b.y + bb.h + GAP && a.y + ba.h + GAP > b.y
+        if (overlapX && overlapY) return true
+      }
+    }
+    return false
+  }
+
+  if (!anyOverlap()) return
+
+  // Expand outward from the centroid until nothing collides. Bounded so a
+  // pathological board cannot loop forever.
+  const STEP = 1.15
+  for (let round = 0; round < 40 && anyOverlap(); round++) {
+    let cx = 0, cy = 0
+    for (const c of positioned) {
+      const b = box(c)
+      cx += c.x + b.w / 2
+      cy += c.y + b.h / 2
+    }
+    cx /= positioned.length
+    cy /= positioned.length
+
+    for (const c of positioned) {
+      const b = box(c)
+      const centreX = c.x + b.w / 2
+      const centreY = c.y + b.h / 2
+      c.x = (cx + (centreX - cx) * STEP) - b.w / 2
+      c.y = (cy + (centreY - cy) * STEP) - b.h / 2
+    }
+  }
+
+  for (const c of positioned) {
+    c.x = Math.round(c.x)
+    c.y = Math.round(c.y)
+  }
+  nextTick(() => { collapseGeneration.value++ })
 }
 
 // Fetch episodes for selector
@@ -2977,22 +4677,35 @@ async function confirmEpisodeSelection() {
   if (!selectedEpisodeValue.value) return
 
   const ep = selectedEpisodeValue.value
-  sessionStorage.setItem('currentEpisode', ep)
-  sessionStorage.setItem('currentEpisodeId', ep)
+  const previousEpisode = currentEpisode.value
+  switchingViaDialog = true
+  if (saveTimeout) clearTimeout(saveTimeout)
 
-  // Update URL query param so identifier computed picks it up
-  await router.replace({ query: { ...route.query, episode: ep } })
+  try {
+    sessionStorage.setItem('currentEpisode', ep)
+    sessionStorage.setItem('currentEpisodeId', ep)
 
-  showEpisodeDialog.value = false
-  notifyUserStandard(`Episode ${ep} selected`, NOTIFICATION_COLORS.SUCCESS, 3000)
+    // Update URL query param so identifier computed picks it up
+    await router.replace({ query: { ...route.query, episode: ep } })
 
-  // Reload board for the new episode
-  await loadBoard()
+    showEpisodeDialog.value = false
+    notifyUserStandard(`Episode ${ep} selected`, NOTIFICATION_COLORS.SUCCESS, 3000)
 
-  // If save was pending, do it now
-  if (pendingSaveAfterSelect.value) {
-    pendingSaveAfterSelect.value = false
-    await saveBoard()
+    if (pendingSaveAfterSelect.value) {
+      // Menu-save with no episode: the point is to save the CURRENT cards to
+      // the episode the user just picked — do not load over them.
+      pendingSaveAfterSelect.value = false
+      await saveBoard(ep)
+    } else {
+      // Normal switch: outgoing board goes back to ITS OWN episode, then the
+      // new episode's board loads.
+      if (previousEpisode && boardLoaded && cards.value.length > 0) {
+        await saveBoard(previousEpisode)
+      }
+      await loadBoard()
+    }
+  } finally {
+    switchingViaDialog = false
   }
 }
 
@@ -3011,9 +4724,10 @@ async function handleEpisodeCreated(episode) {
   if (epNum) {
     sessionStorage.setItem('currentEpisode', epNum)
     sessionStorage.setItem('currentEpisodeId', epNum)
+    // The currentEpisode watcher saves the outgoing board (under its own
+    // episode) and loads the new one — no extra load here.
     await router.replace({ query: { ...route.query, episode: epNum } })
     notifyUserStandard(`Episode ${epNum} created and selected`, NOTIFICATION_COLORS.SUCCESS, 3000)
-    await loadBoard()
   }
 }
 
@@ -3051,6 +4765,48 @@ function formatDate(dateString) {
 }
 
 // Fetch link preview
+// For a web-dropped image, ask the backend what the source URL's page says about
+// itself (og:title / description / site). Populates the card's metadata panel so
+// the image is described by more than its pixel dimensions. Best-effort: many
+// image URLs are bare files with no page metadata, and some hosts return 403.
+async function fetchImagePageMetadata(card) {
+  if (!card.url || !/^https?:\/\//.test(card.url)) return
+  try {
+    const response = await fetchJson(
+      `/api/whiteboard/fetch-link-preview?url=${encodeURIComponent(card.url)}`,
+      { method: 'POST' }
+    )
+    if (!response || response.error) return
+    const merged = { ...(card.mediaMetadata || {}) }
+    if (response.title) merged.source_title = response.title
+    if (response.description) merged.source_description = response.description
+    if (response.domain) merged.source_site = response.domain
+    card.mediaMetadata = merged
+  } catch (error) {
+    // Non-fatal: the card still shows intrinsic metadata from the backend.
+    console.debug('No page metadata for dropped image:', error)
+  }
+}
+
+// Turn an image card that remembers its source URL into a full link card,
+// fetching the preview (title / description / og:image) for that URL.
+function convertImageToLinkCard(card) {
+  if (!card.url) return
+  card.type = 'link'
+  card.notes = card.notes || ''
+  card.previewTitle = null
+  card.previewDescription = null
+  // Keep the dragged image visible until the real preview arrives.
+  card.previewImage = card.imageUrl || null
+  card.previewDomain = null
+  card.previewFavicon = null
+  card.fetchingPreview = false
+  card.socialMetadata = null
+  card.width = 500
+  // bypassCache: we seeded previewImage above, which would otherwise short-circuit.
+  fetchLinkPreview(card, true)
+}
+
 async function fetchLinkPreview(card, bypassCache = false) {
   if (!card.url || !card.url.match(/^https?:\/\//)) {
     return
@@ -3125,6 +4881,1499 @@ async function reloadFromServer(card) {
 }
 
 // Platform chip config for social media badges
+// ─── Node type identity (single source of truth) ───
+// Colors were previously duplicated inline across ~16 template sites (headers,
+// collapsed pills, borders), which is why expanded and collapsed cards drifted
+// apart. Everything type-colored now reads from here.
+const NODE_TYPES = {
+  text: { label: 'TEXT', icon: 'mdi-text', color: '#FFA726', tint: '#FFF8E1' },
+  link: { label: 'LINK', icon: 'mdi-link', color: '#1976D2', tint: '#E3F2FD' },
+  image: { label: 'IMAGE', icon: 'mdi-image', color: '#757575', tint: '#F5F5F5' },
+  video: { label: 'VIDEO', icon: 'mdi-video', color: '#E53935', tint: '#FFEBEE' },
+  audio: { label: 'AUDIO', icon: 'mdi-music', color: '#8E24AA', tint: '#F3E5F5' },
+  html: { label: 'HTML', icon: 'mdi-language-html5', color: '#F57C00', tint: '#FFF3E0' },
+  code: { label: 'CODE', icon: 'mdi-code-tags', color: '#43A047', tint: '#E8F5E9' },
+  markdown: { label: 'MD', icon: 'mdi-language-markdown', color: '#3949AB', tint: '#E8EAF6' },
+  contact: { label: 'CONTACT', icon: 'mdi-account-box', color: '#00897B', tint: '#E0F2F1' },
+  question: { label: 'QUESTION', icon: 'mdi-help-circle', color: '#C2185B', tint: '#FCE4EC' },
+  parent: { label: 'NODE', icon: 'mdi-file-tree', color: '#1565C0', tint: '#E3F2FD' },
+  file: { label: 'FILE', icon: 'mdi-file', color: '#546E7A', tint: '#ECEFF1' }
+}
+
+const WARNING_TYPE = { label: 'WARNING', icon: 'mdi-alert', color: '#ff4444', tint: '#2d1010' }
+
+// Concrete hexes for social platforms (socialPlatformChip returns Vuetify theme
+// names, which work as :color props but not in raw CSS).
+const SOCIAL_HEX = {
+  x: '#000000',
+  twitter: '#1DA1F2',
+  tiktok: '#000000',
+  youtube: '#FF0000',
+  instagram: '#C13584',
+  facebook: '#1877F2',
+  reddit: '#FF4500'
+}
+
+// Resolve a card to its type identity. Special cases that override the raw
+// item_type: warning text cards, social link cards (platform branding), and
+// parent nodes (which carry their own configured color).
+function nodeType(card) {
+  if (!card) return NODE_TYPES.text
+  if (card.type === 'text' && card.isWarning) return WARNING_TYPE
+
+  if (card.type === 'link' && card.socialMetadata?.platform) {
+    const chip = socialPlatformChip(card.socialMetadata.platform)
+    return {
+      label: (chip.label || 'LINK').toUpperCase(),
+      icon: chip.icon || 'mdi-link',
+      // socialPlatformChip returns Vuetify theme names ("primary"); those work
+      // as :color props but not in raw CSS, so keep a concrete hex for styling.
+      color: SOCIAL_HEX[card.socialMetadata.platform] || NODE_TYPES.link.color,
+      tint: NODE_TYPES.link.tint
+    }
+  }
+
+  if (card.type === 'parent') {
+    const meta = card.socialMetadata || {}
+    return {
+      label: (meta.parentNodeType || '').toUpperCase(),
+      icon: meta.parentNodeIcon || NODE_TYPES.parent.icon,
+      color: meta.parentNodeColor || NODE_TYPES.parent.color,
+      tint: NODE_TYPES.parent.tint
+    }
+  }
+
+  return NODE_TYPES[card.type] || NODE_TYPES.file
+}
+
+// Width the header title field to its own content, so it doesn't stretch across
+// the header. A full-width input swallows presses everywhere in the header and
+// startDrag() refuses to drag from INPUT targets — leaving the header dead to
+// drag-to-move. Sized to content, only the text itself is a text target and the
+// surrounding header chrome stays draggable.
+// The title input is capped at TITLE_HOTSPOT_CH characters wide regardless of how
+// long the title is. Anything the input covers is a text-edit target and cannot
+// drag the card, so keeping it short leaves the rest of the header draggable. The
+// full title still displays — it overflows into the sibling span below.
+const TITLE_HOTSPOT_CH = 7
+
+function titleFieldStyle(card) {
+  const text = (card?.title || '') || titlePlaceholder(card)
+  // Width is in ch units so it tracks the header font (0.95rem/700) directly,
+  // rather than needing a magic em ratio per font size.
+  const ch = Math.max(3, Math.min(TITLE_HOTSPOT_CH, text.length + 1))
+  return {
+    width: `${ch}ch`,
+    flex: '0 0 auto',
+    fontSize: '0.95rem'
+  }
+}
+
+// The placeholder is what's visible when the title is empty, so it drives the
+// width in that state.
+function titlePlaceholder(card) {
+  if (!card) return 'Title'
+  if (card.type === 'image') return card.caption || 'Image'
+  if (card.type === 'link') return card.previewTitle || card.url || 'Link'
+  const t = NODE_TYPES[card.type]
+  return t ? t.label.charAt(0) + t.label.slice(1).toLowerCase() : 'Title'
+}
+
+// ─── Visualizers (board layout modes) ───
+
+const VISUALIZERS = [
+  {
+    key: 'free-web',
+    label: 'Free Web',
+    icon: 'mdi-graph-outline',
+    description: 'Cards sit wherever you drop them'
+  },
+  {
+    key: 'balanced-web',
+    label: 'Balanced Web',
+    icon: 'mdi-vector-triangle',
+    description: 'Same web, auto-spaced for even distribution'
+  },
+  {
+    key: 'waterfall-web',
+    label: 'Waterfall Web',
+    icon: 'mdi-file-tree-outline',
+    description: 'Parents on top, children below, siblings side by side'
+  },
+  {
+    key: 'hierarchical',
+    label: 'Hierarchical',
+    icon: 'mdi-file-tree',
+    description: 'Parent/child relationships as an indented tree'
+  }
+]
+
+const activeVisualizer = ref('free-web')
+const visualizerMenuOpen = ref(false)
+const viewSelectorOpen = ref(false)
+
+const currentVisualizer = computed(
+  () => VISUALIZERS.find(v => v.key === activeVisualizer.value) || VISUALIZERS[0]
+)
+
+// Collapsed cards render as a wide horizontal ROW in the hierarchical view rather
+// than the compact pill used elsewhere. A row reads as a line item in a tree and
+// its full width makes the indent legible. This is a rendering state derived from
+// the existing `collapsed` boolean — no schema change, and a card keeps its
+// collapsed state when switching views.
+function isCollapsedRow(card) {
+  return card.collapsed && activeVisualizer.value === 'hierarchical'
+}
+
+// Fixed CANVAS-SPACE width for the hierarchical tree column. Rows used to derive
+// their width from the viewport divided by the zoom (a screen-space rule), which
+// meant row geometry changed on every zoom step. A fixed canvas width keeps the
+// tree honest under geometric zoom: zooming just scales it, like everything else.
+const TREE_WIDTH = 1600
+
+// ─── Waterfall web layout ───
+//
+// A layered tree drawn top-down: parent hubs on the top row, each generation of
+// children on the row beneath its parent, and siblings placed side by side.
+//
+// Unlike the hierarchical view (an indented list), this keeps the web's shape —
+// children fan out horizontally under their parent rather than stepping right —
+// so the structure reads as a waterfall.
+
+const WF_LEVEL_GAP = 220   // vertical distance between generations
+const WF_SIBLING_GAP = 80  // horizontal space between siblings
+const WF_TREE_GAP = 260    // extra space between separate trees
+const WF_ORIGIN = { x: 120, y: 120 }
+
+const waterfallLayout = computed(() => {
+  if (activeVisualizer.value !== 'waterfall-web') return null
+  const list = cards.value
+  if (!list.length) return null
+  void collapseGeneration.value  // re-solve when card sizes change
+
+  const elements = toRaw(cardElements.value)
+  const sizeOf = card => {
+    const el = elements[card.id]
+    return {
+      w: el?.offsetWidth || (card.collapsed ? 220 : (card.width || 300)),
+      h: el?.offsetHeight || (card.collapsed ? 46 : 200)
+    }
+  }
+
+  const byId = new Map(list.map(c => [c.id, c]))
+  const adjacency = new Map(list.map(c => [c.id, []]))
+  for (const link of nodeLinks.value) {
+    if (!adjacency.has(link.sourceCardId) || !adjacency.has(link.targetCardId)) continue
+    adjacency.get(link.sourceCardId).push(link.targetCardId)
+    adjacency.get(link.targetCardId).push(link.sourceCardId)
+  }
+
+  // Roots: parent-type hubs, else the best-connected card of each component.
+  const degree = id => adjacency.get(id)?.length || 0
+  const parents = list.filter(c => c.type === 'parent')
+  const visited = new Set()
+  const roots = []
+  for (const p of parents) roots.push(p.id)
+  // Any component with no parent hub still needs a root, or it would be dropped.
+  for (const c of [...list].sort((a, b) => degree(b.id) - degree(a.id))) {
+    if (roots.includes(c.id)) continue
+    const reachable = roots.some(r => componentContains(adjacency, r, c.id))
+    if (!reachable) roots.push(c.id)
+  }
+
+  // BFS from each root: first arrival fixes a card's generation and its parent.
+  const children = new Map(list.map(c => [c.id, []]))
+  const depth = new Map()
+  const rootOf = new Map()
+  for (const rootId of roots) {
+    if (visited.has(rootId)) continue
+    visited.add(rootId)
+    depth.set(rootId, 0)
+    rootOf.set(rootId, rootId)
+    const queue = [rootId]
+    while (queue.length) {
+      const id = queue.shift()
+      // Stable sibling order so the layout doesn't reshuffle between renders.
+      const next = (adjacency.get(id) || [])
+        .filter(k => !visited.has(k))
+        .sort((a, b) => (byId.get(a)?.y ?? 0) - (byId.get(b)?.y ?? 0) ||
+          (byId.get(a)?.x ?? 0) - (byId.get(b)?.x ?? 0))
+      for (const kid of next) {
+        visited.add(kid)
+        depth.set(kid, depth.get(id) + 1)
+        rootOf.set(kid, rootId)
+        children.get(id).push(kid)
+        queue.push(kid)
+      }
+    }
+  }
+  // Anything still unvisited (isolated card) becomes its own root.
+  for (const c of list) {
+    if (visited.has(c.id)) continue
+    visited.add(c.id)
+    depth.set(c.id, 0)
+    rootOf.set(c.id, c.id)
+    roots.push(c.id)
+  }
+
+  // Width of a subtree = max(own width, sum of children's widths + gaps). This is
+  // what keeps siblings adjacent without their descendants colliding.
+  const subtreeWidth = new Map()
+  const measure = id => {
+    if (subtreeWidth.has(id)) return subtreeWidth.get(id)
+    const card = byId.get(id)
+    const own = card ? sizeOf(card).w : 300
+    const kids = children.get(id) || []
+    let total = 0
+    for (const kid of kids) total += measure(kid) + WF_SIBLING_GAP
+    if (kids.length) total -= WF_SIBLING_GAP
+    const width = Math.max(own, total)
+    subtreeWidth.set(id, width)
+    return width
+  }
+  for (const rootId of roots) measure(rootId)
+
+  // Place: each node is centred over the span its children occupy.
+  const positions = new Map()
+  const place = (id, left, top) => {
+    const card = byId.get(id)
+    const size = card ? sizeOf(card) : { w: 300, h: 200 }
+    const span = subtreeWidth.get(id) || size.w
+
+    positions.set(id, {
+      x: Math.round(left + (span - size.w) / 2),
+      y: Math.round(top),
+      depth: depth.get(id) || 0
+    })
+
+    const kids = children.get(id) || []
+    if (!kids.length) return
+    let childLeft = left
+    // Rows are spaced by the tallest card in the generation above.
+    const rowGap = size.h + WF_LEVEL_GAP
+    for (const kid of kids) {
+      place(kid, childLeft, top + rowGap)
+      childLeft += (subtreeWidth.get(kid) || 300) + WF_SIBLING_GAP
+    }
+  }
+
+  let cursorX = WF_ORIGIN.x
+  for (const rootId of roots) {
+    place(rootId, cursorX, WF_ORIGIN.y)
+    cursorX += (subtreeWidth.get(rootId) || 300) + WF_TREE_GAP
+  }
+  return positions
+})
+
+// Is `targetId` in the same connected component as `fromId`?
+function componentContains(adjacency, fromId, targetId) {
+  const seen = new Set([fromId])
+  const queue = [fromId]
+  while (queue.length) {
+    const id = queue.shift()
+    if (id === targetId) return true
+    for (const next of adjacency.get(id) || []) {
+      if (!seen.has(next)) {
+        seen.add(next)
+        queue.push(next)
+      }
+    }
+  }
+  return false
+}
+
+// Hierarchical layout geometry
+const HIER_INDENT = 320      // horizontal step per depth level
+const HIER_ROW_GAP = 26      // vertical gap between sibling rows
+// Tree is pinned to the top-left of the canvas: the root sits at the top edge,
+// left-justified, and horizontal panning is locked (see handleCanvasMouseMove) so
+// the structure always starts in the same place.
+const HIER_ORIGIN = { x: 24, y: 24 }
+
+/**
+ * Width of a row in the hierarchical tree.
+ *
+ * Rows share a fixed canvas-space right edge (TREE_WIDTH), so deeper rows are
+ * SHORTER by exactly their extra indent and the tree reads as one aligned
+ * column. Pure canvas geometry — zoom scales it like everything else.
+ */
+function treeRowWidth(card) {
+  const depth = hierarchyLayout.value?.get(card?.id)?.depth || 0
+  const indent = HIER_ORIGIN.x + depth * HIER_INDENT
+  // Never collapse to nothing on a deeply nested row.
+  return Math.max(240, TREE_WIDTH - indent)
+}
+
+function collapsedRowWidth(card) {
+  return treeRowWidth(card)
+}
+
+/**
+ * Width for an ordinary card. In the hierarchical tree every row spans the
+ * viewport; elsewhere cards keep their own natural size.
+ */
+function treeCardWidth(card, collapsedWidth, expandedWidth) {
+  if (activeVisualizer.value === 'hierarchical') return treeRowWidth(card)
+  return card.collapsed ? collapsedWidth : (card.width || expandedWidth)
+}
+
+// Thumbnail for a collapsed row, when the card carries any media.
+function rowMedia(card) {
+  if (card.type === 'image') return card.imageUrl || null
+  if (card.previewImage) return card.previewImage
+  if (card.thumbnailUrl) return card.thumbnailUrl
+  if (card.socialMetadata?.thumbnail_url) return card.socialMetadata.thumbnail_url
+  return null
+}
+
+// Bumped to force the force-directed layout to re-solve (view switch, card added
+// or removed, links changed). Without this the solver would either re-run on every
+// position tick — fighting its own CSS transition — or never refresh at all.
+const balancedWebEpoch = ref(0)
+
+watch(
+  () => [activeVisualizer.value, cards.value.length, nodeLinks.value.length].join(':'),
+  () => { balancedWebEpoch.value++ }
+)
+
+// ─── Semantic zoom (level-of-detail tiers) ───
+//
+// The viewport applies a real geometric zoom, so a card's canvas-space footprint
+// NEVER changes with zoom — spacing and sizing stay proportional at every level.
+// What changes is how much detail is drawn INSIDE that footprint:
+//
+//   detail  (>= 0.75) — everything: body content, metadata, comments, actions
+//   compact (>= 0.45) — header, media, primary field; no comments/metadata
+//   summary (>= 0.20) — type, thumbnail, title in the same footprint
+//   marker  (<  0.20) — a type-coloured plate filling the footprint; icon-led
+//
+// No counter-scaled text, no position spreading — to read something, zoom in
+// (the zoom is smooth and focal-point-correct now, so that is cheap).
+const ZOOM_DETAIL = 0.75
+const ZOOM_COMPACT = 0.45
+const ZOOM_SUMMARY = 0.2
+
+const zoomTier = computed(() => {
+  const z = viewport.value?.zoom || 1
+  if (z >= ZOOM_DETAIL) return 'detail'
+  if (z >= ZOOM_COMPACT) return 'compact'
+  if (z >= ZOOM_SUMMARY) return 'summary'
+  return 'marker'
+})
+
+// Crossing a tier boundary swaps each card's inner content for a different-sized
+// element, so measured heights change — the layout solvers (tree, waterfall)
+// must re-measure. Waits a frame so the new elements are measurable.
+watch(zoomTier, () => {
+  nextTick(() => { collapseGeneration.value++ })
+})
+
+// Convenience predicates used throughout the card templates.
+const showDetail = computed(() => zoomTier.value === 'detail')
+const showCompact = computed(() => zoomTier.value === 'detail' || zoomTier.value === 'compact')
+const showSummary = computed(() => zoomTier.value !== 'marker')
+
+// LOD footprint box: the summary/marker representations fill the card's own
+// canvas-space box, so swapping tiers never changes the card's footprint width.
+function lodBoxWidth(card) {
+  if (card.type === 'parent') {
+    // Mirrors parentNodeSize() — the hub disc fills the same footprint.
+    if (card.collapsed) return 260
+    return activeVisualizer.value === 'hierarchical' ? 340 : 520
+  }
+  if (activeVisualizer.value === 'hierarchical') return treeRowWidth(card)
+  return card.collapsed ? 220 : (card.width || 300)
+}
+
+function lodBoxHeight(card) {
+  // Parents are circles — height matches width.
+  if (card.type === 'parent') return lodBoxWidth(card)
+  return Math.round(lodBoxWidth(card) * 0.42)
+}
+
+// ─── Hub labels (parent nodes stay readable at every zoom) ───
+//
+// Below the compact tier the type/title inside a hub disc is too small to
+// read, so each parent gets a SCREEN-SPACE badge ("SEGMENT" + title) anchored
+// to its centre — constant on-screen size, tracking pan/zoom and live drags
+// via the node's reactive position. This is the map-label pattern: geometry
+// scales, landmark labels don't. It does not touch canvas geometry, so the
+// constant-footprint rule stays intact.
+const showHubLabels = computed(() =>
+  (viewport.value?.zoom || 1) < ZOOM_COMPACT && cards.value.some(c => c.type === 'parent')
+)
+
+const hubLabels = computed(() => {
+  if (!showHubLabels.value) return []
+  const vp = viewport.value || { x: 0, y: 0, zoom: 1 }
+  return cards.value
+    .filter(c => c.type === 'parent')
+    .map(c => {
+      const node = findNode(String(c.id))
+      const pos = node ? node.position : cardPosition(c)
+      const w = node?.dimensions?.width || lodBoxWidth(c)
+      const h = node?.dimensions?.height || lodBoxHeight(c)
+      const t = nodeType(c)
+      return {
+        id: c.id,
+        type: t.label || 'NODE',
+        title: c.title || '',
+        color: t.color,
+        style: {
+          left: `${Math.round((pos.x + w / 2) * vp.zoom + vp.x)}px`,
+          top: `${Math.round((pos.y + h / 2) * vp.zoom + vp.y)}px`
+        }
+      }
+    })
+})
+
+// The spawn menu and endpoint popup are SCREEN-SPACE overlays anchored to a flow
+// point: constant on-screen size at every zoom (no counter-scaling), and they
+// track the canvas point through pan/zoom via the live viewport.
+const dropMenuStyle = computed(() => {
+  const s = toScreen(dropMenuPos.value.x, dropMenuPos.value.y)
+  return {
+    left: `${Math.round(s.x)}px`,
+    top: `${Math.round(s.y)}px`,
+    transform: 'translate(-50%, 0)'
+  }
+})
+
+const endpointPopupStyle = computed(() => {
+  if (!endpointPopup.value) return {}
+  const s = toScreen(endpointPopup.value.x, endpointPopup.value.y)
+  return {
+    left: `${Math.round(s.x)}px`,
+    top: `${Math.round(s.y)}px`,
+    transform: 'translate(-50%, -100%) translateY(-12px)'
+  }
+})
+
+// Width of the summary-tier card: the card's own footprint (tree rows span the
+// tree column, like every other tier there).
+function summaryCardWidth(card) {
+  return activeVisualizer.value === 'hierarchical' ? treeRowWidth(card) : lodBoxWidth(card)
+}
+
+// A short excerpt of the card's own content, for the wide hierarchical row.
+function summaryPreview(card) {
+  const raw = card.content || card.notes || card.markdownContent ||
+    card.caption || card.codeContent || card.url || ''
+  const text = String(raw).replace(/\s+/g, ' ').trim()
+  if (!text) return ''
+  // The title already shows first; don't repeat it as the preview.
+  const title = (card.title || '').trim()
+  if (title && text.startsWith(title)) {
+    const rest = text.slice(title.length).trim()
+    return rest ? rest.slice(0, 120) : ''
+  }
+  return text.slice(0, 120)
+}
+
+
+// ─── Per-node user comments ───
+
+// Draft text per card id, keyed so several cards can hold unsent drafts at once.
+const commentDrafts = ref({})
+
+function commentAuthor() {
+  return currentUser.value?.username || currentUser.value?.email || 'unknown'
+}
+
+// Deterministic-enough local id; comments are identified by it for deletion only.
+let commentSeq = 0
+function addComment(card) {
+  const text = (commentDrafts.value[card.id] || '').trim()
+  if (!text) return
+  if (!Array.isArray(card.comments)) card.comments = []
+  card.comments.push({
+    id: `c-${Date.now()}-${commentSeq++}`,
+    author: commentAuthor(),
+    text,
+    ts: new Date().toISOString()
+  })
+  commentDrafts.value[card.id] = ''
+}
+
+function deleteComment(card, commentId) {
+  if (!Array.isArray(card.comments)) return
+  card.comments = card.comments.filter(c => c.id !== commentId)
+}
+
+// Only the author may remove their own comment.
+function canDeleteComment(comment) {
+  return comment.author === commentAuthor()
+}
+
+function commentTimestamp(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  })
+}
+
+// Contact and question cards carry extra fields with no dedicated DB columns.
+// They ride along in social_metadata, which is already a JSON catch-all.
+function typeFieldsForSave(card) {
+  const base = card.socialMetadata ? { ...card.socialMetadata } : {}
+
+  if (card.type === 'contact') {
+    base.contactRole = card.contactRole || null
+    base.contactOrg = card.contactOrg || null
+    base.contactPhone = card.contactPhone || null
+    base.contactEmail = card.contactEmail || null
+  } else if (card.type === 'question') {
+    base.questionAnswer = card.questionAnswer || null
+    base.questionAnswered = !!card.questionAnswered
+  }
+
+  return Object.keys(base).length ? base : null
+}
+
+// Parent hubs anchor the board, so they read larger in the web views (free and
+// balanced). The hierarchical view keeps them compact — there, depth conveys the
+// same weight and vertical space is at a premium.
+function parentNodeSize(card) {
+  // Parents must read as the dominant element at every zoom, so they are sized
+  // well above the child cards rather than merely matching them. Keep these in
+  // step with lodBoxWidth() — the LOD disc fills the same footprint.
+  if (card.collapsed) return '260px'
+  return activeVisualizer.value === 'hierarchical' ? '340px' : '520px'
+}
+
+// True when every card is collapsed, so the toggle can flip its label/icon.
+const allCollapsed = computed(
+  () => cards.value.length > 0 && cards.value.every(c => c.collapsed)
+)
+
+function toggleCollapseAll() {
+  const collapse = !allCollapsed.value
+  for (const card of cards.value) card.collapsed = collapse
+  // Card dimensions changed — connection lines must recompute against the new sizes.
+  nextTick(() => { collapseGeneration.value++ })
+}
+
+function setVisualizer(key) {
+  activeVisualizer.value = key
+  visualizerMenuOpen.value = false
+  floatingMenuOpen.value = false
+  // Glide the cards into the new arrangement, then frame it.
+  glideLayout()
+  // The new view (and possibly a different LOD variant per card) renders first;
+  // re-measure a frame later so the layout solves against the REAL row heights,
+  // then frame the result.
+  nextTick(() => {
+    collapseGeneration.value++
+    nextTick(() => { fitBoard() })
+  })
+}
+
+// ─── Balanced web: force-directed layout ───
+//
+// Keeps the web topology (no tree, no imposed direction) but computes positions
+// so nodes spread evenly: linked cards attract, all cards repel, and a mild pull
+// toward the centre stops disconnected clusters drifting apart forever.
+//
+// Deterministic by design — seeded from each card's stored position and run to a
+// fixed iteration count, so the same board always resolves to the same arrangement
+// rather than shuffling on every view switch.
+
+const FORCE_ITERATIONS = 320
+const FORCE_IDEAL_LINK = 420    // preferred distance between linked cards
+const FORCE_REPULSION = 190000  // strength of the all-pairs push
+const FORCE_CENTER_PULL = 0.012
+// Vertical gravity is stronger than horizontal, which settles the graph into a
+// landscape spread instead of a tall column — measured on a real 14-node board:
+// 1154x1498 (0.77) with equal pull vs 1583x1088 (1.45) at 1.6x.
+const FORCE_VERTICAL_BIAS = 1.6
+const FORCE_DAMPING = 0.86
+const FORCE_ORIGIN = { x: 700, y: 480 }
+
+/**
+ * Run the force-directed solve and return a Map of card id -> {x, y}.
+ *
+ * Shared by the balanced-web visualizer and the one-shot Auto Arrange action.
+ * `parentSpacing` multiplies the repulsion and minimum gap for parent hubs only,
+ * so Auto Arrange can push the anchors further apart than the live visualizer does.
+ */
+function solveForceLayout(list, { parentSpacing = 1, clusterSpacing = 1 } = {}) {
+  if (!list.length) return null
+
+  // cardElements is written during render, so read it untracked — depending on it
+  // inside a computed would let a render feed back into that computed.
+  const elements = toRaw(cardElements.value)
+  const nodes = list.map((card, i) => {
+    const el = elements[card.id]
+    const w = el?.offsetWidth || (card.collapsed ? 220 : (card.width || 300))
+    const h = el?.offsetHeight || (card.collapsed ? 52 : 200)
+    // Seed on a ring when a card has no meaningful stored position, so the
+    // simulation never starts with everything stacked at the origin.
+    const angle = (i / list.length) * Math.PI * 2
+    return {
+      id: card.id,
+      isParent: card.type === 'parent',
+      x: Number.isFinite(card.x) ? card.x : FORCE_ORIGIN.x + Math.cos(angle) * 300,
+      y: Number.isFinite(card.y) ? card.y : FORCE_ORIGIN.y + Math.sin(angle) * 300,
+      vx: 0,
+      vy: 0,
+      w,
+      h,
+      radius: Math.hypot(w, h) / 2
+    }
+  })
+
+  const index = new Map(nodes.map((n, i) => [n.id, i]))
+  const edges = []
+  for (const link of nodeLinks.value) {
+    const a = index.get(link.sourceCardId)
+    const b = index.get(link.targetCardId)
+    if (a !== undefined && b !== undefined && a !== b) edges.push([a, b])
+  }
+
+  // Assign every node to a TREE, so nodes belonging to different trees can be
+  // pushed apart harder than nodes within one tree. Without this only the parent
+  // hubs separate, and their children still tangle in the space between them.
+  assignClusters(nodes, edges)
+
+  for (let step = 0; step < FORCE_ITERATIONS; step++) {
+    // Cooling factor: large moves early, fine settling later.
+    const cooling = 1 - step / FORCE_ITERATIONS
+
+    // Repulsion between every pair.
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i]
+        const b = nodes[j]
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        let dist = Math.hypot(dx, dy)
+        if (dist < 1e-3) {
+          // Coincident nodes: nudge apart deterministically by index.
+          dx = (j - i) * 0.7
+          dy = (i + 1) * 0.5
+          dist = Math.hypot(dx, dy)
+        }
+        // Parent hubs get extra breathing room when asked, so the board's anchors
+        // read as distinct clusters rather than crowding each other.
+        let pairSpacing = (a.isParent && b.isParent) ? parentSpacing
+          : (a.isParent || b.isParent) ? 1 + (parentSpacing - 1) * 0.5
+            : 1
+        // Different trees get interstellar space: they share no edges, so nothing
+        // pulls them back together and they can be pushed well apart.
+        if (a.cluster !== b.cluster) pairSpacing *= clusterSpacing
+        const minGap = (a.radius + b.radius + 40) * pairSpacing
+        const effective = Math.max(dist, 1)
+        let force = (FORCE_REPULSION * pairSpacing) / (effective * effective)
+        if (dist < minGap) force += (minGap - dist) * 1.4
+        const fx = (dx / effective) * force
+        const fy = (dy / effective) * force
+        a.vx -= fx
+        a.vy -= fy
+        b.vx += fx
+        b.vy += fy
+      }
+    }
+
+    // Attraction along links, toward the ideal separation.
+    for (const [ai, bi] of edges) {
+      const a = nodes[ai]
+      const b = nodes[bi]
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const dist = Math.max(Math.hypot(dx, dy), 1)
+      const force = (dist - FORCE_IDEAL_LINK) * 0.045
+      const fx = (dx / dist) * force
+      const fy = (dy / dist) * force
+      a.vx += fx
+      a.vy += fy
+      b.vx -= fx
+      b.vy -= fy
+    }
+
+    // Gentle gravity so unconnected islands stay on-screen.
+    for (const n of nodes) {
+      n.vx += (FORCE_ORIGIN.x - n.x) * FORCE_CENTER_PULL
+      n.vy += (FORCE_ORIGIN.y - n.y) * FORCE_CENTER_PULL * FORCE_VERTICAL_BIAS
+      n.vx *= FORCE_DAMPING
+      n.vy *= FORCE_DAMPING
+      // Clamp per-step travel so the simulation can't explode.
+      const maxStep = 60 * cooling + 4
+      const speed = Math.hypot(n.vx, n.vy)
+      if (speed > maxStep) {
+        n.vx = (n.vx / speed) * maxStep
+        n.vy = (n.vy / speed) * maxStep
+      }
+      n.x += n.vx
+      n.y += n.vy
+    }
+  }
+
+  // Normalise into positive space with a consistent margin, so the result doesn't
+  // land at negative coordinates the user has to pan to find.
+  const minX = Math.min(...nodes.map(n => n.x))
+  const minY = Math.min(...nodes.map(n => n.y))
+  const offsetX = 80 - minX
+  const offsetY = 80 - minY
+
+  // Force layout settles distances but is blind to edge crossings, which are what
+  // make a web look tangled. Untangle before finalising.
+  reduceEdgeCrossings(nodes, edges)
+
+  const positions = new Map()
+  for (const n of nodes) {
+    positions.set(n.id, { x: Math.round(n.x + offsetX), y: Math.round(n.y + offsetY), depth: 0 })
+  }
+  return positions
+}
+
+// ─── Edge-crossing reduction ───
+
+/**
+ * Label each node with the connected component ("tree") it belongs to.
+ *
+ * Used to give different trees interstellar space in the force solve: two nodes in
+ * separate trees have no reason to be near each other, so they repel much harder
+ * than two nodes within the same tree.
+ */
+function assignClusters(nodes, edges) {
+  const adjacency = nodes.map(() => [])
+  for (const [a, b] of edges) {
+    adjacency[a].push(b)
+    adjacency[b].push(a)
+  }
+  for (const n of nodes) n.cluster = -1
+
+  let cluster = 0
+  for (let i = 0; i < nodes.length; i++) {
+    if (nodes[i].cluster !== -1) continue
+    const queue = [i]
+    nodes[i].cluster = cluster
+    while (queue.length) {
+      const at = queue.shift()
+      for (const next of adjacency[at]) {
+        if (nodes[next].cluster === -1) {
+          nodes[next].cluster = cluster
+          queue.push(next)
+        }
+      }
+    }
+    cluster++
+  }
+  return cluster
+}
+
+/** Centre point of a solver node (x/y are top-left). */
+function nodeCentre(n) {
+  return { x: n.x + n.w / 2, y: n.y + n.h / 2 }
+}
+
+/** Do segments p1→p2 and p3→p4 properly cross? */
+function segmentsCross(p1, p2, p3, p4) {
+  const orient = (a, b, c) => {
+    const v = (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y)
+    return Math.abs(v) < 1e-9 ? 0 : (v > 0 ? 1 : 2)
+  }
+  const o1 = orient(p1, p2, p3)
+  const o2 = orient(p1, p2, p4)
+  const o3 = orient(p3, p4, p1)
+  const o4 = orient(p3, p4, p2)
+  // Strict crossing only — shared endpoints (edges meeting at a node) don't count.
+  return o1 !== o2 && o3 !== o4 && o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0
+}
+
+/**
+ * Does node `idx` overlap any other node?
+ *
+ * Uses a BOX test, not the circumscribed radius: radius is hypot(w,h)/2, a corner
+ * distance, so treating it as a circle demands ~400px between two 300x200 cards
+ * that would sit fine side by side — which would reject nearly every untangling
+ * move and make the whole pass a no-op.
+ */
+function nodeOverlapsAny(nodes, idx) {
+  const n = nodes[idx]
+  const GAP = 40
+  // x/y are TOP-LEFT (seeded from card.x/card.y), so compare edges directly.
+  for (let k = 0; k < nodes.length; k++) {
+    if (k === idx) continue
+    const o = nodes[k]
+    const overlapX = n.x < o.x + o.w + GAP && n.x + n.w + GAP > o.x
+    const overlapY = n.y < o.y + o.h + GAP && n.y + n.h + GAP > o.y
+    if (overlapX && overlapY) return true
+  }
+  return false
+}
+
+/** How many edge pairs cross, ignoring pairs that share a node? */
+function countCrossings(nodes, edges) {
+  let count = 0
+  for (let i = 0; i < edges.length; i++) {
+    const [a1, b1] = edges[i]
+    for (let j = i + 1; j < edges.length; j++) {
+      const [a2, b2] = edges[j]
+      if (a1 === a2 || a1 === b2 || b1 === a2 || b1 === b2) continue
+      // Lines are drawn centre-to-centre, so test centres — node x/y are top-left.
+      if (segmentsCross(nodeCentre(nodes[a1]), nodeCentre(nodes[b1]),
+        nodeCentre(nodes[a2]), nodeCentre(nodes[b2]))) count++
+    }
+  }
+  return count
+}
+
+/**
+ * Untangle the web after the force solve.
+ *
+ * Two moves, applied greedily and only kept when they reduce the crossing count:
+ *  1. SWAP a pair of nodes' positions — the classic fix for two edges that cross
+ *     because their endpoints are on the wrong sides of each other.
+ *  2. ROTATE a leaf around its single neighbour — lets a child "poke out further"
+ *     at a different angle instead of cutting across the web.
+ *
+ * Deterministic (fixed candidate order, no RNG) and bounded, so it cannot spin.
+ */
+function reduceEdgeCrossings(nodes, edges) {
+  if (nodes.length < 4 || edges.length < 2) return
+
+  let crossings = countCrossings(nodes, edges)
+  if (crossings === 0) return
+
+  // Degree drives which nodes are leaves (rotatable) vs structural (swap only).
+  const degree = new Array(nodes.length).fill(0)
+  const neighbour = new Array(nodes.length).fill(-1)
+  for (const [a, b] of edges) {
+    degree[a]++; degree[b]++
+    neighbour[a] = b; neighbour[b] = a
+  }
+
+  const MAX_ROUNDS = 12
+  for (let round = 0; round < MAX_ROUNDS && crossings > 0; round++) {
+    let improved = false
+
+    // 1. Position swaps.
+    for (let i = 0; i < nodes.length && crossings > 0; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j]
+        const ax = a.x, ay = a.y
+        a.x = b.x; a.y = b.y
+        b.x = ax; b.y = ay
+        // Cards differ in size, so a swap can leave one overlapping a neighbour.
+        const clean = !nodeOverlapsAny(nodes, i) && !nodeOverlapsAny(nodes, j)
+        const next = clean ? countCrossings(nodes, edges) : Infinity
+        if (next < crossings) {
+          crossings = next
+          improved = true
+        } else {
+          // Revert.
+          b.x = a.x; b.y = a.y
+          a.x = ax; a.y = ay
+        }
+      }
+    }
+
+    // 2. Rotate leaves around their one neighbour, and allow a longer arm — a
+    //    child poking further out is preferable to an edge slicing the web.
+    for (let i = 0; i < nodes.length && crossings > 0; i++) {
+      if (degree[i] !== 1) continue
+      const anchor = nodes[neighbour[i]]
+      if (!anchor) continue
+      const node = nodes[i]
+      const bestX = node.x, bestY = node.y
+      const dx = node.x - anchor.x
+      const dy = node.y - anchor.y
+      const baseRadius = Math.hypot(dx, dy) || FORCE_IDEAL_LINK
+      const baseAngle = Math.atan2(dy, dx)
+
+      let placed = false
+      for (const reach of [1, 1.3, 1.7]) {
+        for (let step = 1; step < 12 && !placed; step++) {
+          // Alternate either side of the current angle, widening as step grows.
+          const offset = (Math.ceil(step / 2) * (Math.PI / 6)) * (step % 2 === 0 ? 1 : -1)
+          const angle = baseAngle + offset
+          node.x = anchor.x + Math.cos(angle) * baseRadius * reach
+          node.y = anchor.y + Math.sin(angle) * baseRadius * reach
+          // Untangling must not create an overlap — a clean web that stacks two
+          // cards on top of each other is worse than one crossing line.
+          if (nodeOverlapsAny(nodes, i)) continue
+          const next = countCrossings(nodes, edges)
+          if (next < crossings) {
+            crossings = next
+            improved = true
+            placed = true
+          }
+        }
+        if (placed) break
+      }
+      if (!placed) {
+        node.x = bestX
+        node.y = bestY
+      }
+    }
+
+    if (!improved) break
+  }
+}
+
+// True while a transient position animation is playing (Auto Arrange or a link
+// snap); gates the CSS transition on card position.
+const autoArranging = ref(false)
+
+const AUTO_ARRANGE_DURATION = 650
+// Parent hubs repel each other this much harder than ordinary cards, giving the
+// clusters visible separation. 1 = identical to the balanced-web visualizer.
+const AUTO_ARRANGE_PARENT_SPACING = 1.9
+// Separate trees push apart this much harder than nodes within one tree, so each
+// tree reads as its own island rather than merging into one mass.
+const AUTO_ARRANGE_CLUSTER_SPACING = 2.6
+
+// ─── Snap-to-neighbour on link ───
+//
+// When a node is first connected to another, pull it in close so the board stays
+// compact — but never so close that cards touch. Positions are chosen by sweeping
+// a ring around the anchor and taking the first candidate that clears every other
+// card, preferring the direction the node is already in so it doesn't jump across
+// the board.
+
+// Gap left between card edges when snapping. Big enough that the ~34px border
+// connection zones of two cards never overlap, which would make them fight for the
+// hover dot.
+const SNAP_GAP = 90
+// Rings are tried outward from this multiple of the ideal separation.
+const SNAP_RING_STEPS = [1, 1.35, 1.75, 2.3]
+
+function cardBox(card) {
+  const el = cardElements.value[card.id]
+  const w = el?.offsetWidth || (card.collapsed ? 220 : (card.width || 300))
+  const h = el?.offsetHeight || (card.collapsed ? 46 : 200)
+  return { w, h }
+}
+
+// Would a card of size `box` at (x, y) overlap anything other than `ignoreIds`?
+function positionIsClear(x, y, box, ignoreIds) {
+  for (const other of cards.value) {
+    if (ignoreIds.has(other.id)) continue
+    const ob = cardBox(other)
+    const pos = cardPositionRaw(other)
+    const overlapX = x < pos.x + ob.w + SNAP_GAP && x + box.w + SNAP_GAP > pos.x
+    const overlapY = y < pos.y + ob.h + SNAP_GAP && y + box.h + SNAP_GAP > pos.y
+    if (overlapX && overlapY) return false
+  }
+  return true
+}
+
+/**
+ * Move `card` next to `anchorCard`, close but clear of every other card.
+ *
+ * No-op outside free-web: the computed layouts own positions there, so writing
+ * x/y would be overwritten on the next solve.
+ */
+function snapCardNearAnchor(card, anchorCard) {
+  if (!card || !anchorCard || card.id === anchorCard.id) return
+  if (activeVisualizer.value !== 'free-web') return
+
+  const box = cardBox(card)
+  const anchorBox = cardBox(anchorCard)
+  const anchor = cardPositionRaw(anchorCard)
+
+  const anchorCx = anchor.x + anchorBox.w / 2
+  const anchorCy = anchor.y + anchorBox.h / 2
+
+  // Start from the direction the card already lies in, so the snap reads as
+  // "pulled in" rather than "teleported to the other side".
+  const currentCx = (card.x ?? anchorCx) + box.w / 2
+  const currentCy = (card.y ?? anchorCy) + box.h / 2
+  const preferred = Math.atan2(currentCy - anchorCy, currentCx - anchorCx)
+
+  // Base radius: enough that the two cards' edges clear SNAP_GAP even corner-on.
+  const baseRadius = (Math.hypot(anchorBox.w, anchorBox.h) + Math.hypot(box.w, box.h)) / 2 + SNAP_GAP
+
+  const ignore = new Set([card.id])
+  const SWEEP = 16   // candidate angles per ring
+
+  for (const step of SNAP_RING_STEPS) {
+    const radius = baseRadius * step
+    for (let i = 0; i < SWEEP; i++) {
+      // Alternate either side of the preferred direction, widening as i grows.
+      const offset = (Math.ceil(i / 2) * (Math.PI * 2 / SWEEP)) * (i % 2 === 0 ? 1 : -1)
+      const angle = preferred + offset
+      const x = Math.round(anchorCx + Math.cos(angle) * radius - box.w / 2)
+      const y = Math.round(anchorCy + Math.sin(angle) * radius - box.h / 2)
+      if (positionIsClear(x, y, box, ignore)) {
+        card.x = x
+        card.y = y
+        return true
+      }
+    }
+  }
+  // Every candidate was blocked — leave the card where it is rather than
+  // deliberately overlapping something.
+  return false
+}
+
+// Watch for newly created links so a FIRST connection pulls the two nodes together.
+// Watching the link list rather than patching each creation site catches every path
+// — drag-to-connect, force-complete, drop-menu spawn, paste-to-link, reparent.
+let knownLinkIds = new Set()
+
+watch(nodeLinks, (links) => {
+  const ids = new Set(links.map(l => l.id))
+  const added = links.filter(l => !knownLinkIds.has(l.id))
+  const isFirstRun = knownLinkIds.size === 0 && links.length > 1
+  knownLinkIds = ids
+
+  // Skip the initial board load, which "adds" every existing link at once.
+  if (isFirstRun || !added.length) return
+  if (activeVisualizer.value !== 'free-web') return
+
+  for (const link of added) {
+    const source = cards.value.find(c => c.id === link.sourceCardId)
+    const target = cards.value.find(c => c.id === link.targetCardId)
+    if (!source || !target) continue
+
+    // Only pull in a node that has no OTHER connection yet — an already-linked
+    // node is positioned relative to its existing neighbours, and yanking it
+    // would disturb an arrangement the user has already made.
+    const targetDegree = links.filter(
+      l => l.sourceCardId === target.id || l.targetCardId === target.id
+    ).length
+    if (targetDegree !== 1) continue
+
+    // Leave it alone if it is already comfortably placed.
+    const box = cardBox(target)
+    const anchorBox = cardBox(source)
+    const sPos = cardPositionRaw(source)
+    const tPos = cardPositionRaw(target)
+    const gapX = Math.max(sPos.x - (tPos.x + box.w), tPos.x - (sPos.x + anchorBox.w), 0)
+    const gapY = Math.max(sPos.y - (tPos.y + box.h), tPos.y - (sPos.y + anchorBox.h), 0)
+    const separation = Math.hypot(gapX, gapY)
+    const tooFar = separation > SNAP_GAP * 4
+    const tooClose = !positionIsClear(tPos.x, tPos.y, box, new Set([target.id]))
+    if (!tooFar && !tooClose) continue
+
+    snapWithAnimation(target, source)
+  }
+}, { deep: true })
+
+/**
+ * A node spawned from a dropped connection lands wherever the user released, which
+ * may sit on top of existing cards. Respect that choice when it is already clear —
+ * only relocate when it would overlap, and then place it near its anchor.
+ */
+function ensureSpawnClear(card, anchorCard) {
+  if (activeVisualizer.value !== 'free-web') return
+  const box = cardBox(card)
+  if (positionIsClear(card.x, card.y, box, new Set([card.id]))) return
+  snapWithAnimation(card, anchorCard)
+}
+
+/**
+ * Ctrl+Shift release: re-pack a subtree into concentric rings around its root.
+ *
+ * Members are ringed by their link distance from the root, so direct children sit
+ * closest and deeper descendants fan out behind them — which reads as organised
+ * rather than merely close. Every placement is collision-checked against cards
+ * OUTSIDE the subtree as well as those already placed, so tightening can't shove
+ * the cluster on top of unrelated nodes.
+ */
+function tightenSubtree(rootCard, memberIds) {
+  if (activeVisualizer.value !== 'free-web' || !memberIds.length) return
+
+  // Link distance from the root, so ring assignment follows the graph.
+  const adjacency = new Map(cards.value.map(c => [c.id, []]))
+  for (const link of nodeLinks.value) {
+    if (!adjacency.has(link.sourceCardId) || !adjacency.has(link.targetCardId)) continue
+    adjacency.get(link.sourceCardId).push(link.targetCardId)
+    adjacency.get(link.targetCardId).push(link.sourceCardId)
+  }
+  const member = new Set(memberIds)
+  const depth = new Map([[rootCard.id, 0]])
+  const queue = [rootCard.id]
+  while (queue.length) {
+    const id = queue.shift()
+    for (const next of adjacency.get(id) || []) {
+      if (!member.has(next) || depth.has(next)) continue
+      depth.set(next, depth.get(id) + 1)
+      queue.push(next)
+    }
+  }
+
+  const byDepth = new Map()
+  for (const id of memberIds) {
+    const d = depth.get(id) ?? 1
+    if (!byDepth.has(d)) byDepth.set(d, [])
+    byDepth.get(d).push(id)
+  }
+
+  const rootBox = cardBox(rootCard)
+  const rootCx = rootCard.x + rootBox.w / 2
+  const rootCy = rootCard.y + rootBox.h / 2
+
+  // Placed cards accumulate as we go, so later rings avoid earlier ones.
+  const placed = [{ x: rootCard.x, y: rootCard.y, ...rootBox }]
+  const outside = cards.value.filter(c => c.id !== rootCard.id && !member.has(c.id))
+
+  const fits = (x, y, box) => {
+    for (const p of [...placed, ...outside.map(c => ({ x: c.x, y: c.y, ...cardBox(c) }))]) {
+      const ox = x < p.x + p.w + SNAP_GAP && x + box.w + SNAP_GAP > p.x
+      const oy = y < p.y + p.h + SNAP_GAP && y + box.h + SNAP_GAP > p.y
+      if (ox && oy) return false
+    }
+    return true
+  }
+
+  for (const d of [...byDepth.keys()].sort((a, b) => a - b)) {
+    const ids = byDepth.get(d)
+    ids.forEach((id, i) => {
+      const card = cards.value.find(c => c.id === id)
+      if (!card) return
+      const box = cardBox(card)
+      // Ring radius grows with depth; spread members evenly around it.
+      const baseRadius = (Math.hypot(rootBox.w, rootBox.h) + Math.hypot(box.w, box.h)) / 2 + SNAP_GAP
+      const startAngle = (i / ids.length) * Math.PI * 2
+
+      for (let expand = 0; expand < 6; expand++) {
+        const radius = baseRadius * (d + expand * 0.45)
+        for (let k = 0; k < 12; k++) {
+          const angle = startAngle + (k / 12) * (Math.PI * 2) / Math.max(ids.length, 1)
+          const x = Math.round(rootCx + Math.cos(angle) * radius - box.w / 2)
+          const y = Math.round(rootCy + Math.sin(angle) * radius - box.h / 2)
+          if (fits(x, y, box)) {
+            card.x = x
+            card.y = y
+            placed.push({ x, y, ...box })
+            return
+          }
+        }
+      }
+    })
+  }
+
+  nextTick(() => { collapseGeneration.value++ })
+}
+
+// Snap with the same transient glide Auto Arrange uses.
+async function snapWithAnimation(card, anchorCard) {
+  autoArranging.value = true
+  await nextTick()
+  const moved = snapCardNearAnchor(card, anchorCard)
+  nextTick(() => { collapseGeneration.value++ })
+  setTimeout(() => {
+    autoArranging.value = false
+    collapseGeneration.value++
+  }, AUTO_ARRANGE_DURATION)
+  return moved
+}
+
+// Auto Arrange: a ONE-SHOT tidy-up. Runs the same force solve as the balanced-web
+// visualizer (with parent hubs spaced further apart), then writes the result to the
+// cards' real x/y and animates them into place.
+//
+// Deliberately different from switching to balanced-web: this stays in free-web, so
+// the positions are genuine, persisted, and the user can immediately drag anything
+// again. The animation is a transient CSS transition, not a layout mode.
+async function autoArrange() {
+  if (!cards.value.length || autoArranging.value) return
+
+  // Auto Arrange is a free-web action; the computed layouts own positions in the
+  // other views, so switch back before writing real coordinates.
+  if (activeVisualizer.value !== 'free-web') {
+    activeVisualizer.value = 'free-web'
+    await nextTick()
+  }
+
+  const solved = solveForceLayout(cards.value, {
+    parentSpacing: AUTO_ARRANGE_PARENT_SPACING,
+    clusterSpacing: AUTO_ARRANGE_CLUSTER_SPACING
+  })
+  if (!solved) return
+
+  // Turn on the transition BEFORE moving, so the cards glide rather than teleport.
+  autoArranging.value = true
+  await nextTick()
+
+  for (const card of cards.value) {
+    const pos = solved.get(card.id)
+    if (pos) {
+      card.x = pos.x
+      card.y = pos.y
+    }
+  }
+
+  // Card positions changed, so connection geometry must be recomputed.
+  nextTick(() => { collapseGeneration.value++ })
+
+  // Drop the transition once it has played, so ordinary dragging stays instant.
+  setTimeout(() => {
+    autoArranging.value = false
+    collapseGeneration.value++
+  }, AUTO_ARRANGE_DURATION)
+}
+
+const balancedWebLayout = computed(() => {
+  if (activeVisualizer.value !== 'balanced-web') return null
+  // Depend on the card set and link graph, not on live positions: the simulation
+  // seeds from x/y, and re-running it on every position change would fight the
+  // CSS transition. balancedWebEpoch forces a deliberate re-solve.
+  void balancedWebEpoch.value
+  return solveForceLayout(cards.value)
+})
+
+
+/**
+ * Derive a forest from the connection graph.
+ *
+ * There is no explicit parent pointer on a card — hierarchy is implied by
+ * nodeLinks, with `type: 'parent'` hub cards as natural roots. Links are
+ * undirected in practice, so this walks breadth-first from the roots and treats
+ * the first arrival at a card as its parent. Cycles are broken by the visited
+ * set; anything unreachable becomes its own root so nothing is ever hidden.
+ */
+const hierarchyLayout = computed(() => {
+  if (activeVisualizer.value !== 'hierarchical') return null
+  // Row heights come from offsetHeight, which changes when cards collapse/expand
+  // AND when a zoom tier swaps the card for a different-sized element (the wide
+  // summary row is far shorter than the stacked card). collapseGeneration is
+  // bumped by both, so depend on it or the tree lays out against stale heights.
+  void collapseGeneration.value
+
+  const byId = new Map(cards.value.map(c => [c.id, c]))
+  const adjacency = new Map(cards.value.map(c => [c.id, []]))
+  for (const link of nodeLinks.value) {
+    if (!adjacency.has(link.sourceCardId) || !adjacency.has(link.targetCardId)) continue
+    adjacency.get(link.sourceCardId).push(link.targetCardId)
+    adjacency.get(link.targetCardId).push(link.sourceCardId)
+  }
+
+  // Roots: parent-type hubs first, then any card with connections, then orphans.
+  const degree = id => adjacency.get(id)?.length || 0
+  const parents = cards.value.filter(c => c.type === 'parent')
+  const roots = parents.length
+    ? parents
+    : [...cards.value].sort((a, b) => degree(b.id) - degree(a.id)).slice(0, 1)
+
+  const visited = new Set()
+  const rows = []   // flattened, in display order: {id, depth}
+
+  function walk(id, depth, parentId = null) {
+    if (visited.has(id)) return
+    visited.add(id)
+    rows.push({ id, depth, parentId })
+    const children = (adjacency.get(id) || [])
+      .filter(childId => !visited.has(childId))
+      // Stable ordering so the tree doesn't reshuffle between renders.
+      .sort((a, b) => {
+        const ca = byId.get(a), cb = byId.get(b)
+        return (ca?.y ?? 0) - (cb?.y ?? 0) || (ca?.x ?? 0) - (cb?.x ?? 0)
+      })
+    for (const childId of children) walk(childId, depth + 1, id)
+  }
+
+  for (const root of roots) walk(root.id, 0)
+  // Anything not reachable from a root still needs a home.
+  for (const card of cards.value) if (!visited.has(card.id)) walk(card.id, 0)
+
+  // Assign positions top-to-bottom, indenting by depth. The gap is fixed canvas
+  // geometry — the zoom scales it together with the rows.
+  const rowGap = HIER_ROW_GAP
+
+  const positions = new Map()
+  let cursorY = HIER_ORIGIN.y
+  for (const row of rows) {
+    const card = byId.get(row.id)
+    const el = cardElements.value[row.id]
+    // Collapsed cards render as ~46px rows in this view, not the 52px pill.
+    const height = el?.offsetHeight || (card?.collapsed ? 46 : 200)
+    positions.set(row.id, {
+      x: HIER_ORIGIN.x + row.depth * HIER_INDENT,
+      y: cursorY,
+      depth: row.depth,
+      parentId: row.parentId,
+      height
+    })
+    cursorY += height + rowGap
+  }
+  return positions
+})
+
+/**
+ * Where a card renders. In the computed layouts this overrides the stored
+ * position WITHOUT mutating card.x/card.y — the free-web arrangement must
+ * survive a trip through another visualizer (saveBoard persists card.x/card.y
+ * directly). Node positions are synced from this resolver (see the flow-sync
+ * section at the bottom of the file).
+ */
+function cardPositionRaw(card) {
+  const layout = hierarchyLayout.value || balancedWebLayout.value || waterfallLayout.value
+  if (layout) {
+    const pos = layout.get(card.id)
+    if (pos) return pos
+  }
+  return { x: card.x, y: card.y, depth: 0 }
+}
+
+/**
+ * Edge geometry for the custom edge template.
+ *
+ * Straight centre-to-centre in the web views — the nodes are painted over the
+ * line, so it reads as joining node to node. In the hierarchical tree, links are
+ * drawn as ELBOWS — out of the parent's left rail, down, then across into the
+ * child's left edge — so connections read as a tree instead of a web of
+ * diagonals. Endpoint dots sit where the line crosses each node's perimeter
+ * (or the centre, for parent hubs — hub-and-spoke anchoring).
+ */
+function edgeGeometry({ sourceNode, targetNode }) {
+  if (!sourceNode || !targetNode) return null
+
+  const sRect = {
+    x: sourceNode.position.x,
+    y: sourceNode.position.y,
+    w: sourceNode.dimensions?.width || 300,
+    h: sourceNode.dimensions?.height || 200
+  }
+  const tRect = {
+    x: targetNode.position.x,
+    y: targetNode.position.y,
+    w: targetNode.dimensions?.width || 300,
+    h: targetNode.dimensions?.height || 200
+  }
+
+  const sCenter = { x: sRect.x + sRect.w / 2, y: sRect.y + sRect.h / 2 }
+  const tCenter = { x: tRect.x + tRect.w / 2, y: tRect.y + tRect.h / 2 }
+
+  const sourceCard = sourceNode.data?.card
+  const targetCard = targetNode.data?.card
+
+  // Endpoint handle positions: card centres for parent hubs, otherwise where the
+  // centre-to-centre line crosses each card's perimeter.
+  let x1, y1, x2, y2
+  const srcIsParent = sourceCard?.type === 'parent'
+  const tgtIsParent = targetCard?.type === 'parent'
+  if (srcIsParent) {
+    x1 = sCenter.x; y1 = sCenter.y
+  } else {
+    const bp = borderIntersection(sRect, tCenter)
+    x1 = bp.x; y1 = bp.y
+  }
+  if (tgtIsParent) {
+    x2 = tCenter.x; y2 = tCenter.y
+  } else {
+    const bp = borderIntersection(tRect, sCenter)
+    x2 = bp.x; y2 = bp.y
+  }
+
+  // Midpoint of the VISIBLE span (between the two handles), so the label and
+  // delete affordance sit on the exposed part of the line, not under a card.
+  const mx = (x1 + x2) / 2
+  const my = (y1 + y2) / 2
+
+  const straight = `M ${sCenter.x} ${sCenter.y} L ${tCenter.x} ${tCenter.y}`
+
+  if (activeVisualizer.value !== 'hierarchical') {
+    return { path: straight, x1, y1, x2, y2, mx, my, srcIsParent, tgtIsParent }
+  }
+
+  const layout = hierarchyLayout.value
+  const sPos = layout?.get(sourceCard?.id)
+  const tPos = layout?.get(targetCard?.id)
+  if (!sPos || !tPos) return { path: straight, x1, y1, x2, y2, mx, my, srcIsParent, tgtIsParent }
+
+  // Orient parent → child by tree depth, since links themselves are undirected.
+  const [parentPos, parentRect, childPos, childRect] = sPos.depth <= tPos.depth
+    ? [sPos, sRect, tPos, tRect]
+    : [tPos, tRect, sPos, sRect]
+
+  // Rail drops from under the parent, offset in from its left edge.
+  const railX = parentPos.x + 24
+  const parentBottom = parentPos.y + parentRect.h
+  const childMidY = childPos.y + Math.min(40, childRect.h / 2)
+  const childLeft = childPos.x
+
+  let path
+  if (childLeft + childRect.w < railX) {
+    // A child to the LEFT of its parent can't use the rail without doubling
+    // back, so route it round the near edge instead.
+    const childRight = childLeft + childRect.w
+    path = `M ${railX} ${parentBottom} L ${railX} ${childMidY} L ${childRight} ${childMidY}`
+  } else {
+    // Rounded corner where the rail turns into the child, so the tree reads
+    // softly.
+    const radius = Math.min(12, Math.max(0, (childLeft - railX) / 2), Math.max(0, (childMidY - parentBottom) / 2))
+    if (radius < 2) {
+      path = `M ${railX} ${parentBottom} L ${railX} ${childMidY} L ${childLeft} ${childMidY}`
+    } else {
+      path = [
+        `M ${railX} ${parentBottom}`,
+        `L ${railX} ${childMidY - radius}`,
+        `Q ${railX} ${childMidY} ${railX + radius} ${childMidY}`,
+        `L ${childLeft} ${childMidY}`
+      ].join(' ')
+    }
+  }
+
+  // Elbow endpoints: the dots sit at the rail mouth and the child's edge.
+  return {
+    path,
+    x1: railX,
+    y1: parentBottom,
+    x2: childLeft + childRect.w < railX ? childLeft + childRect.w : childLeft,
+    y2: childMidY,
+    mx: railX,
+    my: (parentBottom + childMidY) / 2,
+    srcIsParent: false,
+    tgtIsParent: false
+  }
+}
+
+
+// ─── Image metadata display ───
+
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return null
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// Compact one-liner shown under an image: "WEBP · 876×493 · 311 KB · nytimes.com"
+function imageMetaLine(card) {
+  const m = card.mediaMetadata || {}
+  const parts = []
+  if (m.format) parts.push(m.format)
+  if (m.width && m.height) parts.push(`${m.width}×${m.height}`)
+  const size = formatBytes(m.file_size)
+  if (size) parts.push(size)
+  if (m.source_site) parts.push(m.source_site)
+  else if (card.url) {
+    try { parts.push(new URL(card.url).hostname.replace(/^www\./, '')) } catch { /* not a URL */ }
+  }
+  return parts.join(' · ')
+}
+
+// Camera line, present only for images that actually carry EXIF.
+function imageExifLine(card) {
+  const e = card.mediaMetadata?.exif
+  if (!e) return null
+  const body = [
+    [e.camera_make, e.camera_model].filter(Boolean).join(' '),
+    e.lens,
+    e.focal_length,
+    e.aperture,
+    e.shutter,
+    e.iso ? `ISO ${e.iso}` : null
+  ].filter(Boolean)
+  return body.length ? body.join(' · ') : null
+}
+
+function imageTakenAt(card) {
+  const raw = card.mediaMetadata?.exif?.taken_at
+  if (!raw) return null
+  // EXIF format is "YYYY:MM:DD HH:MM:SS"
+  const m = raw.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2})/)
+  if (!m) return raw
+  const [, y, mo, d, h, mi] = m
+  return `${y}-${mo}-${d} ${h}:${mi}`
+}
+
 function socialPlatformChip(platform) {
   const platforms = {
     'x': { icon: 'mdi-twitter', label: 'X', color: 'primary' },
@@ -3272,6 +6521,168 @@ watch(cards, (newCards, oldCards) => {
     }
   })
 }, { deep: true })
+
+// ─── Flow sync: cards/links (source of truth) → Vue Flow nodes/edges ───
+//
+// The cards array and the link store remain the single source of truth (loaded
+// from and saved to the API exactly as before). Vue Flow's node/edge state is a
+// projection of them: rebuilt when the card set or view changes, position-patched
+// when a layout re-solves or free-web coordinates are written.
+
+// Dragging is meaningful in free-web (moves persist) and hierarchical (vertical
+// reorder). The other layouts own their positions outright.
+const nodesDraggable = computed(() =>
+  activeVisualizer.value === 'free-web' || activeVisualizer.value === 'hierarchical'
+)
+
+function minimapNodeColor(node) {
+  return nodeType(node.data?.card)?.color || '#90a4ae'
+}
+
+function buildNode(card) {
+  const pos = cardPosition(card)
+  const node = {
+    id: String(card.id),
+    type: 'card',
+    position: { x: pos.x, y: pos.y },
+    data: { card }
+  }
+  if (activeVisualizer.value === 'hierarchical') {
+    // Tree rows drag vertically only — X is owned by the depth indent.
+    node.extent = [[pos.x, -1e9], [pos.x, 1e9]]
+  }
+  return node
+}
+
+// Full rebuild when the card SET changes (add/remove/reload) or the view
+// switches. Cheap at whiteboard scale, and keeps node state trivially correct.
+const cardIdsSignature = computed(
+  () => activeVisualizer.value + '|' + cards.value.map(c => c.id).join(',')
+)
+
+watch(cardIdsSignature, () => {
+  setNodes(cards.value.map(buildNode))
+}, { immediate: true })
+
+// Position patching: whenever the resolved positions change (a layout re-solve,
+// autoArrange/snap/tighten writing card.x/y, a load-time separation pass), move
+// the existing nodes to match. The node being actively dragged is skipped — Vue
+// Flow owns it for the duration of the gesture.
+const resolvedPositions = computed(() => {
+  void collapseGeneration.value
+  return cards.value.map(c => {
+    const p = cardPosition(c)
+    return `${c.id}:${Math.round(p.x)}:${Math.round(p.y)}`
+  }).join('|')
+})
+
+watch(resolvedPositions, () => {
+  for (const card of cards.value) {
+    if (dragCard.value && dragCard.value.id === card.id) continue
+    const node = findNode(String(card.id))
+    if (!node) continue
+    const pos = cardPosition(card)
+    if (node.position.x !== pos.x || node.position.y !== pos.y) {
+      node.position = { x: pos.x, y: pos.y }
+    }
+    if (activeVisualizer.value === 'hierarchical') {
+      node.extent = [[pos.x, -1e9], [pos.x, 1e9]]
+    }
+  }
+})
+
+// ─── Auto Condense ───
+//
+// Toggle in the top-right chip row. When ON and the view is below the compact
+// tier (the zoomed-out levels), RENDERED positions contract uniformly toward
+// the board centre by the largest factor that keeps every pair of cards from
+// touching — white space shrinks, the arrangement's shape is preserved, and
+// nothing overlaps. Strictly view-only: stored card.x/card.y are untouched
+// (free-web drags write back through the inverse transform), so zooming back
+// in shows the true layout. Skipped in the hierarchical tree, which is
+// already a compact column.
+const autoCondense = ref(localStorage.getItem('wb-auto-condense') === '1')
+watch(autoCondense, v => localStorage.setItem('wb-auto-condense', v ? '1' : '0'))
+
+const CONDENSE_GAP = 36     // canvas px kept between card boxes
+const CONDENSE_FLOOR = 0.2  // never contract below 20%
+
+const condenseActive = computed(() =>
+  autoCondense.value && !showCompact.value && activeVisualizer.value !== 'hierarchical'
+)
+
+// { cx, cy, k } — contraction centre and factor, or null when inactive/no-op.
+const condenseTransform = computed(() => {
+  if (!condenseActive.value) return null
+  void collapseGeneration.value
+  const list = cards.value
+  if (list.length < 2) return null
+
+  // Card centres and boxes in RAW coordinate space.
+  const items = list.map(c => {
+    const pos = cardPositionRaw(c)
+    const box = cardBox(c)
+    return { x: pos.x + box.w / 2, y: pos.y + box.h / 2, w: box.w, h: box.h }
+  }).filter(i => Number.isFinite(i.x) && Number.isFinite(i.y))
+  if (items.length < 2) return null
+
+  let cx = 0, cy = 0
+  for (const i of items) { cx += i.x; cy += i.y }
+  cx /= items.length
+  cy /= items.length
+
+  // Largest safe contraction: for each pair, staying clear on EITHER axis is
+  // enough, so the pair's minimum k is the cheaper of the two axis demands.
+  let k = CONDENSE_FLOOR
+  for (let a = 0; a < items.length; a++) {
+    for (let b = a + 1; b < items.length; b++) {
+      const A = items[a], B = items[b]
+      const dx = Math.abs(B.x - A.x)
+      const dy = Math.abs(B.y - A.y)
+      const needX = (A.w + B.w) / 2 + CONDENSE_GAP
+      const needY = (A.h + B.h) / 2 + CONDENSE_GAP
+      const kx = dx > 0 ? needX / dx : Infinity
+      const ky = dy > 0 ? needY / dy : Infinity
+      const pairK = Math.min(kx, ky)
+      if (Number.isFinite(pairK)) k = Math.max(k, pairK)
+    }
+  }
+  k = Math.min(1, Math.max(CONDENSE_FLOOR, k))
+  if (k >= 0.98) return null
+  return { cx, cy, k }
+})
+
+// Glide the contraction/expansion when the condensed state flips.
+watch(condenseActive, () => { glideLayout() })
+
+/**
+ * Where a card RENDERS: the raw resolved position (stored coords or computed
+ * layout), contracted toward the board centre when Auto Condense is engaged.
+ * Function declaration on purpose — hoisted, so every earlier caller sees it.
+ */
+function cardPosition(card) {
+  const pos = cardPositionRaw(card)
+  const t = condenseTransform.value
+  if (!t) return pos
+  const box = cardBox(card)
+  const ccx = t.cx + ((pos.x + box.w / 2) - t.cx) * t.k
+  const ccy = t.cy + ((pos.y + box.h / 2) - t.cy) * t.k
+  return { ...pos, x: Math.round(ccx - box.w / 2), y: Math.round(ccy - box.h / 2) }
+}
+
+// Edges mirror the link store 1:1.
+watch([nodeLinks, cardIdsSignature], () => {
+  const ids = new Set(cards.value.map(c => c.id))
+  setEdges(nodeLinks.value
+    .filter(l => ids.has(l.sourceCardId) && ids.has(l.targetCardId))
+    .map(l => ({
+      id: String(l.id),
+      source: String(l.sourceCardId),
+      target: String(l.targetCardId),
+      type: 'link',
+      data: { link: l }
+    })))
+}, { deep: true, immediate: true })
 </script>
 
 <style scoped>
@@ -3284,17 +6695,8 @@ watch(cards, (newCards, oldCards) => {
 .whiteboard-canvas {
   flex: 1;
   position: relative;
-  background:
-    linear-gradient(90deg, rgba(200, 200, 200, 0.1) 1px, transparent 1px),
-    linear-gradient(rgba(200, 200, 200, 0.1) 1px, transparent 1px);
-  background-size: 20px 20px;
   overflow: hidden;
   outline: none;
-  cursor: grab;
-}
-
-.whiteboard-canvas:active {
-  cursor: grabbing;
 }
 
 .help-overlay {
@@ -3405,22 +6807,6 @@ watch(cards, (newCards, oldCards) => {
   position: relative;
 }
 
-/* Inner dotted border marking drag zone boundary (inside = drag, outside = link zone) */
-.card-item::after {
-  content: '';
-  position: absolute;
-  inset: 6px;
-  border: 1.5px dashed rgba(0, 0, 0, 0.12);
-  border-radius: 4px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.card-item:hover::after {
-  opacity: 1;
-}
-
 .card-item:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
 }
@@ -3504,6 +6890,100 @@ watch(cards, (newCards, oldCards) => {
 }
 
 /* Link preview box (Facebook-style) */
+/* Images are natively draggable in browsers. On the whiteboard that hijacks a
+   card drag: the native drag suppresses mousemove (so the card never follows the
+   cursor), then the release fires the canvas @drop handler, which spawns a
+   duplicate card — and the drag ghost keeps trailing the mouse afterwards.
+   Suppress native dragging for every image on the canvas so mousedown-based card
+   dragging always wins. */
+.whiteboard-canvas img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/* ─── Node type identity ─── */
+
+/* Colored bar along the card's top edge, in the node type's color. */
+.type-accent {
+  height: 3px;
+  width: 100%;
+  flex: 0 0 auto;
+}
+
+/* Uppercase type label next to the icon in every card header. */
+.type-chip {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  padding: 2px 5px;
+  margin-right: 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  white-space: nowrap;
+  opacity: 0.95;
+}
+
+.node-header {
+  background: #fafafa;
+  /* The header is drag-to-move chrome (double-click still collapses). Inline
+     `cursor: pointer` on the element is overridden here so the affordance
+     matches the behaviour. */
+  cursor: move !important;
+}
+
+/* …except the title text itself, which is a text-entry target. */
+.editable-title :deep(input) {
+  cursor: text !important;
+}
+
+/* Compact metadata under an image: format · dimensions · size · source */
+.image-meta-line {
+  font-size: 10px;
+  line-height: 1.5;
+  color: #78909c;
+  padding: 3px 12px 0;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-meta-exif {
+  color: #8d6e63;
+}
+
+.image-meta-source {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #455a64;
+  padding: 2px 12px 0;
+  font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.image-source-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.image-source-link {
+  font-size: 11px;
+  color: #1976D2;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-source-link:hover {
+  text-decoration: underline;
+}
+
 .link-preview-box {
   border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 8px;
@@ -3540,12 +7020,52 @@ watch(cards, (newCards, oldCards) => {
 }
 
 /* Twitter/X Preview Box */
+/* The tweet renders as a clean white X-style bubble: black-on-white text,
+   rounded (needs !important — vuetify-fixes.css flattens all radii globally),
+   inset from the card edges so the card background frames it. */
 .twitter-preview-box {
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 12px;
+  border: 1px solid #cfd9de;
+  border-radius: 16px !important;
   overflow: hidden;
-  background: white;
+  background: #fff;
+  margin: 6px 4px 10px;
   transition: box-shadow 0.2s;
+}
+
+.tweet-author {
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #0f1419;
+  line-height: 1.25;
+}
+
+.tweet-handle {
+  font-size: 0.88rem;
+  color: #536471;
+  line-height: 1.25;
+}
+
+.tweet-text {
+  font-size: 1.05rem;
+  line-height: 1.45;
+  color: #0f1419;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.x-logo {
+  color: #0f1419;
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.tweet-media-chip {
+  color: #0f1419 !important;
+  border-color: #cfd9de !important;
+}
+
+.tweet-avatar {
+  border-radius: 50% !important;
 }
 
 .twitter-preview-box:hover {
@@ -3553,14 +7073,20 @@ watch(cards, (newCards, oldCards) => {
 }
 
 .twitter-header {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fff;
 }
 
+/* Media sits INSIDE the bubble as its own rounded, bordered block — like a
+   real embedded post — instead of a full-bleed dark slab. */
 .twitter-media {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 2px;
-  background: rgba(0, 0, 0, 0.08);
+  background: #fff;
+  margin: 2px 16px 14px;
+  border: 1px solid #cfd9de;
+  border-radius: 16px !important;
+  overflow: hidden;
 }
 
 .twitter-media-single {
@@ -3574,7 +7100,31 @@ watch(cards, (newCards, oldCards) => {
   display: block;
 }
 
+/* Single image/thumbnail: natural aspect, capped height */
+.twitter-media-single .twitter-media-image {
+  max-height: 360px;
+  object-fit: cover;
+}
+
 /* Editable title styling */
+/* The title field must occupy only the text itself, not a full-width box.
+   A stretched input swallows presses across the whole header, and startDrag()
+   bails on INPUT/TEXTAREA targets — which is what made headers undraggable.
+   Sizing to content leaves the rest of the header as bare, draggable chrome. */
+.editable-title {
+  flex: 0 0 auto !important;
+  min-width: 2ch;
+  max-width: 100%;
+  transition: width 0.15s ease;
+}
+
+/* Once focused the field is unambiguously in edit mode, so it expands to give
+   room for the full title. Collapsed again on blur to keep the drag area large. */
+.editable-title:focus-within {
+  width: 26ch !important;
+  max-width: 60%;
+}
+
 .editable-title :deep(.v-field) {
   padding: 0 !important;
   min-height: unset !important;
@@ -3583,8 +7133,19 @@ watch(cards, (newCards, oldCards) => {
 .editable-title :deep(.v-field__input) {
   padding: 0 !important;
   min-height: unset !important;
+  /* Header titles read as the card's name, so they carry real weight rather
+     than inheriting the small caption styling. Font size INHERITS so the
+     counter-scaled value from titleFieldStyle() applies at low zoom. */
   font-size: inherit !important;
-  font-weight: inherit !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.01em;
+  color: #212121 !important;
+}
+
+.editable-title :deep(input::placeholder) {
+  font-weight: 600;
+  color: #90a4ae !important;
+  opacity: 1;
 }
 
 .editable-title :deep(.v-field__field) {
@@ -3670,46 +7231,534 @@ watch(cards, (newCards, oldCards) => {
 
 .editable-title :deep(input) {
   padding: 0 !important;
-}
-
-/* === SVG Connection Layer === */
-.connection-layer {
-  position: absolute;
-  top: 0;
-  left: 0;
+  /* Inputs carry a default `size` (~20 chars) that keeps them wide regardless of
+     content. `field-sizing: content` shrinks to the text where supported; the
+     ch-based width from titleFieldStyle() is the cross-browser fallback, applied
+     here so it is measured in the input's own (larger, bold) font. */
+  field-sizing: content;
   width: 100%;
-  height: 100%;
+  min-width: 3ch;
+  max-width: 100%;
+  font-size: inherit !important;
+  font-weight: 700 !important;
+  color: #212121 !important;
+}
+
+/* ─── Current view indicator (top-right) ─── */
+
+.view-indicator {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  z-index: 2050;
+  user-select: none;
+  /* Collapse-all sits to the LEFT of the view selector, same chip styling. */
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.collapse-all-chip {
+  flex: 0 0 auto;
+}
+
+.view-chip-disabled {
+  opacity: 0.45;
+  cursor: default;
   pointer-events: none;
-  z-index: 2;
-  overflow: visible;
 }
 
-.connection-label {
-  font-size: 12px;
-  font-weight: 600;
-  paint-order: stroke;
-  stroke: white;
-  stroke-width: 3px;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+/* The dropdown positions against this, not the whole row. */
+.view-selector-anchor {
+  position: relative;
+  flex: 0 0 auto;
 }
 
-/* === Border-hover connection system === */
+.view-indicator-chip {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #cfd8dc;
+  border-radius: 20px;
+  padding: 7px 14px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
 
-/* Invisible thick border becomes visible on hover */
-.card-border-glow {
-  outline: 9px solid rgba(25, 118, 210, 0.45) !important;
+.view-indicator-chip:hover {
+  border-color: #1976d2;
+  box-shadow: 0 4px 16px rgba(25, 118, 210, 0.25);
+}
+
+/* ─── Hub labels: constant-size landmark badges for parent nodes ─── */
+.hub-label-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 45;
+}
+
+.hub-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  color: #fff;
+  text-align: center;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.hub-label-type {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  opacity: 0.9;
+}
+
+.hub-label-title {
+  font-size: 16px;
+  font-weight: 700;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Engaged toggle state (Auto Center) — filled so on/off reads at a glance */
+.view-chip-active {
+  background: #1976d2;
+  border-color: #1976d2;
+}
+
+.view-chip-active:hover {
+  border-color: #1565c0;
+}
+
+.view-chip-active .view-indicator-label {
+  color: #fff;
+}
+
+.view-indicator-open {
+  border-color: #1976d2;
+}
+
+.view-indicator-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #263238;
+  white-space: nowrap;
+}
+
+.view-indicator-caret {
+  transition: transform 0.2s ease;
+  color: #78909c;
+}
+
+.view-indicator-open .view-indicator-caret {
+  transform: rotate(180deg);
+}
+
+.view-indicator-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+  padding: 6px;
+  min-width: 260px;
+}
+
+.view-drop-enter-active,
+.view-drop-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.view-drop-enter-from,
+.view-drop-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.97);
+}
+
+/* ─── Zoom readout (bottom-right of the canvas) ─── */
+
+.zoom-readout {
+  position: absolute;
+  bottom: 16px;
+  right: 20px;
+  z-index: 2050;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #cfd8dc;
+  border-radius: 20px;
+  padding: 6px 14px;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  color: #546e7a;
+}
+
+.zoom-readout:hover {
+  border-color: #1976d2;
+  box-shadow: 0 4px 16px rgba(25, 118, 210, 0.25);
+}
+
+/* Highlighted whenever zoom is off 100%, so it reads as actionable. */
+.zoom-readout-active {
+  border-color: #1976d2;
+  color: #1976d2;
+}
+
+.zoom-readout-value {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  min-width: 4ch;
+  text-align: right;
+}
+
+/* Names the active detail tier — detail / compact / summary / marker. */
+.zoom-readout-tier {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #90a4ae;
+  border-left: 1px solid #cfd8dc;
+  padding-left: 6px;
+}
+
+/* ─── Wide tree rows: lay card bodies out horizontally ─── */
+/*
+ * In the hierarchical tree a row spans the viewport, so a vertically-stacked body
+ * leaves most of that width empty and makes the row needlessly tall. Flow the
+ * body's direct children into columns instead: the row gets shorter, and the
+ * horizontal space is actually used.
+ */
+.tree-wide-body {
+  display: flex !important;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+/* Each block takes a share of the row rather than the full width. */
+.tree-wide-body > * {
+  flex: 1 1 320px;
+  min-width: 0;
+  margin-bottom: 0 !important;
+}
+
+/* Text areas stay readable but don't hog the row. */
+.tree-wide-body :deep(.v-textarea) {
+  flex: 2 1 420px;
+}
+
+/* The social/preview box carries the most content, so give it the largest share. */
+.tree-wide-body .twitter-preview-box,
+.tree-wide-body .link-preview-box {
+  flex: 3 1 480px;
+}
+
+/* Inside the social box, put the author block and the post body side by side. */
+.tree-wide-body .twitter-preview-box {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tree-wide-body .twitter-preview-box > * {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+/* Comments are a conversation log — they read as a full-width strip under the
+   content, not as another column competing with it. */
+.tree-wide-body ~ .node-comments,
+.zoom-summary-wide .node-comments {
+  width: 100%;
+}
+
+/* ─── Node comments ─── */
+
+.node-comments {
+  border-top: 1px solid #eceff1;
+  padding: 6px 10px 2px;
+  background: #fafbfc;
+}
+
+.node-comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 5px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.node-comment {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+/* Username chip preceding each comment. */
+.comment-chip {
+  flex: 0 0 auto;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #546e7a;
+  border-radius: 3px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.comment-chip-me {
+  background: #1976d2;
+}
+
+.comment-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #37474f;
+  word-break: break-word;
+}
+
+.comment-ts {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  color: #b0bec5;
+  white-space: nowrap;
+}
+
+.comment-delete {
+  flex: 0 0 auto;
+  cursor: pointer;
+  color: #cfd8dc;
+}
+
+.comment-delete:hover {
+  color: #e53935;
+}
+
+.node-comment-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+.comment-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 0.75rem;
+  color: #263238;
+  padding: 3px 0;
+}
+
+.comment-input::placeholder {
+  color: #b0bec5;
+}
+
+.comment-send {
+  cursor: pointer;
+}
+
+/* An answered question recedes — it's resolved, not outstanding. */
+.question-answered {
+  opacity: 0.72;
+}
+
+.question-answered :deep(.node-header) {
+  background: #f1f8e9;
+}
+
+/* Ctrl-drag: mark the followers so it's obvious what's coming along. */
+.subtree-member :deep(.v-card),
+.subtree-member :deep(.parent-node-circle) {
+  outline: 2px dashed #1976d2;
+  outline-offset: 2px;
+}
+
+/* Reparent drag feedback in the hierarchical view. */
+.reparent-target :deep(.v-card) {
+  outline: 3px solid #FFC107;
+  outline-offset: 2px;
+}
+
+.reparent-source {
+  opacity: 0.55;
+}
+
+/* ─── Collapsed row (hierarchical view) ─── */
+
+.collapsed-row {
+  border-left: 5px solid;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.collapsed-row-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  min-height: 46px;
+}
+
+.collapsed-row-icon {
+  flex: 0 0 auto;
+}
+
+.collapsed-row-chip {
+  flex: 0 0 auto;
+  margin-right: 2px;
+}
+
+.collapsed-row-thumb {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #eceff1;
+}
+
+.collapsed-row-title :deep(input) {
+  font-size: 0.9rem !important;
+  font-weight: 700 !important;
+}
+
+/* Anything past the title is context, not a control — it must never eat a drag. */
+.collapsed-row-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: #78909c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Tree scaffolding for the hierarchical view — sits below everything. */
+/* ─── Visualizer menu ─── */
+
+.visualizer-wrapper {
+  position: relative;
+}
+
+/* Pop-DOWN list of layout modes, revealed on hover. */
+.visualizer-menu {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+  padding: 6px;
+  min-width: 260px;
+  z-index: 2100;
+}
+
+/* Keeps the hover intent alive across the gap between button and menu. */
+.visualizer-menu::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: 0;
+  right: 0;
+  height: 8px;
+}
+
+.visualizer-option {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.visualizer-option:hover {
+  background: #f0f4f8;
+}
+
+.visualizer-option-active {
+  background: #e3f2fd;
+}
+
+.visualizer-option-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.visualizer-option-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #212121;
+  line-height: 1.2;
+}
+
+.visualizer-option-desc {
+  font-size: 0.68rem;
+  color: #78909c;
+  line-height: 1.3;
+}
+
+.visualizer-drop-enter-active,
+.visualizer-drop-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.visualizer-drop-enter-from,
+.visualizer-drop-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-6px);
+}
+
+/* === Connection feedback === */
+
+/* Yellow glow on the card under the pointer while a connection is in flight —
+   dropping there will connect to it. */
+.canvas-dragging-connection .card-node:hover .v-card,
+.canvas-dragging-connection .card-node:hover .zoom-marker {
+  outline: 9px solid rgba(255, 193, 7, 0.6);
   outline-offset: 2px;
   border-radius: 6px;
-  transition: outline 0.15s ease;
 }
 
-/* Yellow border glow on target card during connection drag */
-.card-border-glow-yellow {
-  outline: 9px solid rgba(255, 193, 7, 0.6) !important;
-  outline-offset: 2px;
-  border-radius: 6px;
-  transition: outline 0.15s ease;
+.canvas-dragging-connection .card-node:hover .parent-node-circle {
+  box-shadow: 0 0 24px 10px rgba(255, 193, 7, 0.5) !important;
 }
 
 /* Blue flash animation on successful connection */
@@ -3724,24 +7773,6 @@ watch(cards, (newCards, oldCards) => {
 .card-flash-blue {
   animation: flash-blue 0.6s ease-out;
   z-index: 1001 !important;
-}
-
-/* Source card yellow glow while connection is active */
-.card-is-drag-source {
-  outline: 9px solid rgba(255, 193, 7, 0.7) !important;
-  outline-offset: 2px;
-}
-
-/* === Parent node connection glow (circle, not rectangular border) === */
-.parent-glow-blue .parent-node-circle {
-  background: #1565C0 !important;
-  box-shadow: 0 0 20px 8px rgba(25, 118, 210, 0.5) !important;
-}
-
-.parent-glow-yellow .parent-node-circle {
-  background: #FFC107 !important;
-  color: #333 !important;
-  box-shadow: 0 0 24px 10px rgba(255, 193, 7, 0.5) !important;
 }
 
 .parent-flash-blue .parent-node-circle {
@@ -3788,11 +7819,11 @@ watch(cards, (newCards, oldCards) => {
   font-size: 0.85em;
 }
 
-/* Drop-into-empty-space spawn menu */
+/* Drop-into-empty-space spawn menu — screen-space overlay, constant size,
+   anchored to a canvas point via dropMenuStyle (left/top/transform inline). */
 .drop-spawn-menu {
   position: absolute;
   z-index: 1100;
-  transform: translate(-50%, 0);
 }
 
 .drop-menu-card {
@@ -3803,7 +7834,7 @@ watch(cards, (newCards, oldCards) => {
 
 .endpoint-popup {
   position: absolute;
-  transform: translate(-50%, -100%) translateY(-12px);
+  /* left/top/transform set inline (endpointPopupStyle) — screen-space anchor. */
   z-index: 2000;
   pointer-events: all;
 }
@@ -3821,12 +7852,6 @@ watch(cards, (newCards, oldCards) => {
   padding: 1px 4px;
   font-family: monospace;
   font-size: 0.85em;
-}
-
-/* === Zoom Wrapper === */
-.zoom-wrapper {
-  min-height: 100%;
-  min-width: 100%;
 }
 
 /* === Parent Node Card === */
@@ -3869,33 +7894,35 @@ watch(cards, (newCards, oldCards) => {
 }
 
 .parent-node-type {
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.85);
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.92);
   line-height: 1.2;
 }
 
 .parent-node-slug {
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.7);
-  max-width: 110px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+  max-width: 88%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .parent-node-input {
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
   color: white;
-  font-size: 0.85rem;
-  text-align: left;
-  padding: 4px 8px;
-  width: 180px;
-  margin-top: 4px;
+  font-size: 1.9rem;
+  font-weight: 800;
+  text-align: center;
+  padding: 6px 12px;
+  width: 86%;
+  margin-top: 6px;
   outline: none;
 }
 
@@ -3909,18 +7936,18 @@ watch(cards, (newCards, oldCards) => {
 }
 
 .parent-node-desc {
-  background: white;
+  background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
-  color: #1565C0;
-  font-size: 0.8rem;
+  border-radius: 8px;
+  color: #263238;
+  font-size: 0.95rem;
   text-align: left;
-  padding: 4px 8px;
-  width: 180px;
-  margin-top: 3px;
+  padding: 6px 10px;
+  width: 74%;
+  margin-top: 8px;
   outline: none;
   resize: none;
-  line-height: 1.3;
+  line-height: 1.35;
 }
 
 .parent-node-desc::placeholder {
@@ -3933,14 +7960,23 @@ watch(cards, (newCards, oldCards) => {
 }
 
 .parent-node-delete {
-  font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #fff;
+  background: #d32f2f;
+  border-radius: 4px;
+  padding: 3px 12px;
   cursor: pointer;
-  margin-top: 4px;
+  margin-top: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .parent-node-delete:hover {
-  color: #ff8a80;
+  background: #b71c1c;
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
 }
 
 /* === Collapsed Pill Layout === */
@@ -4010,17 +8046,364 @@ watch(cards, (newCards, oldCards) => {
 }
 
 /* === Delete text button === */
+/* Delete is a destructive action — filled red with white text so it reads as a
+   real button, not incidental grey text. */
 .delete-text-btn {
-  font-size: 0.65rem !important;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: #9e9e9e !important;
-  text-transform: none !important;
+  font-size: 0.75rem !important;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  background-color: #d32f2f !important;
+  color: #fff !important;
+  text-transform: uppercase !important;
   min-width: unset !important;
-  padding: 0 4px !important;
+  height: 26px !important;
+  padding: 0 16px !important;
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(211, 47, 47, 0.4);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
 }
 
 .delete-text-btn:hover {
-  color: #e53935 !important;
+  background-color: #b71c1c !important;
+  color: #fff !important;
+  box-shadow: 0 3px 10px rgba(211, 47, 47, 0.55);
+}
+
+.delete-text-btn:active {
+  transform: translateY(1px);
+}
+</style>
+<style>
+/* ═══ Vue Flow canvas (unscoped: targets library internals) ═══
+   All selectors are prefixed with .whiteboard-flow / .whiteboard-canvas so
+   nothing leaks outside this view. */
+
+.whiteboard-flow {
+  width: 100%;
+  height: 100%;
+  background: #fafafa;
+}
+
+/* Nodes are transparent wrappers — the card content inside styles itself. */
+.whiteboard-flow .vue-flow__node-card {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: move;
+}
+
+.whiteboard-flow .card-node {
+  position: relative;
+}
+
+/* Card content always wins hit-tests over connect-bands — its own AND any
+   overlapping neighbour's. Bands are only reachable over true empty space. */
+.whiteboard-flow .card-node .card-item,
+.whiteboard-flow .card-node .zoom-marker,
+.whiteboard-flow .card-node .parent-node-circle {
+  position: relative;
+  z-index: 1;
+}
+
+/* Smooth glide when a computed layout re-solves, Auto Arrange runs, or the
+   view switches. Vue Flow positions nodes via transform, so one transition
+   rule covers every animated move. */
+.whiteboard-canvas.layout-animating .vue-flow__node {
+  transition: transform 0.65s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Connection handles ─── */
+
+/* Invisible hot zone: four strips forming a frame strictly OUTSIDE the card
+   bounds (thickness --band, screen-constant via connectBandStyle). Nothing
+   overlaps the card itself, so card content and dragging are untouched. */
+.whiteboard-flow .connect-band {
+  position: absolute;
+  pointer-events: all;
+  background: transparent;
+  z-index: 0;
+}
+
+.whiteboard-flow .connect-band-top {
+  left: calc(-1 * var(--band));
+  right: calc(-1 * var(--band));
+  top: calc(-1 * var(--band));
+  height: var(--band);
+}
+
+.whiteboard-flow .connect-band-bottom {
+  left: calc(-1 * var(--band));
+  right: calc(-1 * var(--band));
+  bottom: calc(-1 * var(--band));
+  height: var(--band);
+}
+
+.whiteboard-flow .connect-band-left {
+  left: calc(-1 * var(--band));
+  top: 0;
+  bottom: 0;
+  width: var(--band);
+}
+
+.whiteboard-flow .connect-band-right {
+  right: calc(-1 * var(--band));
+  top: 0;
+  bottom: 0;
+  width: var(--band);
+}
+
+/* The border-tracking connection dot: clings to the nearest point on the
+   card's perimeter and follows the mouse while it is in the hot zone. Press
+   and drag it to draw a link. NO transition — it must track instantly. */
+.whiteboard-flow .vue-flow__handle.connect-dot-live {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
+  border-style: solid;
+  border-color: #fff;
+  background: #1976d2;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35), 0 0 0 6px rgba(25, 118, 210, 0.18);
+  transform: translate(-50%, -50%);
+  right: auto;
+  bottom: auto;
+  opacity: 0.95;
+  pointer-events: all;
+  transition: none;
+  z-index: 40;
+  cursor: crosshair;
+}
+
+/* Full-card target surface: inert normally; while a connection is in flight it
+   covers the card so releasing anywhere on it completes the link. */
+.whiteboard-flow .vue-flow__handle.connect-target-surface {
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  transform: none;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  opacity: 0;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.canvas-dragging-connection .vue-flow__handle.connect-target-surface {
+  pointer-events: all;
+}
+
+/* ─── Edges ─── */
+
+/* Endpoint dots, label, and delete affordance live in the edge-label layer;
+   lift it above the nodes so they stay clickable. */
+.whiteboard-flow .vue-flow__edge-labels {
+  z-index: 1001;
+}
+
+.whiteboard-flow .edge-endpoint {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.whiteboard-flow .edge-endpoint:hover {
+  box-shadow: 0 0 0 6px rgba(25, 118, 210, 0.25);
+}
+
+.whiteboard-flow .edge-label {
+  position: absolute;
+  font-size: 18px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 2px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.whiteboard-flow .edge-delete {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  background: #fff;
+  border: 2.5px solid #e53935;
+  color: #e53935;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+/* Rubber band while aiming a new connection */
+.whiteboard-flow .connection-rubber-band {
+  stroke: #ffc107;
+  stroke-width: 4;
+  stroke-dasharray: 8 5;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+
+.whiteboard-flow .connection-rubber-dot {
+  fill: #ffc107;
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+/* ─── Semantic zoom tiers (constant footprint) ─── */
+/* All sizes are CANVAS units: they scale geometrically with the zoom, exactly
+   like the full card they stand in for. No counter-scaling anywhere. */
+
+.whiteboard-flow .zoom-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 6px solid;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.whiteboard-flow .zoom-marker-parent {
+  border-radius: 50%;
+  border-width: 12px;
+  box-shadow: 0 6px 40px rgba(0, 0, 0, 0.30);
+}
+
+/* The hub's readable text lives in the screen-space label layer; the tiny
+   in-plate copies would just shimmer behind it. */
+.whiteboard-flow .zoom-marker-parent .zoom-marker-label,
+.whiteboard-flow .zoom-marker-parent .zoom-marker-title {
+  display: none;
+}
+
+.whiteboard-flow .zoom-marker-label {
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.whiteboard-flow .zoom-marker-title {
+  font-size: 26px;
+  color: #37474f;
+  max-width: 90%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.whiteboard-flow .zoom-summary-card {
+  border-top: 10px solid;
+  border-radius: 14px !important;
+}
+
+.whiteboard-flow .zoom-summary-inner {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 22px 26px;
+}
+
+.whiteboard-flow .zoom-summary-thumb {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 10px;
+  flex: 0 0 auto;
+}
+
+.whiteboard-flow .zoom-summary-icon {
+  flex: 0 0 auto;
+}
+
+.whiteboard-flow .zoom-summary-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.whiteboard-flow .zoom-summary-type {
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.whiteboard-flow .zoom-summary-title {
+  font-size: 30px;
+  font-weight: 600;
+  color: #263238;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.whiteboard-flow .zoom-summary-preview {
+  font-size: 22px;
+  color: #607d8b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Wide hierarchical row variant: short and horizontal, so more of the tree
+   fits on screen. */
+.whiteboard-flow .zoom-summary-wide .zoom-summary-inner {
+  padding: 8px 26px;
+}
+
+.whiteboard-flow .zoom-summary-wide .zoom-summary-body {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 24px;
+}
+
+.whiteboard-flow .zoom-summary-wide .zoom-summary-thumb {
+  width: 64px;
+  height: 64px;
+}
+
+/* ─── MiniMap ─── */
+.whiteboard-flow .vue-flow__minimap {
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+/* ─── Circle opt-ins ───
+   styles/vuetify-fixes.css flattens ALL border-radius app-wide with
+   `* { border-radius: 0 !important }` (square aesthetic), and genuinely
+   circular elements must opt back in with their own !important — same pattern
+   the fixes file uses for avatars/radios. These whiteboard elements are
+   genuinely circular: the parent hub discs, connection dots, and edge
+   endpoint/delete buttons. */
+.whiteboard-flow .zoom-marker-parent,
+.parent-node-circle,
+.parent-node-circle::before,
+.whiteboard-flow .vue-flow__handle.connect-dot-live,
+.whiteboard-flow .edge-endpoint,
+.whiteboard-flow .edge-delete,
+.whiteboard-flow .connection-rubber-dot {
+  border-radius: 50% !important;
+}
+
+.hub-label {
+  border-radius: 999px !important;
 }
 </style>

@@ -140,24 +140,6 @@
         class="mt-2 mb-6"
       ></v-checkbox>
 
-      <v-divider class="mb-6"></v-divider>
-
-      <!-- Default Zoom -->
-      <h3 class="text-h6 mb-3">Default Zoom</h3>
-      <v-select
-        v-model="defaultZoom"
-        :items="[
-          { title: '100%', value: 1.0 },
-          { title: '65%', value: 0.65 },
-          { title: '40%', value: 0.4 }
-        ]"
-        label="Default zoom level"
-        variant="outlined"
-        density="compact"
-        hide-details
-        class="mb-6"
-        style="max-width: 200px;"
-      ></v-select>
     </v-card-text>
 
     <v-card-actions>
@@ -201,7 +183,6 @@ const parentNodeTypes = ref([...defaultParentNodeTypes.map(t => ({ ...t }))])
 const lineStyle = ref('curved')
 const defaultLineColor = ref('#1976d2')
 const showLabels = ref(true)
-const defaultZoom = ref(1.0)
 
 const iconOptions = [
   { label: 'Filmstrip', value: 'mdi-filmstrip' },
@@ -256,7 +237,6 @@ function resetDefaults() {
   lineStyle.value = 'curved'
   defaultLineColor.value = '#1976d2'
   showLabels.value = true
-  defaultZoom.value = 1.0
 }
 
 async function loadSettings() {
@@ -269,7 +249,6 @@ async function loadSettings() {
         if (wb.line_style) lineStyle.value = wb.line_style
         if (wb.default_line_color) defaultLineColor.value = wb.default_line_color
         if (wb.show_labels !== undefined) showLabels.value = wb.show_labels
-        if (wb.default_zoom) defaultZoom.value = wb.default_zoom
       }
     }
   } catch {
@@ -288,8 +267,7 @@ async function saveSettings() {
       parent_node_types: parentNodeTypes.value,
       line_style: lineStyle.value,
       default_line_color: defaultLineColor.value,
-      show_labels: showLabels.value,
-      default_zoom: defaultZoom.value
+      show_labels: showLabels.value
     }
 
     await fetchJson('/api/settings/api-configs', {

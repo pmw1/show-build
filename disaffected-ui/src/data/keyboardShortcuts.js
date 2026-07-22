@@ -181,9 +181,15 @@ export const shortcutSections = [
       { keys: ['H'], label: 'Add HTML card' },
       { keys: ['C'], label: 'Add code card' },
       { keys: ['M'], label: 'Add markdown card' },
+      { keys: ['F'], label: 'Fit all nodes to screen' },
+      { keys: ['K'], label: 'Add contact card' },
+      { keys: ['Q'], label: 'Add question card' },
       { keys: ['P'], label: 'Toggle parent menu' },
       { keys: ['Delete'], label: 'Delete active card' },
-      { keys: ['Esc'], label: 'Exit connection mode / close menus' }
+      { keys: ['Esc'], label: 'Close menus / cancel subtree drag' },
+      { keys: ['Scroll'], label: 'Zoom (toward the cursor)' },
+      { keys: ['Ctrl', '+ drag'], label: 'Move node with all its linked children' },
+      { keys: ['Ctrl+Shift', '+ drag'], label: 'Move children and pack them tightly on release' }
     ]
   },
 

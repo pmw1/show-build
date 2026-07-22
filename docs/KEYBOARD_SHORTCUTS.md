@@ -214,11 +214,23 @@ Active when the whiteboard canvas is focused.
 | `H` | Add HTML card |
 | `C` | Add code card |
 | `M` | Add markdown card |
+| `F` | Fit all nodes to screen |
+| `K` | Add contact card |
+| `Q` | Add question card |
 | `P` | Toggle parent menu |
 | `Delete` | Delete active card |
-| `Esc` | Exit connection mode / close menus |
+| `Esc` | Close menus / cancel subtree drag |
+| `Scroll` | Zoom (toward the cursor) |
+| `Ctrl` + drag | Move node with all its linked children |
+| `Ctrl+Shift` + drag | Move children and pack them tightly on release |
 
-Source: `views/ScratchpadView.vue` (~line 2349+)
+**Note:** `Ctrl` / `Ctrl+Shift` can be held before the press *or* pressed part-way
+through a drag. Once engaged, `Ctrl` is latched — releasing it keeps the subtree
+attached. Press `Esc` before dropping to cancel. Connections are drawn by
+dragging one of the four border dots that appear when hovering a card; the
+canvas itself (pan/zoom/drag/connect) runs on Vue Flow.
+
+Source: `views/ScratchpadView.vue`
 
 ---
 
