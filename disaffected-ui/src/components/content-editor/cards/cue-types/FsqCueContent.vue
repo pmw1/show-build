@@ -19,15 +19,29 @@
           >
             <source :src="fsqBackgroundVideoUrl" type="video/mp4">
           </video>
-          <!-- Black bar overlay -->
-          <div class="fsq-preview-black-bar" :style="fsqBlackBarStyle"></div>
-          <!-- Quote text overlay (live preview) -->
-          <div class="fsq-preview-quote-overlay" :style="fsqPreviewStyle">
-            <div class="fsq-preview-quote-wrapper">
-              <div class="fsq-preview-quote-text" :style="fsqPreviewTextStyle">{{ cueData.quote }}</div>
+          <!-- When a CURRENT generated PNG exists, key the ACTUAL image over the
+               background video — the preview IS the render, pixel for pixel
+               (the PNG carries the black bar + text on alpha, exactly as it
+               keys downstream). The HTML recreation below is only the live
+               WYSIWYG fallback while params are dirty or no PNG exists yet. -->
+          <img
+            v-if="showRenderedPng"
+            :src="cueData.mediaUrl"
+            class="fsq-preview-rendered-png"
+            alt="FSQ render"
+            draggable="false"
+          />
+          <template v-else>
+            <!-- Black bar overlay -->
+            <div class="fsq-preview-black-bar" :style="fsqBlackBarStyle"></div>
+            <!-- Quote text overlay (live preview) -->
+            <div class="fsq-preview-quote-overlay" :style="fsqPreviewStyle">
+              <div class="fsq-preview-quote-wrapper">
+                <div class="fsq-preview-quote-text" :style="fsqPreviewTextStyle">{{ cueData.quote }}</div>
+              </div>
+              <div v-if="cueData.attribution" class="fsq-preview-attribution" :style="fsqPreviewAttributionStyle">— {{ cueData.attribution }}</div>
             </div>
-            <div v-if="cueData.attribution" class="fsq-preview-attribution" :style="fsqPreviewAttributionStyle">— {{ cueData.attribution }}</div>
-          </div>
+          </template>
           <!-- Click indicator if PNG exists -->
           <div v-if="cueData.mediaUrl" class="fsq-preview-click-hint">
             <v-icon size="20" color="white">mdi-magnify-plus</v-icon>
@@ -55,6 +69,21 @@
         >
           <v-icon size="small" start>{{ !fsqDirty && cueData.mediaUrl ? 'mdi-check-circle' : (cueData.mediaUrl ? 'mdi-sync' : 'mdi-creation') }}</v-icon>
           {{ !fsqDirty && cueData.mediaUrl ? 'Up to Date' : (cueData.mediaUrl ? 'Regenerate' : 'Generate PNG') }}
+        </v-btn>
+
+        <!-- Pop the render up in a modal, layered over the same background
+             video the inline preview uses (the existing preview modal). -->
+        <v-btn
+          v-if="cueData.mediaUrl"
+          block
+          size="small"
+          variant="text"
+          color="primary"
+          class="mb-2"
+          @click.stop="$emit('open-fsq-preview')"
+        >
+          <v-icon size="small" start>mdi-television-play</v-icon>
+          Preview
         </v-btn>
 
         <v-btn
@@ -332,6 +361,11 @@ const emit = defineEmits(['edit-fsq', 'delete', 'generate-png', 'download-png', 
 // Collapsible adjustments panel
 const adjustmentsOpen = ref(false);
 
+// Show the ACTUAL generated PNG keyed over the background whenever it is
+// current; fall back to the HTML recreation only while editing (dirty) or
+// before the first render exists.
+const showRenderedPng = computed(() => !!props.cueData?.mediaUrl && !props.fsqDirty);
+
 // data - FSQ editable parameters (local state)
 const localFontFamily = ref(props.cueData?.fontFamily || FSQ_DEFAULTS.fontFamily);
 const localFontSize = ref(parseInt(props.cueData?.fontSize) || FSQ_DEFAULTS.fontSize);
@@ -496,6 +530,19 @@ defineExpose({ localFontSize, localAttributionSize, localBoxHeight, localBoxOpac
   height: 100%;
   object-fit: cover;
   z-index: 1;
+}
+
+/* The real render, keyed over the background video. The PNG is a full
+   1920x1080 frame with alpha, and the box is fixed 16/9 — so contain fills it
+   exactly and the preview is pixel-faithful to what keys downstream. */
+.fsq-preview-rendered-png {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 3;
+  pointer-events: none;
 }
 
 .fsq-preview-black-bar {
