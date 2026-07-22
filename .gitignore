@@ -118,3 +118,4 @@ backups/
 .backups/
 app/celerybeat-schedule
 tools/sot-trace/data/
+.capture-extension-api-key

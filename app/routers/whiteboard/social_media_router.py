@@ -177,9 +177,14 @@ async def _download_twitter_media(
             media_category = 'image'
             mime = content_type or f'image/{ext.lstrip(".")}'
 
-        # Generate AssetID and save
+        # Generate a registry-backed AssetID: asset_pool_files.asset_id has an
+        # enforced FK to asset_id_registry, so an unregistered generate() ID
+        # makes the insert below fail.
         asset_type = f"whiteboard_{media_category}"
-        asset_id = AssetIDService.generate(asset_type)
+        asset_id = AssetIDService.request_asset_id(
+            db, entity_type=asset_type, reason="create", requested_by=username,
+            context={"source": "twitter", "source_url": url, "tweet_id": tweet_id}
+        )
         file_name = f"{asset_id}{ext}"
         dest_path = media_dir / file_name
 
@@ -438,8 +443,12 @@ async def _download_via_ytdlp(
             else:
                 media_category = 'document'
 
+            # Registry-backed AssetID — see FK note in _download_twitter_media.
             asset_type = f"whiteboard_{media_category}"
-            asset_id = AssetIDService.generate(asset_type)
+            asset_id = AssetIDService.request_asset_id(
+                db, entity_type=asset_type, reason="create", requested_by=username,
+                context={"source": service, "source_url": url}
+            )
 
             file_ext = file_path.suffix
             file_name = f"{asset_id}{file_ext}"

@@ -105,6 +105,7 @@ try:
 
     # Collaboration & Communication
     from whiteboard_router import router as whiteboard_router
+    from routers.whiteboard.captures_router import router as whiteboard_captures_router
     from todos_router import router as todos_router
     from announcements_router import router as announcements_router
     from voice_conference_router import router as voice_conference_router
@@ -243,6 +244,7 @@ app.include_router(celery_jobs_router, prefix="/api/celery-jobs", tags=["celery-
 
 # Collaboration & Communication
 app.include_router(whiteboard_router)
+app.include_router(whiteboard_captures_router)  # capture inbox (capture-extension/), standalone mount
 app.include_router(todos_router)
 app.include_router(announcements_router)
 app.include_router(voice_conference_router)

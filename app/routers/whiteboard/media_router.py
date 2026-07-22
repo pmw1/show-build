@@ -152,9 +152,15 @@ async def upload_media(
             detail=f"Unsupported file type: {mime_type}"
         )
 
-    # Generate AssetID
+    # Generate a registry-backed AssetID: asset_pool_files.asset_id has an
+    # enforced FK to asset_id_registry, so an unregistered generate() ID makes
+    # the AssetPoolFile insert below fail.
     asset_type = f"whiteboard_{media_category}"
-    asset_id = AssetIDService.generate(asset_type)
+    asset_id = AssetIDService.request_asset_id(
+        db, entity_type=asset_type, reason="create",
+        requested_by=current_user.get("username", "unknown"),
+        context={"source": source, "source_url": source_url}
+    )
 
     # Get file extension
     file_ext = os.path.splitext(file.filename)[1]
