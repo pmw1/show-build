@@ -184,6 +184,7 @@
           :line-number-offset="lineNumberOffset"
           @update:script-content="updateScriptContent"
           @user-initiated-shrink="handleUserInitiatedShrink"
+          @whiteboard-drop="handleWhiteboardDrop"
           v-model:scratch-content="scratchContent"
           v-model:editor-mode="editorMode"
           @update:editor-mode="editorMode = $event"
@@ -329,6 +330,7 @@
       :speaker-wpm="currentSpeakerWpm"
       :edit-mode="!!editingFsqCueData"
       :initial-data="editingFsqCueData"
+      :prefill-data="fsqPrefillData"
       @submit="submitFsq"
     />
     <SotModal
@@ -373,6 +375,36 @@
           >{{ ct }}</v-btn>
           <v-spacer></v-spacer>
           <v-btn size="small" variant="text" @click="showPoolCueTypePicker = false">Cancel</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Whiteboard drop: an item with multiple extraction options was dropped
+         into the script editor — pick how to insert it, then the matching cue
+         modal opens prefilled (same flow as the panel's plus button). -->
+    <v-dialog v-model="showWbCueTypePicker" max-width="360">
+      <v-card>
+        <v-card-title class="text-body-1 d-flex align-center">
+          <v-icon class="mr-2" size="small">mdi-shape-plus</v-icon>
+          Insert as which cue?
+        </v-card-title>
+        <v-card-text class="text-caption text-grey">
+          {{ wbDropItem?.title || 'Whiteboard item' }}
+        </v-card-text>
+        <v-card-actions class="flex-wrap ga-2 px-4 pb-4">
+          <v-btn
+            v-for="opt in wbDropOptions"
+            :key="opt.key"
+            size="small"
+            variant="tonal"
+            color="primary"
+            @click="chooseWbDropOption(opt)"
+          >
+            <v-icon start size="small">{{ opt.icon }}</v-icon>
+            {{ opt.label }}
+          </v-btn>
+          <v-spacer></v-spacer>
+          <v-btn size="small" variant="text" @click="showWbCueTypePicker = false; wbDropItem = null">Cancel</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -736,7 +768,7 @@ import ShowInfoHeader from './content-editor/ShowInfoHeader.vue';
 import JoinPreviewBanner from './content-editor/JoinPreviewBanner.vue';
 import JoinConfigModal from './content-editor/JoinConfigModal.vue';
 
-import { buildModalPrefill } from '@/composables/useCueTranslation';
+import { buildModalPrefill, getExtractionOptions, flattenExtractionOptions } from '@/composables/useCueTranslation';
 
 // Modals - loaded on demand
 const AssetBrowserModal = defineAsyncComponent(() => import('./modals/AssetBrowserModal.vue'));
@@ -1595,6 +1627,12 @@ Good night!
       voPrefillData: null,           // existing-media prefill for VO/NAT/PKG modals
       natPrefillData: null,
       pkgPrefillData: null,
+      fsqPrefillData: null,          // whiteboard text → FSQ quote prefill
+      // Whiteboard item dropped into the script editor with more than one
+      // extraction option: the item + flattened options for the picker.
+      wbDropItem: null,
+      wbDropOptions: [],
+      showWbCueTypePicker: false,
       lastModalCloseTime: 0,
       showGfxModal: false,
       showFsqModal: false,
@@ -6037,6 +6075,15 @@ Try dropping an image or video file here!`
       // Clear any previous prefill
       this.whiteboardPrefillData = null;
 
+      // Slug for media prefills, derived from the item/prefill title (mirrors
+      // the pooled-file fallback slug) so the modals' Submit enables.
+      const wbSlug = (prefill.title || item.title || '')
+        .toLowerCase()
+        .replace(/['".,!?]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60);
+
       switch (option.cueType) {
         case 'GFX':
           this.whiteboardPrefillData = prefill;
@@ -6044,20 +6091,43 @@ Try dropping an image or video file here!`
           this.showGfxModal = true;
           break;
         case 'SOT':
-          this.editingSotCueData = null;
+          // Prefill via editingSotCueData (the modal's editMode watcher reads
+          // mediaUrl/slug); fromPool marks it a NEW cue, never an in-place edit.
+          this.editingSotCueData = prefill.mediaUrl ? {
+            mediaUrl: prefill.mediaUrl,
+            assetId: prefill.assetId,
+            slug: wbSlug,
+            fromPool: true,
+          } : null;
           this.showSotModal = true;
           break;
         case 'VO':
+          this.voPrefillData = prefill.mediaUrl
+            ? { ...prefill, slug: wbSlug, fromPool: true }
+            : null;
           this.showVoModal = true;
           break;
         case 'NAT':
+          this.natPrefillData = prefill.mediaUrl
+            ? { ...prefill, slug: wbSlug, fromPool: true }
+            : null;
           this.showNatModal = true;
           break;
         case 'IMG':
+          this.editingImgCueData = prefill.mediaUrl ? {
+            rawData: { mediaurl: prefill.mediaUrl, slug: wbSlug },
+            slug: wbSlug,
+            mediaUrl: prefill.mediaUrl,
+            assetId: prefill.assetId,
+            fromPool: true,
+          } : null;
           this.showImgCueModal = true;
           break;
         case 'FSQ':
           this.editingFsqCueData = null;
+          this.fsqPrefillData = prefill.quote
+            ? { quote: prefill.quote, attribution: prefill.attribution || '' }
+            : null;
           this.showFsqModal = true;
           break;
         case 'PARAGRAPH':
@@ -6070,6 +6140,34 @@ Try dropping an image or video file here!`
         default:
           console.warn('Unknown cue type:', option.cueType);
       }
+    },
+
+    // A whiteboard item was DROPPED into the script editor. ScriptEditor has
+    // already remembered the drop point as the caret, so whatever gets
+    // inserted (via the modal flow) lands there. One extraction option →
+    // straight into the plus-button flow; several → small picker first.
+    handleWhiteboardDrop(item) {
+      if (!item) return;
+      const options = flattenExtractionOptions(getExtractionOptions(item));
+      if (!options.length) {
+        console.warn('Whiteboard drop: no insertable options for item type', item.item_type);
+        return;
+      }
+      if (options.length === 1) {
+        this.handleInsertWhiteboardCue({ item, option: options[0] });
+        return;
+      }
+      this.wbDropItem = item;
+      this.wbDropOptions = options;
+      this.showWbCueTypePicker = true;
+    },
+
+    chooseWbDropOption(option) {
+      const item = this.wbDropItem;
+      this.showWbCueTypePicker = false;
+      this.wbDropItem = null;
+      this.wbDropOptions = [];
+      if (item) this.handleInsertWhiteboardCue({ item, option });
     },
 
     // ── Re-insert a pooled media file as a cue ──
@@ -6205,9 +6303,24 @@ Try dropping an image or video file here!`
       gfxCueBlock += `[GfxType: ${gfxCueData.gfxType || 'fullscreen-text'}]\n`;
       gfxCueBlock += `[Duration: ${gfxCueData.duration || '00:00:15:00'}]\n`;
 
+      // Escape for the [Field: value] cue format. The parser regex
+      // terminates a field on `]` followed by either another `[` field
+      // marker, the cue end marker, or EOL. We must escape:
+      //   \  -> \\   (so unescape can be unambiguous)
+      //   \n -> \\n  (keep field value on one line)
+      //   \r -> \\n  (normalize line endings)
+      //   ]  -> \\]  (avoid accidental field terminator)
+      const escapeCueValue = s => String(s ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/\n/g, '\\n')
+        .replace(/\]/g, '\\]');
+
       // XPOST subtype - store all Twitter/X metadata
       if (gfxCueData.gfxType === 'xpost') {
         gfxCueBlock += `[Platform: x]\n`;
+        if (gfxCueData.title) gfxCueBlock += `[Title: ${escapeCueValue(gfxCueData.title)}]\n`;
         if (gfxCueData.tweetId) gfxCueBlock += `[TweetID: ${gfxCueData.tweetId}]\n`;
         if (gfxCueData.authorName) gfxCueBlock += `[AuthorName: ${gfxCueData.authorName}]\n`;
         if (gfxCueData.authorHandle) gfxCueBlock += `[AuthorHandle: ${gfxCueData.authorHandle}]\n`;
@@ -6239,25 +6352,25 @@ Try dropping an image or video file here!`
         if (gfxCueData.aspectRatio) gfxCueBlock += `[AspectRatio: ${gfxCueData.aspectRatio}]\n`;
         if (gfxCueData.views) gfxCueBlock += `[Views: ${gfxCueData.views}]\n`;
         if (gfxCueData.bookmarks) gfxCueBlock += `[Bookmarks: ${gfxCueData.bookmarks}]\n`;
-        gfxCueBlock += `[Status: pending]\n`;
+        if (gfxCueData.notes && gfxCueData.notes.length) {
+          gfxCueBlock += `[Notes: ${JSON.stringify(gfxCueData.notes)}]\n`;
+        }
+        // On edit, keep the already-rendered PNG referenced (stable slug =
+        // stable filename; the re-render below overwrites it in place).
+        // Fresh inserts start pending; pollXpostRender flips them.
+        const priorAssetUrl = editing?.rawData?.assetUrl || editing?.rawData?.mediaUrl || editing?.assetUrl;
+        if (priorAssetUrl) {
+          gfxCueBlock += `[AssetURL: ${priorAssetUrl}]\n`;
+          gfxCueBlock += `[MediaURL: ${priorAssetUrl}]\n`;
+          gfxCueBlock += `[Status: generated]\n`;
+        } else {
+          gfxCueBlock += `[Status: pending]\n`;
+        }
 
-        // Sync xpost cue to database
+        // Sync xpost cue to database (captures + dispatches the PNG render)
         this.syncXpostCueToDatabase(gfxCueData);
       } else {
         // Standard GFX fields
-        // Escape for the [Field: value] cue format. The parser regex
-        // terminates a field on `]` followed by either another `[` field
-        // marker, the cue end marker, or EOL. We must escape:
-        //   \  -> \\   (so unescape can be unambiguous)
-        //   \n -> \\n  (keep field value on one line)
-        //   \r -> \\n  (normalize line endings)
-        //   ]  -> \\]  (avoid accidental field terminator)
-        const escapeCueValue = s => String(s ?? '')
-          .replace(/\\/g, '\\\\')
-          .replace(/\r\n/g, '\n')
-          .replace(/\r/g, '\n')
-          .replace(/\n/g, '\\n')
-          .replace(/\]/g, '\\]');
         if (gfxCueData.title) {
           gfxCueBlock += `[Title: ${escapeCueValue(gfxCueData.title)}]\n`;
         }
@@ -6429,11 +6542,93 @@ Try dropping an image or video file here!`
           xpost_referenced_tweets: gfxCueData.referencedTweets || null,
           aspect_ratio: gfxCueData.aspectRatio || null,
           full_metadata: gfxCueData.fullMetadata || null,
+          title: gfxCueData.title || null,
+          notes: gfxCueData.notes || null,
+          render: true,
+          priority: 'high',
         };
-        await axios.post('/api/gfx/xpost', payload);
-        console.log('✅ XPOST cue synced to database:', gfxCueData.assetId);
+        // Plain axios has no auth interceptor (that's only on axiosInstance) —
+        // send the bearer token explicitly.
+        const token = localStorage.getItem('auth-token');
+        const resp = await axios.post('/api/gfx/xpost', payload, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        console.log('✅ XPOST cue captured in database:', gfxCueData.assetId,
+          '(captured_at:', resp.data?.captured_at, ')');
+        if (resp.data?.task_id) {
+          this.pollXpostRender(gfxCueData.assetId, resp.data.task_id);
+        }
       } catch (err) {
         console.error('⚠️ Failed to sync XPOST cue to database (cue block still inserted):', err);
+      }
+    },
+
+    // Poll the xpost render task; when the PNG lands, patch the cue block so
+    // [AssetURL]/[MediaURL] point at it and [Status] flips to generated
+    // (which lights the PNG badge on the cue card).
+    pollXpostRender(assetId, taskId, attempt = 0) {
+      const MAX_ATTEMPTS = 45; // 45 × 2s = 90s ceiling
+      if (attempt >= MAX_ATTEMPTS) {
+        console.warn(`⚠️ X-post render poll timed out for ${assetId} (task ${taskId})`);
+        return;
+      }
+      setTimeout(async () => {
+        try {
+          const token = localStorage.getItem('auth-token');
+          const resp = await axios.get(`/api/gfx/task/${taskId}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          const data = resp.data || {};
+          if (!data.ready) {
+            this.pollXpostRender(assetId, taskId, attempt + 1);
+            return;
+          }
+          const result = data.result || {};
+          if (!data.successful || !result.success || !result.asset_url) {
+            console.warn('⚠️ X-post render failed:', data.error || result.message || 'unknown');
+            return;
+          }
+          await this.applyXpostRenderResult(assetId, result.asset_url);
+        } catch (e) {
+          console.warn('X-post render poll error (retrying):', e?.message);
+          this.pollXpostRender(assetId, taskId, attempt + 1);
+        }
+      }, 2000);
+    },
+
+    async applyXpostRenderResult(assetId, assetUrl) {
+      // Flush in-flight Script-mode typing so we patch current content.
+      if (this.$refs.editorPanel?.flushPendingChanges) {
+        await this.$refs.editorPanel.flushPendingChanges();
+        await this.$nextTick();
+      }
+      const raw = this.rawMarkdownContent || '';
+      const tempered = '(?:(?!<!-- Begin Cue -->|<!-- End Cue -->)[\\s\\S])*?';
+      const escapedId = assetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const cuePattern = new RegExp(
+        `<!-- Begin Cue -->\\n${tempered}\\[Asset\\s*Id:\\s*${escapedId}\\]${tempered}<!-- End Cue -->`,
+        'i'
+      );
+      const match = raw.match(cuePattern);
+      if (!match) {
+        // User probably switched rundown items while rendering; the DB row
+        // has the URL, and the card's Regenerate offers recovery.
+        console.warn(`⚠️ X-post write-back: cue ${assetId} not in the open item — skipping block patch`);
+        return;
+      }
+      const setField = (blockStr, field, value) => {
+        const fieldRe = new RegExp(`\\[${field}:\\s*[^\\]]*\\]`, 'i');
+        if (fieldRe.test(blockStr)) return blockStr.replace(fieldRe, `[${field}: ${value}]`);
+        return blockStr.replace(/<!-- End Cue -->$/, `[${field}: ${value}]\n<!-- End Cue -->`);
+      };
+      let block = match[0];
+      block = setField(block, 'AssetURL', assetUrl);
+      block = setField(block, 'MediaURL', assetUrl);
+      block = setField(block, 'Status', 'generated');
+      if (block !== match[0]) {
+        this.updateScriptContent(raw.replace(cuePattern, () => block));
+        this.hasUnsavedChanges = true;
+        console.log(`✅ X-post PNG ready — cue ${assetId} now references ${assetUrl}`);
       }
     },
 
@@ -6761,6 +6956,7 @@ Try dropping an image or video file here!`
       if (!isVisible) {
         // Clear edit mode state
         this.editingFsqCueData = null;
+        this.fsqPrefillData = null;
 
         // Only clear placement if there's NO pending cue waiting to be placed
         // (if user submitted, placement overlay should remain active)

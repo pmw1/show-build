@@ -458,6 +458,43 @@
                         </div>
                       </v-card-text>
                     </v-card>
+
+                    <!-- Editorial fields: Title (autofilled, overridable) + attributed Notes -->
+                    <template v-if="selectedXPostData || socialPostUrl">
+                      <v-text-field
+                        v-model="xpostTitle"
+                        label="Title"
+                        placeholder="Autofilled from the post — edit to override"
+                        variant="outlined"
+                        density="compact"
+                        hide-details="auto"
+                        class="mt-3"
+                        @input="xpostTitleTouched = true"
+                      />
+                      <div class="mt-2">
+                        <div class="text-caption text-grey mb-1 text-uppercase" style="font-weight: 600;">Notes</div>
+                        <div v-for="note in xpostNotes" :key="note.id" class="d-flex align-center text-body-2 mb-1">
+                          <v-chip size="x-small" variant="tonal" color="primary" class="mr-2 flex-shrink-0">{{ note.author }}</v-chip>
+                          <span class="flex-grow-1" style="min-width: 0; word-break: break-word;">{{ note.text }}</span>
+                          <v-btn icon size="x-small" variant="text" color="grey" @click="removeXpostNote(note.id)">
+                            <v-icon size="small">mdi-close</v-icon>
+                          </v-btn>
+                        </div>
+                        <div class="d-flex align-center ga-2">
+                          <v-text-field
+                            v-model="newNoteText"
+                            placeholder="Add a note…"
+                            variant="outlined"
+                            density="compact"
+                            hide-details
+                            @keydown.enter.prevent="addXpostNote"
+                          />
+                          <v-btn size="small" variant="tonal" color="primary" :disabled="!newNoteText.trim()" @click="addXpostNote">
+                            Add
+                          </v-btn>
+                        </div>
+                      </div>
+                    </template>
                   </div>
                 </div>
 
@@ -613,6 +650,7 @@ import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { getColorValue } from '@/utils/themeColorMap'
 import { registerModalEsc } from '@/composables/useModalStack'
+import { useAuth } from '@/composables/useAuth'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -622,6 +660,9 @@ const props = defineProps({
   currentEpisode: { type: String, default: '' },
   editMode: { type: Boolean, default: false },
   editData: { type: Object, default: null },
+  // Whiteboard insert prefill: {type: 'gfx-xpost', socialMetadata, url}.
+  // Opens the Social tab with the clicked post pre-selected.
+  prefillData: { type: Object, default: null },
 })
 
 const emit = defineEmits([
@@ -838,6 +879,41 @@ const loadingWhiteboardPosts = ref(false)
 const selectedWhiteboardXPost = ref(null) // eslint-disable-line no-unused-vars
 const selectedXPostData = ref(null)
 
+// Editorial fields for the xpost cue: Title (autofilled from the tweet,
+// user-overridable) and user-attributed Notes ([{id, author, text, ts}] —
+// same shape as whiteboard card comments).
+const { currentUser } = useAuth()
+const xpostTitle = ref('')
+const xpostTitleTouched = ref(false)
+const xpostNotes = ref([])
+const newNoteText = ref('')
+
+// "@handle: first 40 chars…" — refreshed on post selection until the user
+// edits the title themselves.
+function autofillXpostTitle(sm) {
+  if (xpostTitleTouched.value || !sm) return
+  const text = (sm.tweet_text || '').replace(/\s+/g, ' ').trim()
+  const snippet = text.length > 40 ? `${text.slice(0, 40).trim()}…` : text
+  const handle = sm.author_handle ? `@${sm.author_handle}` : (sm.author_name || 'X post')
+  xpostTitle.value = snippet ? `${handle}: ${snippet}` : handle
+}
+
+function addXpostNote() {
+  const text = newNoteText.value.trim()
+  if (!text) return
+  xpostNotes.value.push({
+    id: `n-${Date.now()}-${xpostNotes.value.length}`,
+    author: currentUser.value?.username || 'unknown',
+    text,
+    ts: new Date().toISOString(),
+  })
+  newNoteText.value = ''
+}
+
+function removeXpostNote(id) {
+  xpostNotes.value = xpostNotes.value.filter(n => n.id !== id)
+}
+
 const shouldShowUrlInput = computed(() => {
   return ['post', 'video'].includes(socialSourceType.value)
 })
@@ -910,6 +986,12 @@ function loadEditData() {
   const data = props.editData.rawData || props.editData
   initialAssetId.value = data.assetId || props.editData.assetId || null
   if (data.gfxType) gfxType.value = data.gfxType
+  // xpost cues edit on the Social tab with the tweet fully restored — the
+  // gfx-tab restore below would show an empty text editor instead.
+  if ((data.gfxType || '').toLowerCase() === 'xpost') {
+    loadXpostEditData(data)
+    return
+  }
   // Unescape the persisted form. submitGraphic writes \n -> "\\n" (literal
   // backslash-n) so the value stays on one line inside [Body: ...]. We
   // reverse that here so the textarea and preview show real line breaks.
@@ -960,6 +1042,57 @@ function loadEditData() {
   if (flatAlign) textAlign.value = flatAlign
   if (flatVOffset != null && flatVOffset !== '') verticalOffset.value = Number(flatVOffset) || 0
   if (data.renderMode) renderMode.value = data.renderMode
+}
+
+// Restore full Social-tab state from a parsed xpost cue block (camelCase
+// rawData keys from CueParser). JSON fields arrive as strings; text fields
+// carry \n escaped as literal "\n".
+function loadXpostEditData(data) {
+  const unescapeText = s => (typeof s === 'string' ? s.replace(/\\n/g, '\n') : s)
+  const parseJson = (v, fallback) => {
+    if (v == null || v === '') return fallback
+    if (typeof v !== 'string') return v
+    try { return JSON.parse(v) } catch { return fallback }
+  }
+  const toNum = v => {
+    const n = parseInt(String(v ?? '').replace(/[^0-9]/g, ''), 10)
+    return Number.isFinite(n) ? n : null
+  }
+
+  activeTab.value = 'social'
+  socialPlatform.value = 'twitter'
+  socialSourceType.value = 'post'
+  socialPostUrl.value = data.sourceUrl || ''
+  gfxSlug.value = data.slug || ''
+  if (data.aspectRatio) aspectRatio.value = data.aspectRatio
+  xpostTitle.value = unescapeText(data.title || '')
+  xpostTitleTouched.value = !!data.title
+  xpostNotes.value = parseJson(data.notes, [])
+
+  selectedXPostData.value = {
+    tweet_id: data.tweetId || null,
+    tweet_text: unescapeText(data.tweetText || ''),
+    author_name: data.authorName || '',
+    author_handle: data.authorHandle || '',
+    author_avatar: data.authorAvatar || null,
+    author_verified: String(data.authorVerified ?? '') === 'true',
+    author_bio: unescapeText(data.authorBio || ''),
+    author_followers: toNum(data.authorFollowers),
+    author_following: toNum(data.authorFollowing),
+    published_time: data.publishedTime || null,
+    conversation_id: data.conversationId || null,
+    likes: toNum(data.likes),
+    retweets: toNum(data.retweets),
+    replies: toNum(data.replies),
+    quotes: toNum(data.quotes),
+    views: toNum(data.views),
+    bookmarks: toNum(data.bookmarks),
+    media_urls: parseJson(data.mediaUrls, []),
+    media_objects: parseJson(data.mediaObjects, []),
+    entities: parseJson(data.entities, {}),
+    referenced_tweets: parseJson(data.referencedTweets, []),
+    platform: 'x',
+  }
 }
 
 // Reuse original AssetID in edit mode; only mint a new one for genuinely
@@ -1159,6 +1292,26 @@ const handleXPostSelected = (item) => {
   }
   selectedXPostData.value = item.socialMetadata
   socialPostUrl.value = item.url || ''
+  autofillXpostTitle(item.socialMetadata)
+}
+
+// Whiteboard plus/drag prefill: open straight onto the Social tab with the
+// clicked post selected, title autofilled — user just reviews and inserts.
+function applyXpostPrefill() {
+  const prefill = props.prefillData
+  if (!prefill || prefill.type !== 'gfx-xpost') return false
+  activeTab.value = 'social'
+  socialPlatform.value = 'twitter'
+  socialSourceType.value = 'post'
+  selectedXPostData.value = prefill.socialMetadata || null
+  socialPostUrl.value = prefill.url || prefill.socialMetadata?.source_url || ''
+  // Fresh editorial state for this post (a previous open may have left some)
+  xpostTitle.value = ''
+  xpostTitleTouched.value = false
+  xpostNotes.value = []
+  newNoteText.value = ''
+  autofillXpostTitle(prefill.socialMetadata)
+  return true
 }
 
 const handleSocialInsert = async () => {
@@ -1174,7 +1327,8 @@ const handleSocialInsert = async () => {
 
     if (!xPostData && postUrl) {
       try {
-        const previewResp = await axios.get(`/api/whiteboard/fetch-link-preview?url=${encodeURIComponent(postUrl)}`, {
+        // NB: the route is POST with `url` as a query param (media_router.py).
+        const previewResp = await axios.post(`/api/whiteboard/fetch-link-preview?url=${encodeURIComponent(postUrl)}`, null, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
           }
@@ -1201,13 +1355,19 @@ const handleSocialInsert = async () => {
     }
 
     const assetId = await getOrGenerateAssetId()
-    const slug = (xPostData.author_handle || 'xpost') + '-' + (xPostData.tweet_id || Date.now()).toString().slice(-8)
+    // Keep the slug (and therefore the rendered PNG filename) stable when
+    // editing an existing xpost cue; derive it only for new cues.
+    const slug = (props.editData && gfxSlug.value)
+      ? gfxSlug.value
+      : (xPostData.author_handle || 'xpost') + '-' + (xPostData.tweet_id || Date.now()).toString().slice(-8)
 
     const cueData = {
       type: 'GFX',
       gfxType: 'xpost',
       assetId: assetId,
       slug: slug,
+      title: xpostTitle.value || '',
+      notes: xpostNotes.value.length ? xpostNotes.value : null,
       tweetId: xPostData.tweet_id,
       tweetText: xPostData.tweet_text,
       authorName: xPostData.author_name,
@@ -1223,6 +1383,10 @@ const handleSocialInsert = async () => {
       retweets: xPostData.retweets,
       replies: xPostData.replies,
       quotes: xPostData.quotes,
+      // Serialized by ContentEditor ([Views]/[Bookmarks]) but previously
+      // missing from cueData — tolerate both syndication key spellings.
+      views: xPostData.views ?? xPostData.view_count ?? null,
+      bookmarks: xPostData.bookmarks ?? xPostData.bookmark_count ?? null,
       mediaUrls: xPostData.media_urls || [],
       mediaObjects: xPostData.media_objects || [],
       entities: xPostData.entities || {},
@@ -1249,6 +1413,10 @@ const resetSocialForm = () => {
   selectedXPostData.value = null
   socialHeadline.value = ''
   socialSubtext.value = ''
+  xpostTitle.value = ''
+  xpostTitleTouched.value = false
+  xpostNotes.value = []
+  newNoteText.value = ''
 }
 
 // ---- ESC Key ---- (handled by global modal stack)
@@ -1259,6 +1427,10 @@ watch(() => props.show, async (newVal) => {
   if (newVal) {
     if (props.editData) {
       loadEditData()
+    } else {
+      // Whiteboard plus/drag insert: land on the Social tab with the
+      // clicked post pre-selected (no-op without a gfx-xpost prefill).
+      applyXpostPrefill()
     }
 
     await nextTick()

@@ -15,11 +15,13 @@ Endpoints:
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timezone
 
 from auth.router import get_current_user_or_key
 from services.asset_processing import generate_gfx_png
+from services.xpost_renderer import generate_xpost_png
+from models.settings import GfxXpostCue
 from database import get_db
 from sqlalchemy.orm import Session
 from celery_jobs_router import register_celery_job
@@ -321,10 +323,24 @@ async def regenerate_all_gfx_assets(
                 continue
             for match in gfx_pattern.findall(item.script_content):
                 cue_data = _parse_gfx_cue_block(match)
-                # Need a body (or title/list) to render — match frontend rule
-                if cue_data and (cue_data.get('body') or cue_data.get('title') or cue_data.get('listItems')):
-                    cue_data['rundown_item_id'] = item.id
-                    gfx_cues.append(cue_data)
+                if not cue_data:
+                    continue
+                # NB: _to_camel_case lowercases single-word field names, so
+                # [GfxType:] parses to 'gfxtype' and [AssetID:] to 'assetid'.
+                # Read both spellings defensively.
+                is_xpost = (cue_data.get('gfxtype') or cue_data.get('gfxType') or '').lower() == 'xpost'
+                if is_xpost:
+                    # xpost renders from its gfx_xpost_cues row, keyed by AssetID.
+                    # It MUST NOT fall through to the fullscreen-text renderer —
+                    # that would overwrite the tweet PNG with a blank text frame.
+                    if not (cue_data.get('assetid') or cue_data.get('assetId')):
+                        continue
+                    cue_data['_isXpost'] = True
+                elif not (cue_data.get('body') or cue_data.get('title') or cue_data.get('listItems')):
+                    # Need a body (or title/list) to render — match frontend rule
+                    continue
+                cue_data['rundown_item_id'] = item.id
+                gfx_cues.append(cue_data)
 
         print(f"   📝 Found {len(gfx_cues)} GFX cues")
 
@@ -372,6 +388,30 @@ async def regenerate_all_gfx_assets(
                 if asset_path.exists() and not regenerate_existing:
                     print(f"   ⏭️ Skipping existing: {expected_filename}")
                     skipped += 1
+                    continue
+
+                # xpost cues render via the dedicated tweet-card task from
+                # their gfx_xpost_cues row — never the fullscreen-text renderer.
+                if cue.get('_isXpost'):
+                    xp_asset_id = cue.get('assetid') or cue.get('assetId') or ''
+                    xp_row = db.query(GfxXpostCue).filter(
+                        GfxXpostCue.asset_id == xp_asset_id
+                    ).first()
+                    if not xp_row:
+                        print(f"   ⏭️ Skipping xpost {xp_asset_id}: no captured row in gfx_xpost_cues")
+                        skipped += 1
+                        continue
+                    task = generate_xpost_png.apply_async(
+                        kwargs={
+                            'asset_id': xp_asset_id,
+                            'episode_id': episode_id_normalized,
+                            'priority': 'low',
+                        },
+                        queue='xpost'
+                    )
+                    task_ids.append(task.id)
+                    generated += 1
+                    print(f"   ✅ Queued xpost: {expected_filename} (task: {task.id})")
                     continue
 
                 font_size_raw = cue.get('fontSize', '')
@@ -501,3 +541,209 @@ async def get_gfx_task_status(
             status_code=500,
             detail=f"Failed to get task status: {str(e)}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# X-Post (tweet) GFX cues — capture + render
+#
+# The cue block in script_content stays the editorial source of truth; this
+# table is the structured mirror + archival capture. captured_at/captured_by/
+# full_metadata are set ONCE on first upsert and never updated — the "what did
+# the tweet say when we saved it" record. Rendering runs on the dedicated
+# 'xpost' queue (services/xpost_renderer.py).
+# ═══════════════════════════════════════════════════════════════════════════
+
+class XpostCueUpsertRequest(BaseModel):
+    asset_id: str
+    episode_number: str
+    slug: str
+    # Author
+    xpost_name: Optional[str] = None
+    xpost_username: Optional[str] = None
+    xpost_profile_photo: Optional[str] = None
+    xpost_verified: Optional[bool] = False
+    xpost_bio: Optional[str] = None
+    xpost_followers: Optional[int] = None
+    xpost_following: Optional[int] = None
+    # Post content
+    xpost_post_text: Optional[str] = None
+    xpost_tweet_id: Optional[str] = None
+    xpost_conversation_id: Optional[str] = None
+    # Media
+    xpost_media_urls: Optional[List[Any]] = None
+    xpost_media_objects: Optional[List[Any]] = None
+    # Timing (ISO-8601 string, Z tolerated)
+    xpost_datetime: Optional[str] = None
+    # Engagement
+    xpost_view_count: Optional[int] = None
+    xpost_likes: Optional[int] = None
+    xpost_retweets: Optional[int] = None
+    xpost_replies: Optional[int] = None
+    xpost_quotes: Optional[int] = None
+    xpost_bookmarks: Optional[int] = None
+    # Source
+    xpost_source_url: Optional[str] = None
+    xpost_platform: Optional[str] = 'x'
+    xpost_entities: Optional[Dict[str, Any]] = None
+    xpost_referenced_tweets: Optional[List[Any]] = None
+    # Rendering / editorial
+    aspect_ratio: Optional[str] = None
+    title: Optional[str] = None
+    notes: Optional[List[Dict[str, Any]]] = None
+    display_sequence: Optional[Dict[str, Any]] = None
+    enumerator: Optional[str] = None
+    whiteboard_item_id: Optional[int] = None
+    duration: Optional[str] = None
+    # Archival + dispatch
+    full_metadata: Optional[Dict[str, Any]] = None
+    render: bool = True
+    priority: str = 'high'
+
+
+def _parse_xpost_datetime(value: Optional[str]):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        return None
+
+
+# Fields copied verbatim from the request onto the row on every upsert.
+_XPOST_MUTABLE_FIELDS = [
+    'slug', 'xpost_name', 'xpost_username', 'xpost_profile_photo',
+    'xpost_verified', 'xpost_bio', 'xpost_followers', 'xpost_following',
+    'xpost_post_text', 'xpost_tweet_id', 'xpost_conversation_id',
+    'xpost_media_urls', 'xpost_media_objects',
+    'xpost_view_count', 'xpost_likes', 'xpost_retweets', 'xpost_replies',
+    'xpost_quotes', 'xpost_bookmarks',
+    'xpost_source_url', 'xpost_platform', 'xpost_entities',
+    'xpost_referenced_tweets', 'aspect_ratio', 'title', 'notes',
+    'display_sequence', 'enumerator', 'whiteboard_item_id', 'duration',
+]
+
+
+def _xpost_row_to_dict(row: GfxXpostCue) -> dict:
+    out = {}
+    for col in row.__table__.columns:
+        val = getattr(row, col.name)
+        if isinstance(val, datetime):
+            val = val.isoformat()
+        out[col.name] = val
+    return out
+
+
+def _dispatch_xpost_render(db: Session, row: GfxXpostCue, episode_id: str, priority: str = 'high') -> str:
+    task = generate_xpost_png.apply_async(
+        kwargs={
+            'asset_id': row.asset_id,
+            'episode_id': episode_id,
+            'priority': priority,
+        },
+        queue='xpost'
+    )
+    register_celery_job(
+        db, task.id, "services.xpost_renderer.generate_xpost_png",
+        "Render X-Post GFX", "assets", episode_id, "xpost"
+    )
+    row.last_render_task_id = task.id
+    db.commit()
+    return task.id
+
+
+@router.post("/xpost")
+async def upsert_xpost_cue(
+    request: XpostCueUpsertRequest,
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """Upsert an X-post cue's structured/archival record and (by default)
+    dispatch the tweet-card PNG render.
+
+    First insert stamps the immutable capture: captured_at, captured_by,
+    full_metadata. Later upserts refresh only the mutable fields.
+    """
+    try:
+        episode_id = request.episode_number.zfill(4) if len(request.episode_number) < 4 else request.episode_number
+
+        row = db.query(GfxXpostCue).filter(GfxXpostCue.asset_id == request.asset_id).first()
+        created = row is None
+        if created:
+            row = GfxXpostCue(asset_id=request.asset_id)
+            row.captured_at = datetime.now(timezone.utc)
+            row.captured_by = (current_user or {}).get('username') if isinstance(current_user, dict) else None
+            row.full_metadata = request.full_metadata
+            row.status = 'pending'
+            db.add(row)
+        elif row.full_metadata is None and request.full_metadata is not None:
+            # Capture stamp is immutable, but backfill an empty archive.
+            row.full_metadata = request.full_metadata
+
+        row.episode_number = episode_id
+        for field in _XPOST_MUTABLE_FIELDS:
+            value = getattr(request, field)
+            if field == 'duration' and value is None:
+                continue  # keep column default
+            setattr(row, field, value)
+        row.xpost_datetime = _parse_xpost_datetime(request.xpost_datetime)
+
+        db.commit()
+        db.refresh(row)
+
+        task_id = None
+        if request.render:
+            task_id = _dispatch_xpost_render(db, row, episode_id, request.priority)
+
+        print(f"🐦 X-post cue {'captured' if created else 'updated'}: {row.asset_id}"
+              f" (captured_at={row.captured_at}, render task={task_id})")
+
+        return {
+            "success": True,
+            "id": row.id,
+            "asset_id": row.asset_id,
+            "created": created,
+            "captured_at": row.captured_at.isoformat() if row.captured_at else None,
+            "task_id": task_id,
+        }
+
+    except Exception as e:
+        db.rollback()
+        print(f"   ❌ X-post upsert failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"X-post upsert failed: {str(e)}")
+
+
+@router.post("/xpost/{asset_id}/render")
+async def render_xpost_cue(
+    asset_id: str,
+    priority: str = 'high',
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """Re-render the tweet-card PNG for an already-captured X-post cue."""
+    row = db.query(GfxXpostCue).filter(GfxXpostCue.asset_id == asset_id).first()
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No captured X-post data for AssetID {asset_id} — POST /api/gfx/xpost first."
+        )
+    try:
+        task_id = _dispatch_xpost_render(db, row, row.episode_number, priority)
+        return {"success": True, "task_id": task_id, "asset_id": asset_id, "status": "QUEUED"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to queue X-post render: {str(e)}")
+
+
+@router.get("/xpost/{asset_id}")
+async def get_xpost_cue(
+    asset_id: str,
+    current_user=Depends(get_current_user_or_key),
+    db: Session = Depends(get_db)
+):
+    """Fetch the structured/archival record for an X-post cue."""
+    row = db.query(GfxXpostCue).filter(GfxXpostCue.asset_id == asset_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No X-post cue for AssetID {asset_id}")
+    return _xpost_row_to_dict(row)

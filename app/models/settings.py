@@ -111,12 +111,26 @@ class GfxXpostCue(Base):
     render_mode = Column(String(20), default='png')           # png or video
     generated_asset_path = Column(Text, nullable=True)        # Path to rendered PNG/video
     generated_asset_url = Column(Text, nullable=True)         # URL to rendered asset
+    generated_key_path = Column(Text, nullable=True)          # Transparent key variant (vMix alpha)
+    generated_key_url = Column(Text, nullable=True)
     status = Column(String(20), default='pending')            # pending, generating, complete, failed
     duration = Column(String(20), default='00:00:15:00')      # Timecode duration
     enumerator = Column(String(10), nullable=True)            # Rundown cue number (e.g. "03")
+    last_render_task_id = Column(String(64), nullable=True)   # Celery task id of the latest render
+
+    # ── Editorial fields ──
+    title = Column(String(255), nullable=True)                # Autofilled from tweet, user-overridable
+    notes = Column(JSON, nullable=True)                       # [{id, author, text, ts}] — same shape as whiteboard comments
+    # Styling + (future) animation contract. Renderer reads style.* only; the
+    # sequence steps are stored for the motion-graphics phase.
+    display_sequence = Column(JSON, nullable=True)
 
     # ── Full archival metadata ──
     full_metadata = Column(JSON, nullable=True)               # Complete original API response for archival
+    # Immutable capture stamp: set once on first upsert, never updated — the
+    # "what did the tweet say when we saved it" record.
+    captured_at = Column(DateTime(timezone=True), nullable=True)
+    captured_by = Column(String(100), nullable=True)
 
     # ── Whiteboard origin (no FK constraint — whiteboard_items in separate model file) ──
     whiteboard_item_id = Column(Integer, nullable=True)

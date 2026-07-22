@@ -185,10 +185,12 @@
         :fsq-background-video-url="fsqBackgroundVideoUrl"
         :xpost-data="xpostData"
         :gfx-active-list-items="gfxActiveListItems"
+        :gfx-image-url="gfxCardImageUrl"
         @edit-gfx="$emit('edit-gfx', $event)"
         @delete="$emit('delete')"
         @generate-gfx="handleGenerateGfx"
         @download-gfx-png="downloadGfxPNG"
+        @open-gfx-preview="showGfxPreviewModal = true"
         @update-meta="handleChildUpdateMeta"
         @apply-all-gfx="$emit('apply-all-gfx', $event)"
       />
@@ -396,6 +398,57 @@
         <v-tooltip activator="parent" location="top">Delete this cue</v-tooltip>
       </v-btn>
     </v-card-actions>
+
+    <!-- GFX Preview Modal — the rendered PNG keyed over the background video,
+         exactly as it will look on air. ESC closes (v-dialog default). -->
+    <v-dialog
+      v-model="showGfxPreviewModal"
+      max-width="960"
+    >
+      <v-card class="fsq-preview-modal-card">
+        <v-card-title class="d-flex align-center pa-2 bg-grey-darken-4">
+          <v-icon class="mr-2" color="white">mdi-image-frame</v-icon>
+          <span class="text-white">GFX Preview</span>
+          <v-spacer></v-spacer>
+          <v-chip size="small" color="info" class="mr-2">keyed over background</v-chip>
+          <v-btn
+            icon
+            size="small"
+            variant="text"
+            color="white"
+            @click="showGfxPreviewModal = false"
+          >
+            <v-icon>mdi-close</v-icon>
+            <v-tooltip activator="parent" location="top">Close (ESC)</v-tooltip>
+          </v-btn>
+        </v-card-title>
+        <v-card-text class="pa-0">
+          <div class="fsq-preview-container">
+            <video
+              class="fsq-preview-video-bg"
+              autoplay
+              loop
+              muted
+              playsinline
+            >
+              <source :src="fsqBackgroundVideoUrl" type="video/mp4">
+            </video>
+            <img
+              v-if="gfxImageUrl"
+              :src="gfxImageUrl"
+              class="fsq-preview-png-overlay"
+            />
+          </div>
+        </v-card-text>
+        <v-card-actions class="bg-grey-darken-4 pa-2">
+          <v-chip size="small" color="grey-darken-2">
+            {{ cueData.slug || 'No slug' }}
+          </v-chip>
+          <v-spacer></v-spacer>
+          <span class="text-caption text-grey-lighten-1">Press ESC to close</span>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- FSQ Preview Modal (960x540 - half resolution) -->
     <v-dialog
@@ -650,6 +703,8 @@ const gfxGeneratedUrl = ref(null);  // Local override for immediate card refresh
 const showInlinePlayer = ref(false);
 // FSQ preview modal state
 const showFsqPreviewModal = ref(false);
+// GFX preview modal state (rendered PNG keyed over the background video)
+const showGfxPreviewModal = ref(false);
 // Full-resolution 1:1 PNG viewer (the actual rendered 1920×1080 file)
 const showFsqFullResModal = ref(false);
 // SOT preview modal state
@@ -1119,6 +1174,16 @@ const gfxImageUrl = computed(() => { // eslint-disable-line no-unused-vars
   }
   const episode = props.currentEpisode || route?.params?.episode || '';
   return `/episodes/${episode}/assets/graphics/${url}`;
+});
+
+// Card-preview URL: xpost cues show the transparent "_key" variant so the
+// preview background video shows through (the full-frame PNG is opaque and
+// reads as a black slab at card size). The renderer always writes both files.
+const gfxCardImageUrl = computed(() => {
+  const url = gfxImageUrl.value;
+  const gfxTypeVal = (props.cueData?.gfxType || props.cueData?.rawData?.gfxType || '').toLowerCase();
+  if (gfxTypeVal !== 'xpost' || !url || !/\.png($|\?)/.test(url)) return url;
+  return url.replace(/\.png($|\?)/, '_key.png$1');
 });
 
 /**
@@ -1895,6 +1960,111 @@ function downloadGfxPNG() { // eslint-disable-line no-unused-vars
 }
 
 /**
+ * Render (or re-render) an X-post tweet-card PNG. Uses the captured
+ * gfx_xpost_cues row; for legacy cues inserted before the capture endpoint
+ * existed, falls back to capturing from the cue block's own fields first.
+ */
+async function generateXpostPng() {
+  try {
+    generatingGfx.value = true;
+    gfxGenerationStatus.value = 'queued';
+    const token = localStorage.getItem('auth-token');
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    };
+
+    const response = await fetch(
+      `/api/gfx/xpost/${encodeURIComponent(props.cueData.assetId)}/render?priority=high`,
+      { method: 'POST', headers }
+    );
+
+    if (response.status === 404) {
+      console.log('ℹ️ No captured row for this X-post cue — capturing from the cue block first');
+      const captured = await captureXpostFromRawData(headers);
+      if (!captured?.task_id) {
+        throw new Error('X-post capture from cue block failed (no render task dispatched)');
+      }
+      gfxGenerationStatus.value = 'generating';
+      pollGfxTaskStatus(captured.task_id, 45);
+      return;
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || 'Failed to queue X-post render');
+    }
+
+    const result = await response.json();
+    console.log('✅ X-post render queued:', result.task_id);
+    gfxGenerationStatus.value = 'generating';
+    pollGfxTaskStatus(result.task_id, 45);
+  } catch (error) {
+    console.error('❌ X-post render failed:', error);
+    gfxGenerationStatus.value = 'failed';
+  } finally {
+    generatingGfx.value = false;
+  }
+}
+
+// Rebuild the capture payload from the parsed cue block (camelCase rawData
+// keys) — legacy-cue recovery path for generateXpostPng.
+async function captureXpostFromRawData(headers) {
+  const raw = props.cueData.rawData || {};
+  const parseJson = (v, fallback) => {
+    if (v == null || v === '') return fallback;
+    if (typeof v !== 'string') return v;
+    try { return JSON.parse(v); } catch { return fallback; }
+  };
+  const toNum = v => {
+    const n = parseInt(String(v ?? '').replace(/[^0-9]/g, ''), 10);
+    return Number.isFinite(n) ? n : null;
+  };
+  const unesc = s => (typeof s === 'string' ? s.replace(/\\n/g, '\n') : s);
+  const episode = props.currentEpisode || route?.params?.episode || '';
+
+  const payload = {
+    asset_id: props.cueData.assetId,
+    episode_number: episode || '0000',
+    slug: props.cueData.slug || 'xpost',
+    xpost_name: raw.authorName || null,
+    xpost_username: raw.authorHandle || null,
+    xpost_profile_photo: raw.authorAvatar || null,
+    xpost_verified: String(raw.authorVerified ?? '') === 'true',
+    xpost_bio: unesc(raw.authorBio) || null,
+    xpost_followers: toNum(raw.authorFollowers),
+    xpost_following: toNum(raw.authorFollowing),
+    xpost_post_text: unesc(raw.tweetText) || null,
+    xpost_tweet_id: raw.tweetId || null,
+    xpost_conversation_id: raw.conversationId || null,
+    xpost_media_urls: parseJson(raw.mediaUrls, null),
+    xpost_media_objects: parseJson(raw.mediaObjects, null),
+    xpost_datetime: raw.publishedTime || null,
+    xpost_view_count: toNum(raw.views),
+    xpost_likes: toNum(raw.likes),
+    xpost_retweets: toNum(raw.retweets),
+    xpost_replies: toNum(raw.replies),
+    xpost_quotes: toNum(raw.quotes),
+    xpost_bookmarks: toNum(raw.bookmarks),
+    xpost_source_url: raw.sourceUrl || null,
+    xpost_platform: 'x',
+    xpost_entities: parseJson(raw.entities, null),
+    xpost_referenced_tweets: parseJson(raw.referencedTweets, null),
+    aspect_ratio: raw.aspectRatio || null,
+    title: unesc(raw.title) || null,
+    notes: parseJson(raw.notes, null),
+    render: true,
+    priority: 'high',
+  };
+
+  const resp = await fetch('/api/gfx/xpost', {
+    method: 'POST', headers, body: JSON.stringify(payload)
+  });
+  if (!resp.ok) return null;
+  return await resp.json();
+}
+
+/**
  * Poll GFX Celery task status until completion
  */
 async function pollGfxTaskStatus(taskId, maxAttempts = 30) {
@@ -1941,6 +2111,13 @@ async function pollGfxTaskStatus(taskId, maxAttempts = 30) {
               assetId: props.cueData.assetId,
               field: 'assetUrl',
               value: assetUrl
+            });
+
+            // Flip Status too so pending badges clear after a regenerate.
+            emit('update-meta', {
+              assetId: props.cueData.assetId,
+              field: 'status',
+              value: 'generated'
             });
           }
 
@@ -2155,6 +2332,14 @@ async function handleGeneratePNG() {
 async function handleGenerateGfx() {
   if (!props.cueData.assetId) {
     console.error('Cannot generate GFX: no assetId found');
+    return;
+  }
+
+  // X-post cues render via the dedicated tweet-card pipeline (from the
+  // captured gfx_xpost_cues row) — never the fullscreen-text renderer.
+  const gfxTypeVal = (props.cueData.gfxType || props.cueData.rawData?.gfxType || '').toLowerCase();
+  if (gfxTypeVal === 'xpost') {
+    await generateXpostPng();
     return;
   }
 

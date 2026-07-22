@@ -131,6 +131,36 @@ services:
     depends_on:
       - postgres
 
+  # X-post (tweet) GFX card renderer. Bind-mounted (./app) so renderer edits
+  # deploy with a container restart — deliberately NOT on the baked-image
+  # media fleet's queues. Consumes only the dedicated 'xpost' queue.
+  xpost-worker:
+    build:
+      context: .
+    container_name: show-build-xpost-worker
+    user: "1000:1001"
+    command: >
+      celery -A celery_app worker
+      -Q xpost
+      --hostname=xpost-worker@prefect
+      --concurrency=1
+      --max-tasks-per-child=25
+      --loglevel=info
+    volumes:
+      - ./app:/app
+      - ./app/storage:/app/storage
+      - ${EPISODES_PATH:-/data/sync/disaffected/episodes}:/home/episodes
+      - ${REPO_PATH:-/data/sync/disaffected/repo}:/home/repo
+      - ${POOL_PATH:-/data/sync/media_assets/pool}:/home/pool  # local tweet media may live in the pool
+    networks:
+      - video-post
+    environment:
+      - TZ=America/New_York
+      - REDIS_URL=${REDIS_URL:-redis://:showbuild2025@192.168.51.223:6379/0}
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
   celery-beat:
     build:
       context: .

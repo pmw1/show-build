@@ -356,6 +356,22 @@ async def gather_media_for_show(
                     copied += 1
                     print(f"   Copied: {dest_filename}")
 
+                    # X-post (and any future) GFX renders ship a transparent
+                    # "_key" sibling for vMix alpha keying — carry it along.
+                    key_source = source_path.with_name(f"{source_path.stem}_key{source_path.suffix}")
+                    if cue_type == 'GFX' and key_source.exists():
+                        key_dest = dest_path.with_name(f"{dest_path.stem}_key{dest_path.suffix}")
+                        if key_dest.exists() or key_dest.is_symlink():
+                            key_dest.unlink()
+                        shutil.copy2(key_source, key_dest)
+                        gathered_files.append({
+                            'source': str(key_source),
+                            'dest': key_dest.name,
+                            'type': cue_type,
+                            'enumerator': enumerator
+                        })
+                        print(f"   Copied key variant: {key_dest.name}")
+
                 except Exception as e:
                     print(f"   Failed to copy {dest_filename}: {e}")
                     failed += 1

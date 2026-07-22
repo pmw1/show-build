@@ -41,6 +41,7 @@ PyYAML>=6.0
 
 # Image processing
 Pillow>=10.0.0
+pilmoji>=2.0.0  # emoji rendering in X-post GFX PNGs (graceful fallback if absent)
 
 # LLM providers
 openai>=1.0.0

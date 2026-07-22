@@ -43,6 +43,7 @@ celery_app = Celery(
         "services.auto_description_service",  # Background tone + description generation
         "services.phase2_enrichment_service",  # Async Phase 2 Grok enrichment
         "services.script_scrub_service",  # Autoscrub: normalize idle rundown items
+        "services.xpost_renderer",  # X-post (tweet) GFX card renderer
     ]
 )
 
@@ -93,6 +94,10 @@ celery_app.conf.update(
             # Autoscrub sweep is lightweight (regex + DB); route to the general
             # 'assets' queue, which the worker fleet consumes.
             "services.script_scrub_service.*": {"queue": "assets"},
+            # X-post card renders run on a dedicated queue consumed by the
+            # bind-mounted xpost-worker (NOT the baked-image media fleet, which
+            # would reject the unregistered task until an image rebuild).
+            "services.xpost_renderer.*": {"queue": "xpost"},
         }
     ],
 
@@ -134,6 +139,10 @@ celery_app.conf.update(
         'llm_content': {
             'exchange': 'llm_content',
             'routing_key': 'llm_content',
+        },
+        'xpost': {
+            'exchange': 'xpost',
+            'routing_key': 'xpost',
         },
     },
 
