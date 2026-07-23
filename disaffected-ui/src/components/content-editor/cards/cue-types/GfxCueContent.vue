@@ -16,7 +16,7 @@
             <source :src="fsqBackgroundVideoUrl" type="video/mp4">
           </video>
           <!-- Black bar overlay - reactive to box height/opacity sliders -->
-          <div class="fsq-preview-black-bar" :style="gfxBlackBarStyle"></div>
+          <div v-if="cueData.gfxType !== 'xpost'" class="fsq-preview-black-bar" :style="gfxBlackBarStyle"></div>
 
           <!-- XPOST: once the tweet-card PNG has been rendered, show the
                ACTUAL render keyed over the background — pixel-faithful, no
@@ -165,13 +165,16 @@
       </div>
     </div>
 
-    <!-- Bottom: Collapsible Style Controls -->
-    <div class="fsq-adjustments-toggle" @click.stop="adjustmentsOpen = !adjustmentsOpen">
+    <!-- Bottom: Collapsible Style Controls. Hidden for XPOST cues — these
+         sliders (body size, box height/opacity, font, alignment) drive the
+         standard fullscreen-text renderer; x-posts render through the
+         dedicated tweet-card pipeline and none of them apply. -->
+    <div v-if="cueData.gfxType !== 'xpost'" class="fsq-adjustments-toggle" @click.stop="adjustmentsOpen = !adjustmentsOpen">
       <v-icon size="small" class="fsq-toggle-icon" :class="{ 'fsq-toggle-icon--open': adjustmentsOpen }">mdi-chevron-right</v-icon>
       <span class="fsq-toggle-label">Adjustments</span>
       <div class="fsq-toggle-line"></div>
     </div>
-    <div v-show="adjustmentsOpen" class="fsq-compact-controls fsq-compact-controls--wide" @click.stop>
+    <div v-show="adjustmentsOpen && cueData.gfxType !== 'xpost'" class="fsq-compact-controls fsq-compact-controls--wide" @click.stop>
       <!-- Body Font Size Slider -->
       <div class="fsq-control-row fsq-slider-row fsq-slider-row--full">
         <span class="fsq-control-label">Body Size</span>
@@ -654,15 +657,24 @@ defineExpose({
 }
 
 /* XPOST Preview Overlay */
+/* HTML recreation fallback (pre-render only). It used to sit on the
+   slider-driven black bar; that bar is gone for xpost, so the recreation
+   carries its own static tweet-card backdrop — white card, dark text, like
+   the real render it stands in for. */
 .xpost-preview-overlay {
   position: absolute;
-  top: 6%;
-  left: 0;
-  width: 100%;
-  height: 88%;
+  top: 8%;
+  left: 8%;
+  width: 84%;
+  max-height: 84%;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f1419;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
-  padding: 3% 6%;
+  padding: 3% 5%;
   z-index: 3;
   box-sizing: border-box;
   overflow: hidden;
