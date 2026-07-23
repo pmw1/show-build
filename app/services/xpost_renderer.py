@@ -67,26 +67,32 @@ _FONT_CHAINS = {
 }
 
 HOUSE_STYLE = {
-    'theme': 'dark',
+    # Light theme: the tweet reads black-on-white on a WHITE card — no black
+    # slab. The thick white border ring is part of the card silhouette.
+    'theme': 'light',
     'avatar_shape': 'circle',
-    'card_border': {'width': 1, 'color': '#3A3F45'},
+    'card_border': {'width': 10, 'color': '#FFFFFF'},
     'drop_shadow': {'enabled': True, 'blur': 40, 'opacity': 0.6, 'offset': [0, 12]},
     # The inset bubble: ~80% of frame width, centered, big soft corners,
-    # slightly translucent, with a faint platform watermark INSIDE the bubble
-    # (a watermark outside the card would turn to noise over keyed video).
+    # slightly translucent, with a big blurred platform watermark INSIDE the
+    # bubble (a watermark outside the card would turn to noise over keyed
+    # video).
     'bubble': {
         'width_ratio': 0.80,
         'radius': 56,
-        'bg_alpha': 0.92,
-        'watermark_opacity': 0.09,
+        'bg_alpha': 0.97,
+        'watermark_opacity': 0.08,
+        'watermark_blur': 14,
     },
     'colors': {
-        'card_bg': '#000000',
-        'card_fg': '#E7E9EA',
-        'muted': '#8B98A5',
+        'card_bg': '#FFFFFF',
+        'card_fg': '#0F1419',
+        'muted': '#536471',
         'accent': '#1D9BF0',
         'frame_bg': '#0E1114',
         'frame_accent': '#C62828',
+        # Caption sits on the dark frame background, not the white card.
+        'frame_caption': '#8B98A5',
     },
 }
 
@@ -416,21 +422,26 @@ def _render_card(row, style, avatar_img, media_img, media_is_video):
         width=int(border.get('width', 1)),
     )
 
-    # Semi-transparent platform watermark INSIDE the bubble (X only),
-    # clipped to the rounded shape so it never spills past the corners.
+    # Platform watermark INSIDE the bubble (X only): rendered BIG, off-centre
+    # (hanging past the right edge), gaussian-blurred, and translucent — a soft
+    # ghost of the X logo behind the content. Clipped to the rounded shape so
+    # it never spills past the corners.
     platform = (row.xpost_platform or 'x').lower()
-    wm_opacity = float(bubble.get('watermark_opacity', 0.09))
+    wm_opacity = float(bubble.get('watermark_opacity', 0.08))
     if platform in ('x', 'twitter') and wm_opacity > 0:
-        wm_size = int(card_h * 1.15)
+        from PIL import ImageFilter
+        wm_size = int(card_h * 1.35)
         wm_font = _load_font('bold', wm_size)
         wm_layer = Image.new('RGBA', (card_w, card_h), (0, 0, 0, 0))
         wm_draw = ImageDraw.Draw(wm_layer)
         wm_bbox = wm_draw.textbbox((0, 0), 'X', font=wm_font)
         wm_w = wm_bbox[2] - wm_bbox[0]
         wm_draw.text(
-            (card_w - int(wm_w * 0.72), card_h - int(wm_size * 1.02)),
+            (card_w - int(wm_w * 0.78), int(card_h * 0.5 - wm_size * 0.62)),
             'X', font=wm_font,
             fill=_hex_rgba(colors['card_fg'], int(255 * wm_opacity)))
+        wm_layer = wm_layer.filter(
+            ImageFilter.GaussianBlur(int(bubble.get('watermark_blur', 14))))
         mask = Image.new('L', (card_w, card_h), 0)
         ImageDraw.Draw(mask).rounded_rectangle(
             [0, 0, card_w - 1, card_h - 1], radius=radius, fill=255)
@@ -547,7 +558,8 @@ def _compose_frames(card, row, style, captured_at):
     ts = captured_at.strftime('%Y-%m-%d %H:%M %Z') if captured_at else 'unknown'
     caption_font = _load_font('regular', 24)
     fdraw.text((40, height - 6 - 40), f"{handle} · captured {ts} · Disaffected",
-               font=caption_font, fill=_hex_rgba(colors['muted']))
+               font=caption_font,
+               fill=_hex_rgba(colors.get('frame_caption', colors['muted'])))
     full_frame = frame.convert('RGB')
 
     # ── Key frame (transparent) ──
