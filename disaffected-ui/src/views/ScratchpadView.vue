@@ -2522,6 +2522,8 @@ onMounted(async () => {
   loadWhiteboardSettings()
   await loadBoard()
   canvas.value?.focus()
+  // Drain external captures into cards once the board is loaded for this episode.
+  if (currentEpisode.value) startCaptureInbox()
 })
 
 // Load whiteboard settings from API. The old default_zoom setting no longer
@@ -2542,6 +2544,7 @@ async function loadWhiteboardSettings() {
 // Auto-save on unmount (only if board was loaded and has content)
 onUnmounted(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
+  stopCaptureInbox()
   if (saveTimeout) clearTimeout(saveTimeout)
   if (boardLoaded && cards.value.length > 0) {
     saveBoard()
@@ -2567,9 +2570,13 @@ watch(currentEpisode, async (newEpisode, oldEpisode) => {
   // content — which then loaded back as "the board didn't change".
   if (saveTimeout) clearTimeout(saveTimeout)
   if (oldEpisode && boardLoaded && cards.value.length > 0) {
+    // This save also reconciles the outgoing board's captures under oldEpisode.
     await saveBoard(oldEpisode)
   }
+  // Captures are per-episode, so drop spawn state before loading the new board.
+  resetCaptureInboxState()
   await loadBoard()
+  if (newEpisode) startCaptureInbox()
 })
 
 // True while confirmEpisodeSelection is orchestrating a switch, so the
@@ -4493,6 +4500,10 @@ function debouncedSave() {
 }
 
 // Save whiteboard
+// Returns true on a successful server persist, false otherwise (including the
+// localStorage/no-episode path and a concurrent-save skip). The capture-inbox
+// drain gates its acks on this — a capture is only acked once its card has
+// actually reached the database.
 async function saveBoard(episodeOverride = null) {
   const targetEpisode = episodeOverride || currentEpisode.value
   if (!targetEpisode) {
@@ -4503,10 +4514,10 @@ async function saveBoard(episodeOverride = null) {
     } catch (error) {
       console.error('Failed to save to localStorage:', error)
     }
-    return
+    return false
   }
 
-  if (saving.value) return
+  if (saving.value) return false
 
   try {
     saving.value = true
@@ -4556,12 +4567,216 @@ async function saveBoard(episodeOverride = null) {
 
     scratchpadId.value = response.whiteboard_id
     lastSaved.value = new Date()
+    // Ack/dismiss any captures whose cards just reached the database. Awaited so
+    // the save reflects the reconciled inbox, but its own failures never fail
+    // the save (they retry on the next save).
+    await reconcileCapturesAfterSave(targetEpisode)
+    return true
   } catch (error) {
     console.error('Failed to save whiteboard:', error)
     notifyUserStandard('Failed to save whiteboard', NOTIFICATION_COLORS.ERROR, 3000)
+    return false
   } finally {
     saving.value = false
   }
+}
+
+// Map one WhiteboardItem-shaped object (a saved board item OR a capture-inbox
+// row — both share the same field names) to a client card. `pos` supplies the
+// canvas position, since captures carry no stored x/y. This is the single
+// canonical transform: loadBoard and the capture-inbox drain both go through it,
+// so a new field only has to be handled once.
+function itemToCard(item, pos) {
+  const card = {
+    id: nextId++,
+    type: item.item_type,
+    title: item.title || '',
+    x: pos.x,
+    y: pos.y,
+    width: item.width || undefined,
+    collapsed: item.collapsed || false,
+    // Comments exist on every node type, so they live on the base card.
+    comments: Array.isArray(item.comments) ? item.comments : []
+  }
+
+  if (item.item_type === 'text') {
+    card.content = item.text_content || ''
+  } else if (item.item_type === 'link') {
+    card.url = item.url || ''
+    card.notes = item.notes || ''
+    // Restore link preview metadata
+    card.previewTitle = item.preview_title || null
+    card.previewDescription = item.preview_description || null
+    card.previewImage = item.preview_image || null
+    card.previewDomain = item.preview_domain || null
+    card.previewFavicon = item.preview_favicon || null
+    card.fetchingPreview = false
+    // Restore social media metadata
+    card.socialMetadata = item.social_metadata || null
+    // Restore cache metadata (will trigger cached badge if true)
+    card._cached = item.social_metadata?._cached || false
+    card._cached_at = item.social_metadata?._cached_at || null
+    // Restore local cache status (Twitter media stored on filesystem)
+    card._locallyCached = item.social_metadata?._locally_cached || false
+  } else if (item.item_type === 'image') {
+    // Filesystem-backed media serves via media_url (/pool/...); image_data is
+    // only populated for legacy/standalone base64 cards. Prefer media_url.
+    card.imageUrl = item.media_url || item.image_data || ''
+    card.mediaAssetId = item.media_asset_id || null
+    card.mediaMetadata = item.media_metadata || null
+    card.caption = item.caption || ''
+    card.notes = item.notes || ''
+    // Source URL for images dragged in from a web page (blank for local files)
+    card.url = item.url || ''
+  } else if (item.item_type === 'video') {
+    card.videoUrl = item.video_url || item.media_url || item.url || ''
+    card.assetId = item.asset_id || ''
+    card.mediaAssetId = item.media_asset_id || null
+    card.mediaMetadata = item.media_metadata || null
+    card.notes = item.notes || ''
+  } else if (item.item_type === 'audio') {
+    card.audioUrl = item.audio_url || item.media_url || item.url || ''
+    card.assetId = item.asset_id || ''
+    card.mediaAssetId = item.media_asset_id || null
+    card.mediaMetadata = item.media_metadata || null
+    card.notes = item.notes || ''
+  } else if (item.item_type === 'html') {
+    card.htmlContent = item.html_content || item.text_content || ''
+  } else if (item.item_type === 'code') {
+    card.codeContent = item.code_content || item.text_content || ''
+    card.codeLanguage = item.code_language || 'javascript'
+  } else if (item.item_type === 'markdown') {
+    card.markdownContent = item.markdown_content || item.text_content || ''
+  } else if (item.item_type === 'parent') {
+    card.content = item.text_content || ''
+  } else if (item.item_type === 'contact') {
+    // Structured fields ride in social_metadata — see typeFieldsForSave().
+    const meta = item.social_metadata || {}
+    card.contactRole = meta.contactRole || ''
+    card.contactOrg = meta.contactOrg || ''
+    card.contactPhone = meta.contactPhone || ''
+    card.contactEmail = meta.contactEmail || ''
+    card.notes = item.notes || ''
+  } else if (item.item_type === 'question') {
+    const meta = item.social_metadata || {}
+    card.content = item.text_content || ''
+    card.questionAnswer = meta.questionAnswer || ''
+    card.questionAnswered = !!meta.questionAnswered
+  }
+
+  return card
+}
+
+// ── Capture inbox drain ─────────────────────────────────────────────────────
+// External clients (the Chrome capture extension, a future phone PWA) can never
+// append a board card directly: saveBoard deletes+reinserts every item, so any
+// direct insert would be clobbered by the next save. Instead they POST to a
+// capture inbox; this drains pending captures into real cards and acks them
+// only AFTER a successful board save. Full contract: docs/CAPTURE_INBOX_HANDOFF.md
+const CAPTURE_POLL_MS = 20000
+// Captures already spawned this session, so a re-poll doesn't double-spawn.
+// Deliberately NOT persisted: if the tab dies before a save, the spawned cards
+// vanish but the captures stay `pending` server-side and respawn next load.
+const spawnedCaptureIds = new Set()
+// captureId -> the card spawned for it, still waiting for a board save to ack.
+const spawnedUnackedCaptures = new Map()
+let captureInboxTimer = null
+let capturePollInFlight = false
+
+async function pollCaptureInbox() {
+  const ep = currentEpisode.value
+  if (!ep || !boardLoaded || capturePollInFlight) return
+  capturePollInFlight = true
+  try {
+    const response = await fetchJson(`/api/whiteboard/${ep}/captures?status=pending`)
+    const pending = response?.captures || []
+    let spawnedAny = false
+    for (const capture of pending) {
+      if (spawnedCaptureIds.has(capture.id)) continue
+      spawnCaptureCard(capture)
+      spawnedAny = true
+    }
+    // Spawning mutates `cards`, whose deep watcher schedules the debounced save
+    // that will ack these captures. Nudge it in case the watcher is suppressed.
+    if (spawnedAny && currentEpisode.value === ep) debouncedSave()
+  } catch (error) {
+    // A failed poll is non-fatal — captures stay pending and we retry next tick.
+    console.warn('Capture inbox poll failed:', error)
+  } finally {
+    capturePollInFlight = false
+  }
+}
+
+// Cascade successive captures so a burst doesn't stack on one point.
+function spawnCaptureCard(capture) {
+  const offset = spawnedCaptureIds.size % 8
+  const pos = getCanvasCenter(offset * 28, offset * 28)
+  const card = itemToCard(capture, pos)
+
+  // Preserve provenance so it survives into the saved item row (media_metadata
+  // is g023 JSONB). Lets a later "insert as cue" step recover intended_cue_type
+  // and the SOT/VO processing job without another round-trip.
+  const provenance = {
+    capture_id: capture.id,
+    intended_cue_type: capture.intended_cue_type || null,
+    processing_job_id: capture.processing_job_id || null,
+    source: capture.source || null,
+    created_at: capture.created_at || null,
+    created_by: capture.created_by || null
+  }
+  card.mediaMetadata = { ...(card.mediaMetadata || {}), capture: provenance }
+  card._fromCapture = true
+
+  cards.value.push(card)
+  spawnedCaptureIds.add(capture.id)
+  spawnedUnackedCaptures.set(capture.id, card)
+  triggerFlash(card.id)
+}
+
+// Called from saveBoard's success path. Acks every capture whose spawned card
+// still exists on the board; dismisses those the user deleted before saving.
+// Both endpoints are idempotent, so a failed call at worst lets another client
+// re-spawn a duplicate — consistent with the board's last-write-wins model.
+async function reconcileCapturesAfterSave(savedEpisode) {
+  if (!spawnedUnackedCaptures.size) return
+  const live = new Set(cards.value.map(c => c.id))
+  const pending = [...spawnedUnackedCaptures.entries()]
+  for (const [captureId, card] of pending) {
+    const action = live.has(card.id) ? 'ack' : 'dismiss'
+    try {
+      await fetchJson(`/api/whiteboard/${savedEpisode}/captures/${captureId}/${action}`, {
+        method: 'POST'
+      })
+      spawnedUnackedCaptures.delete(captureId)
+    } catch (error) {
+      // Leave it in the map to retry on the next successful save. A 409 means
+      // the row is still `processing` — it'll be ackable once enrichment lands.
+      console.warn(`Capture ${action} failed for ${captureId}:`, error)
+    }
+  }
+}
+
+function startCaptureInbox() {
+  stopCaptureInbox()
+  pollCaptureInbox()
+  captureInboxTimer = setInterval(pollCaptureInbox, CAPTURE_POLL_MS)
+  window.addEventListener('focus', pollCaptureInbox)
+}
+
+function stopCaptureInbox() {
+  if (captureInboxTimer) {
+    clearInterval(captureInboxTimer)
+    captureInboxTimer = null
+  }
+  window.removeEventListener('focus', pollCaptureInbox)
+}
+
+// Clear per-episode spawn tracking (used on episode switch). Any unacked
+// captures from the outgoing board were already reconciled by its save; anything
+// still pending server-side simply respawns on the next board that loads it.
+function resetCaptureInboxState() {
+  spawnedCaptureIds.clear()
+  spawnedUnackedCaptures.clear()
 }
 
 // Load whiteboard
@@ -4595,82 +4810,7 @@ async function loadBoard() {
     scratchpadId.value = response.id
 
     // Convert API format to cards
-    cards.value = response.items.map(item => {
-      const card = {
-        id: nextId++,
-        type: item.item_type,
-        title: item.title || '',
-        x: item.x_position,
-        y: item.y_position,
-        width: item.width,
-        collapsed: item.collapsed || false,
-        // Comments exist on every node type, so they live on the base card.
-        comments: Array.isArray(item.comments) ? item.comments : []
-      }
-
-      if (item.item_type === 'text') {
-        card.content = item.text_content || ''
-      } else if (item.item_type === 'link') {
-        card.url = item.url || ''
-        card.notes = item.notes || ''
-        // Restore link preview metadata
-        card.previewTitle = item.preview_title || null
-        card.previewDescription = item.preview_description || null
-        card.previewImage = item.preview_image || null
-        card.previewDomain = item.preview_domain || null
-        card.previewFavicon = item.preview_favicon || null
-        card.fetchingPreview = false
-        // Restore social media metadata
-        card.socialMetadata = item.social_metadata || null
-        // Restore cache metadata (will trigger cached badge if true)
-        card._cached = item.social_metadata?._cached || false
-        card._cached_at = item.social_metadata?._cached_at || null
-        // Restore local cache status (Twitter media stored on filesystem)
-        card._locallyCached = item.social_metadata?._locally_cached || false
-      } else if (item.item_type === 'image') {
-        // Filesystem-backed media serves via media_url (/pool/...); image_data is
-        // only populated for legacy/standalone base64 cards. Prefer media_url.
-        card.imageUrl = item.media_url || item.image_data || ''
-        card.mediaAssetId = item.media_asset_id || null
-        card.mediaMetadata = item.media_metadata || null
-        card.caption = item.caption || ''
-        card.notes = item.notes || ''
-        // Source URL for images dragged in from a web page (blank for local files)
-        card.url = item.url || ''
-      } else if (item.item_type === 'video') {
-        card.videoUrl = item.video_url || item.url || ''
-        card.assetId = item.asset_id || ''
-        card.notes = item.notes || ''
-      } else if (item.item_type === 'audio') {
-        card.audioUrl = item.audio_url || item.url || ''
-        card.assetId = item.asset_id || ''
-        card.notes = item.notes || ''
-      } else if (item.item_type === 'html') {
-        card.htmlContent = item.html_content || item.text_content || ''
-      } else if (item.item_type === 'code') {
-        card.codeContent = item.code_content || item.text_content || ''
-        card.codeLanguage = item.code_language || 'javascript'
-      } else if (item.item_type === 'markdown') {
-        card.markdownContent = item.markdown_content || item.text_content || ''
-      } else if (item.item_type === 'parent') {
-        card.content = item.text_content || ''
-      } else if (item.item_type === 'contact') {
-        // Structured fields ride in social_metadata — see typeFieldsForSave().
-        const meta = item.social_metadata || {}
-        card.contactRole = meta.contactRole || ''
-        card.contactOrg = meta.contactOrg || ''
-        card.contactPhone = meta.contactPhone || ''
-        card.contactEmail = meta.contactEmail || ''
-        card.notes = item.notes || ''
-      } else if (item.item_type === 'question') {
-        const meta = item.social_metadata || {}
-        card.content = item.text_content || ''
-        card.questionAnswer = meta.questionAnswer || ''
-        card.questionAnswered = !!meta.questionAnswered
-      }
-
-      return card
-    })
+    cards.value = response.items.map(item => itemToCard(item, { x: item.x_position, y: item.y_position }))
 
     // Load node links (map DB indices back to client card IDs). Reset the
     // snap-watcher's memory first, or every link of the incoming board reads
@@ -4825,16 +4965,21 @@ async function confirmEpisodeSelection() {
 
     if (pendingSaveAfterSelect.value) {
       // Menu-save with no episode: the point is to save the CURRENT cards to
-      // the episode the user just picked — do not load over them.
+      // the episode the user just picked — do not load over them. The current
+      // cards stay, so keep their spawn tracking; just (re)start polling for ep.
       pendingSaveAfterSelect.value = false
       await saveBoard(ep)
+      startCaptureInbox()
     } else {
       // Normal switch: outgoing board goes back to ITS OWN episode, then the
       // new episode's board loads.
       if (previousEpisode && boardLoaded && cards.value.length > 0) {
         await saveBoard(previousEpisode)
       }
+      // New episode = new inbox; drop the outgoing board's spawn tracking.
+      resetCaptureInboxState()
       await loadBoard()
+      startCaptureInbox()
     }
   } finally {
     switchingViaDialog = false
