@@ -1,10 +1,12 @@
 # Capture Inbox → Whiteboard Integration (handoff spec)
 
 **Audience:** the whiteboard-canvas session (owner of `ScratchpadView.vue`).
-**Status:** backend + Chrome extension live as of 2026-07-22; this UI
-integration is the missing last mile. Until it lands, captures accumulate as
-`pending` and their media is already visible in the AssetPoolPanel — nothing
-is lost.
+**Status:** ✅ **LANDED 2026-07-23** (`a22bc54`, branch
+`feat/whiteboard-capture-inbox`). Backend + Chrome extension shipped
+2026-07-22; the UI drain described below is now implemented in
+`ScratchpadView.vue` (`pollCaptureInbox` / `spawnCaptureCard` /
+`reconcileCapturesAfterSave`). Verified end-to-end against live. The spec
+below is retained as the implemented contract.
 
 ## Background (why an inbox exists)
 
