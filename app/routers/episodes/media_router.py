@@ -159,7 +159,12 @@ async def gather_media_for_show(
                         else:
                             filename_base = f"fsq_{clean_slug}"
                     elif cue_type_local == 'GFX':
-                        asset_folder = 'graphics'
+                        # X-post GFX renders live in assets/gfx/xpost/.
+                        gfxtype_m = re.search(r'\[GfxType:\s*([^\]]+)\]', cue_content, re.IGNORECASE)
+                        if gfxtype_m and gfxtype_m.group(1).strip().lower() == 'xpost':
+                            asset_folder = 'gfx/xpost'
+                        else:
+                            asset_folder = 'graphics'
                         extensions = ['.png']
                         if enumerator_local:
                             filename_base = f"{enumerator_local}-{clean_slug}"

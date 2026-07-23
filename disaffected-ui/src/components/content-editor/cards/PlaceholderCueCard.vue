@@ -1173,7 +1173,9 @@ const gfxImageUrl = computed(() => { // eslint-disable-line no-unused-vars
     return url;
   }
   const episode = props.currentEpisode || route?.params?.episode || '';
-  return `/episodes/${episode}/assets/graphics/${url}`;
+  // X-post renders live in their dedicated directory.
+  const gfxDir = (props.cueData?.gfxType || '').toLowerCase() === 'xpost' ? 'gfx/xpost' : 'graphics';
+  return `/episodes/${episode}/assets/${gfxDir}/${url}`;
 });
 
 // Card-preview URL: xpost cues show the transparent "_key" variant so the

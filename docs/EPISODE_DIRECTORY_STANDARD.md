@@ -46,6 +46,7 @@
 - ✅ **Audio files**: Stored in `assets/audio/`
 - ✅ **Image files**: Stored in `assets/images/`
 - ✅ **Graphics**: Stored in `assets/graphics/`
+- ✅ **X-post GFX renders**: Stored in `assets/gfx/xpost/` (full-frame PNG, `_key.png` keying variant, `src/` archival originals)
 
 **Generated Artifacts** (Export/Optional):
 - ⚠️ **Scripts** (`scripts/` directory): Generated from database, NOT source files
@@ -153,9 +154,15 @@ This document defines the **ONLY** acceptable directory structure and naming con
 │   ├── audio/
 │   │   └── 030-intro-music.mp3
 │   │
-│   └── graphics/
-│       ├── quotes/                               # Full-screen quote graphics
-│       └── 040-lower-third.png
+│   ├── graphics/
+│   │   ├── quotes/                               # Full-screen quote graphics
+│   │   └── 040-lower-third.png
+│   │
+│   └── gfx/
+│       └── xpost/                                # Rendered X-post tweet cards
+│           ├── 020-@handle-12345678.png          #   full frame (gathered)
+│           ├── 020-@handle-12345678_key.png      #   alpha key for vMix
+│           └── src/{AssetID}/                    #   archival avatar/media originals
 │
 ├── rundown/                                        # Rundown organization
 │   └── media-list/                                # vMix playlist (symlinks)

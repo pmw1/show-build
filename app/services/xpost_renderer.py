@@ -2,7 +2,7 @@
 X-Post (tweet) GFX renderer — broadcast-ready news-style tweet card.
 
 Renders a GFX/xpost cue (rows in gfx_xpost_cues, captured from the whiteboard)
-to two PNGs in {episode}/assets/graphics/:
+to two PNGs in {episode}/assets/gfx/xpost/ (the dedicated x-post GFX home):
 
   gfx_{slug}.png       1920x1080 full-frame: house background + centered tweet
                        card + archival caption. This is what gather-media
@@ -10,7 +10,7 @@ to two PNGs in {episode}/assets/graphics/:
   gfx_{slug}_key.png   The card (with drop shadow) on a transparent 1080p
                        canvas, for straight alpha keying in vMix.
 
-Original avatar/media bytes are downloaded to assets/graphics/xpost_src/
+Original avatar/media bytes are downloaded to assets/gfx/xpost/src/
 {asset_id}/ and recorded in xpost_media_local_paths — the provable record of
 what the post looked like even if X later deletes it.
 
@@ -628,9 +628,10 @@ def generate_xpost_png(self, asset_id: str, episode_id: str, priority: str = 'no
         })
 
         path_manager = ShowBuildPaths()
-        assets_dir = path_manager.get_asset_type_dir(episode_id, 'graphics')
+        # X-post renders live in their own dedicated directory.
+        assets_dir = path_manager.episodes_root / episode_id / 'assets' / 'gfx' / 'xpost'
         assets_dir.mkdir(parents=True, exist_ok=True)
-        src_dir = assets_dir / 'xpost_src' / asset_id
+        src_dir = assets_dir / 'src' / asset_id
 
         if row.aspect_ratio and row.aspect_ratio not in ('16:9',):
             logger.warning(f"   ⚠️ Aspect ratio {row.aspect_ratio} not supported yet — rendering 16:9")

@@ -383,7 +383,11 @@ async def regenerate_all_gfx_assets(
                 else:
                     expected_filename = f"gfx_{clean_slug}.png"
 
-                asset_path = assets_dir / expected_filename
+                if cue.get('_isXpost'):
+                    # X-post renders live in their dedicated directory.
+                    asset_path = assets_dir.parent / 'gfx' / 'xpost' / expected_filename
+                else:
+                    asset_path = assets_dir / expected_filename
 
                 if asset_path.exists() and not regenerate_existing:
                     print(f"   ⏭️ Skipping existing: {expected_filename}")

@@ -316,6 +316,8 @@ async def enumerate_cue_blocks(
                 asset_type = "audio"
             elif old_mediaurl and "/video/" in old_mediaurl:
                 asset_type = "video"
+            elif old_mediaurl and "/gfx/xpost/" in old_mediaurl:
+                asset_type = "gfx/xpost"
             elif old_mediaurl and "/graphics/" in old_mediaurl:
                 asset_type = "graphics"
             elif old_mediaurl and "/images/" in old_mediaurl:
@@ -326,6 +328,12 @@ async def enumerate_cue_blocks(
                 asset_type = "video"
             else:
                 asset_type = "quotes"  # fallback
+
+            # X-post GFX renders live in their dedicated directory.
+            gfx_m = gfxtype_pattern.search(cue_body)
+            cue_is_xpost = bool(gfx_m and gfx_m.group(1).strip().lower() == 'xpost')
+            if cue_type == 'GFX' and cue_is_xpost:
+                asset_type = "gfx/xpost"
 
             if old_mediaurl:
                 old_filename = Path(old_mediaurl).name
@@ -369,28 +377,40 @@ async def enumerate_cue_blocks(
 
             elif cue_type == 'GFX':
                 # GFX/xpost cues usually reference their render via [AssetURL:]
-                # rather than [Media Url:]. Find the render in graphics/ by its
-                # conventional name and enumerate it (+ the _key sibling).
-                asset_dir = episode_assets_dir / 'graphics'
+                # rather than [Media Url:]. Find the render by its conventional
+                # name and enumerate it (+ the _key sibling). X-posts live in
+                # assets/gfx/xpost/; renders still sitting in the legacy
+                # assets/graphics/ home are migrated in as part of the rename.
+                target_rel = 'gfx/xpost' if cue_is_xpost else 'graphics'
+                target_dir = episode_assets_dir / target_rel
+                search_dirs = [target_dir, episode_assets_dir / 'graphics'] if cue_is_xpost else [target_dir]
                 ext = '.png'
-                for candidate in (f"gfx_{normalized_slug}{ext}", f"{normalized_slug}{ext}", f"{new_slug}{ext}"):
-                    gfx_path = asset_dir / candidate
-                    if gfx_path.exists():
-                        new_filename = f"{new_slug}{ext}"
-                        new_file_path = asset_dir / new_filename
-                        if str(gfx_path) != str(new_file_path):
-                            try:
-                                shutil.move(str(gfx_path), str(new_file_path))
-                                renamed_files += 1
-                                old_key = gfx_path.with_name(gfx_path.stem + '_key.png')
-                                if old_key.exists():
-                                    shutil.move(str(old_key), str(new_file_path.with_name(new_file_path.stem + '_key.png')))
-                                logger.info(f"Renamed GFX: {gfx_path.name} -> {new_file_path.name}")
-                            except Exception as e:
-                                logger.warning(f"Could not rename GFX file {gfx_path}: {e}")
-                                break
-                        new_mediaurl = f"/episodes/{episode_id_normalized}/assets/graphics/{new_filename}"
+                found = None
+                for sdir in search_dirs:
+                    for candidate in (f"gfx_{normalized_slug}{ext}", f"{normalized_slug}{ext}", f"{new_slug}{ext}"):
+                        gfx_path = sdir / candidate
+                        if gfx_path.exists():
+                            found = gfx_path
+                            break
+                    if found:
                         break
+                if found:
+                    new_filename = f"{new_slug}{ext}"
+                    new_file_path = target_dir / new_filename
+                    if str(found) != str(new_file_path):
+                        try:
+                            new_file_path.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.move(str(found), str(new_file_path))
+                            renamed_files += 1
+                            old_key = found.with_name(found.stem + '_key.png')
+                            if old_key.exists():
+                                shutil.move(str(old_key), str(new_file_path.with_name(new_file_path.stem + '_key.png')))
+                            logger.info(f"Renamed GFX: {found} -> {new_file_path}")
+                            new_mediaurl = f"/episodes/{episode_id_normalized}/assets/{target_rel}/{new_filename}"
+                        except Exception as e:
+                            logger.warning(f"Could not rename GFX file {found}: {e}")
+                    else:
+                        new_mediaurl = f"/episodes/{episode_id_normalized}/assets/{target_rel}/{new_filename}"
 
             elif cue_type == 'FSQ':
                 # FSQ cues with no MediaUrl - try to find file by slug with fsq_ prefix
