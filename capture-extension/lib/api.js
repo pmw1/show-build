@@ -41,9 +41,14 @@ async function request(path, { method = 'GET', json, formData, timeoutMs = 30000
   return resp.json();
 }
 
+// Only episodes actively being built are capture targets.
+const VISIBLE_STATUSES = new Set(['draft', 'production']);
+
 export async function listEpisodes() {
   const data = await request('/api/episodes/');
-  return (data.episodes || []).map((e) => ({ number: e.episode_number, title: e.title || '' }));
+  return (data.episodes || [])
+    .filter((e) => VISIBLE_STATUSES.has((e.status || '').toLowerCase()))
+    .map((e) => ({ number: e.episode_number, title: e.title || '' }));
 }
 
 export function createCapture(episode, payload) {

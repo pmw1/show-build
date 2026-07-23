@@ -41,8 +41,13 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 async function handleClick(info, tab) {
   const id = String(info.menuItemId);
 
-  if (id.startsWith(MENU.EP_PREFIX)) return setEpisode(id.slice(MENU.EP_PREFIX.length));
+  // EP_REFRESH ('sb-ep-refresh') and EP_MENU ('sb-ep-menu') also start with
+  // EP_PREFIX ('sb-ep-') — match them first, then require a 4-digit episode.
   if (id === MENU.EP_REFRESH) return refreshEpisodes();
+  if (id.startsWith(MENU.EP_PREFIX)) {
+    const ep = id.slice(MENU.EP_PREFIX.length);
+    return /^\d{4}$/.test(ep) ? setEpisode(ep) : undefined;
+  }
 
   const { episode } = await getSettings();
   if (!episode) {
@@ -116,9 +121,11 @@ async function captureScreenshot(episode, tab) {
 async function refreshEpisodes() {
   const eps = await listEpisodes();
   const { episode } = await getSettings();
+  // Self-heal a corrupted stored episode (an earlier bug could store "refresh").
+  const kept = /^\d{4}$/.test(episode || '') ? episode : null;
   await setSettings({
     episodeList: eps.slice(0, 10),
-    episode: episode || eps[0]?.number || null,
+    episode: kept || eps[0]?.number || null,
   });
   await rebuildMenus();
 }

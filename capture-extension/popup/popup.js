@@ -41,6 +41,15 @@ async function renderEpisodes() {
     if (ep.number === episode) opt.selected = true;
     episodeSel.appendChild(opt);
   }
+  // A previously-chosen episode that fell out of the draft/production list
+  // stays selectable rather than silently misreporting the target.
+  if (/^\d{4}$/.test(episode || '') && !episodeList.some((e) => e.number === episode)) {
+    const opt = document.createElement('option');
+    opt.value = episode;
+    opt.textContent = `${episode} — (current)`;
+    opt.selected = true;
+    episodeSel.appendChild(opt);
+  }
 }
 
 async function renderCaptures() {
