@@ -6884,8 +6884,14 @@ watch(autoCondense, v => localStorage.setItem('wb-auto-condense', v ? '1' : '0')
 const CONDENSE_GAP = 36     // canvas px kept between card boxes
 const CONDENSE_FLOOR = 0.2  // never contract below 20%
 
+// Auto Condense engages from this zoom level DOWN — mid-compact, where the
+// white space between cards starts to dominate the view.
+const CONDENSE_TRIGGER_ZOOM = 0.65
+
 const condenseActive = computed(() =>
-  autoCondense.value && !showCompact.value && activeVisualizer.value !== 'hierarchical'
+  autoCondense.value &&
+  (viewport.value?.zoom || 1) <= CONDENSE_TRIGGER_ZOOM &&
+  activeVisualizer.value !== 'hierarchical'
 )
 
 // { cx, cy, k } — contraction centre and factor, or null when inactive/no-op.
