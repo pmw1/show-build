@@ -128,6 +128,21 @@ raw space via `cardPositionRaw`. Skipped in the hierarchical tree (already a
 compact column). Zooming back past the compact threshold releases the
 contraction with a glide.
 
+## Node context menu + destructive deletes
+
+Right-click on any node opens a screen-space menu (`onFlowNodeContextMenu` /
+`.node-context-menu`): **Edit {Type}** (focus-zooms the card and drops the
+caret into its first field), **Delete**, and **Delete Full Branch (N nodes)**
+(the node plus its `linkedSubtreeOf` — hidden for leaf nodes). A right-click
+on a field the user is ACTIVELY editing keeps the native browser menu
+(copy/paste); any other right-click on the node opens ours.
+
+Every delete path (buttons, keyboard `Delete`, menu) goes through one stressed
+confirmation dialog — "This is not undoable / You cannot Ctrl+Z your way out
+of this" — and while it is open, every targeted node is dimmed, desaturated,
+and pulses a slow red ring (`.doomed-node`, driven by `deleteTargetIds`), so
+the blast radius is visible before committing.
+
 ## Gotchas (learned the hard way)
 
 - **`isValidConnection` re-validates EVERY edge passed to `setEdges`**, not just

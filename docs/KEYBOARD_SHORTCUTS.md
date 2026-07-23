@@ -218,7 +218,8 @@ Active when the whiteboard canvas is focused.
 | `K` | Add contact card |
 | `Q` | Add question card |
 | `P` | Toggle parent menu |
-| `Delete` | Delete active card |
+| `Delete` | Delete active card (with confirmation) |
+| Right-click | Node menu: edit / delete / delete full branch |
 | `Esc` | Close menus / cancel subtree drag |
 | `Scroll` | Zoom (toward the cursor) |
 | `Ctrl` + drag | Move node with all its linked children |
@@ -227,8 +228,8 @@ Active when the whiteboard canvas is focused.
 **Note:** `Ctrl` / `Ctrl+Shift` can be held before the press *or* pressed part-way
 through a drag. Once engaged, `Ctrl` is latched — releasing it keeps the subtree
 attached. Press `Esc` before dropping to cancel. Connections are drawn by
-dragging one of the four border dots that appear when hovering a card; the
-canvas itself (pan/zoom/drag/connect) runs on Vue Flow.
+dragging the blue dot that tracks the mouse along a card's border (hover just
+outside the edge); the canvas itself (pan/zoom/drag/connect) runs on Vue Flow.
 
 Source: `views/ScratchpadView.vue`
 

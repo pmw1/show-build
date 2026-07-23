@@ -287,20 +287,31 @@
       </v-card>
     </v-dialog>
 
-    <!-- Delete Confirmation Dialog -->
-    <v-dialog v-model="showDeleteConfirm" max-width="360" persistent>
+    <!-- Delete Confirmation Dialog. While it is open, every would-be-deleted
+         node on the canvas is dimmed, desaturated, and pulses a red outline
+         (.doomed-node) so the blast radius is unmistakable. -->
+    <v-dialog v-model="showDeleteConfirm" max-width="420" persistent>
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon class="me-2" color="error">mdi-alert</v-icon>
-          Delete Card
+          {{ deleteTargetIds.length > 1 ? `Delete ${deleteTargetIds.length} Nodes` : 'Delete Node' }}
         </v-card-title>
         <v-card-text>
-          Are you sure you want to delete this card? This action cannot be undone.
+          <p class="delete-warning-headline mb-2">This is not undoable.</p>
+          <p class="mb-2">You cannot <kbd>Ctrl</kbd>+<kbd>Z</kbd> your way out of this.</p>
+          <p class="mb-0">
+            {{ deleteTargetIds.length > 1
+              ? `All ${deleteTargetIds.length} selected whiteboard nodes will be permanently deleted.`
+              : 'The selected whiteboard node will be permanently deleted.' }}
+            The affected {{ deleteTargetIds.length > 1 ? 'nodes are' : 'node is' }} pulsing red on the board.
+          </p>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <v-btn variant="text" @click="showDeleteConfirm = false">Cancel</v-btn>
-          <v-btn color="error" variant="elevated" @click="executeDelete">Delete</v-btn>
+          <v-btn variant="text" @click="cancelDelete">Cancel</v-btn>
+          <v-btn color="error" variant="elevated" @click="executeDelete">
+            Delete {{ deleteTargetIds.length > 1 ? `${deleteTargetIds.length} Nodes` : '' }}
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -443,6 +454,39 @@
         </transition>
       </div>
 
+      <!-- Node right-click context menu (screen-space overlay) -->
+      <div
+        v-if="contextMenu"
+        class="node-context-menu"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+        @click.stop
+        @contextmenu.prevent
+      >
+        <v-card elevation="8" width="240" class="drop-menu-card">
+          <v-list density="compact" class="pa-0">
+            <v-list-item
+              prepend-icon="mdi-pencil"
+              :title="`Edit ${contextMenuTypeLabel}`"
+              @click="editFromContextMenu"
+            ></v-list-item>
+            <v-divider></v-divider>
+            <v-list-item
+              prepend-icon="mdi-delete"
+              title="Delete"
+              class="text-red"
+              @click="deleteFromContextMenu"
+            ></v-list-item>
+            <v-list-item
+              v-if="contextMenuBranchCount > 0"
+              prepend-icon="mdi-delete-sweep"
+              :title="`Delete Full Branch (${contextMenuBranchCount + 1} nodes)`"
+              class="text-red"
+              @click="deleteBranchFromContextMenu"
+            ></v-list-item>
+          </v-list>
+        </v-card>
+      </div>
+
       <!-- Drag-to-connect Indicator -->
       <div v-if="connecting" class="connection-mode-banner">
         <v-icon size="small" class="me-1">mdi-vector-line</v-icon>
@@ -582,6 +626,7 @@
         :elevate-nodes-on-select="true"
         @node-double-click="onFlowNodeDblClick"
         @node-click="onFlowNodeClick"
+        @node-context-menu="onFlowNodeContextMenu"
         @node-drag-start="onFlowNodeDragStart"
         @node-drag="onFlowNodeDrag"
         @node-drag-stop="onFlowNodeDragStop"
@@ -714,6 +759,7 @@
           :class="{
             'card-flash-blue': flashingCards.has(card.id) && card.type !== 'parent',
             'parent-flash-blue': flashingCards.has(card.id) && card.type === 'parent',
+            'doomed-node': showDeleteConfirm && deleteTargetIds.includes(card.id),
             'reparent-target': reparentDrag?.targetId === card.id,
             'reparent-source': reparentDrag?.cardId === card.id,
             'subtree-member': subtreeDrag && subtreeDrag.offsets.some(o => o.id === card.id)
@@ -2435,7 +2481,9 @@ const showParentMenu = ref(false)
 
 // Delete confirmation state
 const showDeleteConfirm = ref(false)
-const deleteTargetId = ref(null)
+// Every node id the pending delete will remove (1 for a single delete, the
+// whole subtree for a branch delete). Drives the .doomed-node pulse too.
+const deleteTargetIds = ref([])
 
 // Drag state. Vue Flow owns the drag mechanics; these track the gesture's
 // MEANING (which card, subtree membership, tree reparent target).
@@ -3055,6 +3103,7 @@ function onPaneClick() {
   endpointPopup.value = null
   viewSelectorOpen.value = false
   floatingMenuOpen.value = false
+  closeContextMenu()
   if (showDropMenu.value) {
     closeDropMenu()
     return
@@ -3078,6 +3127,7 @@ function handlePaneDblClick(event) {
 // Pan/zoom started: screen-anchored popups would drift, so close them.
 function onViewportMoveStart() {
   endpointPopup.value = null
+  closeContextMenu()
 }
 
 // Close the spawn menu and clear any pending connection source.
@@ -3572,6 +3622,7 @@ function handleKeyDown(event) {
     event.preventDefault()
     // Close popups and cancel a pending spawn.
     closeDropMenu()
+    closeContextMenu()
     endpointPopup.value = null
     showParentMenu.value = false
   } else if (event.key === 'Delete' && activeCardId.value) {
@@ -3809,9 +3860,15 @@ function clearConnectDot() {
 // replaces per-element opt-outs: stopping propagation here means Vue Flow's
 // drag handler on the node wrapper never sees the press, while the element
 // itself behaves natively.
+let pressOnFocusedField = false
+
 function maybeBlockNodeDrag(event) {
   const t = event.target
   if (!t || !t.closest) return
+  // Remember whether this press landed on a field that was ALREADY focused —
+  // the context-menu handler uses it to decide native-vs-custom menu.
+  pressOnFocusedField = !!t.closest('input, textarea, [contenteditable="true"]') &&
+    document.activeElement === t
   if (t.closest('input, textarea, select, video, audio, a, [contenteditable="true"], .v-select, .v-field__input')) {
     event.stopPropagation()
   }
@@ -4314,32 +4371,107 @@ function handleDropPaste(event) {
   return false
 }
 
-// Confirm delete (shows dialog)
+// Confirm delete of a single node (shows the stressed dialog)
 function confirmDelete(id) {
-  deleteTargetId.value = id
+  deleteTargetIds.value = [id]
   showDeleteConfirm.value = true
 }
 
-// Execute delete (after confirmation)
-function executeDelete() {
-  if (deleteTargetId.value !== null) {
-    deleteLinksForCard(deleteTargetId.value)
-    cards.value = cards.value.filter(c => c.id !== deleteTargetId.value)
-    if (activeCardId.value === deleteTargetId.value) {
-      activeCardId.value = null
-    }
-  }
-  showDeleteConfirm.value = false
-  deleteTargetId.value = null
+// Confirm delete of a node AND its whole branch (linked subtree)
+function confirmDeleteBranch(id) {
+  deleteTargetIds.value = [id, ...linkedSubtreeOf(id)]
+  showDeleteConfirm.value = true
 }
 
-// Delete card (legacy direct delete for keyboard shortcut)
-function deleteCard(id) {
-  deleteLinksForCard(id)
-  cards.value = cards.value.filter(c => c.id !== id)
-  if (activeCardId.value === id) {
+function cancelDelete() {
+  showDeleteConfirm.value = false
+  deleteTargetIds.value = []
+}
+
+// Execute delete (after confirmation) — removes every targeted node
+function executeDelete() {
+  for (const id of deleteTargetIds.value) {
+    deleteLinksForCard(id)
+  }
+  const doomed = new Set(deleteTargetIds.value)
+  cards.value = cards.value.filter(c => !doomed.has(c.id))
+  if (doomed.has(activeCardId.value)) {
     activeCardId.value = null
   }
+  showDeleteConfirm.value = false
+  deleteTargetIds.value = []
+}
+
+// Delete via keyboard now routes through the same stressed confirmation —
+// a single keypress should not be able to irreversibly destroy a node.
+function deleteCard(id) {
+  confirmDelete(id)
+}
+
+// ─── Node right-click context menu ───
+// {cardId, x, y} — x/y are screen px relative to the canvas element.
+const contextMenu = ref(null)
+
+const contextMenuCard = computed(() =>
+  contextMenu.value ? cards.value.find(c => c.id === contextMenu.value.cardId) : null
+)
+
+// "Edit Segment" / "Edit Text" / ... — the node's own type identity, title-cased.
+const contextMenuTypeLabel = computed(() => {
+  const label = contextMenuCard.value ? (nodeType(contextMenuCard.value).label || 'Node') : 'Node'
+  return label.charAt(0).toUpperCase() + label.slice(1).toLowerCase()
+})
+
+const contextMenuBranchCount = computed(() =>
+  contextMenuCard.value ? linkedSubtreeOf(contextMenuCard.value.id).size : 0
+)
+
+function onFlowNodeContextMenu({ event, node }) {
+  const card = node.data?.card
+  if (!card) return
+  // A right-click on a field the user is ACTIVELY editing keeps the native
+  // browser menu (copy/paste matters there). Any other right-click on the
+  // node — including unfocused fields — opens our menu.
+  if (pressOnFocusedField && event.target.closest?.('input, textarea, [contenteditable="true"]')) return
+  event.preventDefault()
+  const rect = canvas.value?.getBoundingClientRect()
+  if (!rect) return
+  contextMenu.value = {
+    cardId: card.id,
+    // Clamp so the menu never opens off the canvas edge.
+    x: Math.min(event.clientX - rect.left, rect.width - 250),
+    y: Math.min(event.clientY - rect.top, rect.height - 170)
+  }
+  activeCardId.value = card.id
+}
+
+function closeContextMenu() {
+  contextMenu.value = null
+}
+
+// Edit: bring the node up to reading/editing zoom and drop focus into its
+// first text field.
+function editFromContextMenu() {
+  const card = contextMenuCard.value
+  closeContextMenu()
+  if (!card) return
+  focusCard(card)
+  setTimeout(() => {
+    const el = cardElements.value[card.id]
+    el?.querySelector('input, textarea')?.focus()
+  }, 650)
+}
+
+function deleteFromContextMenu() {
+  const card = contextMenuCard.value
+  closeContextMenu()
+  if (card) confirmDelete(card.id)
+}
+
+function deleteBranchFromContextMenu() {
+  const card = contextMenuCard.value
+  closeContextMenu()
+  if (card) confirmDeleteBranch(card.id)
 }
 
 // Clear all
@@ -7826,6 +7958,20 @@ watch([nodeLinks, cardIdsSignature], () => {
   z-index: 1100;
 }
 
+/* Node right-click menu — same overlay treatment as the spawn menu. */
+.node-context-menu {
+  position: absolute;
+  z-index: 1100;
+}
+
+/* Headline inside the delete confirmation */
+.delete-warning-headline {
+  color: #c62828;
+  font-weight: 800;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+}
+
 .drop-menu-card {
   border: 2px solid #1976d2 !important;
   border-radius: 12px !important;
@@ -8103,6 +8249,21 @@ watch([nodeLinks, cardIdsSignature], () => {
 .whiteboard-flow .card-node .parent-node-circle {
   position: relative;
   z-index: 1;
+}
+
+/* Nodes marked for deletion while the confirmation dialog is open: dimmed,
+   desaturated, and pulsing a slow red ring — the blast radius is visible
+   before the user commits to an un-undoable delete. */
+.whiteboard-flow .vue-flow__node .card-node.doomed-node {
+  filter: grayscale(0.85) brightness(0.85);
+  opacity: 0.65;
+  animation: doomed-pulse 1.8s ease-in-out infinite;
+  border-radius: 10px;
+}
+
+@keyframes doomed-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(198, 40, 40, 0.25); }
+  50% { box-shadow: 0 0 0 16px rgba(198, 40, 40, 0.65); }
 }
 
 /* Smooth glide when a computed layout re-solves, Auto Arrange runs, or the
