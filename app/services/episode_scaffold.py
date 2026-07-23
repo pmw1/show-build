@@ -286,8 +286,14 @@ class EpisodeScaffoldService:
 
             logger.info(f"Created episode {episode_number} with AssetID {asset_id} using template {template.name} in episodes table")
 
-            # Create rundown items from template (with inheritance)
-            await self.create_rundown_items_from_template(template, episodes_record.id, episode_number)
+            # Create rundown items from rundown template if provided, otherwise use blueprint template
+            if request.rundown_template_id:
+                await self.create_rundown_items_from_rundown_template(
+                    request.rundown_template_id, episodes_record.id, episode_number
+                )
+            else:
+                # Create rundown items from blueprint template (with inheritance)
+                await self.create_rundown_items_from_template(template, episodes_record.id, episode_number)
 
             # Return response based on the episodes record
             return BlueprintResponse(
@@ -310,7 +316,9 @@ class EpisodeScaffoldService:
             raise
         except Exception as e:
             self.db.rollback()
+            import traceback
             logger.error(f"Error creating episode: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to create episode: {e}")
     
     async def get_episode_by_number(self, episode_number: str) -> Optional[BlueprintResponse]:
@@ -374,7 +382,8 @@ class EpisodeScaffoldService:
             episode_id: The episode record ID
             episode_number: Episode number string
         """
-        from models_v2 import RundownItem
+        from models_v2 import RundownItem, Rundown
+        from services.asset_id import AssetIDService
 
         # Get resolved nodes (includes inherited nodes from parent templates)
         resolved_nodes = template.get_resolved_nodes(self.db)
@@ -386,6 +395,34 @@ class EpisodeScaffoldService:
             logger.info(f"No rundown item templates found in template {template.name}")
             return
 
+        # Create Rundown record first (required parent for RundownItems)
+        rundown_asset_id = AssetIDService.request_asset_id(
+            db=self.db,
+            entity_type="rundown",
+            reason="episode_scaffold_rundown",
+            requested_by="episode_scaffold_service",
+            linked_to=[],
+            context={
+                "episode_number": episode_number,
+                "episode_id": episode_id,
+                "template_name": template.name
+            }
+        )
+
+        rundown = Rundown(
+            asset_id=rundown_asset_id,
+            episode_id=episode_id,
+            name=f"Episode {episode_number} Main Rundown",
+            description=f"Main rundown for episode {episode_number}",
+            order_in_episode=0,
+            status="draft"
+        )
+        self.db.add(rundown)
+        self.db.commit()
+        self.db.refresh(rundown)
+
+        logger.info(f"Created rundown {rundown.id} with AssetID {rundown_asset_id} for episode {episode_number}")
+
         # Sort by sort_order
         rundown_nodes.sort(key=lambda n: n.sort_order)
 
@@ -393,6 +430,20 @@ class EpisodeScaffoldService:
         created_count = 0
         for idx, node in enumerate(rundown_nodes):
             metadata = node.rundown_item_metadata or {}
+
+            # Generate AssetID for each rundown item
+            item_asset_id = AssetIDService.request_asset_id(
+                db=self.db,
+                entity_type="rundown_item",
+                reason="episode_scaffold_item",
+                requested_by="episode_scaffold_service",
+                linked_to=[{"asset_id": rundown_asset_id, "link_type": "child_of"}],
+                context={
+                    "episode_number": episode_number,
+                    "item_type": metadata.get('item_type', 'segment'),
+                    "title": node.name
+                }
+            )
 
             # Build script content with YAML frontmatter
             frontmatter_data = {
@@ -420,9 +471,10 @@ class EpisodeScaffoldService:
             else:
                 script_content += f"# {node.name}\n\n[Content to be added]\n"
 
-            # Create rundown item
+            # Create rundown item with correct rundown_id and asset_id
             rundown_item = RundownItem(
-                episode_id=episode_id,
+                asset_id=item_asset_id,
+                rundown_id=rundown.id,
                 title=node.name,
                 slug=frontmatter_data['slug'],
                 item_type=frontmatter_data['type'],
@@ -437,3 +489,124 @@ class EpisodeScaffoldService:
 
         self.db.commit()
         logger.info(f"Created {created_count} rundown items for episode {episode_number} from template {template.name}")
+
+    async def create_rundown_items_from_rundown_template(self, rundown_template_id: int, episode_id: int, episode_number: str):
+        """
+        Create rundown items from a rundown template.
+
+        Args:
+            rundown_template_id: The rundown template ID
+            episode_id: The episode record ID
+            episode_number: Episode number string
+        """
+        from models_v2 import RundownItem, Rundown
+        from models_episode import RundownTemplate
+        from services.asset_id import AssetIDService
+
+        # Get rundown template with items
+        rundown_template = self.db.query(RundownTemplate).filter(
+            RundownTemplate.id == rundown_template_id,
+            RundownTemplate.is_active == True
+        ).first()
+
+        if not rundown_template:
+            logger.warning(f"Rundown template {rundown_template_id} not found or inactive")
+            return
+
+        if not rundown_template.items:
+            logger.info(f"No items found in rundown template {rundown_template.name}")
+            return
+
+        # Create Rundown record first (required parent for RundownItems)
+        rundown_asset_id = AssetIDService.request_asset_id(
+            db=self.db,
+            entity_type="rundown",
+            reason="episode_scaffold_rundown_template",
+            requested_by="episode_scaffold_service",
+            linked_to=[],
+            context={
+                "episode_number": episode_number,
+                "episode_id": episode_id,
+                "rundown_template_id": rundown_template_id,
+                "rundown_template_name": rundown_template.name
+            }
+        )
+
+        rundown = Rundown(
+            asset_id=rundown_asset_id,
+            episode_id=episode_id,
+            name=f"Episode {episode_number} Main Rundown",
+            description=f"Main rundown for episode {episode_number} (from template: {rundown_template.name})",
+            order_in_episode=0,
+            status="draft"
+        )
+        self.db.add(rundown)
+        self.db.commit()
+        self.db.refresh(rundown)
+
+        logger.info(f"Created rundown {rundown.id} with AssetID {rundown_asset_id} for episode {episode_number} from template {rundown_template.name}")
+
+        # Sort items by sort_order
+        sorted_items = sorted(rundown_template.items, key=lambda item: item.sort_order)
+
+        # Create rundown items
+        created_count = 0
+        for idx, template_item in enumerate(sorted_items):
+            # Generate AssetID for each rundown item
+            item_asset_id = AssetIDService.request_asset_id(
+                db=self.db,
+                entity_type="rundown_item",
+                reason="episode_scaffold_rundown_template_item",
+                requested_by="episode_scaffold_service",
+                linked_to=[{"asset_id": rundown_asset_id, "link_type": "child_of"}],
+                context={
+                    "episode_number": episode_number,
+                    "item_type": template_item.item_type,
+                    "title": template_item.title or template_item.item_type
+                }
+            )
+
+            # Build script content with YAML frontmatter
+            frontmatter_data = {
+                'slug': template_item.slug or template_item.title.lower().replace(' ', '-'),
+                'type': template_item.item_type,
+                'order': (idx + 1) * 10,  # Spacing of 10 for future insertions
+                'index': (idx + 1) * 10,
+                'duration': template_item.duration or '00:05:00',
+                'status': 'draft',
+                'title': template_item.title or template_item.item_type
+            }
+
+            # Add YAML frontmatter to content
+            script_content = "---\n"
+            for key, value in frontmatter_data.items():
+                if isinstance(value, str):
+                    script_content += f"{key}: \"{value}\"\n"
+                else:
+                    script_content += f"{key}: {value}\n"
+            script_content += "---\n\n"
+
+            # Add template script content if provided
+            if template_item.script_content:
+                script_content += template_item.script_content
+            else:
+                script_content += f"# {template_item.title or template_item.item_type}\n\n[Content to be added]\n"
+
+            # Create rundown item with correct rundown_id and asset_id
+            rundown_item = RundownItem(
+                asset_id=item_asset_id,
+                rundown_id=rundown.id,
+                title=template_item.title or template_item.item_type,
+                slug=frontmatter_data['slug'],
+                item_type=template_item.item_type,
+                order_in_rundown=frontmatter_data['order'],
+                duration=frontmatter_data['duration'],
+                status=frontmatter_data['status'],
+                script_content=script_content
+            )
+
+            self.db.add(rundown_item)
+            created_count += 1
+
+        self.db.commit()
+        logger.info(f"Created {created_count} rundown items for episode {episode_number} from rundown template {rundown_template.name}")

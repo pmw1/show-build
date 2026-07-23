@@ -3,6 +3,26 @@
     :class="['rundown-panel', panelWidth === 'narrow' ? 'narrow' : 'wide']"
     :style="{ width: panelWidthValue }"
   >
+    <!-- Tab-shaped control buttons on right edge -->
+    <div class="tab-controls-right">
+      <v-btn
+        icon
+        size="small"
+        @click="$emit('toggle-width')"
+        class="tab-btn"
+      >
+        <v-icon>{{ panelWidth === 'narrow' ? 'mdi-arrow-expand-horizontal' : 'mdi-arrow-collapse-horizontal' }}</v-icon>
+      </v-btn>
+      <v-btn
+        icon
+        size="small"
+        @click="$emit('close')"
+        class="tab-btn"
+      >
+        <v-icon>mdi-close</v-icon>
+      </v-btn>
+    </div>
+
     <v-card class="h-auto" flat>
       <!-- Rundown Header -->
       <v-card-title class="d-flex align-center pa-2 rundown-title">
@@ -67,23 +87,6 @@
             </v-tooltip>
           </v-btn>
 
-
-          <!-- Save Button -->
-          <v-btn
-            size="x-small"
-            :color="saveState?.hasChanges ? 'info' : (saveState?.buttonColor || 'success')"
-            variant="elevated"
-            @click="$emit('save')"
-            :disabled="saveState?.isDisabled ?? true"
-            class="toolbar-btn-tile"
-          >
-            <v-icon size="small" class="mr-1">{{ saveState?.buttonIcon || 'mdi-check-circle' }}</v-icon>
-            <span class="btn-text-tiny">{{ saveState?.buttonText || 'Sync' }}</span>
-            <v-tooltip activator="parent" location="bottom">
-              {{ saveState?.tooltip || 'Episode is synchronized - no changes to save' }}
-            </v-tooltip>
-          </v-btn>
-
           <!-- View Regions Toggle Button -->
           <v-btn
             size="x-small"
@@ -97,20 +100,6 @@
             <v-tooltip activator="parent" location="bottom">
               {{ showRegions ? 'Hide Regions (Alt+Shift+R)' : 'Show Regions (Alt+Shift+R)' }}
             </v-tooltip>
-          </v-btn>
-
-          <!-- Refresh Button -->
-          <v-btn
-            size="x-small"
-            color="primary"
-            variant="elevated"
-            @click="handleRefresh"
-            :loading="loading"
-            class="toolbar-btn-tile"
-          >
-            <v-icon size="small" class="mr-1">mdi-refresh</v-icon>
-            <span class="btn-text-tiny">Refresh</span>
-            <v-tooltip activator="parent" location="bottom">Refresh Rundown (Ctrl+Shift+R)</v-tooltip>
           </v-btn>
 
           <!-- Options Menu -->
@@ -2760,7 +2749,7 @@ export default {
 
 .type-label {
   font-weight: normal;
-  font-size: 8px;
+  font-size: 12px;
   text-align: left;
   display: flex;
   align-items: center;
@@ -2784,6 +2773,7 @@ export default {
 }
 .slug-text {
   font-weight: normal;
+  font-size: 1.2em;
   overflow: visible;
   white-space: normal; /* Allow wrapping */
   word-wrap: break-word;
@@ -2796,7 +2786,7 @@ export default {
   top: 50%;
   transform: translateY(-50%);
   font-family: 'Roboto Mono', monospace;
-  font-size: calc(9px + 0.2em);
+  font-size: 14px;
   color: inherit;
   white-space: nowrap;
   transition: right 0.3s ease;
@@ -2884,7 +2874,7 @@ export default {
   margin-top: 3px;
   margin-bottom: 3px;
   padding-top: 0;
-  font-size: 10px;
+  font-size: 15px;
 }
 
 .rundown-panel.narrow .selected-item .slug-column {
@@ -3107,15 +3097,23 @@ export default {
 
 .toolbar-btn-tile {
   border-radius: 0 !important;
-  min-height: 28px !important; /* 25% smaller than standard 36px */
-  font-size: 10px !important; /* Smaller font size */
+  height: 48px !important;
+  min-height: 48px !important;
+  font-size: 10px !important;
   flex: 1;
   width: 100% !important;
   justify-self: stretch;
   display: flex !important;
   align-items: center;
   justify-content: center;
-  padding: 0 4px !important;
+  padding: 2px 4px !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+  transition: all 0.2s ease !important;
+}
+
+.toolbar-btn-tile:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3) !important;
 }
 
 .toolbar-btn-tile .btn-text-tiny {
@@ -3831,5 +3829,37 @@ export default {
   border: 2px solid v-bind('getSelectionColor()') !important;
   background-color: v-bind('getSelectionColor()') !important;
   color: v-bind('getSelectionTextColor()') !important;
+}
+
+/* Tab-shaped control buttons on right edge of RundownPanel */
+.tab-controls-right {
+  position: absolute;
+  right: -32px;
+  top: 50vh;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 1000;
+}
+
+.tab-btn {
+  border-radius: 0 8px 8px 0 !important;
+  background-color: rgba(25, 118, 210, 0.9) !important;
+  color: white !important;
+  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.2s ease !important;
+  width: 32px !important;
+  height: 40px !important;
+}
+
+.tab-btn:hover {
+  background-color: rgba(25, 118, 210, 1) !important;
+  transform: translateX(4px) !important;
+  box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+.tab-btn .v-icon {
+  color: white !important;
 }
 </style>

@@ -44,6 +44,13 @@ export function useSystemHealth(pollInterval = 10000) {
         status: 'unknown',
         host: null,
         error: null
+      },
+      tts: {
+        status: 'unknown',
+        service: null,
+        label: null,
+        host: null,
+        error: null
       }
     }
   })
@@ -201,12 +208,54 @@ export function useSystemHealth(pollInterval = 10000) {
     }
   })
 
-  // XTTS computed properties
-  const xttsHost = computed(() => health.value.services.xtts?.host || null)
-  const xttsError = computed(() => health.value.services.xtts?.error || null)
+  // TTS computed properties (handles both XTTS and Fish Speech)
+  // Check if Fish Speech is active (tts service exists and has fishspeech as service)
+  const ttsService = computed(() => health.value.services.tts?.service || null)
+  const ttsLabel = computed(() => health.value.services.tts?.label || null)
+  const isFishSpeechActive = computed(() => ttsService.value === 'fishspeech')
+
+  // Use TTS service if Fish Speech is active, otherwise fall back to XTTS
+  const xttsHost = computed(() => {
+    if (isFishSpeechActive.value) {
+      return health.value.services.tts?.host || null
+    }
+    return health.value.services.xtts?.host || null
+  })
+
+  const xttsError = computed(() => {
+    if (isFishSpeechActive.value) {
+      return health.value.services.tts?.error || null
+    }
+    return health.value.services.xtts?.error || null
+  })
+
+  // Dynamic label: "Fish" when Fish Speech is active, "XTTS" otherwise
+  const ttsDisplayLabel = computed(() => {
+    if (isFishSpeechActive.value) {
+      return ttsLabel.value || 'Fish'
+    }
+    return 'XTTS'
+  })
+
+  // Check if XTTS is deprecated (Fish Speech enabled, XTTS disabled)
+  const isXttsDeprecated = computed(() => {
+    return health.value.services.xtts?.status === 'deprecated'
+  })
 
   const xttsStatus = computed(() => {
+    // If Fish Speech is active, use the tts service status
+    if (isFishSpeechActive.value) {
+      const status = health.value.services.tts?.status || 'unknown'
+      if (status === 'error') return 'error'
+      if (status === 'not_configured') return 'warning'
+      if (status === 'warning') return 'warning'
+      if (status === 'connected') return 'success'
+      return 'warning'
+    }
+
+    // Otherwise use XTTS status
     const status = health.value.services.xtts?.status || 'unknown'
+    if (status === 'deprecated') return 'deprecated'
     if (status === 'error') return 'error'
     if (status === 'not_configured') return 'warning'
     if (status === 'warning') return 'warning'
@@ -215,7 +264,17 @@ export function useSystemHealth(pollInterval = 10000) {
   })
 
   const xttsStatusText = computed(() => {
+    if (isFishSpeechActive.value) {
+      const status = health.value.services.tts?.status || 'unknown'
+      if (status === 'error') return 'Error'
+      if (status === 'not_configured') return 'Not Configured'
+      if (status === 'warning') return 'Warning'
+      if (status === 'connected') return 'Connected'
+      return 'Unknown'
+    }
+
     const status = health.value.services.xtts?.status || 'unknown'
+    if (status === 'deprecated') return 'Deprecated'
     if (status === 'error') return 'Error'
     if (status === 'not_configured') return 'Not Configured'
     if (status === 'warning') return 'Warning'
@@ -228,6 +287,7 @@ export function useSystemHealth(pollInterval = 10000) {
       case 'success': return 'success'
       case 'warning': return 'warning'
       case 'error': return 'error'
+      case 'deprecated': return 'grey'
       default: return 'grey'
     }
   })
@@ -237,6 +297,7 @@ export function useSystemHealth(pollInterval = 10000) {
       case 'success': return 'mdi-check-circle'
       case 'warning': return 'mdi-alert-circle'
       case 'error': return 'mdi-close-circle'
+      case 'deprecated': return 'mdi-archive-outline'
       default: return 'mdi-help-circle'
     }
   })
@@ -509,13 +570,16 @@ export function useSystemHealth(pollInterval = 10000) {
     driveStatusText,
     driveStatusColor,
     driveStatusIcon,
-    // XTTS computed properties
+    // TTS/XTTS computed properties
     xttsHost,
     xttsError,
     xttsStatus,
     xttsStatusText,
     xttsStatusColor,
     xttsStatusIcon,
+    ttsDisplayLabel,
+    isFishSpeechActive,
+    isXttsDeprecated,
     loading
   }
 }

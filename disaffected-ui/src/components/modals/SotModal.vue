@@ -6,9 +6,9 @@
       <div style="display: flex; gap: 12px; align-items: center; justify-content: center;">
         <!-- Current Timecode (75% size) -->
         <div style="color: white; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(255, 255, 255, 0.5); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">{{ currentTimecode }}</div>
-        <!-- Countdown Timecode (75% size, red background) -->
-        <div style="background: rgba(244, 67, 54, 0.3); border: 2px solid rgba(244, 67, 54, 0.6); border-radius: 6px; padding: 8px 12px;">
-          <div style="color: #ff6b6b; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(255, 107, 107, 0.5); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">-{{ remainingTimecode }}</div>
+        <!-- Countdown Timecode (75% size, red text only) -->
+        <div style="padding: 8px 12px;">
+          <div style="color: #F44336; font-size: 30px; font-weight: bold; font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 3px; text-shadow: 0 0 15px rgba(244, 67, 54, 0.8); width: 240px; display: inline-block; font-variant-numeric: tabular-nums;">-{{ remainingTimecode }}</div>
         </div>
       </div>
       <div style="color: #90CAF9; font-size: 10px; font-weight: bold; font-family: 'Helvetica', Arial, sans-serif; margin-top: 6px;">{{ currentActionDisplay }}</div>
@@ -1361,7 +1361,7 @@ export default {
         // Don't interfere with typing in input fields (except trim inputs with arrow keys)
         if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
           if (!(event.target === trimStartInputRef.value || event.target === trimEndInputRef.value) ||
-              !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+              !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
             return
           }
         }
@@ -1425,6 +1425,16 @@ export default {
             } else {
               performStepForwardFrame()
             }
+            break
+
+          case 'ArrowUp': // Up Arrow - Jump forward 10 seconds
+            event.preventDefault()
+            performJumpForwardTenSeconds()
+            break
+
+          case 'ArrowDown': // Down Arrow - Jump back 10 seconds
+            event.preventDefault()
+            performJumpBackTenSeconds()
             break
 
           case 'i':

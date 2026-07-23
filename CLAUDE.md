@@ -44,26 +44,26 @@ cd disaffected-ui && npm run lint -- --fix
 
 ## ⚠️ **MANDATORY: INTER-CLAUDE RELAY COORDINATION** ⚠️
 
-**CRITICAL RULE**: Check the relay server for coordination with other Claude instances.
+**CRITICAL RULE**: Check the relay server on EVERY user message for coordination with other Claude instances.
 
 ### Relay Server: http://192.168.51.223:8001
 **Web Interface**: http://192.168.51.223:8001/ui
 
 ### MANDATORY Relay Check Frequency:
-- **EVERY OTHER USER MESSAGE** - Check the relay for coordination with retro-transcriber-claude and kairo-claude
+- **EVERY USER MESSAGE** - Check the relay before responding to ANY user message
 - **AT SESSION START** - Always check before beginning work
 - **WHEN STARTING/COMPLETING MAJOR WORK** - Post updates for team coordination
 
 ### Required Actions:
 
-**1. CHECK AT SESSION START** - Before doing any work:
+**1. CHECK ON EVERY USER MESSAGE** - Before responding:
 ```bash
-curl http://192.168.51.223:8001/read
+curl -s 'http://192.168.51.223:8001/read?project=show-build&limit=5'
 ```
 
-**2. CHECK EVERY 5 MESSAGES** - Regular coordination is critical:
+**2. CHECK ANNOUNCEMENTS** - System-wide important messages:
 ```bash
-curl 'http://192.168.51.223:8001/read?project=show-build&limit=10'
+curl -s http://192.168.51.223:8001/announcements
 ```
 
 **3. POST UPDATES WHEN STARTING/COMPLETING WORK**:
@@ -71,12 +71,7 @@ curl 'http://192.168.51.223:8001/read?project=show-build&limit=10'
 curl -X POST http://192.168.51.223:8001/write -H "Content-Type: application/json" -d '{"content":"Your status","sender":"show-build-claude","project":"show-build"}'
 ```
 
-**4. CHECK ANNOUNCEMENTS** - System-wide important messages:
-```bash
-curl http://192.168.51.223:8001/announcements
-```
-
-**5. COORDINATE BEFORE CHANGES** - If work involves shared systems, check relay first.
+**4. COORDINATE BEFORE CHANGES** - If work involves shared systems, check relay first.
 
 ### Why This Matters:
 - Prevents conflicting work between Claude instances
@@ -198,14 +193,41 @@ python claudespawn.py --mode local --port 47291
 
 **📖 Complete Documentation**: See [`/mnt/process/claudespawn/README.md`](../claudespawn/README.md) for full usage guide.
 
+## 🚀 **ACTIVE WORK QUEUE** 🚀
+
+**📌 CRITICAL**: Before starting any development work, ALWAYS check the active work queue:
+
+**→ [`ACTIVE_WORK_QUEUE.md`](ACTIVE_WORK_QUEUE.md) ← MASTER TASK CHECKLIST**
+
+This document contains:
+- Current sprint goals and priorities
+- Task checklist with status tracking
+- Architectural decisions and rationale
+- Blocked tasks and dependencies
+- Success criteria and metrics
+
+**MANDATORY**: Update task status in `ACTIVE_WORK_QUEUE.md` as you complete work.
+
+---
+
 ## Project Overview
 
-Show-Build is a full-stack broadcast rundown management system designed for the Disaffected media ecosystem. It serves as a drop-in replacement for Obsidian-based workflows while maintaining complete file format compatibility. The system maintains compatibility with markdown file format for future filesystem integration, using the same organizational structure as Obsidian.
+Show-Build is a **database-first broadcast production platform** designed for the Disaffected media ecosystem. It provides a comprehensive web-based interface for managing episodes, rundowns, scripts, and media assets for professional broadcast production.
+
+**Core Mission**:
+- **Database-first architecture** - PostgreSQL as single source of truth
+- **Professional broadcast workflows** - Optimized for TV/podcast production
+- **AI-enhanced content creation** - Universal LLM Framework for intelligent assistance
+- **Multi-format script generation** - 6 output formats from single database source
+- **Enterprise-grade security** - RBAC with audit trails
 
 **📋 Key Documentation**:
+- [`ACTIVE_WORK_QUEUE.md`](ACTIVE_WORK_QUEUE.md) - 🚀 **Active Work Queue** - Current tasks and priorities (CHECK FIRST!)
+- [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md) - 📐 **Architecture Decisions** - Strategic decisions and rationale
 - [`UNIVERSAL_LLM_FRAMEWORK_UFDP.md`](UNIVERSAL_LLM_FRAMEWORK_UFDP.md) - ⭐ **Universal LLM Framework** - Unified AI state management (v1.0)
-- [`docs/EPISODE_DIRECTORY_STANDARD.md`](docs/EPISODE_DIRECTORY_STANDARD.md) - 🗂️ **Episode File Structure Standard** - Canonical specification for all episode organization (AUTHORITATIVE)
+- [`docs/EPISODE_DIRECTORY_STANDARD.md`](docs/EPISODE_DIRECTORY_STANDARD.md) - 🗂️ **Episode File Structure Standard** - Media asset organization (AUTHORITATIVE)
 - [`docs/ASSETID_SYSTEM_GUIDE.md`](docs/ASSETID_SYSTEM_GUIDE.md) - AssetID system reference
+- [`docs/DASHBOARD_ANNOUNCEMENTS.md`](docs/DASHBOARD_ANNOUNCEMENTS.md) - 📢 **Dashboard Announcements Guide** - How to create and manage dashboard announcements
 - [`docs/LLM_GENERATOR_TROUBLESHOOTING.md`](docs/LLM_GENERATOR_TROUBLESHOOTING.md) - LLM test segment generator debugging (legacy patterns)
 - [`docs/THUMBNAIL_GENERATION_RESEARCH.md`](docs/THUMBNAIL_GENERATION_RESEARCH.md) - Thumbnail automation research (pending implementation)
 
@@ -213,32 +235,43 @@ Show-Build is a full-stack broadcast rundown management system designed for the 
 
 ### Data Storage Architecture (CRITICAL - READ THIS FIRST)
 
-**CURRENT STATE**: 100% Database-Only Content Storage
-- All rundown items stored in PostgreSQL `rundown_items.script_content` field
-- NO filesystem markdown files are currently read or written for content
-- Media assets (images/video/audio) ARE written to `/mnt/sync/disaffected/episodes/{episode}/assets/`
-- Episode directory structure exists for media organization
+**ARCHITECTURE**: Database-First, Single Source of Truth
 
-**FUTURE FILESYSTEM INTEGRATION** (Planned, Not Implemented):
-- YAML frontmatter format in `script_content` matches Obsidian/markdown conventions
-- When mirroring is implemented, content will be exported to:
-  - `/mnt/sync/disaffected/episodes/{episode_number}/rundown/*.md` - Individual markdown files
-  - `/mnt/sync/disaffected/episodes/{episode_number}/info.md` - Episode metadata
-  - Full bidirectional sync between database and filesystem
-  - Compatible with Obsidian workflows
+**PostgreSQL Database (Primary Storage)**:
+- ✅ **ALL content stored in database** - Episodes, rundowns, segments, cues, scripts
+- ✅ **Single source of truth** - Database is authoritative for all content
+- ✅ **Transactional integrity** - ACID guarantees on all changes
+- ✅ **Real-time collaboration** - Multiple users can edit simultaneously
+- ✅ **Advanced querying** - SQL-powered search, filtering, analytics
+
+**Filesystem (Media Assets Only)**:
+- ✅ **Binary media files** - Images, video, audio stored in `/mnt/sync/disaffected/episodes/{episode}/assets/`
+- ✅ **Organized by type** - `assets/video/`, `assets/images/`, `assets/audio/`, `assets/graphics/`
+- ✅ **AssetID tracking** - Database references to filesystem paths
+- ✅ **Episode directory structure** - See `docs/EPISODE_DIRECTORY_STANDARD.md` (media organization only)
+
+**Optional Export Features** (Generated Artifacts, Not Source):
+- ⬜ **Script generation** - 6 formats generated on-demand from database
+- ⬜ **Markdown export** - Optional utility for external tools (future feature)
+- ⬜ **Media list enumeration** - Symlinks for vMix playlists
 
 **DEVELOPER GUIDANCE**:
-- ✅ USE: Database queries to `rundown_items` table for content
-- ✅ USE: Filesystem operations for media assets in `assets/` directory
-- ❌ AVOID: Reading/writing markdown files in `rundown/` directory (not active)
-- ✅ MAINTAIN: YAML frontmatter format compatibility in `script_content` field
+- ✅ **USE**: Database queries for ALL content operations (episodes, rundowns, scripts)
+- ✅ **USE**: Filesystem for media assets (images, video, audio, graphics)
+- ✅ **USE**: Celery + Redis for async tasks (script generation, asset processing)
+- ❌ **AVOID**: Treating generated scripts as source files (they're artifacts)
+- ❌ **AVOID**: Manual filesystem operations for content (use database)
+- ❌ **REMOVED**: MQTT infrastructure (replaced by Celery) - See `docs/ARCHITECTURE_DECISIONS.md`
+
+**Reference**: See [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md) for strategic decisions and rationale.
 
 ### Backend (FastAPI + Python)
 - **Main Application**: `app/main.py` - Central FastAPI application with comprehensive API endpoints
-- **Database**: PostgreSQL with SQLAlchemy ORM (`app/database.py`)
-- **Authentication**: JWT-based auth system in `app/auth/` with role-based access control
-- **Background Processing**: Celery with Redis for async tasks (`app/celery_app.py`)
-- **Media Storage**: Episode media assets stored in `/mnt/sync/disaffected/episodes/{episode}/assets/` (host)
+- **Database**: PostgreSQL with SQLAlchemy ORM (`app/database.py`) - **Single source of truth**
+- **Authentication**: JWT-based auth system in `app/auth/` with role-based access control (RBAC)
+- **Background Processing**: Celery with Redis for async tasks (`app/celery_app.py`) - 7 queues with priority support
+- **Media Storage**: Binary media assets stored in `/mnt/sync/disaffected/episodes/{episode}/assets/`
+- **Task Queues**: assets_high, assets, assets_low, compilation, quotes, media, fsq
 
 ### Frontend (Vue 3 + Vuetify)
 - **Framework**: Vue 3 with Composition API, Vuetify 3 for UI components
@@ -249,15 +282,16 @@ Show-Build is a full-stack broadcast rundown management system designed for the 
 ### Key Components
 - **RundownManager.vue**: Drag-and-drop rundown editing with virtual scrolling
 - **ContentEditor.vue**: Markdown content editing with live preview
+- **Whiteboard/Brainstorm System**: Visual canvas for pre-production research, asset collection, and idea organization (9 card types)
 - **Universal LLM Framework**: Centralized AI state management with visual feedback and persistence
 - **Auth System**: Login/JWT authentication with API key fallback
-- **Asset Management**: File upload and media processing capabilities
+- **Asset Management**: File upload and media processing capabilities with AssetID tracking
 
 ## Development Commands
 
 ### Backend
 ```bash
-# Start all services (backend, frontend, database, MQTT)
+# Start all services (backend, frontend, database, Redis)
 docker compose up --build
 
 # Backend only
@@ -265,6 +299,9 @@ docker compose up --build server
 
 # View logs
 docker logs show-build-server
+
+# Monitor Celery tasks (if Flower installed)
+# Open browser: http://192.168.51.210:5555
 ```
 
 ### Frontend
@@ -288,23 +325,26 @@ cd app && python -m alembic upgrade head
 
 ## File Structure and Data Flow
 
-### Episode Directory Structure (File System Organization)
-**CURRENT STATE**: Directory structure exists for media asset storage only
+### Episode Directory Structure (Media Asset Organization)
+**IMPORTANT**: Directory structure is for **MEDIA ASSETS ONLY**. All content (scripts, rundowns, metadata) stored in database.
 
 **📖 AUTHORITATIVE SPECIFICATION**: See [`docs/EPISODE_DIRECTORY_STANDARD.md`](docs/EPISODE_DIRECTORY_STANDARD.md) for complete canonical file structure.
 
-Episodes are organized as directories in `/mnt/sync/disaffected/episodes/{episode_number}/`:
-- `projects/` - vMix profiles, After Effects teasers/graphics with source/ subdirectories
+Episodes organized in `/mnt/sync/disaffected/episodes/{episode_number}/`:
+- `projects/` - Production files (vMix profiles, After Effects projects with source media)
 - `captures/` - Raw vMix recordings (BLOCK-A.mov, BLOCK-B.mov, BREAK-1.mov)
-- `thumbnails/` - Master artwork (master-16x9.psd, master-square.psd)
-- `assets/` - Final media files (video/, images/, audio/, graphics/) with AssetID naming
-- `rundown/media-list/` - Symlinks to assets for vMix playlists (enumerated with parent references)
-- `scripts/` - Generated scripts (6 formats: hardcopy, teleprompter, director, media-list, flat-text, source.md)
-- `exports/` - Distribution content (blocks, full episode, audio, subtitles, platform-specific thumbnails)
+- `thumbnails/` - Master artwork sources (master-16x9.psd, master-square.psd)
+- `assets/` - **Final media files** (video/, images/, audio/, graphics/) with AssetID naming
+- `rundown/media-list/` - **Generated symlinks** to assets for vMix playlists (created from database)
+- `scripts/` - **Generated scripts** (6 formats created on-demand from database, NOT source files)
+- `exports/` - Distribution content (blocks, full episode, audio, subtitles, platform thumbnails)
 - `info.md` - Episode metadata (reserved for future filesystem sync)
 - `{EPISODE}-rundown.json` - Complete rundown structure export
 
-**CRITICAL**: Rundown content is currently stored 100% in database, NOT filesystem. Scripts are generated from database single source of truth.
+**CRITICAL**:
+- ✅ **Content**: 100% database storage (rundowns, scripts, metadata)
+- ✅ **Media**: Filesystem storage (images, video, audio, graphics)
+- ✅ **Generated artifacts**: Scripts, symlinks, exports created from database on-demand
 
 ### Rundown Items (Database Records)
 Each rundown item is a **PostgreSQL database record** in the `rundown_items` table with:

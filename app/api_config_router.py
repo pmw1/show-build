@@ -418,6 +418,272 @@ async def synthesize_speech(
         logger.error(f"Error in XTTS synthesis: {e}")
         raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
 
+
+# ============================================
+# Fish Speech Endpoints
+# ============================================
+
+@router.get("/fishspeech/references")
+async def get_fishspeech_references(token_data=Depends(get_current_user_or_key)):
+    """
+    Get available reference voices from Fish Speech service.
+    """
+    try:
+        config = api_config_manager.load_config()
+        fish_config = config.get("preproduction", {}).get("ai_services", {}).get("fishspeech", {})
+
+        if not fish_config.get("enabled", False):
+            raise HTTPException(status_code=400, detail="Fish Speech is not enabled")
+
+        fish_host = fish_config.get("host")
+        if not fish_host:
+            raise HTTPException(status_code=400, detail="Fish Speech host not configured")
+
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{fish_host}/v1/references/list",
+                headers={"Accept": "application/json"}
+            )
+
+        if response.status_code == 200:
+            # Fish Speech returns msgpack by default, but we requested JSON
+            try:
+                data = response.json()
+                references = data.get("reference_ids", [])
+                return {
+                    "success": True,
+                    "references": references,
+                    "message": data.get("message", f"Found {len(references)} reference voices")
+                }
+            except:
+                # If JSON parsing fails, return empty list
+                return {
+                    "success": True,
+                    "references": [],
+                    "message": "No reference voices found"
+                }
+        else:
+            raise HTTPException(status_code=response.status_code, detail="Failed to fetch references")
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=408, detail="Fish Speech service timeout")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Cannot connect to Fish Speech service")
+    except Exception as e:
+        logger.error(f"Error fetching Fish Speech references: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch references: {str(e)}")
+
+
+@router.post("/fishspeech/synthesize")
+async def fishspeech_synthesize(
+    request: dict = Body(...),
+    token_data=Depends(get_current_user_or_key)
+):
+    """
+    Proxy endpoint for Fish Speech text-to-speech synthesis.
+    """
+    try:
+        config = api_config_manager.load_config()
+        fish_config = config.get("preproduction", {}).get("ai_services", {}).get("fishspeech", {})
+
+        if not fish_config.get("enabled", False):
+            raise HTTPException(status_code=400, detail="Fish Speech is not enabled")
+
+        fish_host = fish_config.get("host")
+        if not fish_host:
+            raise HTTPException(status_code=400, detail="Fish Speech host not configured")
+
+        text = request.get("text", "")
+        if not text:
+            raise HTTPException(status_code=400, detail="Text is required for synthesis")
+
+        # Build Fish Speech request
+        fish_request = {
+            "text": text,
+            "format": request.get("format", "wav"),
+            "reference_id": request.get("reference_id") or request.get("speaker"),
+            "chunk_length": request.get("chunk_length", 200),
+            "normalize": request.get("normalize", True),
+            "streaming": False,
+            "temperature": request.get("temperature", 0.8),
+            "top_p": request.get("top_p", 0.8)
+        }
+
+        # Remove None values
+        fish_request = {k: v for k, v in fish_request.items() if v is not None}
+
+        logger.info(f"Fish Speech Request URL: {fish_host}/v1/tts")
+        logger.info(f"Fish Speech Request: {fish_request}")
+
+        import httpx
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{fish_host}/v1/tts",
+                json=fish_request,
+                headers={"Content-Type": "application/json", "Accept": "audio/wav"}
+            )
+
+        if response.status_code != 200:
+            try:
+                error_detail = response.json()
+                logger.error(f"Fish Speech error {response.status_code}: {error_detail}")
+                raise HTTPException(status_code=response.status_code, detail=f"Fish Speech error: {error_detail}")
+            except ValueError:
+                error_text = response.text
+                logger.error(f"Fish Speech error {response.status_code}: {error_text}")
+                raise HTTPException(status_code=response.status_code, detail=f"Fish Speech error: {error_text}")
+
+        # Return audio data
+        from fastapi.responses import Response
+        audio_data = response.content
+
+        content_type = response.headers.get('content-type', 'audio/wav')
+
+        return Response(
+            content=audio_data,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": "attachment; filename=fishspeech_output.wav",
+                "Content-Length": str(len(audio_data))
+            }
+        )
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=408, detail="Fish Speech synthesis timeout")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Cannot connect to Fish Speech service")
+    except Exception as e:
+        logger.error(f"Error in Fish Speech synthesis: {e}")
+        raise HTTPException(status_code=500, detail=f"Fish Speech synthesis failed: {str(e)}")
+
+
+# ============================================
+# Unified TTS Endpoint (auto-selects service)
+# ============================================
+
+@router.post("/tts/synthesize")
+async def unified_tts_synthesize(
+    request: dict = Body(...),
+    token_data=Depends(get_current_user_or_key)
+):
+    """
+    Unified TTS synthesis endpoint.
+    Automatically routes to Fish Speech or XTTS based on configuration.
+    Fish Speech is preferred if enabled; falls back to XTTS.
+    """
+    try:
+        config = api_config_manager.load_config()
+        fish_config = config.get("preproduction", {}).get("ai_services", {}).get("fishspeech", {})
+        xtts_config = config.get("preproduction", {}).get("ai_services", {}).get("xtts", {})
+
+        fish_enabled = fish_config.get("enabled", False)
+        xtts_enabled = xtts_config.get("enabled", False)
+
+        # Route to appropriate service
+        if fish_enabled:
+            logger.info("Routing TTS request to Fish Speech")
+            return await fishspeech_synthesize(request, token_data)
+        elif xtts_enabled:
+            logger.info("Routing TTS request to XTTS")
+            return await synthesize_speech(request, token_data)
+        else:
+            raise HTTPException(status_code=400, detail="No TTS service is enabled. Enable Fish Speech or XTTS in settings.")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in unified TTS synthesis: {e}")
+        raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
+
+
+@router.get("/tts/config")
+async def get_tts_config(token_data=Depends(get_current_user_or_key)):
+    """
+    Get current TTS configuration.
+    Returns which service is active and available speakers/references.
+    """
+    try:
+        config = api_config_manager.load_config()
+        fish_config = config.get("preproduction", {}).get("ai_services", {}).get("fishspeech", {})
+        xtts_config = config.get("preproduction", {}).get("ai_services", {}).get("xtts", {})
+
+        fish_enabled = fish_config.get("enabled", False)
+        xtts_enabled = xtts_config.get("enabled", False)
+
+        active_service = None
+        if fish_enabled:
+            active_service = "fishspeech"
+        elif xtts_enabled:
+            active_service = "xtts"
+
+        return {
+            "success": True,
+            "active_service": active_service,
+            "services": {
+                "fishspeech": {
+                    "enabled": fish_enabled,
+                    "host": fish_config.get("host") if fish_enabled else None
+                },
+                "xtts": {
+                    "enabled": xtts_enabled,
+                    "host": xtts_config.get("host") if xtts_enabled else None,
+                    "speaker": xtts_config.get("speaker") if xtts_enabled else None
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting TTS config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get TTS config: {str(e)}")
+
+
+@router.get("/tts/speakers")
+async def get_tts_speakers(token_data=Depends(get_current_user_or_key)):
+    """
+    Get available speakers/references for the active TTS service.
+    """
+    try:
+        config = api_config_manager.load_config()
+        fish_config = config.get("preproduction", {}).get("ai_services", {}).get("fishspeech", {})
+        xtts_config = config.get("preproduction", {}).get("ai_services", {}).get("xtts", {})
+
+        fish_enabled = fish_config.get("enabled", False)
+        xtts_enabled = xtts_config.get("enabled", False)
+
+        if fish_enabled:
+            # Get Fish Speech references
+            result = await get_fishspeech_references(token_data)
+            return {
+                "success": True,
+                "service": "fishspeech",
+                "speakers": result.get("references", [])
+            }
+        elif xtts_enabled:
+            # Get XTTS speakers
+            result = await get_xtts_speakers(token_data)
+            return {
+                "success": True,
+                "service": "xtts",
+                "speakers": result.get("speakers", [])
+            }
+        else:
+            return {
+                "success": False,
+                "service": None,
+                "speakers": [],
+                "message": "No TTS service is enabled"
+            }
+
+    except Exception as e:
+        logger.error(f"Error getting TTS speakers: {e}")
+        return {
+            "success": False,
+            "service": None,
+            "speakers": [],
+            "error": str(e)
+        }
+
+
 @router.get("/current-episode")
 async def get_current_episode_info(token_data=Depends(get_current_user_or_key)):
     """

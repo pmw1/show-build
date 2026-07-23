@@ -109,3 +109,34 @@ export default {
   }
 };
 </script>
+
+<style scoped>
+/* Fix text visibility - add proper padding */
+.v-card-text {
+  padding-top: 32px !important;
+}
+
+/* Ensure text fields have proper spacing and prevent label cutoff */
+.v-text-field,
+.v-textarea {
+  margin-bottom: 16px;
+  margin-top: 8px;
+}
+
+/* Prevent label from being cut off */
+:deep(.v-field__field) {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+/* Fix textarea input fading/cutoff issue */
+:deep(.v-field__input) {
+  padding-top: 8px !important;
+  min-height: auto !important;
+}
+
+:deep(textarea.v-field__input) {
+  padding-top: 8px !important;
+  line-height: 1.5 !important;
+}
+</style>

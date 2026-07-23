@@ -92,17 +92,17 @@
           <div class="d-flex gap-3 justify-center">
             <v-btn
               @click="pasteFromClipboard"
-              color="primary"
+              :color="clipboardDetection.buttonColor.value"
               variant="outlined"
               :prepend-icon="'mdi-clipboard-outline'"
-              :loading="pasteLoading"
+              :loading="clipboardDetection.isProcessing.value"
               :disabled="!!previewUrl"
               ref="pasteTarget"
               tabindex="0"
             >
-              Paste from Clipboard
+              {{ clipboardDetection.buttonLabel.value }}
               <v-tooltip activator="parent" location="bottom">
-                {{ pasteShortcut }}
+                {{ pasteShortcut }} - {{ clipboardDetection.statusMessage.value || 'Paste image from clipboard' }}
               </v-tooltip>
             </v-btn>
 
@@ -160,12 +160,24 @@
 <script>
 import axios from 'axios'
 import { useRequireEpisode } from '@/composables/useRequireEpisode'
+import { useClipboardImageDetection } from '@/composables/useClipboardImageDetection'
 
 export default {
   name: 'ImgCueModal',
   setup() {
-    const { requireEpisode } = useRequireEpisode();
-    return { requireEpisode };
+    const { requireEpisode } = useRequireEpisode()
+
+    // Initialize clipboard detection composable
+    // We'll pass the callback in methods via a ref
+    const clipboardDetection = useClipboardImageDetection({
+      autoProbeClipboard: false, // We'll manually probe when modal opens
+      onImageReady: null // Will be set in methods
+    })
+
+    return {
+      requireEpisode,
+      clipboardDetection
+    }
   },
   emits: ['update:show', 'submit'],
   props: {
@@ -238,6 +250,9 @@ export default {
   watch: {
     show(newVal) {
       if (newVal) {
+        // Probe clipboard when modal opens to detect available paste types
+        this.clipboardDetection.probeClipboard()
+
         if (this.editData) {
           // Populate form with existing data for editing
           this.formData = {
@@ -322,63 +337,18 @@ export default {
     },
     
     async pasteFromClipboard() {
-      this.pasteLoading = true
-      this.errorMessage = ''
+      try {
+        // Use the composable's intelligent paste detection
+        const result = await this.clipboardDetection.pasteImage()
 
-      console.log('Paste button clicked. Platform:', navigator.platform)
-      console.log('Clipboard API available:', !!navigator.clipboard)
-      console.log('Clipboard read available:', !!navigator.clipboard?.read)
-
-      // Try direct Clipboard API first (works best on Windows)
-      if (navigator.clipboard && navigator.clipboard.read) {
-        try {
-          console.log('Attempting Clipboard API read...')
-          const clipboardItems = await navigator.clipboard.read()
-          console.log('Clipboard items retrieved:', clipboardItems.length)
-
-          for (const clipboardItem of clipboardItems) {
-            console.log('Clipboard item types:', clipboardItem.types)
-            for (const type of clipboardItem.types) {
-              if (type.startsWith('image/')) {
-                console.log('Found image type:', type)
-                const blob = await clipboardItem.getType(type)
-                console.log('Blob retrieved:', { size: blob.size, type: blob.type })
-                const file = new File([blob], 'pasted-image.png', { type })
-                await this.processImageFile(file, 'pasted-image.png')
-                this.pasteLoading = false
-                this.errorMessage = ''
-                return
-              }
-            }
-          }
-
-          // No image found via API
-          console.log('No image found in Clipboard API')
-          this.errorMessage = 'No image found in clipboard. Copy an image and try again.'
-          this.pasteLoading = false
-          return
-
-        } catch (clipboardError) {
-          console.log('Clipboard API failed, falling back to paste event:', clipboardError)
-          // Fall through to paste event method
+        if (result && result.file) {
+          // Process the image file
+          await this.processImageFile(result.file, result.filename)
         }
+      } catch (error) {
+        console.error('Paste failed:', error)
+        this.errorMessage = error.message || 'Failed to paste image from clipboard'
       }
-
-      // Fallback: Wait for paste event (for browsers without direct clipboard access)
-      this.errorMessage = `${this.getPasteInstructions()} (Modal is listening for paste events)`
-
-      console.log('Waiting for paste event. Modal state:', {
-        show: this.show,
-        pasteLoading: this.pasteLoading
-      })
-
-      // Set timeout to reset if no paste happens
-      setTimeout(() => {
-        if (this.pasteLoading) {
-          this.pasteLoading = false
-          this.errorMessage = 'Paste timeout. Make sure you have an image copied and try again.'
-        }
-      }, 15000) // Longer timeout for user to copy image if needed
     },
 
     getPasteInstructions() {
@@ -389,92 +359,29 @@ export default {
     async handleGlobalPaste(event) {
       console.log('Global paste event fired:', {
         modalOpen: this.show,
-        pasteLoading: this.pasteLoading,
         target: event.target?.tagName || 'unknown'
       })
 
-      // Only handle paste when modal is open and we're expecting a paste
-      if (!this.show || !this.pasteLoading) {
-        console.log('Ignoring paste - modal not open or not waiting for paste')
+      // Only handle paste when modal is open
+      if (!this.show) {
+        console.log('Ignoring paste - modal not open')
         return
       }
 
-      console.log('Processing paste event:', {
-        clipboardData: !!event.clipboardData,
-        files: event.clipboardData?.files?.length || 0,
-        items: event.clipboardData?.items?.length || 0,
-        types: event.clipboardData?.types || []
-      })
-
+      // Prevent default to handle paste ourselves
       event.preventDefault()
 
       try {
-        let imageFound = false
+        // Use the composable's intelligent paste detection
+        const result = await this.clipboardDetection.pasteImage(event)
 
-        // Method 1: Check clipboardData.files (most reliable for actual files)
-        if (event.clipboardData && event.clipboardData.files && event.clipboardData.files.length > 0) {
-          for (const file of event.clipboardData.files) {
-            console.log('File found:', { name: file.name, type: file.type, size: file.size })
-            if (file.type.startsWith('image/')) {
-              await this.processImageFile(file, file.name || 'pasted-image.png')
-              this.pasteLoading = false
-              this.errorMessage = ''
-              imageFound = true
-              return
-            }
-          }
+        if (result && result.file) {
+          // Process the image file
+          await this.processImageFile(result.file, result.filename)
         }
-
-        // Method 2: Check clipboardData.items (good for copied images from web/screenshots)
-        if (event.clipboardData && event.clipboardData.items && event.clipboardData.items.length > 0) {
-          for (const item of event.clipboardData.items) {
-            console.log('Item found:', { type: item.type, kind: item.kind })
-            if (item.type.startsWith('image/') && item.kind === 'file') {
-              const file = item.getAsFile()
-              if (file) {
-                console.log('File from item:', { name: file.name, type: file.type, size: file.size })
-                await this.processImageFile(file, 'pasted-image.png')
-                this.pasteLoading = false
-                this.errorMessage = ''
-                imageFound = true
-                return
-              }
-            }
-          }
-        }
-
-        // Method 3: Modern Clipboard API fallback (for browsers that support it)
-        if (!imageFound && navigator.clipboard && navigator.clipboard.read) {
-          try {
-            const clipboardItems = await navigator.clipboard.read()
-            for (const clipboardItem of clipboardItems) {
-              for (const type of clipboardItem.types) {
-                if (type.startsWith('image/')) {
-                  const blob = await clipboardItem.getType(type)
-                  const file = new File([blob], 'pasted-image.png', { type })
-                  await this.processImageFile(file, 'pasted-image.png')
-                  this.pasteLoading = false
-                  this.errorMessage = ''
-                  imageFound = true
-                  return
-                }
-              }
-            }
-          } catch (clipboardError) {
-            console.log('Clipboard API error:', clipboardError)
-          }
-        }
-
-        if (!imageFound) {
-          console.log('No image found in any clipboard method')
-          this.errorMessage = 'No image found in clipboard. Copy an image first, then try again.'
-          this.pasteLoading = false
-        }
-
       } catch (error) {
-        console.error('Paste processing error:', error)
-        this.errorMessage = 'Error processing clipboard image. Try copying the image again.'
-        this.pasteLoading = false
+        console.error('Paste failed:', error)
+        this.errorMessage = error.message || 'Failed to paste image from clipboard'
       }
     },
     

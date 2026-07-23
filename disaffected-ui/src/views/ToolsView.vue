@@ -106,6 +106,17 @@
             </v-expansion-panel-title>
             <v-expansion-panel-text>
               <v-list lines="two">
+                <v-list-item @click="showScriptGeneratorModal = true">
+                  <template v-slot:prepend>
+                    <v-icon color="primary">mdi-script-text</v-icon>
+                  </template>
+                  <v-list-item-title class="font-weight-bold">Generate Host Script</v-list-item-title>
+                  <v-list-item-subtitle>Create formatted HTML script for host/teleprompter</v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-btn variant="outlined" size="small" color="primary">Generate</v-btn>
+                  </template>
+                </v-list-item>
+
                 <v-list-item disabled>
                   <template v-slot:prepend>
                     <v-icon>mdi-format-quote-close</v-icon>
@@ -234,6 +245,44 @@
       </v-col>
     </v-row>
 
+    <!-- Script Generator Modal -->
+    <v-dialog v-model="showScriptGeneratorModal" max-width="500">
+      <v-card>
+        <v-card-title class="d-flex align-center bg-primary text-white">
+          <v-icon class="me-2">mdi-script-text</v-icon>
+          Generate Host Script
+        </v-card-title>
+        <v-card-text class="pa-4">
+          <v-text-field
+            v-model="scriptEpisodeNumber"
+            label="Episode Number"
+            placeholder="e.g., 0249"
+            variant="outlined"
+            density="comfortable"
+            :rules="[v => !!v || 'Episode number is required']"
+            class="mb-4"
+          />
+          <p class="text-body-2 text-grey-darken-1">
+            This will generate an HTML script from the episode's rundown data,
+            formatted for the host with block headers, cue blocks, and speaker attribution.
+          </p>
+        </v-card-text>
+        <v-card-actions class="pa-4">
+          <v-spacer></v-spacer>
+          <v-btn variant="text" @click="showScriptGeneratorModal = false">Cancel</v-btn>
+          <v-btn
+            color="primary"
+            variant="flat"
+            :loading="generatingScript"
+            :disabled="!scriptEpisodeNumber"
+            @click="generateHostScript"
+          >
+            Generate Script
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Success Snackbar -->
     <v-snackbar
       v-model="showSuccessMessage"
@@ -255,18 +304,52 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, inject } from 'vue'
 import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'
 import EpisodeNameNormalizerModal from '@/components/EpisodeNameNormalizerModal.vue'
+
+// Inject axios
+const axios = inject('axios')
 
 // Reactive data
 const showSuccessMessage = ref(false)
 const successMessage = ref('')
 
+// Script generator state
+const showScriptGeneratorModal = ref(false)
+const scriptEpisodeNumber = ref('')
+const generatingScript = ref(false)
+
 // Event handlers
 const handleEpisodeCreated = (episode) => {
   successMessage.value = `Episode ${episode.episode_number} created successfully!`
   showSuccessMessage.value = true
+}
+
+// Generate host script
+const generateHostScript = async () => {
+  if (!scriptEpisodeNumber.value) return
+
+  generatingScript.value = true
+  try {
+    const response = await axios.post(`/scripts/host/${scriptEpisodeNumber.value}`)
+
+    if (response.data.success) {
+      successMessage.value = `Host script generated: ${response.data.output_path}`
+      showSuccessMessage.value = true
+      showScriptGeneratorModal.value = false
+      scriptEpisodeNumber.value = ''
+    } else {
+      successMessage.value = `Error: ${response.data.error}`
+      showSuccessMessage.value = true
+    }
+  } catch (error) {
+    console.error('Script generation failed:', error)
+    successMessage.value = `Failed to generate script: ${error.response?.data?.detail || error.message}`
+    showSuccessMessage.value = true
+  } finally {
+    generatingScript.value = false
+  }
 }
 </script>
 

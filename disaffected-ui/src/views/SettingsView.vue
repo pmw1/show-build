@@ -12,6 +12,7 @@
         <v-tabs v-model="activeTab" color="primary" class="mb-4">
           <v-tab value="ai-llm">AI & LLM</v-tab>
           <v-tab value="interface">Interface</v-tab>
+          <v-tab value="content">Content</v-tab>
           <v-tab value="system">System</v-tab>
         </v-tabs>
 
@@ -60,6 +61,11 @@
             />
           </v-tabs-window-item>
 
+          <!-- Content Tab -->
+          <v-tabs-window-item value="content">
+            <RundownTemplateManager />
+          </v-tabs-window-item>
+
           <!-- System Tab -->
           <v-tabs-window-item value="system">
             <SystemSettings
@@ -79,6 +85,7 @@ import ApiAccessSettings from '@/components/settings/ApiAccessSettings.vue'
 import GenerationSettings from '@/components/settings/GenerationSettings.vue'
 import SystemSettings from '@/components/settings/SystemSettings.vue'
 import PromptManager from '@/components/PromptManager.vue'
+import RundownTemplateManager from '@/components/settings/RundownTemplateManager.vue'
 
 export default {
   name: 'SettingsView',
@@ -87,7 +94,8 @@ export default {
     ApiAccessSettings,
     GenerationSettings,
     SystemSettings,
-    PromptManager
+    PromptManager,
+    RundownTemplateManager
   },
   data() {
     return {

@@ -5,8 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.staticfiles import StaticFiles
-from preproc_mqtt_pub import publish_message
-from preproc_mqtt_listen import MQTTListener
+# MQTT imports removed 2026-01-01 - archived in app/backup/mqtt_archived_2026-01-01/
+# from preproc_mqtt_pub import publish_message
+# from preproc_mqtt_listen import MQTTListener
 from pydantic import BaseModel, Field
 from typing import Optional
 from utils.id import get_next_id
@@ -66,6 +67,7 @@ try:
     from settings_colors_router import router as settings_colors_router
     from episodes_router import router as episodes_router
     from episode_scaffold_router import router as episode_scaffold_router
+    from rundown_templates_router import router as rundown_templates_router
     from setup_router import router as setup_router
     from rbac_router import router as rbac_router
     from duration_analysis_router import router as duration_router
@@ -93,6 +95,7 @@ try:
     from twitter_oauth_router import router as twitter_oauth_router
     from repo_router import router as repo_router
     from workers_router import router as workers_router
+    from script_generation_router import router as script_generation_router
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Current directory: {os.getcwd()}")
@@ -100,17 +103,17 @@ except ImportError as e:
 
 app = FastAPI()
 
-listener = MQTTListener()
+# listener = MQTTListener()  # Removed 2026-01-01 - MQTT archived (see app/backup/mqtt_archived_2026-01-01/)
 
 @app.on_event("startup")
 def startup_event():
     """Initialize database and start background services."""
     # Create database tables
     Base.metadata.create_all(bind=engine)
-    
-    # Start MQTT listener
-    threading.Thread(target=listener.start, daemon=True).start()
-    
+
+    # # Start MQTT listener  # Removed 2026-01-01 - MQTT archived (see app/backup/mqtt_archived_2026-01-01/)
+    # threading.Thread(target=listener.start, daemon=True).start()
+
     logging.info("Show-Build server started with database and background processing")
 
 app.add_middleware(
@@ -169,6 +172,9 @@ app.include_router(episodes_router, prefix="/api")
 
 # Include the episode scaffolding router
 app.include_router(episode_scaffold_router, prefix="/api")
+
+# Include the rundown templates router
+app.include_router(rundown_templates_router, prefix="/api/rundown-templates", tags=["rundown-templates"])
 
 # Include the setup router
 app.include_router(setup_router, prefix="/api")
@@ -250,6 +256,9 @@ app.include_router(repo_router)
 # Include the workers monitoring router (cross-platform Celery worker status)
 app.include_router(workers_router)
 
+# Include the script generation router (host scripts, teleprompter, etc.)
+app.include_router(script_generation_router, prefix="/api")
+
 # Include the media analysis router
 from media_analysis_router import router as media_analysis_router
 app.include_router(media_analysis_router)
@@ -257,9 +266,10 @@ app.include_router(media_analysis_router)
 MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
-class PublishRequest(BaseModel):
-    topic: str
-    message: str
+# PublishRequest removed 2026-01-01 - MQTT functionality archived
+# class PublishRequest(BaseModel):
+#     topic: str
+#     message: str
 
 class ReorderRequest(BaseModel):
     segments: list[dict]
@@ -299,12 +309,6 @@ def read_root():
         <h2>POST <code>/rundown/{episode_number}/reorder</code></h2>
         <p>Reorder segments by updating <code>order:</code> in YAML frontmatter.</p>
 
-        <h2>POST <code>/publish/</code></h2>
-        <p>Send a raw MQTT message.</p>
-
-        <h2>GET <code>/listen/?topic=xyz</code></h2>
-        <p>Subscribe to an MQTT topic and stream responses.</p>
-
         <h2>POST <code>/next-id</code></h2>
         <p>Generates the next unique ID. Requires form fields <code>slug</code> and <code>type</code>.</p>
 
@@ -314,27 +318,30 @@ def read_root():
     </html>
     """
 
-@app.post("/publish/")
-async def publish_endpoint(payload: PublishRequest):
-    try:
-        result = publish_message(payload.topic, payload.message)
-        if not result:
-            raise HTTPException(status_code=500, detail="Failed to publish message")
-        return {
-            "topic": payload.topic,
-            "message": payload.message,
-            "status": "published",
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/listen/")
-async def listen_endpoint(topic: str):
-    try:
-        listener.subscribe_to_topic(topic)
-        return {"topic": topic, "status": "listening"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# MQTT endpoints removed 2026-01-01 - functionality archived in app/backup/mqtt_archived_2026-01-01/
+# All async task processing now handled by Celery + Redis (see app/celery_app.py)
+#
+# @app.post("/publish/")
+# async def publish_endpoint(payload: PublishRequest):
+#     try:
+#         result = publish_message(payload.topic, payload.message)
+#         if not result:
+#             raise HTTPException(status_code=500, detail="Failed to publish message")
+#         return {
+#             "topic": payload.topic,
+#             "message": payload.message,
+#             "status": "published",
+#         }
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+#
+# @app.get("/listen/")
+# async def listen_endpoint(topic: str):
+#     try:
+#         listener.subscribe_to_topic(topic)
+#         return {"topic": topic, "status": "listening"}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/branding/random")
 async def random_branding_image():
@@ -829,11 +836,18 @@ async def health():
             "error": str(e)[:50]
         }
 
-    # Test XTTS connectivity
+    # Test TTS connectivity (Fish Speech or XTTS)
     try:
         from pathlib import Path
         import json
         from api_config import api_config_manager
+
+        # Load Fish Speech configuration first (preferred service)
+        fishspeech_config = api_config_manager.get_service_config(
+            workflow="preproduction",
+            category="ai_services",
+            service="fishspeech"
+        )
 
         # Load XTTS configuration
         xtts_config = api_config_manager.get_service_config(
@@ -842,14 +856,74 @@ async def health():
             service="xtts"
         )
 
-        if not xtts_config:
+        fishspeech_enabled = fishspeech_config and fishspeech_config.get("enabled")
+        xtts_enabled = xtts_config and xtts_config.get("enabled")
+
+        # If Fish Speech is enabled and XTTS is not, show XTTS as deprecated
+        if fishspeech_enabled and not xtts_enabled:
+            # Check Fish Speech connectivity
+            fish_host = fishspeech_config.get("host")
+            if not fish_host:
+                health_status["services"]["tts"] = {
+                    "status": "error",
+                    "connected": False,
+                    "service": "fishspeech",
+                    "label": "Fish",
+                    "error": "No host configured"
+                }
+            else:
+                try:
+                    # Test Fish Speech connectivity using root endpoint (returns Swagger UI)
+                    # Fish Speech doesn't have a /health endpoint, so we check root returns 200
+                    async with httpx.AsyncClient(timeout=5.0) as client:
+                        response = await client.get(f"{fish_host}/")
+                        if response.status_code == 200:
+                            health_status["services"]["tts"] = {
+                                "status": "connected",
+                                "connected": True,
+                                "service": "fishspeech",
+                                "label": "Fish",
+                                "host": fish_host
+                            }
+                        else:
+                            health_status["services"]["tts"] = {
+                                "status": "error",
+                                "connected": False,
+                                "service": "fishspeech",
+                                "label": "Fish",
+                                "error": f"HTTP {response.status_code}"
+                            }
+                except httpx.TimeoutException:
+                    health_status["services"]["tts"] = {
+                        "status": "error",
+                        "connected": False,
+                        "service": "fishspeech",
+                        "label": "Fish",
+                        "error": "Timeout"
+                    }
+                except httpx.ConnectError:
+                    health_status["services"]["tts"] = {
+                        "status": "error",
+                        "connected": False,
+                        "service": "fishspeech",
+                        "label": "Fish",
+                        "error": "Connection refused"
+                    }
+
+            # Also report XTTS as deprecated
+            health_status["services"]["xtts"] = {
+                "status": "deprecated",
+                "connected": False,
+                "error": "Replaced by Fish Speech"
+            }
+        elif not xtts_config:
             # XTTS not configured - show as error
             health_status["services"]["xtts"] = {
                 "status": "error",
                 "connected": False,
                 "error": "Not configured"
             }
-        elif not xtts_config.get("enabled"):
+        elif not xtts_enabled:
             # XTTS disabled in config - show as error
             health_status["services"]["xtts"] = {
                 "status": "error",
@@ -906,7 +980,7 @@ async def health():
             "error": "Connection refused"
         }
     except Exception as e:
-        # Show error status instead of hiding XTTS
+        # Show error status instead of hiding TTS
         health_status["services"]["xtts"] = {
             "status": "error",
             "connected": False,

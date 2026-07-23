@@ -277,9 +277,13 @@ export default {
   computed: {
     imageUrl() {
       // Check multiple possible locations for the image URL
+      // MediaURL field gets parsed to 'mediaurl' (all lowercase) by cueParser
       return this.cueData.rawData?.mediaurl ||
+             this.cueData.rawData?.mediaUrl ||
              this.cueData.mediaUrl ||
+             this.cueData.mediaurl ||
              this.cueData.imageSrc ||
+             this.cueData.rawData?.imageSrc ||
              '';
     },
 

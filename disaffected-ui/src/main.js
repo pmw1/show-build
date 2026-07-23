@@ -36,6 +36,25 @@ app.config.errorHandler = (err, instance, info) => {
   console.error('Info:', info)
 }
 
+// Suppress benign ResizeObserver errors (occurs with Vuetify expansion panels/modals)
+// This is a browser timing issue that doesn't affect functionality
+const resizeObserverErr = window.onerror
+window.onerror = function(message, source, lineno, colno, error) {
+  if (message === 'ResizeObserver loop completed with undelivered notifications.' ||
+      (typeof message === 'string' && message.includes('ResizeObserver loop'))) {
+    return true // Suppress the error
+  }
+  return resizeObserverErr ? resizeObserverErr(message, source, lineno, colno, error) : false
+}
+
+window.addEventListener('error', (e) => {
+  if (e.message && e.message.includes('ResizeObserver loop')) {
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    return false
+  }
+}, true) // Use capture phase to catch it early
+
 app.use(router)
 app.use(vuetify)
 app.use(createPinia())
@@ -44,7 +63,8 @@ app.use(Toast, {
   maxToasts: 20,
   newestOnTop: true,
   timeout: 4000,  // Increased from default 3000ms to 4000ms (1 second longer)
-  containerClassName: "toast-container-high-z"  // Custom class for z-index override
+  containerClassName: "toast-container-high-z toast-custom-style",  // Custom classes for z-index and styling
+  toastClassName: "toast-blue-small"  // Custom class for individual toasts
 });
 
 const axiosInstance = axios.create({

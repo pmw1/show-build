@@ -228,24 +228,34 @@ export default {
           }
         })
 
-        if (response.data && response.data.length > 0) {
+        // API returns { episodes: [...] }, not a raw array
+        const episodes = response.data?.episodes || response.data || []
+
+        if (episodes.length > 0) {
           // Find the next show (first episode with air_date in future or today)
           const today = new Date()
           today.setHours(0, 0, 0, 0)
 
-          const upcoming = response.data.find(ep => {
-            if (!ep.air_date) return false
-            const airDate = new Date(ep.air_date)
+          const upcoming = episodes.find(ep => {
+            // API returns "airdate" not "air_date"
+            const dateField = ep.air_date || ep.airdate
+            if (!dateField) return false
+            const airDate = new Date(dateField)
             airDate.setHours(0, 0, 0, 0)
             return airDate >= today
           })
 
           if (upcoming) {
-            nextShow.value = upcoming
+            // Normalize air_date field (API returns "airdate")
+            nextShow.value = {
+              ...upcoming,
+              air_date: upcoming.air_date || upcoming.airdate,
+              number: upcoming.episode_number || upcoming.number
+            }
 
             // Fetch statistics for this episode
             try {
-              const statsResponse = await axios.get(`/api/episodes/${upcoming.number}/statistics`)
+              const statsResponse = await axios.get(`/api/episodes/${nextShow.value.number}/statistics`)
               statistics.value = statsResponse.data
             } catch (statsError) {
               console.warn('Could not fetch episode statistics:', statsError)

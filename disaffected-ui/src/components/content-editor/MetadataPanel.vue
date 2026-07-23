@@ -3,35 +3,27 @@
     :class="['metadata-panel', panelWidth === 'narrow' ? 'narrow' : 'wide']"
     :style="{ width: panelWidthValue }"
   >
-    <v-card class="h-auto" flat>
-      <!-- Metadata Header -->
-      <v-card-title
-        class="d-flex align-center pa-2 metadata-title"
-        :style="itemHeaderStyle"
+    <!-- Tab-shaped control buttons on left edge -->
+    <div class="tab-controls-left">
+      <v-btn
+        icon
+        size="small"
+        @click="$emit('toggle-width')"
+        class="tab-btn"
       >
-        <div class="header-content">
-          <div v-if="item?.slug" class="text-h6">{{ item.slug }}</div>
-          <div v-else-if="item" class="header-fallback">
-            <div class="text-h6">{{ (item.type || 'Unknown Type').toUpperCase() }}</div>
-            <div class="asset-id-subtitle">{{ item.id || 'No AssetID' }}</div>
-          </div>
-          <div v-else class="text-h6">No Item Selected</div>
-        </div>
-        <v-spacer></v-spacer>
-        <v-btn
-          icon
-          size="small"
-          @click="$emit('toggle-width')"
-        >
-          <v-icon>{{ panelWidth === 'narrow' ? 'mdi-arrow-expand-horizontal' : 'mdi-arrow-collapse-horizontal' }}</v-icon>
-        </v-btn>
-        <v-btn icon size="small" @click="$emit('close')">
-          <v-icon>mdi-close</v-icon>
-        </v-btn>
-      </v-card-title>
-      
-      <v-divider></v-divider>
-      
+        <v-icon>{{ panelWidth === 'narrow' ? 'mdi-arrow-expand-horizontal' : 'mdi-arrow-collapse-horizontal' }}</v-icon>
+      </v-btn>
+      <v-btn
+        icon
+        size="small"
+        @click="$emit('close')"
+        class="tab-btn"
+      >
+        <v-icon>mdi-close</v-icon>
+      </v-btn>
+    </div>
+
+    <v-card class="h-auto" flat>
       <!-- Metadata Content -->
       <v-card-text class="pa-2 metadata-content">
         <div v-if="!item" class="text-center py-8">
@@ -243,7 +235,7 @@
 
           <!-- Action Buttons -->
           <div class="metadata-actions mt-4">
-            
+
             <v-btn
               color="secondary"
               variant="outlined"
@@ -252,6 +244,306 @@
             >
               <v-icon left>mdi-refresh</v-icon>
               Reset
+            </v-btn>
+          </div>
+        </div>
+
+        <!-- Asset Generation Section -->
+        <div v-if="episodeNumber" class="metadata-section mt-4 asset-generation-section">
+          <h4 class="section-title">
+            <v-icon size="small" class="mr-1">mdi-image-multiple</v-icon>
+            Asset Generation
+          </h4>
+          <div class="asset-generation-buttons">
+            <v-btn
+              size="small"
+              variant="tonal"
+              color="amber-darken-2"
+              :loading="regeneratingFSQ"
+              :disabled="regeneratingFSQ"
+              @click="regenerateAllFSQ"
+              class="mb-2"
+              block
+            >
+              <v-icon left size="small">mdi-format-quote-close</v-icon>
+              Regenerate All Quotes
+            </v-btn>
+            <div v-if="fsqRegenerationStatus" class="text-caption mt-1" :class="fsqRegenerationStatus.includes('Error') ? 'text-error' : 'text-success'">
+              {{ fsqRegenerationStatus }}
+            </div>
+
+            <v-btn
+              size="small"
+              variant="tonal"
+              color="blue-darken-2"
+              :loading="enumeratingCues"
+              :disabled="enumeratingCues"
+              @click="enumerateCueBlocks"
+              class="mb-2 mt-2"
+              block
+            >
+              <v-icon left size="small">mdi-format-list-numbered</v-icon>
+              Enumerate Cue Blocks
+            </v-btn>
+            <div v-if="enumerationStatus" class="text-caption mt-1" :class="enumerationStatus.includes('Error') ? 'text-error' : 'text-success'">
+              {{ enumerationStatus }}
+            </div>
+
+            <v-btn
+              size="small"
+              variant="tonal"
+              color="teal-darken-2"
+              :loading="gatheringMedia"
+              :disabled="gatheringMedia"
+              @click="gatherForShow"
+              class="mb-2 mt-2"
+              block
+            >
+              <v-icon left size="small">mdi-folder-download</v-icon>
+              Gather for Show
+            </v-btn>
+            <v-progress-linear
+              v-if="gatheringMedia && gatherProgress > 0"
+              :model-value="gatherProgress"
+              color="teal"
+              height="6"
+              class="mt-1 mb-1"
+            />
+            <div v-if="gatherStatus" class="text-caption mt-1" :class="gatherStatus.includes('Error') ? 'text-error' : 'text-success'">
+              {{ gatherStatus }}
+              <v-btn
+                v-if="gatherResults"
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click="showGatherResultsModal = true"
+                class="ml-1"
+              >
+                Details
+              </v-btn>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gather Results Modal -->
+        <v-dialog v-model="showGatherResultsModal" max-width="600">
+          <v-card>
+            <v-card-title class="d-flex align-center">
+              <v-icon class="mr-2">mdi-folder-download</v-icon>
+              Media Gather Results
+              <v-spacer />
+              <v-btn icon size="small" @click="showGatherResultsModal = false">
+                <v-icon>mdi-close</v-icon>
+              </v-btn>
+            </v-card-title>
+
+            <v-card-text v-if="gatherResults">
+              <!-- Summary -->
+              <v-alert
+                :type="gatherResults.failed > 0 ? 'warning' : 'success'"
+                density="compact"
+                class="mb-3"
+              >
+                <strong>{{ gatherResults.copied }}</strong> files copied,
+                <strong>{{ gatherResults.skipped }}</strong> skipped (no media),
+                <strong>{{ gatherResults.failed }}</strong> failed
+              </v-alert>
+
+              <!-- Successful Files -->
+              <div v-if="gatherResults.files && gatherResults.files.length > 0" class="mb-3">
+                <div class="text-subtitle-2 text-success mb-1">
+                  <v-icon size="small" color="success">mdi-check-circle</v-icon>
+                  Successfully Copied ({{ gatherResults.files.length }})
+                </div>
+                <v-list density="compact" class="gather-results-list">
+                  <v-list-item
+                    v-for="file in gatherResults.files"
+                    :key="file.dest"
+                    class="px-2"
+                  >
+                    <template v-slot:prepend>
+                      <v-chip size="x-small" :color="getTypeColor(file.type)" class="mr-2">
+                        {{ file.type }}
+                      </v-chip>
+                    </template>
+                    <v-list-item-title class="text-body-2">{{ file.dest }}</v-list-item-title>
+                  </v-list-item>
+                </v-list>
+              </div>
+
+              <!-- Failed Files -->
+              <div v-if="gatherResults.failures && gatherResults.failures.length > 0" class="mb-3">
+                <div class="text-subtitle-2 text-error mb-1">
+                  <v-icon size="small" color="error">mdi-alert-circle</v-icon>
+                  Failed - File Not Found ({{ gatherResults.failures.length }})
+                </div>
+                <v-list density="compact" class="gather-results-list error-list">
+                  <v-list-item
+                    v-for="(failure, idx) in gatherResults.failures"
+                    :key="idx"
+                    class="px-2"
+                  >
+                    <template v-slot:prepend>
+                      <v-chip size="x-small" :color="getTypeColor(failure.type)" class="mr-2">
+                        {{ failure.type }}
+                      </v-chip>
+                    </template>
+                    <v-list-item-title class="text-body-2">{{ failure.slug }}</v-list-item-title>
+                    <v-list-item-subtitle class="text-caption text-error">
+                      {{ failure.mediaUrl }}
+                    </v-list-item-subtitle>
+                  </v-list-item>
+                </v-list>
+              </div>
+
+              <!-- Skipped (no MediaURL) -->
+              <div v-if="gatherResults.skippedCues && gatherResults.skippedCues.length > 0">
+                <div class="text-subtitle-2 text-grey mb-1">
+                  <v-icon size="small" color="grey">mdi-skip-next</v-icon>
+                  Skipped - No MediaURL ({{ gatherResults.skippedCues.length }})
+                </div>
+                <v-list density="compact" class="gather-results-list">
+                  <v-list-item
+                    v-for="(skipped, idx) in gatherResults.skippedCues"
+                    :key="idx"
+                    class="px-2"
+                  >
+                    <template v-slot:prepend>
+                      <v-chip size="x-small" :color="getTypeColor(skipped.type)" class="mr-2">
+                        {{ skipped.type }}
+                      </v-chip>
+                    </template>
+                    <v-list-item-title class="text-body-2 text-grey">{{ skipped.slug || 'No slug' }}</v-list-item-title>
+                  </v-list-item>
+                </v-list>
+              </div>
+
+              <!-- Output Path -->
+              <v-divider class="my-3" />
+              <div class="text-caption text-grey">
+                <v-icon size="small">mdi-folder</v-icon>
+                Output: {{ gatherResults.media_list_path }}
+              </div>
+            </v-card-text>
+
+            <v-card-actions>
+              <v-spacer />
+              <v-btn color="primary" @click="showGatherResultsModal = false">Close</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <!-- Generated Scripts Section (episode-level, always shown) -->
+        <div v-if="episodeNumber" class="metadata-section mt-4 generated-documents-section">
+          <h4 class="section-title">
+            <v-icon size="small" class="mr-1">mdi-script-text-outline</v-icon>
+            Generated Scripts
+          </h4>
+
+          <!-- Loading State -->
+          <div v-if="loadingDocuments" class="text-center py-2">
+            <v-progress-circular indeterminate size="20" width="2" color="primary" />
+          </div>
+
+          <!-- No Scripts -->
+          <div v-else-if="generatedDocuments.length === 0" class="text-center py-2">
+            <p class="text-caption text-grey">No generated scripts yet</p>
+            <v-btn
+              size="x-small"
+              variant="text"
+              color="primary"
+              @click="$emit('generate-host-script')"
+            >
+              <v-icon left size="small">mdi-plus</v-icon>
+              Generate Host Script
+            </v-btn>
+          </div>
+
+          <!-- Document List -->
+          <v-list v-else density="compact" class="document-list pa-0">
+            <v-list-item
+              v-for="doc in generatedDocuments"
+              :key="doc.filename"
+              :href="doc.url"
+              target="_blank"
+              class="document-item px-2"
+            >
+              <template v-slot:prepend>
+                <v-icon
+                  :color="getDocumentIconColor(doc.format)"
+                  size="small"
+                >
+                  {{ getDocumentIcon(doc.format) }}
+                </v-icon>
+              </template>
+              <v-list-item-title class="text-body-2">
+                {{ formatDocumentName(doc) }}
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption">
+                {{ doc.size_formatted }} • {{ doc.modified_formatted }}
+              </v-list-item-subtitle>
+              <template v-slot:append>
+                <v-btn
+                  icon
+                  size="x-small"
+                  variant="text"
+                  :href="doc.url"
+                  target="_blank"
+                  @click.stop
+                >
+                  <v-icon size="small">mdi-open-in-new</v-icon>
+                </v-btn>
+              </template>
+            </v-list-item>
+          </v-list>
+
+          <!-- Action Buttons -->
+          <div class="document-actions mt-2">
+            <v-btn
+              size="x-small"
+              variant="tonal"
+              color="success"
+              class="mr-1"
+              @click="$emit('generate-host-script')"
+              :loading="hostScriptLoading"
+            >
+              <v-icon left size="small">mdi-script-text-outline</v-icon>
+              Host Script
+            </v-btn>
+
+            <v-btn
+              size="x-small"
+              variant="tonal"
+              color="primary"
+              class="mr-1"
+              @click="$emit('generate-media-list')"
+              :loading="mediaListLoading"
+            >
+              <v-icon left size="small">mdi-playlist-play</v-icon>
+              Media List
+            </v-btn>
+
+            <v-btn
+              size="x-small"
+              variant="tonal"
+              color="secondary"
+              class="mr-1"
+              @click="$emit('generate-prompter-files')"
+              disabled
+            >
+              <v-icon left size="small">mdi-script-text</v-icon>
+              Prompter
+              <v-tooltip activator="parent" location="bottom">Coming Soon</v-tooltip>
+            </v-btn>
+
+            <v-btn
+              size="x-small"
+              variant="text"
+              color="primary"
+              @click="loadGeneratedDocuments"
+              :loading="loadingDocuments"
+            >
+              <v-icon size="small">mdi-refresh</v-icon>
             </v-btn>
           </div>
         </div>
@@ -269,7 +561,12 @@ export default {
     'close',
     'toggle-width',
     'update-field',
-    'open-wpm-tool'
+    'open-wpm-tool',
+    'generate-host-script',
+    'generate-media-list',
+    'generate-prompter-files',
+    'refresh-rundown',
+    'show-notification'
   ],
   props: {
     panelWidth: {
@@ -281,6 +578,10 @@ export default {
       type: Object,
       default: () => null
     },
+    episodeNumber: {
+      type: String,
+      default: null
+    },
     itemTypes: {
       type: Array,
       default: () => [
@@ -290,6 +591,14 @@ export default {
         { title: 'Call to Action', value: 'cta' },
         { title: 'Transition', value: 'trans' }
       ]
+    },
+    mediaListLoading: {
+      type: Boolean,
+      default: false
+    },
+    hostScriptLoading: {
+      type: Boolean,
+      default: false
     }
   },
   data() {
@@ -307,7 +616,28 @@ export default {
         'urgent'
       ],
       speakers: [],
-      loadingSpeakers: false
+      loadingSpeakers: false,
+      generatedDocuments: [],
+      loadingDocuments: false,
+      regeneratingFSQ: false,
+      fsqRegenerationStatus: '',
+      enumeratingCues: false,
+      enumerationStatus: '',
+      gatheringMedia: false,
+      gatherProgress: 0,
+      gatherStatus: '',
+      gatherResults: null,
+      showGatherResultsModal: false
+    }
+  },
+  watch: {
+    episodeNumber: {
+      handler(newVal) {
+        if (newVal) {
+          this.loadGeneratedDocuments()
+        }
+      },
+      immediate: true
     }
   },
   mounted() {
@@ -412,6 +742,206 @@ export default {
       } finally {
         this.loadingSpeakers = false
       }
+    },
+
+    async regenerateAllFSQ() {
+      if (!this.episodeNumber) {
+        this.fsqRegenerationStatus = 'Error: No episode selected'
+        return
+      }
+
+      this.regeneratingFSQ = true
+      this.fsqRegenerationStatus = ''
+
+      try {
+        const authToken = localStorage.getItem('auth-token')
+        const response = await this.$axios.post(
+          `/fsq/regenerate-all/${this.episodeNumber}`,
+          { regenerate_existing: true },
+          {
+            headers: {
+              'Authorization': `Bearer ${authToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+
+        if (response.data.success) {
+          const { generated, skipped, failed, total_fsqs } = response.data
+          this.fsqRegenerationStatus = `Generated: ${generated}/${total_fsqs}, Skipped: ${skipped}, Failed: ${failed}`
+        } else {
+          this.fsqRegenerationStatus = 'Error: ' + (response.data.message || 'Unknown error')
+        }
+      } catch (error) {
+        console.error('Error regenerating FSQ assets:', error)
+        this.fsqRegenerationStatus = 'Error: ' + (error.response?.data?.detail || error.message)
+      } finally {
+        this.regeneratingFSQ = false
+      }
+    },
+
+    async enumerateCueBlocks() {
+      if (!this.episodeNumber) {
+        this.enumerationStatus = 'Error: No episode selected'
+        return
+      }
+
+      this.enumeratingCues = true
+      this.enumerationStatus = ''
+
+      try {
+        const authToken = localStorage.getItem('auth-token')
+        const response = await this.$axios.post(
+          `/episodes/${this.episodeNumber}/enumerate-cues`,
+          {},
+          {
+            headers: {
+              'Authorization': `Bearer ${authToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+
+        if (response.data.success) {
+          const { updated, renamed, total } = response.data
+          this.enumerationStatus = `Enumerated: ${updated}/${total} cues, ${renamed} files renamed`
+          // Emit event to refresh the rundown data
+          this.$emit('refresh-rundown')
+        } else {
+          this.enumerationStatus = 'Error: ' + (response.data.message || 'Unknown error')
+        }
+      } catch (error) {
+        console.error('Error enumerating cue blocks:', error)
+        this.enumerationStatus = 'Error: ' + (error.response?.data?.detail || error.message)
+      } finally {
+        this.enumeratingCues = false
+      }
+    },
+
+    async gatherForShow() {
+      if (!this.episodeNumber) {
+        this.gatherStatus = 'Error: No episode selected'
+        return
+      }
+
+      this.gatheringMedia = true
+      this.gatherProgress = 0
+      this.gatherStatus = 'Gathering media files...'
+      this.gatherResults = null
+
+      try {
+        const authToken = localStorage.getItem('auth-token')
+        const response = await this.$axios.post(
+          `/episodes/${this.episodeNumber}/gather-media`,
+          {},
+          {
+            headers: {
+              'Authorization': `Bearer ${authToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+
+        if (response.data.success) {
+          const { copied, skipped, failed, total } = response.data
+          this.gatherProgress = 100
+          this.gatherStatus = `Gathered: ${copied}/${total} files, ${skipped} skipped, ${failed} failed`
+
+          // Store full results for modal
+          this.gatherResults = response.data
+
+          // Auto-show modal if there are failures
+          if (failed > 0) {
+            this.showGatherResultsModal = true
+          }
+
+          // Show toast notification
+          this.$emit('show-notification', {
+            message: `Media gather complete: ${copied} files copied to media-list`,
+            type: failed > 0 ? 'warning' : 'success'
+          })
+        } else {
+          this.gatherStatus = 'Error: ' + (response.data.message || 'Unknown error')
+        }
+      } catch (error) {
+        console.error('Error gathering media:', error)
+        this.gatherStatus = 'Error: ' + (error.response?.data?.detail || error.message)
+      } finally {
+        this.gatheringMedia = false
+      }
+    },
+
+    getTypeColor(cueType) {
+      const colors = {
+        'FSQ': 'purple',
+        'IMG': 'blue',
+        'SOT': 'green',
+        'GFX': 'orange',
+        'DIR': 'grey',
+        'RIF': 'cyan',
+        'BUMP': 'pink',
+        'STING': 'amber',
+        'PKG': 'teal'
+      }
+      return colors[cueType?.toUpperCase()] || 'grey'
+    },
+
+    async loadGeneratedDocuments() {
+      if (!this.episodeNumber) {
+        this.generatedDocuments = []
+        return
+      }
+
+      this.loadingDocuments = true
+      try {
+        const authToken = localStorage.getItem('auth-token')
+        const response = await this.$axios.get(`/scripts/episode/${this.episodeNumber}/generated`, {
+          headers: {
+            'Authorization': `Bearer ${authToken}`
+          }
+        })
+
+        this.generatedDocuments = response.data.documents || []
+      } catch (error) {
+        console.error('Error loading generated documents:', error)
+        this.generatedDocuments = []
+      } finally {
+        this.loadingDocuments = false
+      }
+    },
+
+    getDocumentIcon(format) {
+      const icons = {
+        pdf: 'mdi-file-pdf-box',
+        html: 'mdi-language-html5',
+        txt: 'mdi-file-document-outline'
+      }
+      return icons[format] || 'mdi-file-outline'
+    },
+
+    getDocumentIconColor(format) {
+      const colors = {
+        pdf: 'red',
+        html: 'orange',
+        txt: 'grey'
+      }
+      return colors[format] || 'grey'
+    },
+
+    formatDocumentName(doc) {
+      // Extract readable name from filename
+      // e.g., "0249-HOST-SCRIPT.html" -> "Host Script"
+      let name = doc.filename
+        .replace(/^\d+-/, '') // Remove episode number prefix
+        .replace(/\.(html|pdf|txt)$/i, '') // Remove extension
+        .replace(/-/g, ' ') // Replace dashes with spaces
+
+      // Title case
+      name = name.split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ')
+
+      return name
     }
   }
 }
@@ -700,6 +1230,102 @@ export default {
 .speaker-wpm-display .text-body-2 {
   font-size: 0.8rem;
   font-weight: 600;
+}
+
+/* Tab-shaped control buttons on left edge */
+.tab-controls-left {
+  position: absolute;
+  left: -32px;
+  top: 50vh;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 1000;
+}
+
+.tab-btn {
+  border-radius: 8px 0 0 8px !important;
+  background-color: rgba(25, 118, 210, 0.9) !important;
+  color: white !important;
+  box-shadow: -2px 2px 8px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.2s ease !important;
+  width: 32px !important;
+  height: 40px !important;
+}
+
+.tab-btn:hover {
+  background-color: rgba(25, 118, 210, 1) !important;
+  transform: translateX(-4px) !important;
+  box-shadow: -4px 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+.tab-btn .v-icon {
+  color: white !important;
+}
+
+/* Generated Documents Section */
+.generated-documents-section {
+  border-left-color: var(--v-secondary-base);
+}
+
+.generated-documents-section .section-title {
+  color: var(--v-secondary-base) !important;
+}
+
+.document-list {
+  background: transparent !important;
+}
+
+.document-item {
+  border-radius: 4px;
+  margin-bottom: 2px;
+}
+
+.document-item:hover {
+  background: rgba(var(--v-theme-primary), 0.08);
+}
+
+.document-item .v-list-item-title {
+  font-weight: 500;
+}
+
+.document-item .v-list-item-subtitle {
+  font-size: 0.65rem !important;
+  opacity: 0.7;
+}
+
+/* Document action buttons */
+.document-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.document-actions .v-btn {
+  font-size: 0.65rem !important;
+}
+
+/* Gather Results Modal */
+.gather-results-list {
+  max-height: 200px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 4px;
+}
+
+.gather-results-list.error-list {
+  background: rgba(244, 67, 54, 0.05);
+}
+
+.gather-results-list .v-list-item {
+  min-height: 32px !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.gather-results-list .v-list-item:last-child {
+  border-bottom: none;
 }
 
 </style>

@@ -36,12 +36,16 @@ except ImportError:
     from paths import EPISODE_ROOT
     EPISODES_ROOT = EPISODE_ROOT
 
-__version__ = "2.0.0-showbuild"
+__version__ = "2.1.0-showbuild"
+
+# API endpoint for FSQ regeneration (optional)
+FSQ_API_BASE = "http://localhost:8888/api/fsq"
+
 
 class MediaCollector:
     """Media collection engine for Show-Build episodes."""
     
-    def __init__(self, episode_number: str):
+    def __init__(self, episode_number: str, generate_fsq: bool = True, regenerate_fsq: bool = False):
         self.episode_number = episode_number
         self.episodes_root = EPISODES_ROOT
         self.episode_path = self.episodes_root / episode_number
@@ -49,7 +53,9 @@ class MediaCollector:
         self.list_path = self.rundown_path / "list"
         self.counter = 1
         self.collected_files = []
-        
+        self.generate_fsq = generate_fsq  # Generate missing FSQ PNGs before collection
+        self.regenerate_fsq = regenerate_fsq  # Regenerate all FSQ PNGs (even existing)
+
         # Valid cue types for media collection
         self.media_cue_types = ['GFX', 'SOT']
         self.fsq_cue_types = ['FSQ']
@@ -59,12 +65,61 @@ class MediaCollector:
         if not self.episode_path.exists():
             print(f"❌ Episode folder for {self.episode_number} does not exist at {self.episode_path}")
             return False
-            
+
         if not self.rundown_path.exists():
             print(f"❌ Rundown folder for episode {self.episode_number} does not exist at {self.rundown_path}")
             return False
-            
+
         return True
+
+    def trigger_fsq_generation(self) -> dict:
+        """
+        Trigger FSQ PNG generation via API before collecting media.
+
+        Returns:
+            dict: API response with generation status
+        """
+        import urllib.request
+        import json as json_lib
+
+        if not self.generate_fsq and not self.regenerate_fsq:
+            return {"skipped": True, "message": "FSQ generation disabled"}
+
+        print(f"\n🎨 Triggering FSQ PNG generation...")
+
+        try:
+            url = f"{FSQ_API_BASE}/regenerate-all/{self.episode_number}?regenerate_existing={str(self.regenerate_fsq).lower()}"
+
+            # Create request with proper headers
+            req = urllib.request.Request(
+                url,
+                method='POST',
+                headers={'Content-Type': 'application/json'}
+            )
+
+            with urllib.request.urlopen(req, timeout=30) as response:
+                result = json_lib.loads(response.read().decode('utf-8'))
+
+            print(f"   ✅ FSQ generation triggered: {result.get('message', 'No message')}")
+            print(f"   📊 Total FSQs: {result.get('total_fsqs', 0)}")
+            print(f"   📥 Queued: {result.get('generated', 0)}")
+            print(f"   ⏭️ Skipped: {result.get('skipped', 0)}")
+            print(f"   ❌ Failed: {result.get('failed', 0)}")
+
+            if result.get('generated', 0) > 0:
+                print(f"   ⏳ Waiting 5 seconds for generation to complete...")
+                import time
+                time.sleep(5)
+
+            return result
+
+        except urllib.error.URLError as e:
+            print(f"   ⚠️ Could not connect to FSQ API: {e}")
+            print(f"   📝 Proceeding with existing FSQ files...")
+            return {"error": str(e), "generated": 0}
+        except Exception as e:
+            print(f"   ⚠️ FSQ generation request failed: {e}")
+            return {"error": str(e), "generated": 0}
     
     def parse_yaml_frontmatter(self, content: str) -> dict:
         """Parse YAML frontmatter from markdown content."""
@@ -314,12 +369,18 @@ class MediaCollector:
         print(f"📁 Episodes root: {self.episodes_root}")
         print(f"📁 Episode path: {self.episode_path}")
         print(f"📁 List directory: {self.list_path}")
+        print(f"🎨 FSQ Generation: {'Enabled' if self.generate_fsq else 'Disabled'}")
+        print(f"🔄 FSQ Regenerate: {'All' if self.regenerate_fsq else 'Missing Only'}")
         print()
-        
+
         # Validate paths
         if not self.validate_paths():
             return False
-        
+
+        # Trigger FSQ generation before collecting media
+        if self.generate_fsq:
+            self.trigger_fsq_generation()
+
         # Get production segments
         valid_segments = self.get_production_segments()
         if not valid_segments:
@@ -358,21 +419,29 @@ def main():
 Examples:
   python media-collect.py 0237
   python media-collect.py --episode 0237
+  python media-collect.py 0237 --regenerate-fsq    # Regenerate all FSQ PNGs
+  python media-collect.py 0237 --no-fsq            # Skip FSQ generation
 
 The script will:
-1. Scan all rundown segments with 'production' status
-2. Extract MediaURL references from GFX/SOT cue blocks
-3. Find FSQ-generated quote images
-4. Copy all media to rundown/list/ with enumerated filenames
-5. Generate media-list.m3u and media-list.txt files
+1. Trigger FSQ PNG generation for any missing quote graphics (via API)
+2. Scan all rundown segments with 'production' status
+3. Extract MediaURL references from GFX/SOT cue blocks
+4. Find FSQ-generated quote images in assets/quotes/
+5. Copy all media to rundown/list/ with enumerated filenames
+6. Generate media-list.m3u and media-list.txt files
 
 Path Management:
 - Uses Show-Build centralized path system
 - Handles relative MediaURL paths (../assets/...)
 - Searches multiple quote directories for FSQ media
+
+FSQ PNG Generation:
+- Default: Generate missing FSQ PNGs only
+- --regenerate-fsq: Regenerate ALL FSQ PNGs (even existing)
+- --no-fsq: Skip FSQ generation entirely (use existing files only)
         """
     )
-    
+
     parser.add_argument(
         "episode_number",
         nargs="?",
@@ -382,24 +451,42 @@ Path Management:
         "--episode",
         help="Episode number (alternative format)"
     )
-    
+    parser.add_argument(
+        "--regenerate-fsq",
+        action="store_true",
+        help="Regenerate ALL FSQ PNG graphics (even if they already exist)"
+    )
+    parser.add_argument(
+        "--no-fsq",
+        action="store_true",
+        help="Skip FSQ PNG generation (use existing files only)"
+    )
+
     args = parser.parse_args()
-    
+
     # Get episode number from either positional or --episode argument
     episode_number = args.episode_number or args.episode
-    
+
     if not episode_number:
         print("❌ Episode number is required")
         parser.print_help()
         sys.exit(1)
-    
+
     if not re.match(r'^\d{4}$', episode_number):
         print(f"❌ Invalid episode number format: {episode_number}")
         print("Episode number should be 4 digits (e.g., 0237)")
         sys.exit(1)
-    
+
+    # Determine FSQ generation settings
+    generate_fsq = not args.no_fsq
+    regenerate_fsq = args.regenerate_fsq
+
     try:
-        collector = MediaCollector(episode_number)
+        collector = MediaCollector(
+            episode_number,
+            generate_fsq=generate_fsq,
+            regenerate_fsq=regenerate_fsq
+        )
         success = collector.collect_media()
         sys.exit(0 if success else 1)
         

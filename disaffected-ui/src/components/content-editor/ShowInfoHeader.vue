@@ -28,23 +28,6 @@
 
         <!-- Action Buttons (right side) -->
         <div class="action-buttons-area d-flex align-center gap-2">
-          <!-- Metadata Panel Toggle -->
-          <v-btn
-            size="small"
-            :color="showMetadataPanel ? 'secondary' : 'grey'"
-            :variant="showMetadataPanel ? 'elevated' : 'outlined'"
-            @click="$emit('toggle-metadata-panel')"
-            class="metadata-toggle-btn px-3"
-            rounded="0"
-          >
-            <v-icon size="small" class="mr-1">mdi-information-outline</v-icon>
-            Metadata
-            <v-tooltip activator="parent" location="bottom">{{ showMetadataPanel ? 'Hide Metadata Panel' : 'Show Metadata Panel' }}</v-tooltip>
-          </v-btn>
-
-          <!-- Vertical Divider -->
-          <v-divider vertical class="mx-1"></v-divider>
-
           <!-- More Options Dropdown -->
           <v-menu>
             <template v-slot:activator="{ props }">
@@ -83,25 +66,34 @@
                   Show AssetID Info
                 </v-list-item-title>
               </v-list-item>
+              <v-divider></v-divider>
+              <v-list-item @click="$emit('generate-host-script')" :disabled="!episodeNumber">
+                <v-list-item-title>
+                  <v-icon size="small" class="mr-2" color="primary">mdi-script-text</v-icon>
+                  Generate Host Script
+                </v-list-item-title>
+                <v-list-item-subtitle>
+                  Create formatted HTML script
+                </v-list-item-subtitle>
+              </v-list-item>
             </v-list>
           </v-menu>
 
           <!-- Vertical Divider -->
           <v-divider vertical class="mx-1"></v-divider>
 
-          <!-- Save All Button (rightmost) -->
+          <!-- Save All Button (rightmost) - Always clickable for manual save -->
           <v-btn
             size="small"
-            :color="saveState?.buttonColor || 'success'"
+            :color="saveState?.hasChanges ? 'primary' : 'success'"
             variant="elevated"
             @click="$emit('save-all')"
-            :disabled="saveState?.isDisabled ?? true"
             class="save-all-btn"
             rounded="0"
           >
-            <v-icon size="small" class="mr-1">{{ saveState?.buttonIcon || 'mdi-check-circle' }}</v-icon>
-            Save All
-            <v-tooltip activator="parent" location="bottom">{{ saveState?.tooltip || 'Episode is synchronized - no changes to save' }}</v-tooltip>
+            <v-icon size="small" class="mr-1">{{ saveState?.hasChanges ? 'mdi-content-save' : 'mdi-check-circle' }}</v-icon>
+            {{ saveState?.hasChanges ? 'Save All' : 'Saved' }}
+            <v-tooltip activator="parent" location="bottom">{{ saveState?.hasChanges ? 'Save all changes now' : 'Click to force save (already synchronized)' }}</v-tooltip>
           </v-btn>
         </div>
       </div>
@@ -114,7 +106,7 @@ import { getColorValue, resolveVuetifyColor } from '../../utils/themeColorMap';
 
 export default {
   name: 'ShowInfoHeader',
-  emits: ['update:airDate', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description', 'save-all', 'toggle-metadata-panel', 'toggle-script-reading', 'request-new-episode-assetid', 'show-assetid-info'],
+  emits: ['update:airDate', 'update:productionStatus', 'update:title', 'update:slug', 'update:episodeTitle', 'update:subtitle', 'update:guest', 'update:description', 'save-all', 'toggle-metadata-panel', 'toggle-script-reading', 'request-new-episode-assetid', 'show-assetid-info', 'generate-host-script'],
   props: {
     title: {
       type: String,
@@ -199,6 +191,10 @@ export default {
     isReadingScript: {
       type: Boolean,
       default: false
+    },
+    episodeNumber: {
+      type: String,
+      default: ''
     }
   },
   computed: {
@@ -313,6 +309,7 @@ export default {
   justify-content: flex-start;
   background-color: white;
   transition: height 0.2s;
+  margin-top: 20px; /* Push down to avoid overlap with app navigation */
   padding-top: 0;
   position: relative !important; /* Override any Vuetify position: sticky */
 }
