@@ -72,14 +72,17 @@ HOUSE_STYLE = {
     'theme': 'light',
     'avatar_shape': 'circle',
     'card_border': {'width': 10, 'color': '#FFFFFF'},
-    'drop_shadow': {'enabled': True, 'blur': 40, 'opacity': 0.6, 'offset': [0, 12]},
+    # Slim charcoal stroke wrapped around the white ring: keeps the card edge
+    # defined over bright keyed video as well as the dark house frame.
+    'card_edge': {'width': 4, 'color': '#14181C', 'opacity': 0.85},
+    'drop_shadow': {'enabled': True, 'blur': 56, 'opacity': 0.72, 'offset': [0, 16]},
     # The inset bubble: ~80% of frame width, centered, big soft corners,
     # slightly translucent, with a big blurred platform watermark INSIDE the
     # bubble (a watermark outside the card would turn to noise over keyed
     # video).
     'bubble': {
         'width_ratio': 0.80,
-        'radius': 56,
+        'radius': 28,
         'bg_alpha': 0.97,
         'watermark_opacity': 0.08,
         'watermark_blur': 14,
@@ -511,6 +514,22 @@ def _render_card(row, style, avatar_img, media_img, media_is_video):
                 mx += draw.textbbox((0, 0), value, font=metric_num_font)[2] + 12
                 _draw_text(card, draw, (mx, y), label, metric_lbl_font, muted)
                 mx += draw.textbbox((0, 0), label, font=metric_lbl_font)[2] + 40
+
+    # Wrap the finished card in the outer edge stroke: a rounded ring of
+    # edge.width around the whole bubble. Done by compositing the card inset
+    # on a slightly larger rounded rect, so the drop shadow in
+    # _compose_frames automatically follows the bordered silhouette.
+    edge = style.get('card_edge', HOUSE_STYLE.get('card_edge', {})) or {}
+    edge_w = int(edge.get('width', 0))
+    if edge_w > 0:
+        edge_alpha = int(255 * float(edge.get('opacity', 0.85)))
+        bordered = Image.new('RGBA', (card_w + 2 * edge_w, card_h + 2 * edge_w), (0, 0, 0, 0))
+        ImageDraw.Draw(bordered).rounded_rectangle(
+            [0, 0, bordered.width - 1, bordered.height - 1],
+            radius=radius + edge_w,
+            fill=_hex_rgba(edge.get('color', '#14181C'), edge_alpha))
+        bordered.alpha_composite(card, (edge_w, edge_w))
+        card = bordered
 
     return card
 
