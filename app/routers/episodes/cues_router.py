@@ -87,6 +87,11 @@ async def enumerate_cue_blocks(
         # Patterns
         slug_pattern = re.compile(r'\[Slug:\s*([^\]]+)\]', re.IGNORECASE)
         mediaurl_pattern = re.compile(r'\[Media\s*Url:\s*([^\]]+)\]', re.IGNORECASE)
+        asseturl_pattern = re.compile(r'\[Asset\s*Url:\s*([^\]]+)\]', re.IGNORECASE)
+        title_pattern = re.compile(r'\[Title:\s*([^\]]*)\]', re.IGNORECASE)
+        gfxtype_pattern = re.compile(r'\[GfxType:\s*([^\]]+)\]', re.IGNORECASE)
+        assetid_pattern = re.compile(r'\[AssetID:\s*([^\]]+)\]', re.IGNORECASE)
+        title_enum_prefix = re.compile(r'^\d+-')
         enumerator_pattern = re.compile(r'\[Enumerator:\s*[^\]]*\]\n?', re.IGNORECASE)
         enum_prefix_pattern = re.compile(r'^(\d+)[-_](.+)$')
         type_pattern = re.compile(r'\[Type:\s*([^\]]+)\]', re.IGNORECASE)
@@ -163,6 +168,37 @@ async def enumerate_cue_blocks(
                                             logger.debug(f"De-enumerated file: {old_file.name} -> {new_file.name}")
                                     except Exception as e:
                                         logger.warning(f"Could not de-enumerate file {old_file}: {e}")
+
+                # X-post/GFX blocks: strip the enumeration prefix from the
+                # display Title too, and de-enumerate the AssetURL-referenced
+                # graphics file (+ its _key sibling).
+                title_match = title_pattern.search(cue_body)
+                if title_match and title_enum_prefix.match(title_match.group(1).strip()):
+                    stripped = title_enum_prefix.sub('', title_match.group(1).strip(), count=1)
+                    cue_body = title_pattern.sub(
+                        lambda m: f'[Title: {stripped}]', cue_body, count=1)
+
+                asset_match = asseturl_pattern.search(cue_body)
+                if asset_match:
+                    old_url = asset_match.group(1).strip()
+                    old_path = Path(old_url)
+                    fname_enum = enum_prefix_pattern.match(old_path.name)
+                    if fname_enum:
+                        base_name = fname_enum.group(2)
+                        new_url = str(old_path.parent / base_name)
+                        cue_body = asseturl_pattern.sub(f'[AssetURL: {new_url}]', cue_body)
+                        old_file = episodes_root / old_url.lstrip('/').replace('episodes/', '')
+                        new_file = old_file.parent / base_name
+                        if old_file.exists() and not new_file.exists():
+                            try:
+                                shutil.move(str(old_file), str(new_file))
+                                files_de_enumerated += 1
+                                # _key sibling travels with the full frame
+                                old_key = old_file.with_name(old_file.stem + '_key.png')
+                                if old_key.exists():
+                                    shutil.move(str(old_key), str(new_file.with_name(new_file.stem + '_key.png')))
+                            except Exception as e:
+                                logger.warning(f"Could not de-enumerate asset file {old_file}: {e}")
 
                 if cue_body != original_body:
                     de_enumerated += 1
@@ -274,10 +310,14 @@ async def enumerate_cue_blocks(
                 asset_type = "images"
             elif cue_type == 'FSQ':
                 asset_type = "quotes"
+            elif cue_type == 'GFX':
+                asset_type = "graphics"
             elif cue_type == 'AUDIO':
                 asset_type = "audio"
             elif old_mediaurl and "/video/" in old_mediaurl:
                 asset_type = "video"
+            elif old_mediaurl and "/graphics/" in old_mediaurl:
+                asset_type = "graphics"
             elif old_mediaurl and "/images/" in old_mediaurl:
                 asset_type = "images"
             elif old_mediaurl and "/audio/" in old_mediaurl:
@@ -296,20 +336,61 @@ async def enumerate_cue_blocks(
                     ext = '.mp4'
 
                 new_filename = f"{new_slug}{ext}"
-                new_mediaurl = f"/episodes/{episode_id_normalized}/assets/{asset_type}/{new_filename}"
+                candidate_mediaurl = f"/episodes/{episode_id_normalized}/assets/{asset_type}/{new_filename}"
 
                 # Try to rename the actual file
                 old_file_path = episodes_root / old_mediaurl.lstrip('/').replace('episodes/', '')
                 new_file_path = episode_assets_dir / asset_type / new_filename
 
-                if old_file_path.exists() and str(old_file_path) != str(new_file_path):
+                if str(old_file_path) == str(new_file_path) or new_file_path.exists():
+                    # Already at (or previously renamed to) the target.
+                    new_mediaurl = candidate_mediaurl
+                elif old_file_path.exists():
                     try:
                         new_file_path.parent.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(old_file_path), str(new_file_path))
                         renamed_files += 1
                         logger.info(f"Renamed: {old_file_path.name} -> {new_file_path.name}")
+                        # Graphics carry a _key sibling for vMix keying.
+                        old_key = old_file_path.with_name(old_file_path.stem + '_key.png')
+                        if old_key.exists():
+                            shutil.move(str(old_key), str(new_file_path.with_name(new_file_path.stem + '_key.png')))
+                        new_mediaurl = candidate_mediaurl
                     except Exception as e:
                         logger.warning(f"Could not rename file {old_file_path}: {e}")
+                        # Move failed: keep the cue pointing at the file that
+                        # actually exists rather than at a name that doesn't.
+                        new_mediaurl = None
+                else:
+                    # Source file missing: do NOT rewrite the reference to a
+                    # nonexistent enumerated name ("image not found").
+                    logger.warning(f"Enumerate: source file missing for '{current_slug}' ({old_file_path}) — leaving URL untouched")
+                    new_mediaurl = None
+
+            elif cue_type == 'GFX':
+                # GFX/xpost cues usually reference their render via [AssetURL:]
+                # rather than [Media Url:]. Find the render in graphics/ by its
+                # conventional name and enumerate it (+ the _key sibling).
+                asset_dir = episode_assets_dir / 'graphics'
+                ext = '.png'
+                for candidate in (f"gfx_{normalized_slug}{ext}", f"{normalized_slug}{ext}", f"{new_slug}{ext}"):
+                    gfx_path = asset_dir / candidate
+                    if gfx_path.exists():
+                        new_filename = f"{new_slug}{ext}"
+                        new_file_path = asset_dir / new_filename
+                        if str(gfx_path) != str(new_file_path):
+                            try:
+                                shutil.move(str(gfx_path), str(new_file_path))
+                                renamed_files += 1
+                                old_key = gfx_path.with_name(gfx_path.stem + '_key.png')
+                                if old_key.exists():
+                                    shutil.move(str(old_key), str(new_file_path.with_name(new_file_path.stem + '_key.png')))
+                                logger.info(f"Renamed GFX: {gfx_path.name} -> {new_file_path.name}")
+                            except Exception as e:
+                                logger.warning(f"Could not rename GFX file {gfx_path}: {e}")
+                                break
+                        new_mediaurl = f"/episodes/{episode_id_normalized}/assets/graphics/{new_filename}"
+                        break
 
             elif cue_type == 'FSQ':
                 # FSQ cues with no MediaUrl - try to find file by slug with fsq_ prefix
@@ -376,6 +457,25 @@ async def enumerate_cue_blocks(
                     # Update slug
                     updated_body = slug_pattern.sub(f"[Slug: {repl['new_slug']}]", updated_body)
 
+                    # Keep the AssetURL reference in step with the renamed
+                    # render (GFX/xpost previews resolve this field first).
+                    if repl['new_mediaurl']:
+                        asset_m = asseturl_pattern.search(updated_body)
+                        if asset_m:
+                            updated_body = asseturl_pattern.sub(
+                                f"[AssetURL: {repl['new_mediaurl']}]", updated_body, count=1)
+
+                    # X-post cards display the [Title:] field — prefix it with
+                    # the enumerator so the rundown reads "20-@handle: ...".
+                    gfxtype_m = gfxtype_pattern.search(updated_body)
+                    if gfxtype_m and gfxtype_m.group(1).strip().lower() == 'xpost':
+                        t_m = title_pattern.search(updated_body)
+                        if t_m:
+                            base_title = title_enum_prefix.sub('', t_m.group(1).strip(), count=1)
+                            new_title = f"{repl['enumerator']}-{base_title}"
+                            updated_body = title_pattern.sub(
+                                lambda m: f'[Title: {new_title}]', updated_body, count=1)
+
                     # Update mediaurl if applicable - remove ALL old MediaUrl fields, add single clean one
                     if repl['new_mediaurl']:
                         # Remove all existing MediaUrl/Media Url/Mediaurl fields
@@ -413,6 +513,31 @@ async def enumerate_cue_blocks(
 
             item.script_content = content
             db.add(item)
+
+        # Sync enumerators into gfx_xpost_cues so the tweet-card renderer names
+        # its output {enumerator}-{slug}.png — the name gather-media expects
+        # for an enumerated GFX cue (and vMix builds its list from what gather
+        # collected). Without this, enumerated x-posts silently drop out of the
+        # gather → vMix chain.
+        try:
+            from models.settings import GfxXpostCue
+            for item_id, update_info in items_to_update.items():
+                content_now = update_info['item'].script_content or ''
+                for m in CUE_BLOCK_RE.finditer(content_now):
+                    body = m.group(1)
+                    g_m = gfxtype_pattern.search(body)
+                    if not g_m or g_m.group(1).strip().lower() != 'xpost':
+                        continue
+                    aid_m = assetid_pattern.search(body)
+                    enum_m = re.search(r'\[Enumerator:\s*([^\]]+)\]', body, re.IGNORECASE)
+                    if not aid_m or not enum_m:
+                        continue
+                    xp_row = db.query(GfxXpostCue).filter(
+                        GfxXpostCue.asset_id == aid_m.group(1).strip()).first()
+                    if xp_row:
+                        xp_row.enumerator = enum_m.group(1).strip()
+        except Exception as e:
+            logger.warning(f"Could not sync x-post enumerators: {e}")
 
         # Commit all changes
         db.commit()
