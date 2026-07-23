@@ -1,7 +1,28 @@
 // Turn a context-menu click (OnClickData + tab) into a CaptureCreate payload
 // for POST /api/whiteboard/{ep}/captures.
 
-const LONE_URL_RE = /^https?:\/\/\S+$/i;
+// TLDs accepted for bare two-part domains ("x.com") with no scheme/www/path —
+// keeps lone filenames like "convert.py" from being mistaken for URLs.
+const COMMON_TLDS = new Set([
+  'com', 'net', 'org', 'io', 'tv', 'app', 'dev', 'co', 'me', 'us', 'uk', 'ca',
+  'au', 'de', 'fr', 'it', 'nl', 'es', 'se', 'ch', 'jp', 'cn', 'in', 'br', 'mx',
+  'gov', 'edu', 'mil', 'info', 'biz', 'xyz', 'ly', 'fm', 'cc', 'gg', 'to', 'watch',
+]);
+
+// A selection that is just one URL — with or without a scheme, the way pages
+// often print them as plain text — becomes a link capture.
+export function asLoneUrl(raw) {
+  let t = (raw || '').trim().replace(/[.,;]+$/, '');
+  if (!t.includes('(')) t = t.replace(/\)+$/, ''); // sentence paren, not a wiki URL's
+  if (/\s/.test(t)) return null;
+  if (/^https?:\/\//i.test(t)) return t;
+  const m = t.match(/^(www\.)?([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)(:\d+)?(\/\S*)?$/i);
+  if (!m) return null;
+  const host = m[2].toLowerCase();
+  const tld = host.slice(host.lastIndexOf('.') + 1);
+  if (m[1] || m[4] || COMMON_TLDS.has(tld)) return `https://${t}`;
+  return null;
+}
 
 export function buildCapturePayload(info, tab, cueType = null) {
   const page_url = info.pageUrl || tab?.url || null;
@@ -22,9 +43,9 @@ export function buildCapturePayload(info, tab, cueType = null) {
   }
 
   if (info.selectionText !== undefined && info.selectionText !== '') {
-    const text = info.selectionText.trim();
-    if (LONE_URL_RE.test(text)) {
-      return { ...base, capture_kind: 'link', url: text }; // highlighted URL → link card
+    const url = asLoneUrl(info.selectionText);
+    if (url) {
+      return { ...base, capture_kind: 'link', url }; // highlighted URL → link card
     }
     return { ...base, capture_kind: 'selection', text_content: info.selectionText };
   }
