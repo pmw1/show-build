@@ -20,6 +20,7 @@ import { ScriptParagraph } from './ScriptParagraph.js';
 import { CueNode } from './CueNode.js';
 import { RevisionMark } from './RevisionMark.js';
 import { SlashCommand } from './SlashCommand.js';
+import { BlockDragHandle } from './BlockDragHandle.js';
 
 /**
  * @param {object} [opts]
@@ -36,6 +37,10 @@ export function buildScriptExtensions(opts = {}) {
     CueNode,
     RevisionMark,
     SlashCommand.configure({ onSelectCue: opts.onSelectCue || null }),
+    // Drag-and-drop reordering of top-level blocks (left-gutter grab handle,
+    // live displacement, single-transaction move). Self-contained; reuses the
+    // legacy --dropline-color / --draglight-color CSS vars.
+    BlockDragHandle,
     UndoRedo,
   ];
 }
