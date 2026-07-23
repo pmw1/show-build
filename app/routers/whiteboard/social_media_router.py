@@ -117,11 +117,15 @@ async def _download_twitter_media(
             media_objects = [{'type': 'photo', 'url': u} for u in media_urls]
 
     if not media_objects:
+        # Text-only tweet: still return the fetched tweet_data so callers
+        # (capture enrichment, card creation) keep author/text/metrics.
         return {
             "success": True,
             "url": url,
+            "tweet_id": tweet_id,
             "files_downloaded": 0,
             "assets": [],
+            "tweet_data": tweet_data,
             "message": "Tweet has no downloadable media"
         }
 
