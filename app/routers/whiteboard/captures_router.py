@@ -175,13 +175,20 @@ async def create_capture(
     if has_media and payload.intended_cue_type in ("sot", "vo") and (payload.mime_type or "").startswith("video/"):
         needs_enrichment = True
 
+    # Page titles arrive at whatever length the web gives us (X pages easily
+    # exceed 300 chars); the column is varchar(200) and a capture must never
+    # fail because of a long title.
+    raw_title = (payload.title or payload.page_title or '').strip() or None
+    if raw_title and len(raw_title) > 200:
+        raw_title = raw_title[:197] + '…'
+
     capture = WhiteboardCapture(
         episode_number=episode,
         client_capture_id=payload.client_capture_id,
         capture_kind=payload.capture_kind,
         item_type=item_type,
         intended_cue_type=payload.intended_cue_type,
-        title=(payload.title or payload.page_title or None),
+        title=raw_title,
         text_content=payload.text_content,
         url=payload.url,
         media_asset_id=payload.media_asset_id,
