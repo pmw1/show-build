@@ -2,7 +2,7 @@
 // the handlers delegate to lib/ modules.
 
 import { rebuildMenus, setEpisode, MENU } from './lib/menus.js';
-import { buildCapturePayload } from './lib/capture.js';
+import { buildCapturePayload, buildImagePayload } from './lib/capture.js';
 import { createCapture, uploadMedia, listEpisodes } from './lib/api.js';
 import { getSettings, setSettings } from './lib/settings.js';
 import { enqueue, drainQueue, getQueue } from './lib/queue.js';
@@ -56,6 +56,15 @@ async function handleClick(info, tab) {
   }
 
   if (id === MENU.SHOT) return captureScreenshot(episode, tab);
+
+  if (id === MENU.IMG) {
+    if (!info.srcUrl) {
+      notify('Show-Build Capture', 'No image detected under the cursor — on X, open the photo full-screen and right-click it there.');
+      return;
+    }
+    const payload = buildImagePayload(info, tab);
+    return payload.url.startsWith('data:') ? sendDataUrlImage(episode, payload) : sendCapture(episode, payload);
+  }
 
   const cueType = id === MENU.SOT ? 'sot' : id === MENU.VO ? 'vo' : id === MENU.NAT ? 'nat' : null;
   if (id !== MENU.SEND && !cueType) return;

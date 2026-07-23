@@ -11,6 +11,7 @@ export const MENU = {
   SOT: 'sb-sot',
   VO: 'sb-vo',
   NAT: 'sb-nat',
+  IMG: 'sb-img',
   SHOT: 'sb-shot',
   EP_MENU: 'sb-ep-menu',
   EP_REFRESH: 'sb-ep-refresh',
@@ -41,6 +42,7 @@ export async function rebuildMenus() {
   await create({ id: MENU.SOT, parentId: MENU.ROOT, title: 'Send video as SOT', contexts: VIDEO_CONTEXTS });
   await create({ id: MENU.VO, parentId: MENU.ROOT, title: 'Send video as VO', contexts: VIDEO_CONTEXTS });
   await create({ id: MENU.NAT, parentId: MENU.ROOT, title: 'Send video as NAT', contexts: VIDEO_CONTEXTS });
+  await create({ id: MENU.IMG, parentId: MENU.ROOT, title: 'Send just this image', contexts: ['image'] });
   await create({ id: MENU.SHOT, parentId: MENU.ROOT, title: 'Capture visible tab (screenshot)', contexts: ['page', 'selection'] });
   await create({ id: 'sb-sep', parentId: MENU.ROOT, type: 'separator', contexts: ALL_CONTEXTS });
   await create({ id: MENU.EP_MENU, parentId: MENU.ROOT, title: 'Target episode', contexts: ALL_CONTEXTS });

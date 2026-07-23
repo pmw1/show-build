@@ -24,6 +24,52 @@ export function asLoneUrl(raw) {
   return null;
 }
 
+// X serves timeline images as small variants (?name=small); request the
+// original so the pool gets full resolution.
+export function upgradeImageUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'pbs.twimg.com' && u.searchParams.has('name')) {
+      u.searchParams.set('name', 'orig');
+      return u.toString();
+    }
+  } catch { /* not a parseable URL — leave as-is */ }
+  return url;
+}
+
+// If a right-clicked image sits inside a social post, this returns the post's
+// canonical URL (X photo permalinks are normalized back to the status URL) so
+// the generic "Send to Whiteboard" can capture the WHOLE post. Image-only
+// capture is the explicit "Send just this image" item.
+export function socialPostUrl(u) {
+  if (!u) return null;
+  try {
+    const url = new URL(u);
+    const h = url.hostname.toLowerCase();
+    if (/(^|\.)(twitter\.com|x\.com)$/.test(h)) {
+      const m = url.pathname.match(/^(\/[^/]+\/status\/\d+)/);
+      return m ? `${url.origin}${m[1]}` : null;
+    }
+    if (/(^|\.)instagram\.com$/.test(h) && /^\/(p|reel)\//.test(url.pathname)) return u.split('?')[0];
+    if (/(^|\.)tiktok\.com$/.test(h) && url.pathname.includes('/video/')) return u.split('?')[0];
+    if (/(^|\.)(facebook\.com|fb\.watch)$/.test(h)) return u;
+  } catch { /* not a parseable URL */ }
+  return null;
+}
+
+// Explicit image-only capture (the "Send just this image" menu item): always
+// uses srcUrl, ignoring any co-present link/selection/post context.
+export function buildImagePayload(info, tab) {
+  return {
+    capture_kind: 'image',
+    url: info.srcUrl.startsWith('data:') ? info.srcUrl : upgradeImageUrl(info.srcUrl),
+    page_url: info.pageUrl || tab?.url || null,
+    page_title: tab?.title || null,
+    client_capture_id: crypto.randomUUID(),
+    source: { agent: 'chrome-extension', version: chrome.runtime.getManifest().version },
+  };
+}
+
 export function buildCapturePayload(info, tab, cueType = null) {
   const page_url = info.pageUrl || tab?.url || null;
   const page_title = tab?.title || null;
@@ -51,9 +97,17 @@ export function buildCapturePayload(info, tab, cueType = null) {
   }
 
   if (info.mediaType === 'image' && info.srcUrl) {
-    // data: URLs are pre-uploaded by the background handler; remote URLs are
-    // fetched server-side (immune to page CORS / referer checks).
-    return { ...base, capture_kind: 'image', url: info.srcUrl };
+    // An image inside a social post: "Send to Whiteboard" means the WHOLE
+    // post (server downloads all media + metadata). The wrapping link (X
+    // timeline) or the page itself (lightbox) identifies the post.
+    const post = socialPostUrl(info.linkUrl) || socialPostUrl(page_url);
+    if (post) {
+      return { ...base, capture_kind: 'page', url: post };
+    }
+    // Plain image elsewhere: data: URLs are pre-uploaded by the background
+    // handler; remote URLs are fetched server-side (immune to page CORS).
+    const url = info.srcUrl.startsWith('data:') ? info.srcUrl : upgradeImageUrl(info.srcUrl);
+    return { ...base, capture_kind: 'image', url };
   }
 
   if (info.mediaType === 'video' && info.srcUrl) {
