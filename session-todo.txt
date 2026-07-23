@@ -1,0 +1,1143 @@
+ ▐▛███▜▌   Claude Code v2.1.167
+▝▜█████▛▘  Opus 4.8 · Claude Max
+  ▘▘ ▝▝    ~/show-build-migration/disaffected-ui/disaffected-ui
+
+
+❯ lets use this session to add some todo list items                             
+
+● I'll handle the ICR protocol first, then we can add todo items.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now let me post my introduction announcement and mark it as announced.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● ICR protocol done. Now let's add todo items.
+
+  Per the CLAUDE.md, todos live in the unified /api/todos table. What items do
+  you want to add? For each one, tell me as much as you have and I'll fill the
+  rest with sensible defaults:
+
+  - content (task title) — required
+  - description (optional details)
+  - priority — low / normal / high / critical (default: normal)
+  - created_by — your username (kevin) or claude?
+
+  Just list them out however is easiest — one per line, a paragraph, whatever.
+  I'll POST each one to https://192.168.51.238:8888/api/todos and confirm the
+  IDs back to you.
+
+❯ One to do item is that the logo for show builder for the app on top says show 
+  builder, and it should just say show build.                                   
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● TLS handshake failed from the host. Let me try from inside the container.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Added — todo #42 on the live backend (:8888):
+
+  ▎ App header logo says "Show Builder" — should read "Show Build" · normal 
+  ▎ priority · created_by kevin
+
+  One thing to clean up: I accidentally created a stray "probe" todo (#33) on
+  the dev backend (:8889) while checking which port to use. Let me delete that.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Cleaned up. So we're set:
+
+  - #42 (live) — App header logo says "Show Builder", should read "Show Build".
+  ✅ added
+  - Stray dev probe todo deleted. ✅
+
+  What's the next item?
+
+❯ Another interesting thing is that whenever I reload the page, I get an        
+  overlay that says initializing status check with a spinning square. I'd like  
+  to find out what that is, if it's necessary, and if it is necessary, I'd like 
+  to change the animation to indicate that we're on a newer version.            
+
+● I'll add that as a todo, but let me first dig into what that overlay actually
+  is so the todo is specific and actionable.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Found it. Let me read the overlay component and how it's used.
+
+  Read 1 file (ctrl+o to expand)
+
+● Let me check where it's mounted and what useSystemHealth does.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● I now have the full picture. Here's what that overlay is:
+
+  What it is: InitializationOverlay.vue, mounted in App.vue:328 (only for
+  authenticated users). On every page load it shows the dark full-screen overlay
+  with a spinning ring + "Initializing status check..." while it waits for the
+  system health check (useSystemHealth, which polls /health/critical) to return
+  its first non-unknown status. It dismisses as soon as health resolves, or
+  after a 2s failsafe.
+
+  Is it necessary? Mostly no, as a blocking full-screen gate. The app doesn't
+  actually depend on health being known to render — health drives the status-bar
+  indicators. The overlay seems to exist purely to mask a brief "unknown" flash
+  on the status bar at startup. It even has a "If this is happening frequently,
+  please let Kevin know" subtext, suggesting it's already a known annoyance. So
+  the real question in the todo is: does it need to block the whole screen, or 
+  can it be non-blocking / removed, and if kept, restyle the animation to signal
+  "newer version."
+
+  Let me capture all of that in the todo.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Added — todo #43.
+
+  To answer your three questions directly:
+
+  - What is it? A startup gate (InitializationOverlay.vue) shown only to
+  logged-in users. It blocks the screen until the system health poll
+  (/health/critical via useSystemHealth) returns its first real status, then
+  fades out — with a hard 2-second failsafe so it can never trap you.
+  - Is it necessary? As a full-screen blocker, not really. The app renders fine
+  before health is known; the overlay just hides a brief "unknown" flicker in
+  the status bar. It even carries a "let Kevin know if this happens a lot" note,
+  so it's already flagged as borderline. It could be removed, made
+  non-blocking, or only appear if health is slow (e.g. >800ms).
+  - If kept, the animation: Yes — easy to swap the spinning square/ring for a
+  new spinner + updated copy that signals the newer version. That's captured as
+  task (2) in the todo.
+
+  Both items logged now:
+  - #42 — logo "Show Builder" → "Show Build"
+  - #43 — Initializing-status-check overlay reassessment + version-signal
+  animation
+
+  Next item?
+
+❯ Regarding the SOT cube blocks as they appear in the script, the duration is   
+  set to a decimal, both where it says duration in the body and on the bottom   
+  footer of the cube block where the delete and other buttons are. The decimal  
+  should be a time expression in hh:mm:ss:ff                                    
+
+● Let me do the ICR check-in and dig into the SOT cue card duration formatting
+  in parallel.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● ICR check: Nothing actionable for me. One sibling worth noting —
+  prefect-show-build-claude-746024 is actively working on the same
+  feat/script-editor-tiptap branch (pushed #41 segment-locking at 7a9491d, then
+  did LLM slug generation, commit 9ce8784). Since we're just adding todos this
+  session, no collision. Proceeding.
+
+  Now the SOT duration. Let me find where it renders.
+
+  Searched for 2 patterns, listed 1 directory (ctrl+o to expand)
+
+● Clear picture. The duration value comes from jobStatus.post_analysis.duration
+  / video_specs.duration (the ffprobe/analysis result, which is a raw seconds 
+  decimal like 12.34), and from cueData.duration. The footer/header templates
+  render it verbatim. The fix is to format that decimal into hh:mm:ss:ff
+  timecode at the display points (both the body "Duration:" row in
+  SotCueContent.vue:96 and the footer duration-text-footer in
+  PlaceholderCueCard.vue:287, plus header/chip).
+
+  Let me confirm whether a timecode formatter already exists so the todo can
+  point to reuse.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● There's already a secondsToTimecode(seconds, showFrames) in
+  useTrimmableMediaModal.js:152 that produces exactly HH:MM:SS:FF (frames from
+  seconds % 1 * framerate). Ideally it gets extracted into a shared util so the
+  SOT cards can reuse it. Now I have everything for a precise todo.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Added — todo #44.
+
+  Quick summary of what I found while writing it: the decimal you're seeing is
+  the raw seconds value from the ffprobe/analysis data (post_analysis.duration /
+  video_specs.duration). It renders unformatted in the body "Duration:" row,
+  the footer, the header, and a chip. Good news — there's already a
+  secondsToTimecode() helper producing exactly hh:mm:ss:ff in the trim-modal
+  composable, so the cleanest fix is to extract it to a shared util and reuse it
+  (with a guard so the paths that already store a 00:00:05:00 timecode string
+  don't get double-formatted).
+
+  Todos so far this session:
+  - #42 — logo "Show Builder" → "Show Build"
+  - #43 — Initializing-status-check overlay reassessment + version animation
+  - #44 — SOT cue duration → hh:mm:ss:ff timecode
+
+  Next item?
+
+❯ we have the color coordination. We have colors set for the different types of 
+  elements and cues, and those should be consistent across the board, both in   
+  the add cue menu at the top of the content in the script and the cue block    
+  that displays in the script and the pop up that you see when user uses it     
+  within the script to trigger an insertion.                                    
+
+● Let me investigate the color system so the todo is precise about where the
+  inconsistency lives. The memory note says colors were unified on
+  colorRegistry.js, so let me see what's actually consuming it vs. not.
+  Ran 1 shell command (ctrl+o to expand)
+
+● The three UI surfaces you named: (1) the "add cue" toolbar/menu, (2) the cue
+  block in the script, (3) the insertion popup. Let me find the actual color
+  lookups in each so I can pinpoint the inconsistency.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Path confusion — grep ran from a stale cwd. Let me use absolute paths.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+❯ Another problem seems to be that the cues are not always inserting at the point of the cursor. Frequently, they are inserting at the bottom of the script. 
+
+● I now have enough to write the color-consistency todo precisely, and there's a
+  second issue (cue insertion point) to capture. Let me check both the
+  cue-block color path and the insertion-point logic, then write both todos.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Let me look at getCueColor (the toolbar button) vs the cue-card lookup, and
+  the cursor insertion logic.
+
+  Read 1 file (ctrl+o to expand)
+
+● Good — both the toolbar (getCueColor → getColorValue(type) + 
+  resolveVuetifyColor) and the cue card (PlaceholderCueCard.vue:1271, same two
+  calls) and the popup all resolve through themeColorMap.js. So they should be
+  consistent. The inconsistency is likely either the modal/popup using a
+  different lookup, or stale per-component CSS classes (cue.btnClass, the
+  btnClass per cue definition) overriding the inline style. Let me quickly check
+  the cue definitions' btnClass and the cursor-insertion path, then write all
+  the todos.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● I have enough context for precise todos on both. Note: there are CSS classes
+  (sot-btn, fsq-btn, etc.) layered on top of the inline getCueButtonStyle — a
+  likely source of the toolbar-vs-card color drift (hardcoded CSS overriding the
+  registry-resolved inline color). And this branch is mid-migration to
+  TipTap/ProseMirror, so the cursor-insertion path differs between the legacy
+  contenteditable and the new editor — a strong candidate for "inserts at bottom
+  instead of cursor."
+
+  Let me write both todos.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Both added.
+
+  #45 — Cue/element type color consistency (normal): All three surfaces (toolbar
+  menu, cue block, insertion popup) are supposed to resolve through
+  themeColorMap.js, and the toolbar + cue card do use the same two calls. The
+  likely drift source I spotted: the toolbar buttons also carry hardcoded CSS
+  classes (sot-btn, fsq-btn, etc.) layered on top of the registry-resolved
+  inline color, plus the per-type modals may define their own colors. The todo
+  says to audit all surfaces + modals and kill the hardcoded per-type color
+  classes so the registry is the single source.
+
+  #46 — Cues inserting at bottom instead of cursor (high — flagged higher since
+  it's a real workflow bug): The insertion path falls back to end-of-document
+  when the saved selection is lost — most likely because clicking the toolbar
+  button blurs the editor and the caret Range is dropped. Compounded by this
+  branch being mid-migration to TipTap/ProseMirror, where the insert point
+  should come from the ProseMirror selection, not a contenteditable Range. The
+  fix is to capture/restore selection at click time and route insertion through
+  the active editor.
+
+  Session todos now:
+  - #42 logo "Show Builder" → "Show Build"
+  - #43 Initializing-status overlay reassessment
+  - #44 SOT duration → hh:mm:ss:ff
+  - #45 cue color consistency across the 3 surfaces
+  - #46 cue inserts at bottom instead of cursor (high)
+
+  Next item?
+
+❯ We need the ability to create a new line in the script without creating a new 
+  paragraph. In most editors, you can hold shift and press enter, but that      
+  doesn't seem to be working here, period. If I press enter alone, I simply get 
+  a new paragraph, and that's fine. But I need a way to create a new line       
+  without creating a new paragraph.                                             
+
+● Let me check how the ProseMirror/TipTap editor handles Enter and whether
+  Shift+Enter (hard break) is wired up.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Key finding — they explicitly do NOT use StarterKit, which is what normally
+  provides the HardBreak extension and the Shift-Enter keymap. Let me see the
+  full extension list and the ScriptParagraph's Enter handling.
+
+  Read 1 file (ctrl+o to expand)
+
+● Confirmed root cause. The schema is Document, Text, ScriptParagraph, CueNode —
+  there is no HardBreak node in the schema and no Shift-Enter keymap registered
+  anywhere. So Shift+Enter does nothing (or falls through to a plain Enter /
+  paragraph split). That's exactly the symptom you describe.
+
+  There's a wrinkle worth noting in the todo: this editor round-trips to
+  markdown, where a soft line break is typically \n within a paragraph (or
+  trailing-two-spaces). So adding a HardBreak isn't just a TipTap config line —
+  the markdown serialize/parse layer (cueParser.js / ScriptParagraph's
+  toMarkdown/parseMarkdown) has to preserve it, or the soft break will be lost
+  on save/reload. Let me confirm whether ScriptParagraph already handles
+  <br>/\n.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Confirmed end to end. The markdown round-trip splits paragraphs on blank lines
+  (\n\s*\n) and has no concept of a soft line break / <br> within a paragraph.
+  So even if I added a HardBreak node to TipTap, the markdown serializer would
+  drop it on save. The todo needs to flag both layers.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Added — todo #47.
+
+  The reason Shift+Enter does nothing: the script editor's TipTap schema
+  deliberately skips StarterKit and only registers Document, Text, 
+  ScriptParagraph, CueNode, … — so there's no HardBreak node and no Shift-Enter 
+  keymap at all. The fix is two layers, and the second is the real work:
+
+  1. Editor — add a hard-break extension and bind Shift-Enter → setHardBreak so
+  it drops a <br> inside the current paragraph.
+  2. Markdown round-trip — the harder half: the markdown layer splits paragraphs
+  on blank lines and has no soft-break concept, so a naive <br> would be lost
+  on save/reload. The serializer needs to emit a markdown soft break (single \n
+  or trailing-two-spaces) and the parser needs to read it back as a <br> without
+  treating it as a paragraph boundary.
+
+  So it's a genuine feature, not just a missing keybind — good thing to have
+  captured with the round-trip caveat.
+
+  Session todos:
+  - #42 logo "Show Builder" → "Show Build"
+  - #43 Initializing-status overlay reassessment
+  - #44 SOT duration → hh:mm:ss:ff
+  - #45 cue color consistency across 3 surfaces
+  - #46 cue inserts at bottom instead of cursor (high)
+  - #47 Shift+Enter soft line break
+
+  Next item?
+
+❯ I'd like the cue blocks as they appear in the script to be pushed over a bit  
+  to the right so that they align with the text paragraphs.                     
+                                                                                
+  now, they're a little bit too far to the left.                                
+                                                                                
+  I'd also like to add a little bit more spacing above and below all of the cue 
+  blocks as they appear in the script.                                          
+
+● Let me find the cue block's left alignment and vertical spacing styles versus
+  the paragraph indent.
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● The cue node wrapper has margin: 4px 0 and no left offset. Now I need to know
+  the paragraph's left indent so the todo specifies the exact target. The
+  paragraph indent likely comes from the line-number gutter / CSS in
+  ScriptEditor.vue. Let me check.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Let me read the exact paragraph padding-left so the todo names the target
+  indent for the cue block to match.
+
+  Read 1 file (ctrl+o to expand)
+
+● Now I have the full picture. Paragraphs (.ProseMirror p) sit at the editor's
+  left edge (margin 0 0 0.6em, no extra left padding beyond the shared 3.2em
+  gutter when line numbers are on). The cue node (.pm-cue-nodeview) also sits at
+  the editor left edge with margin: 4px 0 — so visually they should be at the
+  same x. Since the user perceives the cue as too far left, the cue's inner card
+  likely has its own left padding that's smaller than the paragraph text's, or
+  the paragraph text has a visual indent the cue lacks. The actionable fix is
+  concrete regardless: add left margin to align with paragraph text, and
+  increase top/bottom margin.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Added — todo #48.
+
+  It's a focused CSS change on the cue block wrapper (.pm-cue-nodeview,
+  currently margin: 4px 0 with no left offset): nudge it right to line up with
+  the paragraph text's left edge (and stay aligned whether or not line numbers
+  are on), and bump the top/bottom margin so cues breathe between paragraphs.
+
+  Session todos:
+  - #42 logo "Show Builder" → "Show Build"
+  - #43 Initializing-status overlay reassessment
+  - #44 SOT duration → hh:mm:ss:ff
+  - #45 cue color consistency across 3 surfaces
+  - #46 cue inserts at bottom instead of cursor (high)
+  - #47 Shift+Enter soft line break
+  - #48 cue block alignment + vertical spacing
+
+  Next item?
+
+❯ Right now, if there is no content in a segment, the speaker header is still   
+  showing. I'd like to hide the speaker header until there's at least one       
+  character in the first paragraph.                                             
+
+● Let me do the ICR check-in and inspect the SpeakerHeaders logic in parallel.
+  Ran 1 shell command (ctrl+o to expand)
+
+● ICR: Nothing new/actionable (same sibling slug-gen work from earlier).
+  Proceeding.
+
+  Now the speaker header. Let me read how SpeakerHeaders decides where to
+  render.
+
+  Read 1 file (ctrl+o to expand)
+
+● This is clear and the fix is well-scoped. The header is a widget emitted at
+  the start of a paragraph that begins a new speaker run. To hide it on an empty
+  first paragraph, the showHeader guard at line 88 needs an additional
+  condition: skip the header when this paragraph is empty (node.content.size ===
+  0 / node.textContent empty).
+
+  There's a subtlety worth noting for the todo: the user said "until there's at
+  least one character in the first paragraph." Strictly, this is about the first
+  paragraph of the segment being empty. But since a header is shown at the
+  start of every speaker-run, the cleanest interpretation is: don't render a
+  speaker header above an empty paragraph. I'll capture both the literal request
+  and that nuance.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Added — todo #49.
+
+  Nicely scoped: the header is a decoration widget in SpeakerHeaders.js, gated
+  by a showHeader condition. Adding an emptiness guard (node.content.size === 0)
+  so it isn't emitted above an empty paragraph does it — and because the
+  decorations recompute on every doc change, the header pops in the instant the
+  first character is typed. I noted one thing to verify during implementation:
+  the prevSpeaker bookkeeping when skipping an empty leading paragraph, so the
+  header still lands correctly on the first paragraph that does get text.
+
+  Session todos:
+  - #42 logo "Show Builder" → "Show Build"
+  - #43 Initializing-status overlay reassessment
+  - #44 SOT duration → hh:mm:ss:ff
+  - #45 cue color consistency across 3 surfaces
+  - #46 cue inserts at bottom instead of cursor (high)
+  - #47 Shift+Enter soft line break
+  - #48 cue block alignment + vertical spacing
+  - #49 hide speaker header until first paragraph has a character
+
+  Next item?
+
+❯ when deleting a queue and then deciding to abort deleting the queue, there is 
+  an option that says to cancel it and return the queue to the script or        
+  something like that, but it doesn't actually return the queue. It just leaves 
+  it gone. I'd like to fix that                                                 
+
+● You mean a cue (the cue block), not a queue — the delete-cue confirmation
+  modal. Let me look at the DeleteCueModal and how its cancel/restore path
+  works.
+
+  Read 1 file (ctrl+o to expand)
+
+● This DeleteCueModal only has plain "Cancel" and "Delete Cue" — no "return cue
+  to script" option. The "cancel and return the cue to the script" wording you
+  describe must come from a different modal. Given the memory note about
+  cue-delete media disposition (delete-only / delete+media / release-to-pool),
+  there's likely a richer delete flow. Let me find which modal actually has that
+  "restore/return" language and how the cue gets removed before the dialog
+  opens.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● There's a DeleteCueWithMediaModal.vue. Let me look at it and how the delete is
+  triggered from CueNodeView — specifically whether the cue is removed from the
+  doc before the modal opens (which would explain why "cancel" leaves it gone).
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now the key question: where is the cue actually removed from the document, and
+  does that happen before the modal opens? Let me trace the delete trigger in
+  CueNodeView and the handler in ScriptEditor/EditorPanel.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Found the bug. Let me read the exact handler around CueNodeView line 158-175
+  and ScriptEditor 261-300.
+
+  Read 1 file (ctrl+o to expand)
+
+● CueNodeView is correct — it does NOT remove the node itself; it passes
+  removeNode up and only calls it on confirm. So the bug is in the
+  EditorPanel/ScriptEditor onDeleteCue handler. Let me read that.
+
+  Read 1 file (ctrl+o to expand)
+
+● ScriptEditor forwards delete-cue (with removeNode) up to EditorPanel. So the
+  bug is in EditorPanel's delete-cue handler — it must open the disposition
+  modal and call removeNode on confirm, but the Cancel path is wired to also
+  remove (or removeNode gets called before the modal resolves). Let me find it.
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● handlePmDeleteCue correctly only opens the modal — it does NOT remove the node
+  yet. Now let me check the cancel handler for DeleteCueWithMediaModal. The
+  modal emits update:show on cancel but the template at 1348 wires delete-only,
+  delete-with-media, delete-release-to-pool — no explicit @cancel. So cancel
+  just closes the dialog without removing. That contradicts the user's report...
+  unless the user is hitting a different modal, or there's a
+  showDeleteCueConfirm plain-confirm modal with a "return to script" option. Let
+  me check showDeleteCueConfirm's modal and the wording around it.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● There's also a showDeleteImgModal with @delete-preserve-assets. Let me read
+  the showDeleteCueConfirm inline dialog (line 1402) — that's the plain-confirm
+  one, and check its buttons + handleDeletePreserveAssets since "preserve
+  assets"/"return" language may be there.
+
+  Read 1 file (ctrl+o to expand)
+
+● Let me look at the showDeleteImgModal modal component (the one with
+  delete-preserve-assets) and the handleDeletePreserveAssets / cancelDeleteCue
+  handlers — "preserve assets" is the likely "return to script"-type wording,
+  and one of these handlers may be removing the cue when it shouldn't.
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● cancelDeleteCue is correct — it does NOT call removeCueFromDocument; it just
+  clears state and nulls pmRemoveNode. So in the PM editor path, cancel works
+  correctly.
+
+  This means the "doesn't actually return the cue" bug is most likely in the
+  legacy contenteditable path (the deleteCue(index) at lines 754/765,
+  index-based), where the cue may already be removed from the raw content before
+  the modal opens — OR the user is on a path where removeNode runs regardless.
+  The wording "return the cue to the script" doesn't match any current button
+  I've found, which suggests it may be a cancelCuePlacement / a different
+  "cancel" that the user is conflating, or a legacy deleteCue flow. Rather than
+  keep spelunking (this is a todo-capture session, not a fix session), I'll
+  write a thorough todo that points the implementer at exactly the paths I've
+  verified and the one I couldn't confirm.
+
+  Read 1 file (ctrl+o to expand)
+
+● Now let me check the DeleteCueWithMediaModal button labels — specifically
+  whether one of the disposition buttons is mislabeled as a cancel/return when
+  it actually deletes. That would perfectly explain the user's report: a button
+  that reads like "cancel and keep the cue" but is actually deleteOnly.
+
+  Read 1 file (ctrl+o to expand)
+
+● I've now traced the whole current flow and it appears correct in the PM path —
+  Cancel (line 37 → cancel() → just update:show=false) does not remove the cue,
+  and cancelDeleteCue nulls pmRemoveNode without removing. So either (a) the
+  user is on the legacy index-based deleteCue(index) path where removal happens
+  differently, or (b) there's a real defect where removeNode/the node is dropped
+  before/independently of the modal in some cue type. The user's specific
+  phrase — "cancel it and return the cue to the script" — doesn't match any
+  current button label, which itself is a finding: the wording may need to
+  exist, or it's a stale/legacy modal. This is worth a todo with a clear repro
+  request. Let me write it.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Added — todo #50 (high priority, since it's a data-loss bug).
+
+  One thing surfaced while tracing it that I want to flag to you directly: in
+  the current TipTap editor path, the cancel flow actually looks correct — the
+  cue isn't removed from the document until you pick a real delete option, and
+  Cancel just closes the modal without touching it. So if you're reliably seeing
+  the cue vanish on cancel, it's most likely either:
+
+  - the legacy contenteditable editor (not the new TipTap one), where deletion
+  is index-based and may strip the cue from the raw content before the modal
+  opens, or
+  - a specific cue type whose flow differs.
+
+  Also: I couldn't find any button actually labeled "return the cue to the 
+  script" — the abort is just a plain "Cancel." So when we fix this, it'd help
+  to know which cue type you deleted and whether you're on the new or old editor
+  (a screenshot of the exact modal would nail it). I put all of that in the
+  todo as a repro request so whoever picks it up fixes the right path.
+
+  Session todos:
+  - #42 logo "Show Builder" → "Show Build"
+  - #43 Initializing-status overlay reassessment
+  - #44 SOT duration → hh:mm:ss:ff
+  - #45 cue color consistency across 3 surfaces
+  - #46 cue inserts at bottom instead of cursor (high)
+  - #47 Shift+Enter soft line break
+  - #48 cue block alignment + vertical spacing
+  - #49 hide speaker header until first paragraph has a character
+  - #50 cancel cue-delete doesn't restore the cue (high)
+
+  Next item?
+
+❯ change to add a whole new cue-type. will be a little confusing because this   
+  cue type will be called "reader" just like the rundown item type, but not to  
+  be confused with the rundown item type.  This is where the host, or whomever, 
+  reads an advertisement directly in the script.                                
+
+● Let me handle the ICR project naming first, then research how to add a new cue
+  type.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● ICR rename done. Now let me research what it takes to add a new cue type —
+  there are many surfaces (parser, registry, modal, card, toolbar, colors,
+  backend) so the todo needs to enumerate them.
+  Ran 1 shell command (ctrl+o to expand)
+
+● That's a wide spread. Let me find the most authoritative definition points:
+  the colorRegistry default colors, the cueDefinitions list, the SlashCommand
+  CUE_ITEMS, the parser's cue recognition, and any backend cue-type enum.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Let me check the backend cue-type enum and the cueDefinitions + per-type
+  modal/card mapping to fully enumerate the touch points.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Confirmed important detail: the backend already has RundownItemType.READER = 
+  "reader" (line 20) AND a separate CueType enum (line 35). So the new "reader"
+  cue type is distinct from the existing reader rundown-item type — exactly the
+  naming collision the user warned about. Let me see the CueType enum values to
+  confirm where the new one slots in.
+
+  Read 1 file (ctrl+o to expand)
+
+● Interesting — the backend CueType enum is a different taxonomy
+  (media/camera/audio_mic/…) and doesn't contain FSQ/SOT/VO at all. So the
+  FSQ/SOT/etc. cue types the editor uses are NOT driven by this enum; they live
+  as string types in the markdown/script layer and the frontend registries. That
+  means a new "reader" cue is primarily a frontend + markdown + parser change,
+  not a DB enum change. Good — that's the key architectural note for the todo. I
+  have enough to write a thorough, accurate todo.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Added — todo #51.
+
+  A couple of useful things I confirmed while writing it:
+
+  - The naming collision is real but clean at the data layer —
+  RundownItemType.READER = "reader" already exists in the backend enum (a
+  rundown-item type), and it's genuinely separate from the new in-script cue
+  type. They don't have to fight; we just need to keep the item-type vs cue-type
+  branches from crossing.
+  - Adding a cue type is mostly frontend + parser, not a DB migration — the
+  editor's cue types (FSQ/SOT/VO/…) are string tokens in the markdown and the
+  frontend registries; the backend CueType enum is a different, unused taxonomy
+  (media/camera/audio). So a Reader cue means: color registry, slash menu,
+  add-cue toolbar, parser round-trip, the cue card, and a ReaderModal — no
+  Alembic migration.
+
+  Three decisions I'll need from you before anyone implements it (also in the
+  todo):
+
+● User answered Claude's questions:
+  ⎿  · What fields should a READER cue store? → All of the above.. This will 
+     also be a unique field as it needs the abilityt o pull its content from a 
+     pool of saved content. It also needs to track how many times it is read 
+     over the episodes and the duration of each time.
+     · What color should the READER cue be? (it must be distinct from the other 
+     cue types) → set it to gray, but make a selector for it in the settings 
+     color picker so the admin can recolorize it at a later time from the ui
+
+● Those answers add significant scope — a content pool to pull ad reads from,
+  plus cross-episode read-tracking (count + per-read duration). That's well
+  beyond a normal cue type, so let me update the todo to capture it accurately
+  and check whether any "ad pool" scaffolding already exists.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Excellent — there's already a ContentLibrary system (model
+  models_content_library.py with a customer_name/advertiser field, a
+  content_library table, a placements table tracking where library items are
+  used, and ContentLibraryManager/ContentLibraryPickerModal on the frontend).
+  This is exactly the "pool of saved content" the user wants the Reader cue to
+  pull from — and the placements table is likely where read-tracking can live.
+  Let me peek at the model to confirm.
+
+  Read 1 file (ctrl+o to expand)
+
+● This is a major find — the infrastructure the user wants already largely 
+  exists:
+
+  - The saved-content pool = ContentLibrary (with item_type like
+  "advertisement", customer_name advertiser, script_content, duration, validity
+  window). The frontend already has ContentLibraryPickerModal to pull from it.
+  - Read-tracking across episodes = ContentPlacement junction table — one row
+  per placement, with episode_number, airdate, placed_at/removed_at lifecycle,
+  and a content_snapshot. Count of reads = count of placements; per-read 
+  duration = content_snapshot.duration / library duration. So tracking "how many
+  times read + duration each time" is mostly a query over existing placements,
+  not new schema.
+
+  So the Reader cue's job is largely: pull from ContentLibrary via the existing
+  picker, and create/track a ContentPlacement per use. Let me rewrite the todo
+  to reflect all of this — the user's full answer plus the existing infra.
+
+● I don't need TaskGet — that was a mis-aimed search; I'll just update the
+  existing todo #51 via the API with the richer scope.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+❯ enough information for the todo? 
+
+● Yes — #51 now has more than enough to implement from cold. The big win is that
+  I found the heavy lifting already exists in the codebase, so this isn't the
+  from-scratch feature it sounded like:
+
+  - The "pool of saved content" = the existing Content Library (ContentLibrary
+  model — has advertiser/customer_name, the read copy in script_content, and
+  duration), with a ready-made ContentLibraryPickerModal to pull from. So the
+  Reader cue just reuses that picker.
+  - "How many times read + duration each time, across episodes" = the existing
+  ContentPlacement junction table — one row per placement with episode_number,
+  airdate, and a frozen content_snapshot.duration. So read-count is a COUNT of
+  placements and per-read duration is already captured. That's a query + a small
+  aggregate endpoint, very likely no new schema.
+  - Gray + admin-recolorable = registering reader as a normal colorRegistry.js
+  entry automatically gives the Settings color picker a swatch.
+
+  The todo enumerates all 7 frontend/parser touch points (registry, slash menu,
+  toolbar, parser, cue card, ReaderModal, and the grep-sweep of other cue-type
+  lists), plus the item-type/cue-type naming-collision guard.
+
+  One open decision left in the todo, which I'll need from you eventually (not
+  blocking): the slash-menu hotkey letter — r is already taken by RIF. Want a
+  (ad/advertisement) for the Reader cue?
+
+❯ show the todo list                                                            
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Here's the full active list (27 items). The 10 we added this session are
+  #42–#51:
+
+  This session (kevin):
+
+  ┌─────┬─────┬──────────────────────────────────────────────────────────────┐
+  │ ID  │ Pri │                             Task                             │
+  ├─────┼─────┼──────────────────────────────────────────────────────────────┤
+  │ 42  │ ⚪  │ Logo "Show Builder" → "Show Build"                           │
+  ├─────┼─────┼──────────────────────────────────────────────────────────────┤
+  │ 43  │ ⚪  │ Reassess "Initializing status check…" overlay + version      │
+  │     │     │ animation                                                    │
+  ├─────┼─────┼──────────────────────────────────────────────────────────────┤
+  │ 44  │ ⚪  │ SOT cue duration → hh:mm:ss:ff timecode                      │
+  ├─────┼─────┼──────────────────────────────────────────────────────────────┤
+  │ 45  │ ⚪  │ Cue color consistency across menu / block / popup            │
+  ├─────┼─────┼──────────────────────────────────────────────────────────────┤
+  │ 46  │ 🟠  │ Cues inserting at bottom instead of cursor                   │
+  ├─────┼─────┼──────────────────────────────────────────────────────────────┤
+  │ 47  │ ⚪  │ Shift+Enter soft line break (no new paragraph)               │
+  ├─────┼─────┼──────────────────────────────────────────────────────────────┤
+  │ 48  │ ⚪  │ Align cue blocks with paragraph text + vertical spacing      │
+  ├─────┼─────┼──────────────────────────────────────────────────────────────┤
+  │ 49  │ ⚪  │ Hide speaker header until first paragraph has a character    │
+  ├─────┼─────┼──────────────────────────────────────────────────────────────┤
+  │ 50  │ 🟠  │ Cancel cue-delete doesn't restore the cue                    │
+  ├─────┼─────┼──────────────────────────────────────────────────────────────┤
+  │ 51  │ ⚪  │ New READER cue type (host reads ad live)                     │
+  └─────┴─────┴──────────────────────────────────────────────────────────────┘
+
+  Pre-existing items worth flagging — a few overlap with what we just discussed:
+  - #27 — SOT insertion (kevin) and #36 — restore inline speaker header relate
+  to our #44/#49.
+  - #23 — Extract shared cue-type schema as single source of truth is directly
+  relevant to #45 (color consistency) and #51 (new cue type) — doing #23 first
+  would make both easier.
+  - #29 — TipTap migration (🟠) and #33 — autosave decline are the big
+  architectural ones; several of our new items live inside that editor.
+  - #26 — strikethrough mod deletes whole paragraph (kevin) is an open editor
+  bug.
+
+  Want me to do anything with these — e.g. bump any of the new items' priority,
+  or link #45/#51 to #23 in their descriptions?
+
+❯ I have another session, basically, not acknowledging that these to do items   
+  exist.                                                                        
+
+● Let me figure out why the other session isn't seeing these. The most likely
+  cause: it's hitting a different database (dev :8889/showbuild_dev vs live
+  :8888/showbuild). Let me check both, and do the ICR check-in.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● That's the problem, confirmed.
+
+  I wrote all 10 todos (#42–#51) to the LIVE database (showbuild, port 8888). 
+  Your other session is almost certainly looking at the DEV database 
+  (showbuild_dev, port 8889), which does NOT have any of them (it's at 27 todos
+  with none of 42–51).
+
+  This was my mistake. The CLAUDE.md sync-protocol examples use :8888, and
+  earlier when I probed both ports I picked 8888 — but we're working in the DEV 
+  worktree (/home/kevin/show-build-migration, branch feat/script-editor-tiptap),
+  which is served by the dev backend on :8889 against showbuild_dev. All this
+  editor work is dev work, so the todos belong on dev :8889.
+
+  ICR: nothing actionable for us — sibling prefect-show-build-claude just pushed
+  3f44058 and started #39 (drag-drop animation), which is the pre-existing #39,
+  not our items.
+
+  Let me fix this: copy all 10 todos from live to dev, then delete them from
+  live so there's one clean copy. First, pull the exact live records.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Before I move anything, let me confirm with you how you want this resolved,
+  since "delete from live" is a destructive step:
+
+● User answered Claude's questions:
+  ⎿  · I mistakenly wrote todos #42–#51 to the LIVE db (showbuild :8888); your 
+     other session reads DEV (showbuild_dev :8889). How should I fix it? → Move 
+     to DEV, remove from LIVE
+
+❯ this is not for live. This is all for development, period. You should know that. 
+
+● You're right, and I apologize — we're in the dev worktree on the dev branch;
+  everything this session is dev work and I should have written to :8889 from
+  the start. Moving them now: recreate all 10 on dev, then delete from live.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All 10 recreated on dev. Now let me verify the descriptions made it intact
+  (not truncated), then delete the live copies.
+
+  Ran 1 shell command (ctrl+o to expand)
+● The dev #45 check came back empty — let me confirm that's just a GET /{id}
+  quirk and that the dev copies (with full descriptions) are actually intact.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Done and verified. All 10 todos are now on dev (showbuild_dev, :8889) with
+  full descriptions intact, and the live copies are deleted.
+
+  New dev IDs (was → now):
+
+  ┌───────┬─────┬───────────────────────────────────────────────┐
+  │ Dev # │ Pri │                     Task                      │
+  ├───────┼─────┼───────────────────────────────────────────────┤
+  │ 36    │ ⚪  │ Logo "Show Builder" → "Show Build"            │
+  ├───────┼─────┼───────────────────────────────────────────────┤
+  │ 37    │ ⚪  │ Reassess "Initializing status check…" overlay │
+  ├───────┼─────┼───────────────────────────────────────────────┤
+  │ 38    │ ⚪  │ SOT duration → hh:mm:ss:ff                    │
+  ├───────┼─────┼───────────────────────────────────────────────┤
+  │ 39    │ ⚪  │ Cue color consistency across the 3 surfaces   │
+  ├───────┼─────┼───────────────────────────────────────────────┤
+  │ 40    │ 🟠  │ Cues insert at bottom instead of cursor       │
+  ├───────┼─────┼───────────────────────────────────────────────┤
+  │ 41    │ ⚪  │ Shift+Enter soft line break                   │
+  ├───────┼─────┼───────────────────────────────────────────────┤
+  │ 42    │ ⚪  │ Cue block alignment + vertical spacing        │
+  ├───────┼─────┼───────────────────────────────────────────────┤
+  │ 43    │ ⚪  │ Hide speaker header until first char          │
+  ├───────┼─────┼───────────────────────────────────────────────┤
+  │ 44    │ 🟠  │ Cancel cue-delete doesn't restore the cue     │
+  ├───────┼─────┼───────────────────────────────────────────────┤
+  │ 45    │ ⚪  │ New READER cue type                           │
+  └───────┴─────┴───────────────────────────────────────────────┘
+
+  Your other session will see them now. (Descriptions confirmed intact — the
+  READER one is 3,155 chars, nothing truncated.)
+
+  That one's on me — this is all dev work, and dev :8889 is where it should have
+  gone in the first place. To make sure I don't repeat it, let me save a memory
+  note.
+
+  Recalled 1 memory, wrote 2 memories (ctrl+o to expand)
+
+● Saved a memory note so I default to dev :8889 in this worktree going forward.
+
+  To recap where things stand:
+  - ✅ All 10 todos (#36–#45 on dev) live in showbuild_dev :8889 — your other
+  session will see them.
+  - ✅ Live :8888 cleaned up (no stray copies).
+  - ✅ Descriptions intact.
+
+  Want to keep adding items, or is that the set?
+
+❯ to let another system pick up on any items as soon as the session in line in  
+  front of you completes its job. We will begin going through the to do list in 
+  this session.                                                                 
+
+● Got it — you want this session to start working through the dev todo list, and
+  you want another system/session to be able to pick up items as soon as the
+  session ahead of me finishes. Let me check the relay to see what that in-front
+  session is doing right now, so I know what it's about to free up and we don't
+  collide.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Here's the lay of the land:
+
+  The session "in front of me" is prefect-show-build-claude-746024 — it just
+  started #39 (drag-drop animation) at 04:42, editing only ProseMirror
+  drag-handle files. That's the one whose completion frees up the lane. (Note:
+  dev todo #39 is a different #39 — "cue color consistency", one of ours. The
+  relay "#39" refers to that session's own task numbering, the drag-drop one,
+  which is dev #39... no — actually it maps to a different list. The relay
+  sender is working drag-drop; our dev color-consistency item is dev #39. Watch
+  for that ID-namespace clash.)
+
+  The mechanism you want — another system picks up items as soon as the front
+  session finishes — works through two things that already exist here:
+  1. The dev todo table (:8889/api/todos) is the shared work queue. A free
+  session claims an item by PATCHing it to in_progress with its own created_by,
+  and marks completed when done.
+  2. The ICR relay is how sessions announce "starting #X / done #X" so they
+  don't collide.
+
+  Before I start working items in this session, two things I should confirm with
+  you so we coordinate cleanly:
+
+● User declined to answer questions
+  ⎿  · Which item should THIS session start on? (avoiding #39-drag-drop which 
+     the front session is editing, and the editor files it's touching) (#44 
+     cue-delete cancel (HIGH bug) / #36 logo Show Builder→Show Build / #40 cues 
+     insert at bottom (HIGH bug) / #38 SOT duration timecode)
+     · How should sessions claim items so the next system knows what's taken? 
+     (PATCH to in_progress + relay announce / Relay announce only / Todo status 
+     only)
+
+● Understood — what would you like to clarify before we set this up? A few
+  things I'm unsure about, but tell me what's on your mind first:
+
+  - When you say "the session in line in front of me completes its job" and
+  "another system" picks up items — do you mean a specific other host/session
+  you have in mind (e.g. the 746024 one currently on drag-drop, or a separate
+  machine entirely)?
+  - And "we will begin going through the to do list in this session" — do you
+  want me to start implementing items now, or just to set up the hand-off
+  mechanism so the queue is ready for whoever picks up next?
+
+  What's the part you want to clarify?
+
+❯ what was the first one we added in this session                               
+
+● The first todo we added this session was the logo fix:
+
+  ▎ "App header logo says 'Show Builder' — should read 'Show Build'"
+
+  It was created on the live DB as #42 originally, then moved to dev where it's
+  now #36 (the lowest-numbered of our 10, since they were recreated in order).
+  It's normal priority, created_by: kevin, still pending.
+
+❯ Show me the full list.                                                        
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Full active dev todo list (showbuild_dev, :8889) — 26 active, 12 completed
+  hidden:
+
+  In progress (another session is on these — note #46 just got claimed for the
+  drag-drop flash work):
+  - #29 🟠 Migrate Script Mode editor → TipTap/ProseMirror
+  - #46 Script editor drag-drop: restore drop-flash on the dropline
+
+  The 10 we added this session (kevin, #36–#45):
+
+  ┌─────┬──────┬─────────────────────────────────────────────────────────┐
+  │ ID  │ Pri  │                          Task                           │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 36  │ norm │ App header logo "Show Builder" → "Show Build"           │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 37  │ norm │ Reassess "Initializing status check…" overlay           │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 38  │ norm │ SOT cue duration → hh:mm:ss:ff timecode                 │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 39  │ norm │ Cue color consistency across menu / block / popup       │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 40  │ 🟠   │ Cues insert at bottom instead of cursor                 │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 41  │ norm │ Shift+Enter soft line break (no new paragraph)          │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 42  │ norm │ Align cue blocks with paragraph text + vertical spacing │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 43  │ norm │ Hide speaker header until first paragraph has a char    │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 44  │ 🟠   │ Cancel cue-delete doesn't restore the cue               │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 45  │ norm │ New READER cue type (host reads ad live)                │
+  └─────┴──────┴─────────────────────────────────────────────────────────┘
+
+  Pre-existing items (mostly claude, some kevin):
+
+  ┌─────┬──────┬─────────────────────────────────────────────────────────┐
+  │ ID  │ Pri  │                          Task                           │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 2   │ norm │ Review/modify status levels                             │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 16  │ ?    │ Verify: FSQ placeholder collapsed adjustments           │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 17  │ ?    │ Verify: FSQ modal View PNG button                       │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 19  │ ?    │ Verify: GFX modal View PNG in edit mode                 │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 23  │ norm │ Extract shared cue-type schema (single source of truth) │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 24  │ 🟠   │ Replace polling with SSE for job status                 │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 25  │ norm │ Unify modal ESC behavior across 27 modals               │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 26  │ norm │ Strikethrough accept deletes whole paragraph            │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 27  │ norm │ SOT insertion                                           │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 28  │ norm │ Update keyboard-shortcut docs (TTS scope)               │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 30  │ norm │ Rundown item title not editable from field above script │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 32  │ low  │ Surface Autoscrub toggles in Settings                   │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 34  │ low  │ Multi Select Options (on hold)                          │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 35  │ norm │ SOT cue: thumbnail Back/Next + Take button              │
+  └─────┴──────┴─────────────────────────────────────────────────────────┘
+
+  Want me to start on one of these now?
+
+❯ list should go all the way up to #51                                          
+
+● You're right to expect #46–#51 — but those IDs don't exist on dev. Here's the
+  mismatch: on the live DB our 10 items were #42–#51, but when I moved them to
+  dev they were renumbered to #36–#45 (dev's IDs). So on dev, the list correctly
+  ends at #45 (plus dev's own #46 which a sibling just created for the
+  drag-flash work). There is no dev #47–#51.
+
+  Let me verify there's nothing on dev above #46, and do the ICR check-in.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Confirmed: dev's highest todo ID is #46, and there are only 38 rows. There is
+  no #47–#51 on dev. The #42–#51 numbering you remember was the live DB; on dev
+  the same 10 items are #36–#45.
+
+  ICR: nothing new actionable (same drag-drop sibling activity). Proceeding.
+
+  So the list genuinely ends at #45 for our items (#46 is the sibling's
+  drag-flash task). The earlier full list I showed you was complete and correct.
+  If you'd specifically like the dev IDs to read 42–51 to match what you
+  remember, I have two options:
+
+● User declined to answer questions
+  ⎿  · On dev the 10 items are #36–#45 (not #42–#51 — those were the live IDs). 
+     What do you want? (Leave as #36–#45 / Show the #36→#45 ↔ live #42–#51 
+     mapping / Re-create so dev IDs are 42–51)
+
+❯ scan the live db to see if they went there                                    
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Scanned live (showbuild, :8888): #42–#51 are NOT there — none of them. Live's
+  highest ID is now #41, total 34 rows. That confirms the deletes I ran earlier
+  worked — the live copies are gone.
+
+  So the full picture:
+  - Live :8888 — max ID #41, our items absent (correctly deleted). ✅
+  - Dev :8889 — our 10 items live as #36–#45, plus sibling's #46. This is the
+  real, current list.
+
+  The #42–#51 numbers exist nowhere now — they were the temporary live IDs that
+  I deleted when moving everything to dev. On dev they got fresh IDs (#36–#45)
+  because dev's table had only reached #35.
+
+  So the dev list ending at #45 (our items) / #46 (sibling) is complete and
+  correct — nothing leaked or got lost. The only thing that changed is the row
+  numbers.
+
+  Want to just proceed with the dev list as #36–#45, or is the numbering still a
+  problem for how the other session refers to them?
+
+❯ rescan the dev db                                                             
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Full dev rescan — 38 rows total, IDs 2–46. Our 10 items are #36–#45 (all
+  kevin, all pending).
+
+  Here's the complete dev list, all statuses:
+
+  Completed (12): #4, #5, #6, #7, #10, #11, #12, #14, #15, #18, #22, #31
+
+  In progress (2):
+  - #29 🟠 Migrate Script Mode editor → TipTap/ProseMirror (claude)
+  - #46 Script editor drag-drop: restore drop-flash on the dropline (claude — 
+  sibling session)
+
+  On hold (1): #34 Multi Select Options
+
+  Pending — pre-existing (11):
+
+  ┌─────┬──────┬─────────────────────────────────────────────────────────┐
+  │ ID  │ Pri  │                          Task                           │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 2   │ norm │ Review/modify status levels                             │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 16  │ ?    │ Verify: FSQ placeholder collapsed adjustments           │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 17  │ ?    │ Verify: FSQ modal View PNG button                       │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 19  │ ?    │ Verify: GFX modal View PNG in edit mode                 │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 23  │ norm │ Extract shared cue-type schema (single source of truth) │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 24  │ 🟠   │ Replace polling with SSE for job status                 │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 25  │ norm │ Unify modal ESC across 27 modals                        │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 26  │ norm │ Strikethrough accept deletes whole paragraph            │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 27  │ norm │ SOT insertion                                           │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 28  │ norm │ Update keyboard-shortcut docs (TTS scope)               │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 30  │ norm │ Rundown item title not editable above script            │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 32  │ low  │ Surface Autoscrub toggles in Settings                   │
+  ├─────┼──────┼─────────────────────────────────────────────────────────┤
+  │ 35  │ norm │ SOT cue: thumbnail Back/Next + Take button              │
+  └─────┴──────┴─────────────────────────────────────────────────────────┘
+
+  Pending — added this session (#36–#45, all kevin):
+
+  ┌─────┬──────┬───────────────────────────────────────────────┐
+  │ ID  │ Pri  │                     Task                      │
+  ├─────┼──────┼───────────────────────────────────────────────┤
+  │ 36  │ norm │ Logo "Show Builder" → "Show Build"            │
+  ├─────┼──────┼───────────────────────────────────────────────┤
+  │ 37  │ norm │ Reassess "Initializing status check…" overlay │
+  ├─────┼──────┼───────────────────────────────────────────────┤
+  │ 38  │ norm │ SOT duration → hh:mm:ss:ff                    │
+  ├─────┼──────┼───────────────────────────────────────────────┤
+  │ 39  │ norm │ Cue color consistency (menu / block / popup)  │
+  ├─────┼──────┼───────────────────────────────────────────────┤
+  │ 40  │ 🟠   │ Cues insert at bottom instead of cursor       │
+  ├─────┼──────┼───────────────────────────────────────────────┤
+  │ 41  │ norm │ Shift+Enter soft line break                   │
+  ├─────┼──────┼───────────────────────────────────────────────┤
+  │ 42  │ norm │ Cue block alignment + vertical spacing        │
+  ├─────┼──────┼───────────────────────────────────────────────┤
+  │ 43  │ norm │ Hide speaker header until first char          │
+  ├─────┼──────┼───────────────────────────────────────────────┤
+  │ 44  │ 🟠   │ Cancel cue-delete doesn't restore the cue     │
+  ├─────┼──────┼───────────────────────────────────────────────┤
+  │ 45  │ norm │ New READER cue type                           │
+  └─────┴──────┴───────────────────────────────────────────────┘
+
+  So everything we added is present and correct on dev as #36–#45. Where do you
+  want to go from here?
