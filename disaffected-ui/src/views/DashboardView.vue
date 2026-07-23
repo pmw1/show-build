@@ -99,8 +99,13 @@
                   <!-- Announcements -->
                   <AnnouncementsPanel v-else-if="element === 'announcements'" class="dash-drag-handle-wrap" />
 
-                  <!-- Todo Panel -->
-                  <TodoPanel v-else-if="element === 'todo'" class="dash-drag-handle-wrap" />
+                  <!-- Whiteboard: board stats + capture inbox for tonight's
+                       episode, with a jump straight to its board. -->
+                  <WhiteboardPanel
+                    v-else-if="element === 'whiteboard'"
+                    :episode="railEpisodeNumber"
+                    class="dash-drag-handle-wrap"
+                  />
 
                   <!-- Shortcuts: what survives of the old Tools & Actions and
                        Preproduction button walls. Three destinations, not eleven —
@@ -194,13 +199,13 @@ import draggable from 'vuedraggable'
 import { useSystemHealth } from '@/composables/useSystemHealth'
 import { useUserPrefs } from '@/composables/useUserPrefs'
 import AnnouncementsPanel from '@/components/AnnouncementsPanel.vue'
-import TodoPanel from '@/components/TodoPanel.vue'
 import NextShowPanel from '@/components/NextShowPanel.vue'
 import CurrentShowPanel from '@/components/CurrentShowPanel.vue'
 import EpisodeScaffoldModal from '@/components/EpisodeScaffoldModal.vue'
 import OnAirRail from '@/components/OnAirRail.vue'
 import BlockersPanel from '@/components/BlockersPanel.vue'
 import JobFeedPanel from '@/components/JobFeedPanel.vue'
+import WhiteboardPanel from '@/components/WhiteboardPanel.vue'
 
 // ===== Zone-based dashboard layout =====
 // Zones are fixed and ordered by urgency; only their contents rearrange. A new
@@ -213,15 +218,16 @@ const ZONES = [
 
 const DEFAULT_LAYOUT = {
   tonight: [],
-  pipeline: ['job-feed', 'todo', 'announcements'],
+  pipeline: ['job-feed', 'whiteboard', 'announcements'],
   system: ['queue-coverage', 'system-health', 'shortcuts']
 }
 
 const KNOWN_BLOCKS = Object.values(DEFAULT_LAYOUT).flat()
 
-// Blocks retired in the zone redesign. Old persisted layouts still name them,
-// so drop them on load rather than rendering an empty slot.
-const RETIRED_BLOCKS = ['current-show', 'tools-actions', 'preproduction']
+// Blocks retired in the zone redesign (plus 'todo', retired 2026-07-23 — the
+// task list was a dev-era panel). Old persisted layouts still name them, so
+// drop them on load rather than rendering an empty slot.
+const RETIRED_BLOCKS = ['current-show', 'tools-actions', 'preproduction', 'todo']
 
 // Per-user pref key for the persisted layout. Bumped from `dashboard.layout`
 // because the stored shape changed from an array of columns to a zone map.
@@ -456,7 +462,7 @@ onMounted(() => {
   padding: 0 10px !important;
 }
 
-/* Deep overrides to compact imported panels (NextShowPanel, TodoPanel, AnnouncementsPanel) */
+/* Deep overrides to compact imported panels (NextShowPanel, AnnouncementsPanel, WhiteboardPanel) */
 .dashboard-compact :deep(.v-card-title) {
   font-size: 0.9rem !important;
   font-weight: 600 !important;
